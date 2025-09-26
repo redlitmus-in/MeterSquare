@@ -40,17 +40,23 @@ def email_worker_thread():
             email_data = email_queue.get(timeout=1)
 
             if email_data is None:  # Shutdown signal
+                email_queue.task_done()
                 break
 
             # Send the email
-            send_email_sync(email_data)
+            try:
+                send_email_sync(email_data)
+            except Exception as e:
+                log.error(f"Error sending email: {e}")
+            finally:
+                # Mark task as done only after processing
+                email_queue.task_done()
 
         except queue.Empty:
+            # No items in queue, continue waiting
             continue
         except Exception as e:
             log.error(f"Email worker error: {e}")
-        finally:
-            email_queue.task_done()
 
 def send_email_sync(email_data):
     """Synchronously send an email (called by worker thread)"""

@@ -349,17 +349,26 @@ def verification_otp():
     # OTP verified, remove from storage
     del otp_storage[email_id]
     
-    # Get role permissions
+    # Get role information safely
     role_permissions = []
-    if user.role and user.role.permissions:
-        role_permissions = user.role.permissions if isinstance(user.role.permissions, list) else []
-    
+    role_name = "user"
+
+    # Get role from database if role_id exists
+    if user.role_id:
+        role = Role.query.filter_by(role_id=user.role_id, is_deleted=False).first()
+        if role:
+            role_name = role.role
+            # Get permissions if they exist
+            if hasattr(role, 'permissions') and role.permissions:
+                role_permissions = role.permissions if isinstance(role.permissions, list) else []
+
     # Create JWT token with role information
     expiration_time = current_time + timedelta(days=1)
     payload = {
         'user_id': user.user_id,
         'email': user.email,
-        'role': user.role.role if user.role else "user",
+        'username': user.email,  # Add username for compatibility
+        'role': role_name,
         'role_id': user.role_id,
         'permissions': role_permissions,
         'full_name': user.full_name,
@@ -370,7 +379,7 @@ def verification_otp():
     # jwt.encode returns bytes in PyJWT < 2.0, decode to str if needed
     if isinstance(session_token, bytes):
         session_token = session_token.decode('utf-8')
-    
+
     response_data = {
         "message": "Login successful",
         "access_token": session_token,
@@ -380,7 +389,7 @@ def verification_otp():
             "email": user.email,
             "full_name": user.full_name,
             "phone": user.phone,
-            "role": user.role.role if user.role else "user",
+            "role": role_name,
             "role_id": user.role_id,
             "department": user.department,
             "permissions": role_permissions
@@ -431,6 +440,7 @@ def jwt_required(f):
     """Decorator to require valid JWT token for protected routes"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        from models.role import Role  # Import Role model here
         token = None
         
         # Check for token in Authorization header
@@ -457,11 +467,22 @@ def jwt_required(f):
             data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
             
             # Get the user from the database
-            current_user = User.query.filter_by(user_id=data['user_id']).first()
-            
+            current_user = User.query.filter_by(
+                user_id=data['user_id'],
+                is_deleted=False,
+                is_active=True
+            ).first()
+
             if not current_user:
-                return jsonify({'message': 'User not found'}), 401
-            
+                return jsonify({'message': 'User not found or inactive'}), 401
+
+            # Get role name safely
+            role_name = "user"
+            if current_user.role_id:
+                role = Role.query.filter_by(role_id=current_user.role_id, is_deleted=False).first()
+                if role:
+                    role_name = role.role
+
             # Store user in g object for access in route
             g.current_user = current_user
             g.user_id = current_user.user_id
@@ -470,7 +491,10 @@ def jwt_required(f):
                 'email': current_user.email,
                 'full_name': current_user.full_name,
                 'role_id': current_user.role_id,
-                'role': current_user.role.role if current_user.role else "user"
+                'role': role_name,
+                'department': current_user.department,
+                'phone': current_user.phone,
+                'is_active': current_user.is_active
             }
             
         except jwt.ExpiredSignatureError:
