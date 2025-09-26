@@ -1,0 +1,51 @@
+from datetime import datetime
+from config.db import db
+from sqlalchemy.dialects.postgresql import ARRAY
+
+
+class Project(db.Model):
+    __tablename__ = 'project'
+    __table_args__ = {'schema': 'public'}  # Explicitly set schema
+
+    project_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    project_name = db.Column(db.String(255), nullable=False)  # Required
+    user_id = db.Column(db.Integer, nullable=True)
+    location = db.Column(db.String(255), nullable=True)  # Optional - changed from required
+    floor_name = db.Column(db.String(255), nullable=True)  # Optional
+    working_hours = db.Column(db.String(255), nullable=True)
+    client = db.Column(db.String(255), nullable=True)  # Optional
+    work_type = db.Column(db.String(255), nullable=True)  # Optional
+    start_date = db.Column(db.Date, nullable=True)  # Optional - changed from required
+    end_date = db.Column(db.Date, nullable=True)  # Optional - changed from required
+    status = db.Column(db.String(50), nullable=False, default='active')  # Default status
+    description = db.Column(db.Text, nullable=True)  # Changed to Text for longer descriptions
+    is_deleted = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
+    last_modified_by = db.Column(db.String(255), nullable=True)
+     
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+    
+    def to_dict(self):
+        """Convert to dictionary for JSON response"""
+        return {
+            'project_id': self.project_id,
+            'project_name': self.project_name,
+            'user_id': self.user_id,
+            'location': self.location,
+            'floor_name': self.floor_name,
+            'working_hours':self.working_hours,
+            'client': self.client,
+            'work_type': self.work_type,
+            'start_date': self.start_date.isoformat() if self.start_date else None,
+            'end_date': self.end_date.isoformat() if self.end_date else None,
+            'status': self.status,
+            'description': self.description,
+            'is_deleted': self.is_deleted,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            'created_by': self.created_by,
+            "last_modified_at": self.last_modified_at.isoformat() if self.last_modified_at else None,
+            'last_modified_by': self.last_modified_by
+        }
