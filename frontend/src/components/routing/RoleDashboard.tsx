@@ -5,8 +5,11 @@ import { getRoleName } from '@/utils/roleRouting';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 // Lazy load all role-specific dashboards
+const AdminDashboard = lazy(() => import('@/pages/dashboards/AdminDashboard'));
 const TechnicalDirectorDashboard = lazy(() => import('@/pages/dashboards/TechnicalDirectorDashboard'));
+const EstimatorDashboard = lazy(() => import('@/pages/dashboards/EstimatorDashboardNew'));
 const ProjectManagerDashboard = lazy(() => import('@/pages/dashboards/ProjectManagerDashboard'));
+const SiteEngineerDashboard = lazy(() => import('@/pages/dashboards/SiteEngineerDashboard'));
 const ProcurementDashboard = lazy(() => import('@/pages/dashboards/ProcurementDashboard'));
 const SiteSupervisorDashboard = lazy(() => import('@/pages/dashboards/SiteSupervisorDashboard'));
 const MEPSupervisorDashboard = lazy(() => import('@/pages/dashboards/MEPSupervisorDashboard'));
@@ -39,19 +42,40 @@ const RoleDashboard: React.FC = () => {
     );
   }
 
-  // Get the role name from role_id (handles both numeric and string formats)
-  const roleName = getRoleName(user.role_id);
+  // Get the role name from user (handles both role_id and role string)
+  const userRole = (user as any)?.role || getRoleName(user.role_id);
+  const roleName = typeof userRole === 'string' ? userRole.toLowerCase() : getRoleName(userRole);
 
   // Get the dashboard component based on role
   let DashboardComponent: React.LazyExoticComponent<React.FC> | null = null;
 
+  // Handle various role name formats
   switch (roleName) {
+    case 'admin':
+    case 'Admin':
+      DashboardComponent = AdminDashboard;
+      break;
+
+    case 'technicaldirector':
+    case 'technicalDirector':
     case UserRole.TECHNICAL_DIRECTOR:
       DashboardComponent = TechnicalDirectorDashboard;
       break;
 
+    case 'estimator':
+    case 'Estimator':
+      DashboardComponent = EstimatorDashboard;
+      break;
+
+    case 'projectmanager':
+    case 'projectManager':
     case UserRole.PROJECT_MANAGER:
       DashboardComponent = ProjectManagerDashboard;
+      break;
+
+    case 'siteengineer':
+    case 'siteEngineer':
+      DashboardComponent = SiteEngineerDashboard;
       break;
 
     case UserRole.PROCUREMENT:
@@ -59,6 +83,7 @@ const RoleDashboard: React.FC = () => {
       break;
 
     case UserRole.SITE_SUPERVISOR:
+    case 'sitesupervisor':
       DashboardComponent = SiteSupervisorDashboard;
       break;
 

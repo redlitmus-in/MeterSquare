@@ -7,6 +7,43 @@ Based on Material Purchases - Project Bound workflow
 # Role hierarchy - lower level number means higher authority
 # Roles match the workflow diagram exactly
 ROLE_HIERARCHY = {
+    'admin': {
+        'level': 0,
+        'tier': 'Executive',
+        'approval_limit': None,  # No limit
+        'can_approve': ['all'],
+        'can_initiate': ['all'],
+        'permissions': [
+            'system_administration',
+            'user_management',
+            'role_management',
+            'full_system_access',
+            'configuration_management',
+            'audit_logs',
+            'all_permissions'
+        ],
+        'description': 'Admin - Full system administration and control',
+        'color': '#6366f1',
+        'icon': 'Shield'
+    },
+    'siteEngineer': {
+        'level': 3,
+        'tier': 'Operations',
+        'approval_limit': 10000,
+        'can_approve': [],
+        'can_initiate': ['purchase_requisition'],
+        'permissions': [
+            'create_purchase_request',
+            'view_site_materials',
+            'request_materials',
+            'view_task_status',
+            'site_operations',
+            'material_management'
+        ],
+        'description': 'Site Engineer - On-ground execution and material usage',
+        'color': '#ea580c',
+        'icon': 'HardHat'
+    },
     'siteSupervisor': {
         'level': 3,
         'tier': 'Operations',
@@ -174,6 +211,8 @@ APPROVAL_CHAINS = {
 
 # Department mapping for workflow roles
 ROLE_DEPARTMENTS = {
+    'admin': 'Executive',
+    'siteEngineer': 'Operations',
     'siteSupervisor': 'Operations',
     'mepSupervisor': 'Operations',
     'projectManager': 'Management',

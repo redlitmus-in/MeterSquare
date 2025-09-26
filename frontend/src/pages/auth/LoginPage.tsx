@@ -54,17 +54,13 @@ const loginSchema = z.object({
   role: z.string().min(1, 'Please select a role'),
 });
 
-// Available roles - matching database exactly (camelCase)
+// Available roles - matching README requirements
 const availableRoles = [
+  { value: 'admin', label: 'Admin', icon: Shield },
   { value: 'technicalDirector', label: 'Technical Director', icon: Briefcase },
-  { value: 'projectManager', label: 'Project Manager', icon: Users },
-  { value: 'procurement', label: 'Procurement', icon: Package },
-  { value: 'siteSupervisor', label: 'Site Supervisor', icon: HardHat },
-  { value: 'mepSupervisor', label: 'MEP Supervisor', icon: Activity },
-  { value: 'estimation', label: 'Estimation', icon: BarChart3 },
   { value: 'estimator', label: 'Estimator', icon: FileText },
-  { value: 'accounts', label: 'Accounts', icon: Building2 },
-  // { value: 'design', label: 'Design', icon: Layers },
+  { value: 'projectManager', label: 'Project Manager', icon: Users },
+  { value: 'siteEngineer', label: 'Site Engineer', icon: HardHat },
 ];
 
 type LoginFormData = z.infer<typeof loginSchema>;

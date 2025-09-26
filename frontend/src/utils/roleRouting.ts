@@ -18,7 +18,8 @@ import { UserRole } from '@/types';
  * 9: technicalDirector
  */
 export const ROLE_ID_TO_NAME: Record<number, string> = {
-  2: UserRole.SITE_SUPERVISOR,
+  1: 'admin',
+  2: 'siteEngineer',
   3: UserRole.MEP_SUPERVISOR,
   4: UserRole.PROCUREMENT,
   5: UserRole.PROJECT_MANAGER,
@@ -26,13 +27,15 @@ export const ROLE_ID_TO_NAME: Record<number, string> = {
   7: UserRole.ESTIMATION,
   8: UserRole.ACCOUNTS,
   9: UserRole.TECHNICAL_DIRECTOR,
-  10: 'estimator' // New estimator role
+  10: 'estimator'
 };
 
 /**
  * Convert camelCase role to URL-friendly slug
  */
 export const ROLE_URL_SLUGS: Record<string, string> = {
+  'admin': 'admin',
+  'siteEngineer': 'site-engineer',
   [UserRole.SITE_SUPERVISOR]: 'site-supervisor',
   [UserRole.MEP_SUPERVISOR]: 'mep-supervisor',
   [UserRole.PROCUREMENT]: 'procurement',
@@ -41,7 +44,9 @@ export const ROLE_URL_SLUGS: Record<string, string> = {
   [UserRole.ESTIMATION]: 'estimation',
   [UserRole.ACCOUNTS]: 'accounts',
   [UserRole.TECHNICAL_DIRECTOR]: 'technical-director',
-  'estimator': 'estimator' // New estimator role
+  'technicalDirector': 'technical-director',
+  'projectManager': 'project-manager',
+  'estimator': 'estimator'
 };
 
 /**
@@ -53,6 +58,8 @@ export const URL_SLUG_TO_ROLE: Record<string, UserRole> = Object.entries(ROLE_UR
 );
 
 export const ROLE_DASHBOARD_PATHS: Record<string, string> = {
+  'admin': '/admin/dashboard',
+  'siteEngineer': '/site-engineer/dashboard',
   [UserRole.SITE_SUPERVISOR]: '/site-supervisor/dashboard',
   [UserRole.MEP_SUPERVISOR]: '/mep-supervisor/dashboard',
   [UserRole.PROCUREMENT]: '/procurement/dashboard',
@@ -61,7 +68,9 @@ export const ROLE_DASHBOARD_PATHS: Record<string, string> = {
   [UserRole.ESTIMATION]: '/estimation/dashboard',
   [UserRole.ACCOUNTS]: '/accounts/dashboard',
   [UserRole.TECHNICAL_DIRECTOR]: '/technical-director/dashboard',
-  'estimator': '/estimator/dashboard' // New estimator role
+  'technicalDirector': '/technical-director/dashboard',
+  'projectManager': '/project-manager/dashboard',
+  'estimator': '/estimator/dashboard'
 };
 
 /**
@@ -123,6 +132,8 @@ export const getRoleDashboardPath = (role: string | number | UserRole): string =
 export const getRoleDisplayName = (role: string | number | UserRole): string => {
   const roleName = getRoleName(role);
   const roleNames: Record<string, string> = {
+    'admin': 'Admin',
+    'siteEngineer': 'Site Engineer',
     [UserRole.SITE_SUPERVISOR]: 'Site Supervisor',
     [UserRole.MEP_SUPERVISOR]: 'MEP Supervisor',
     [UserRole.PROCUREMENT]: 'Procurement',
@@ -131,7 +142,9 @@ export const getRoleDisplayName = (role: string | number | UserRole): string => 
     [UserRole.ESTIMATION]: 'Estimation',
     [UserRole.ACCOUNTS]: 'Accounts',
     [UserRole.TECHNICAL_DIRECTOR]: 'Technical Director',
-    'estimator': 'Estimator' // New estimator role
+    'technicalDirector': 'Technical Director',
+    'projectManager': 'Project Manager',
+    'estimator': 'Estimator'
   };
 
   return roleNames[roleName as UserRole] || roleNames[roleName] || 'User';
@@ -144,6 +157,8 @@ export const getRoleDisplayName = (role: string | number | UserRole): string => 
  */
 export const getRoleThemeColor = (role: string | UserRole): string => {
   const roleColors: Record<string, string> = {
+    'admin': 'purple',
+    'siteEngineer': 'orange',
     [UserRole.SITE_SUPERVISOR]: 'orange',
     [UserRole.MEP_SUPERVISOR]: 'cyan',
     [UserRole.PROCUREMENT]: 'red',
@@ -152,7 +167,9 @@ export const getRoleThemeColor = (role: string | UserRole): string => {
     [UserRole.ESTIMATION]: 'amber',
     [UserRole.ACCOUNTS]: 'emerald',
     [UserRole.TECHNICAL_DIRECTOR]: 'blue',
-    'estimator': 'indigo' // New estimator role
+    'technicalDirector': 'blue',
+    'projectManager': 'green',
+    'estimator': 'indigo'
   };
 
   return roleColors[role as UserRole] || roleColors[role] || 'gray';
@@ -209,14 +226,18 @@ export const hasRouteAccess = (userRole: string | UserRole, routePath: string): 
   
   // Role-specific access rules
   const roleAccess: Record<string, string[]> = {
+    'admin': ['/'], // Admin has access to all routes
+    'siteEngineer': ['/projects', '/materials', '/tasks', '/reports'],
     [UserRole.SITE_SUPERVISOR]: ['/workflows/material-dispatch-site'],
     [UserRole.MEP_SUPERVISOR]: ['/workflows/material-dispatch-site'],
     [UserRole.PROCUREMENT]: ['/procurement', '/vendor'],
-    [UserRole.PROJECT_MANAGER]: ['/procurement', '/workflows'],
+    [UserRole.PROJECT_MANAGER]: ['/procurement', '/workflows', '/projects', '/team'],
+    'projectManager': ['/procurement', '/workflows', '/projects', '/team'],
     [UserRole.DESIGN]: ['/projects', '/workflows'],
     [UserRole.ESTIMATION]: ['/procurement/quotations'],
     [UserRole.ACCOUNTS]: ['/procurement/approvals'],
-    'estimator': ['/boq-management', '/cost-analysis', '/projects'] // New estimator role
+    'technicalDirector': ['/'], // Technical Director has access to all routes
+    'estimator': ['/boq', '/estimation', '/projects', '/cost-analysis']
   };
   
   const allowedRoutes = roleAccess[userRole as UserRole] || [];
