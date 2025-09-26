@@ -1,0 +1,693 @@
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate, useLocation } from 'react-router-dom'; // Add router imports
+import {
+  Bell,
+  Check,
+  X,
+  AlertCircle,
+  Info,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Users,
+  Banknote,
+  FileText,
+  TrendingUp,
+  AlertTriangle,
+  Calendar,
+  Trash2,
+  ChevronRight,
+  Mail,
+  BellRing,
+  Search,
+  Folder,
+  Tag,
+  Eye,
+  Archive,
+  Maximize2,
+  Minimize2
+} from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
+import { formatRelativeTime } from '@/utils/dateFormatter';
+import { useNotificationStore } from '@/store/notificationStore';
+import { NotificationData } from '@/services/notificationService';
+import { sanitizeNotification, sanitizeText } from '@/utils/sanitizer';
+import { cn } from '@/lib/utils';
+
+interface NotificationSystemProps {
+  position?: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
+  maxNotifications?: number;
+  onNavigate?: (path: string) => void; // Optional custom navigation handler
+}
+
+const NotificationSystem: React.FC<NotificationSystemProps> = ({
+  position = 'top-right',
+  maxNotifications = 5,
+  onNavigate
+}) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  
+  const {
+    notifications,
+    unreadCount,
+    isPermissionGranted,
+    isPermissionRequested,
+    markAsRead,
+    markAllAsRead,
+    deleteNotification,
+    clearAll,
+    requestPermission
+  } = useNotificationStore();
+
+  const [showPanel, setShowPanel] = useState(false);
+  const [activeTab, setActiveTab] = useState<'all' | 'unread' | 'pr' | 'system'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedPriority, setSelectedPriority] = useState<string>('all');
+  const [toastNotifications, setToastNotifications] = useState<NotificationData[]>([]);
+  const [expandedView, setExpandedView] = useState(false);
+  
+  // Refs for click outside detection
+  const panelRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const toastTimeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  // Handle click outside with proper cleanup
+  useEffect(() => {
+    if (!showPanel) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (panelRef.current &&
+          buttonRef.current &&
+          !panelRef.current.contains(event.target as Node) &&
+          !buttonRef.current.contains(event.target as Node)) {
+        setShowPanel(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showPanel]);
+
+  // Request notification permission on first load
+  useEffect(() => {
+    if (!isPermissionRequested) {
+      const timer = setTimeout(() => {
+        requestPermission();
+      }, 2000);
+
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [isPermissionRequested, requestPermission]);
+
+  // Clean up all toast timeouts on unmount
+  useEffect(() => {
+    return () => {
+      toastTimeoutRefs.current.forEach(timeout => clearTimeout(timeout));
+      toastTimeoutRefs.current.clear();
+    };
+  }, []);
+
+  // Update toast notifications when new notifications arrive
+  useEffect(() => {
+    if (notifications.length === 0) return;
+
+    const latestNotification = notifications[0];
+
+    // Only show toast for new notifications (less than 10 seconds old)
+    const notificationTime = latestNotification.timestamp instanceof Date
+      ? latestNotification.timestamp.getTime()
+      : new Date(latestNotification.timestamp).getTime();
+    const isRecent = new Date().getTime() - notificationTime < 10000;
+
+    if (isRecent && !latestNotification.read) {
+      setToastNotifications(prev => {
+        const exists = prev.find(n => n.id === latestNotification.id);
+        if (exists) return prev;
+
+        const sanitized = sanitizeNotification(latestNotification);
+        const newToasts = [sanitized, ...prev.slice(0, maxNotifications - 1)];
+
+        const existingTimeout = toastTimeoutRefs.current.get(latestNotification.id);
+        if (existingTimeout) {
+          clearTimeout(existingTimeout);
+        }
+
+        const timeoutId = setTimeout(() => {
+          setToastNotifications(current =>
+            current.filter(n => n.id !== latestNotification.id)
+          );
+          toastTimeoutRefs.current.delete(latestNotification.id);
+        }, 5000);
+
+        toastTimeoutRefs.current.set(latestNotification.id, timeoutId);
+
+        return newToasts;
+      });
+    }
+  }, [notifications, maxNotifications]);
+
+  const getNotificationIcon = useCallback((type: NotificationData['type']) => {
+    switch (type) {
+      case 'email':
+        return <Mail className="w-5 h-5" />;
+      case 'approval':
+        return <Clock className="w-5 h-5" />;
+      case 'alert':
+        return <AlertTriangle className="w-5 h-5" />;
+      case 'success':
+        return <CheckCircle className="w-5 h-5" />;
+      case 'error':
+        return <XCircle className="w-5 h-5" />;
+      case 'info':
+        return <Info className="w-5 h-5" />;
+      case 'update':
+        return <TrendingUp className="w-5 h-5" />;
+      case 'reminder':
+        return <Calendar className="w-5 h-5" />;
+      default:
+        return <Bell className="w-5 h-5" />;
+    }
+  }, []);
+
+  const getNotificationColor = useCallback((type: NotificationData['type']) => {
+    switch (type) {
+      case 'email':
+        return 'text-blue-600 bg-blue-100';
+      case 'approval':
+        return 'text-[#243d8a] bg-[#243d8a]/10';
+      case 'alert':
+        return 'text-amber-600 bg-amber-100';
+      case 'success':
+        return 'text-green-600 bg-green-100';
+      case 'error':
+        return 'text-red-600 bg-red-100';
+      case 'info':
+        return 'text-gray-600 bg-gray-100';
+      case 'update':
+        return 'text-purple-600 bg-purple-100';
+      case 'reminder':
+        return 'text-indigo-600 bg-indigo-100';
+      default:
+        return 'text-gray-600 bg-gray-100';
+    }
+  }, []);
+
+  const getPriorityColor = useCallback((priority: NotificationData['priority']) => {
+    switch (priority) {
+      case 'urgent':
+        return 'bg-red-100 text-red-700 border-red-300';
+      case 'high':
+        return 'bg-orange-100 text-orange-700 border-orange-300';
+      case 'medium':
+        return 'bg-[#243d8a]/10 text-[#243d8a]/90 border-[#243d8a]/30';
+      case 'low':
+        return 'bg-gray-100 text-gray-600 border-gray-300';
+      default:
+        return 'bg-gray-100 text-gray-600 border-gray-300';
+    }
+  }, []);
+
+  // Notification counts
+  const counts = useMemo(() => {
+    const all = notifications.length;
+    const unread = notifications.filter(n => !n.read).length;
+    const pr = notifications.filter(n => n.category === 'approval').length;
+    const system = notifications.filter(n => n.category === 'system').length;
+    const urgent = notifications.filter(n => n.priority === 'urgent' && !n.read).length;
+    return { all, unread, pr, system, urgent };
+  }, [notifications]);
+
+  const filteredNotifications = useMemo(() => {
+    return notifications
+      .map(n => sanitizeNotification(n))
+      .filter(n => {
+        if (activeTab === 'unread' && n.read) return false;
+        if (activeTab === 'pr' && n.category !== 'approval') return false;
+        if (activeTab === 'system' && n.category !== 'system') return false;
+
+        if (selectedPriority !== 'all' && n.priority !== selectedPriority) return false;
+
+        if (searchQuery) {
+          const query = searchQuery.toLowerCase();
+          return (
+            n.title.toLowerCase().includes(query) ||
+            n.message.toLowerCase().includes(query) ||
+            n.metadata?.project?.toLowerCase().includes(query) ||
+            n.metadata?.sender?.toLowerCase().includes(query)
+          );
+        }
+        return true;
+      });
+  }, [notifications, activeTab, selectedPriority, searchQuery]);
+
+  const formatTimestamp = useCallback((date: Date) => {
+    return formatRelativeTime(date);
+  }, []);
+
+  // Remove individual toast with cleanup
+  const removeToast = useCallback((notificationId: string) => {
+    setToastNotifications(prev => prev.filter(n => n.id !== notificationId));
+
+    const timeout = toastTimeoutRefs.current.get(notificationId);
+    if (timeout) {
+      clearTimeout(timeout);
+      toastTimeoutRefs.current.delete(notificationId);
+    }
+  }, []);
+
+  // FIXED: Handle PR notification action with proper navigation
+  const handleNotificationAction = useCallback((notification: NotificationData) => {
+    if (notification.actionRequired && notification.metadata?.link) {
+      try {
+        // Use custom navigation handler if provided
+        if (onNavigate) {
+          onNavigate(notification.metadata.link);
+        } 
+        // Check if it's an internal route (starts with /)
+        else if (notification.metadata.link.startsWith('/')) {
+          // Use React Router navigation for internal routes
+          navigate(notification.metadata.link, { 
+            replace: false,
+            state: { from: location.pathname } // Pass current location for back navigation
+          });
+        } 
+        // Handle external links
+        else if (notification.metadata.link.startsWith('http')) {
+          window.open(notification.metadata.link, '_blank', 'noopener,noreferrer');
+        }
+        // Handle relative paths
+        else {
+          navigate(`/${notification.metadata.link}`, { 
+            replace: false,
+            state: { from: location.pathname }
+          });
+        }
+      } catch (error) {
+        console.error('Navigation error:', error);
+        // Fallback to window.location for problematic cases
+        window.location.href = notification.metadata.link;
+      }
+    }
+    markAsRead(notification.id);
+  }, [markAsRead, navigate, location.pathname, onNavigate]);
+
+  // ADDED: Helper function to safely navigate
+  const safeNavigate = useCallback((path: string) => {
+    try {
+      if (onNavigate) {
+        onNavigate(path);
+      } else {
+        navigate(path, { 
+          replace: false,
+          state: { from: location.pathname }
+        });
+      }
+    } catch (error) {
+      console.error('Safe navigation error:', error);
+      // Fallback
+      window.location.href = path;
+    }
+  }, [navigate, location.pathname, onNavigate]);
+
+  // Position classes for toast notifications
+  const positionClasses = {
+    'top-right': 'top-4 right-4',
+    'top-left': 'top-4 left-4',
+    'bottom-right': 'bottom-4 right-4',
+    'bottom-left': 'bottom-4 left-4'
+  };
+
+  return (
+    <>
+      {/* Notification Bell Icon */}
+      <div className="relative">
+        <Button
+          ref={buttonRef}
+          variant="outline"
+          size="icon"
+          onClick={() => setShowPanel(!showPanel)}
+          className="relative"
+        >
+          <Bell className="w-4 h-4" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center animate-pulse">
+              {unreadCount}
+            </span>
+          )}
+          {counts.urgent > 0 && (
+            <motion.span
+              className="absolute -top-1 -left-1 w-2 h-2 bg-orange-500 rounded-full"
+              animate={{ scale: [1, 1.2, 1] }}
+              transition={{ repeat: Infinity, duration: 2 }}
+            />
+          )}
+        </Button>
+      </div>
+
+      {/* Notification Panel */}
+      <AnimatePresence>
+        {showPanel && (
+          <motion.div
+            ref={panelRef}
+            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+            className={cn(
+              "absolute right-0 top-full mt-2 bg-white rounded-lg shadow-2xl border z-[9999] overflow-hidden transition-all duration-300",
+              expandedView ? "w-[600px] max-h-[700px]" : "w-[420px] max-h-[600px]"
+            )}
+          >
+            {/* Enhanced Header */}
+            <div className="bg-gradient-to-r from-red-500 to-red-600 text-white p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+                    <Bell className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-lg">Notification Center</h3>
+                    <p className="text-sm text-white/80 mt-0.5">
+                      {counts.unread} unread • {counts.pr} PR • {counts.urgent} urgent
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!isPermissionGranted && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={requestPermission}
+                      className="bg-white/20 hover:bg-white/30 text-white border-white/30"
+                    >
+                      <BellRing className="w-4 h-4 mr-1" />
+                      Enable
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setExpandedView(!expandedView)}
+                    className="text-white hover:bg-white/20"
+                    title={expandedView ? "Compact View" : "Expanded View"}
+                  >
+                    {expandedView ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowPanel(false)}
+                    className="text-white hover:bg-white/20"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Search and Filters */}
+            <div className="p-3 border-b bg-gray-50">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Input
+                    placeholder="Search notifications..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 h-9"
+                  />
+                </div>
+                <Select value={selectedPriority} onValueChange={setSelectedPriority}>
+                  <SelectTrigger className="w-[140px] h-9">
+                    <SelectValue placeholder="Priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Priorities</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Tabs for PR and System notifications */}
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
+              <TabsList className="w-full rounded-none border-b bg-white grid grid-cols-4">
+                <TabsTrigger value="all" className="data-[state=active]:bg-red-50">
+                  All
+                  {counts.all > 0 && (
+                    <Badge variant="secondary" className="ml-1 h-5 px-1">
+                      {counts.all}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="unread" className="data-[state=active]:bg-red-50">
+                  Unread
+                  {counts.unread > 0 && (
+                    <Badge className="bg-red-500 text-white ml-1 h-5 px-1">
+                      {counts.unread}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="pr" className="data-[state=active]:bg-red-50">
+                  PR
+                  {counts.pr > 0 && (
+                    <Badge variant="secondary" className="ml-1 h-5 px-1">
+                      {counts.pr}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="system" className="data-[state=active]:bg-red-50">
+                  System
+                  {counts.system > 0 && (
+                    <Badge variant="secondary" className="ml-1 h-5 px-1">
+                      {counts.system}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value={activeTab} className="mt-0">
+                {/* Notifications List */}
+                <div className="h-[400px] overflow-y-auto">
+                  {filteredNotifications.length === 0 ? (
+                    <div className="p-8 text-center">
+                      <Bell className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                      <p className="text-gray-500">No notifications</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y">
+                      {filteredNotifications.map((notification) => (
+                        <motion.div
+                          key={notification.id}
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className={`p-3 hover:bg-gray-50 transition-colors ${
+                            !notification.read ? 'bg-[#243d8a]/5/30' : ''
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className={`p-1.5 rounded-md ${getNotificationColor(notification.type)}`}>
+                              {getNotificationIcon(notification.type)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="font-medium text-sm text-gray-900 mb-1">
+                                {notification.title}
+                              </h4>
+                              <p className="text-xs text-gray-600 mb-2">
+                                {notification.message}
+                              </p>
+                              
+                              {/* Metadata */}
+                              {notification.metadata && (
+                                <div className="flex flex-wrap gap-1.5 mb-2">
+                                  {notification.metadata.project && (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
+                                      <FileText className="w-3 h-3 mr-1" />
+                                      {notification.metadata.project}
+                                    </Badge>
+                                  )}
+                                  {notification.metadata.amount && (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
+                                      <Banknote className="w-3 h-3 mr-1" />
+                                      AED {notification.metadata.amount.toLocaleString()}
+                                    </Badge>
+                                  )}
+                                </div>
+                              )}
+
+                              <div className="flex items-center gap-2 mt-2">
+                                <div className="flex items-center gap-2 flex-1">
+                                  <span className="text-xs text-gray-400">
+                                    {formatTimestamp(notification.timestamp)}
+                                  </span>
+                                  {notification.metadata?.sender && (
+                                    <span className="text-xs text-gray-500">
+                                      <Users className="w-3 h-3 inline mr-1" />
+                                      {notification.metadata.sender}
+                                    </span>
+                                  )}
+                                </div>
+                                
+                                {/* Actions */}
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  <Badge className={`text-[10px] px-1.5 py-0.5 ${getPriorityColor(notification.priority)} border`}>
+                                    {notification.priority}
+                                  </Badge>
+                                  {notification.actionRequired && (
+                                    <Button 
+                                      size="sm" 
+                                      className="h-6 px-2 text-[11px]"
+                                      onClick={() => handleNotificationAction(notification)}
+                                    >
+                                      {notification.actionLabel || 'Action'}
+                                      <ChevronRight className="w-3 h-3 ml-0.5" />
+                                    </Button>
+                                  )}
+                                  {!notification.read && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => markAsRead(notification.id)}
+                                      className="h-6 w-6 p-0"
+                                      title="Mark as read"
+                                    >
+                                      <Check className="w-3 h-3" />
+                                    </Button>
+                                  )}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => deleteNotification(notification.id)}
+                                    className="h-6 w-6 p-0 text-gray-400 hover:text-red-600"
+                                    title="Delete"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Enhanced Toast Notifications with PR Support */}
+      <div className={cn(
+        "fixed z-[10000] space-y-2 pointer-events-none",
+        positionClasses[position]
+      )}>
+        <AnimatePresence>
+          {toastNotifications.map((notification, index) => (
+            <motion.div
+              key={notification.id}
+              initial={{
+                opacity: 0,
+                x: position.includes('right') ? 100 : -100,
+                scale: 0.9
+              }}
+              animate={{
+                opacity: 1,
+                x: 0,
+                scale: 1
+              }}
+              exit={{
+                opacity: 0,
+                x: position.includes('right') ? 100 : -100,
+                scale: 0.9
+              }}
+              transition={{
+                type: "spring",
+                damping: 20,
+                stiffness: 300
+              }}
+              style={{
+                zIndex: 10000 - index
+              }}
+              className={cn(
+                "bg-white rounded-lg shadow-2xl border p-4 w-80 pointer-events-auto",
+                notification.priority === 'urgent' && "border-red-500 border-2 animate-pulse",
+                notification.category === 'approval' && "border-l-4 border-amber-500"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "p-2 rounded-lg flex-shrink-0",
+                  getNotificationColor(notification.type)
+                )}>
+                  {getNotificationIcon(notification.type)}
+                </div>
+                <div className="flex-1">
+                  <h4 className="font-medium text-sm text-gray-900">
+                    {notification.title}
+                  </h4>
+                  <p className="text-xs text-gray-600 mt-1">
+                    {notification.message}
+                  </p>
+                  {notification.category === 'approval' && notification.metadata && (
+                    <div className="mt-2 flex items-center gap-2">
+                      {notification.metadata.project && (
+                        <Badge variant="outline" className="text-[10px]">
+                          <FileText className="w-3 h-3 mr-1" />
+                          {notification.metadata.project}
+                        </Badge>
+                      )}
+                      {notification.metadata.amount && (
+                        <Badge variant="outline" className="text-[10px]">
+                          AED {notification.metadata.amount.toLocaleString()}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                  {notification.actionRequired && (
+                    <Button
+                      size="sm"
+                      className="h-6 px-2 text-[11px] mt-2 bg-red-500 hover:bg-red-600 text-white"
+                      onClick={() => {
+                        handleNotificationAction(notification);
+                        removeToast(notification.id);
+                      }}
+                    >
+                      View PR
+                      <ChevronRight className="w-3 h-3 ml-0.5" />
+                    </Button>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeToast(notification.id)}
+                  className="h-6 w-6 p-0 hover:bg-gray-100"
+                >
+                  <X className="w-3 h-3" />
+                </Button>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+    </>
+  );
+};
+
+export default NotificationSystem;

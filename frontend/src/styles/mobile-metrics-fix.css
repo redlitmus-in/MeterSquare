@@ -1,0 +1,122 @@
+/* TARGETED MOBILE FIX - MINIMAL AND PRECISE */
+@media (max-width: 640px) {
+  /* Fix tab names that are cut off */
+  [role="tablist"] {
+    display: flex !important;
+    overflow-x: auto !important;
+    padding: 0.5rem !important;
+    gap: 0.25rem !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+  }
+
+  [role="tablist"]::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  [role="tab"] {
+    flex: 0 0 auto !important;
+    padding: 0.5rem 1rem !important;
+    white-space: nowrap !important;
+    min-width: fit-content !important;
+    font-size: 0.875rem !important;
+  }
+
+  /* Fix button overlapping in filter area */
+  .flex.flex-wrap.items-center.gap-2 {
+    gap: 0.5rem !important;
+  }
+
+  /* Fix grid/list view toggle buttons */
+  .border.bg-white button.rounded-l-md,
+  .border.bg-white button.rounded-r-md {
+    padding: 0.375rem !important;
+    min-width: 36px !important;
+  }
+
+  /* Fix search input to take proper space */
+  input[type="search"],
+  input[placeholder*="Search"] {
+    flex: 1 1 auto !important;
+    min-width: 150px !important;
+    font-size: 14px !important;
+  }
+
+  /* Fix select dropdowns */
+  select,
+  [role="combobox"] {
+    min-width: auto !important;
+    max-width: 120px !important;
+    font-size: 0.875rem !important;
+  }
+
+  /* Action buttons (New Purchase, etc) */
+  button.bg-red-500,
+  button.bg-blue-500,
+  button.bg-green-500,
+  button[class*="bg-red"],
+  button[class*="bg-blue"],
+  button[class*="bg-green"] {
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.875rem !important;
+    white-space: nowrap !important;
+  }
+
+  /* Header cards - reduce size */
+  .bg-gradient-to-r,
+  .bg-gradient-to-br {
+    padding: 1rem !important;
+  }
+
+  /* Reduce header text size */
+  h1 {
+    font-size: 1.25rem !important;
+    line-height: 1.5 !important;
+  }
+
+  /* Description text */
+  p.text-sm {
+    font-size: 0.75rem !important;
+    line-height: 1.25 !important;
+  }
+
+  /* Ensure main content doesn't overflow */
+  main {
+    width: 100% !important;
+    overflow-x: hidden !important;
+  }
+
+  /* Purchase cards in list */
+  .bg-white.rounded-lg.border {
+    margin: 0.5rem !important;
+    padding: 0.75rem !important;
+  }
+
+  /* Tab panel content */
+  [role="tabpanel"] {
+    padding: 0.5rem !important;
+  }
+
+  /* Fix Details and History buttons */
+  button:has(svg) {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 0.25rem !important;
+  }
+
+  /* Prevent horizontal scroll on body */
+  body {
+    overflow-x: hidden !important;
+  }
+
+  /* Cards inside tab panels */
+  [role="tabpanel"] .grid {
+    gap: 0.75rem !important;
+  }
+
+  /* Status badges */
+  .inline-flex.items-center.rounded-full {
+    font-size: 0.75rem !important;
+    padding: 0.25rem 0.5rem !important;
+  }
+}
