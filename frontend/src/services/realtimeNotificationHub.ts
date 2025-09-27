@@ -68,7 +68,12 @@ class RealtimeNotificationHub {
       return;
     }
 
-    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
+    const socketUrl = import.meta.env.VITE_SOCKET_URL;
+
+    if (!socketUrl) {
+      console.error('VITE_SOCKET_URL environment variable is not set');
+      return;
+    }
 
     try {
       this.socket = io(socketUrl, {

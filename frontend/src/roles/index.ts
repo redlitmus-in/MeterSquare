@@ -3,74 +3,153 @@
  * Maps user roles to their permissions and dashboards
  */
 
-import { procurementPermissions } from './procurement/permissions';
-import { siteSupervisorPermissions } from './site-supervisor/permissions';
-import { mepSupervisorPermissions } from './mep-supervisor/permissions';
-import { projectManagerPermissions } from './project-manager/permissions';
-import { estimationPermissions } from './estimation/permissions';
 import { estimatorPermissions } from './estimator/permissions';
-import { technicalDirectorPermissions } from './technical-director/permissions';
-import { accountsPermissions } from './accounts/permissions';
-import { designPermissions } from './design/permissions';
 
 export type UserRole =
-  | 'procurement'
-  | 'site_supervisor'
-  | 'mep_supervisor'
-  | 'project_manager'
-  | 'estimation'
+  | 'admin'
   | 'estimator'
+  | 'project_manager'
   | 'technical_director'
-  | 'accounts'
-  | 'design'
-  | 'admin';
+  | 'site_engineer';
 
 /**
  * Get permissions for a specific role
  */
 export const getRolePermissions = (role: string) => {
-  // Handle multiple formats: "Site Supervisor", "siteSupervisor", "site_supervisor"
+  // Handle multiple formats: "Project Manager", "projectManager", "project_manager"
   const normalizedRole = role.toLowerCase()
     .replace(/\s+/g, '_')  // Replace spaces with underscores
     .replace(/([a-z])([A-Z])/g, '$1_$2')  // Convert camelCase to snake_case
     .toLowerCase();  // Ensure all lowercase
-  
-  switch (normalizedRole) {
-    case 'procurement':
-    case 'procurement_manager':
-      return procurementPermissions;
-      
-    case 'site_supervisor':
-    case 'sitesupervisor':
-    case 'site':
-      return siteSupervisorPermissions;
-      
-    case 'mep_supervisor':
-    case 'mep':
-      return mepSupervisorPermissions;
-      
-    case 'project_manager':
-    case 'pm':
-      return projectManagerPermissions;
-      
-    case 'estimation':
-      return estimationPermissions;
 
+  switch (normalizedRole) {
     case 'estimator':
-      return estimatorPermissions;
-      
+      return {
+        ...estimatorPermissions,
+        projects: {
+          create: true,
+          view: true,
+          edit: true,
+          delete: false
+        }
+      };
+
+    case 'project_manager':
+    case 'projectmanager':
+    case 'pm':
+      return {
+        purchaseRequests: {
+          create: true,
+          view: true,
+          edit: true,
+          delete: false,
+          sendEmail: true,
+          approve: true,
+          handleCostRevision: true
+        },
+        vendorQuotations: {
+          create: true,
+          view: true,
+          edit: true,
+          delete: false,
+          compare: true,
+          negotiate: true
+        },
+        approvals: {
+          canApprove: true,
+          canReject: true,
+          canEscalate: true
+        },
+        workflow: {
+          canSendToProjectManager: false,
+          canHandleCostFlag: true,
+          canRequestRevision: true
+        },
+        projects: {
+          create: true,
+          view: true,
+          edit: true,
+          delete: true
+        }
+      };
+
     case 'technical_director':
+    case 'technicaldirector':
     case 'td':
-      return technicalDirectorPermissions;
-      
-    case 'accounts':
-    case 'accountant':
-      return accountsPermissions;
-      
-    case 'design':
-    case 'designer':
-      return designPermissions;
-      
+      return {
+        purchaseRequests: {
+          create: false,
+          view: true,
+          edit: false,
+          delete: false,
+          sendEmail: false,
+          approve: true,
+          handleCostRevision: false
+        },
+        vendorQuotations: {
+          create: false,
+          view: true,
+          edit: false,
+          delete: false,
+          compare: true,
+          negotiate: false
+        },
+        approvals: {
+          canApprove: true,
+          canReject: true,
+          canEscalate: false
+        },
+        workflow: {
+          canSendToProjectManager: false,
+          canHandleCostFlag: false,
+          canRequestRevision: false
+        },
+        projects: {
+          create: false,
+          view: true,
+          edit: false,
+          delete: false
+        }
+      };
+
+    case 'site_engineer':
+    case 'siteengineer':
+      return {
+        purchaseRequests: {
+          create: true,
+          view: true,
+          edit: true,
+          delete: false,
+          sendEmail: false,
+          approve: false,
+          handleCostRevision: false
+        },
+        vendorQuotations: {
+          create: false,
+          view: false,
+          edit: false,
+          delete: false,
+          compare: false,
+          negotiate: false
+        },
+        approvals: {
+          canApprove: false,
+          canReject: false,
+          canEscalate: true
+        },
+        workflow: {
+          canSendToProjectManager: true,
+          canHandleCostFlag: false,
+          canRequestRevision: false
+        },
+        projects: {
+          create: false,
+          view: true,
+          edit: false,
+          delete: false
+        }
+      };
+
     case 'admin':
     case 'administrator':
       // Admin has all permissions
@@ -101,9 +180,15 @@ export const getRolePermissions = (role: string) => {
           canSendToProjectManager: true,
           canHandleCostFlag: true,
           canRequestRevision: true
+        },
+        projects: {
+          create: true,
+          view: true,
+          edit: true,
+          delete: true
         }
       };
-      
+
     default:
       // Default to most restrictive permissions
       return {
@@ -133,6 +218,12 @@ export const getRolePermissions = (role: string) => {
           canSendToProjectManager: false,
           canHandleCostFlag: false,
           canRequestRevision: false
+        },
+        projects: {
+          create: false,
+          view: false,
+          edit: false,
+          delete: false
         }
       };
   }
@@ -156,46 +247,29 @@ export const hasPermission = (
  */
 export const getRoleDashboard = async (role: string) => {
   const normalizedRole = role.toLowerCase().replace(/\s+/g, '_');
-  
-  switch (normalizedRole) {
-    case 'procurement':
-    case 'procurement_manager':
-      return (await import('@/pages/dashboards/ProcurementDashboard')).default;
-      
-    case 'site_supervisor':
-    case 'site':
-      return (await import('@/pages/dashboards/SiteSupervisorDashboard')).default;
-      
-    case 'mep_supervisor':
-    case 'mep':
-      return (await import('@/pages/dashboards/MEPSupervisorDashboard')).default;
-      
-    case 'project_manager':
-    case 'pm':
-      return (await import('@/pages/dashboards/ProjectManagerDashboard')).default;
-      
-    case 'estimation':
-      return (await import('@/pages/dashboards/EstimationDashboard')).default;
 
+  switch (normalizedRole) {
     case 'estimator':
       return (await import('@/pages/dashboards/EstimatorDashboard')).default;
-      
+
+    case 'project_manager':
+    case 'projectmanager':
+    case 'pm':
+      return (await import('@/pages/dashboards/ProjectManagerDashboard')).default;
+
     case 'technical_director':
+    case 'technicaldirector':
     case 'td':
       return (await import('@/pages/dashboards/TechnicalDirectorDashboard')).default;
-      
-    case 'accounts':
-    case 'accountant':
-      return (await import('@/pages/dashboards/AccountsDashboard')).default;
-      
-    case 'design':
-    case 'designer':
-      return (await import('@/pages/dashboards/DesignDashboard')).default;
-      
+
+    case 'site_engineer':
+    case 'siteengineer':
+      return (await import('@/pages/dashboards/SiteEngineerDashboard')).default;
+
     case 'admin':
     case 'administrator':
-      return (await import('@/pages/ModernDashboard')).default;
-      
+      return (await import('@/pages/dashboards/AdminDashboard')).default;
+
     default:
       return (await import('@/pages/ModernDashboard')).default;
   }
@@ -206,46 +280,29 @@ export const getRoleDashboard = async (role: string) => {
  */
 export const getRoleDashboardPath = (role: string): string => {
   const normalizedRole = role.toLowerCase().replace(/\s+/g, '_');
-  
-  switch (normalizedRole) {
-    case 'procurement':
-    case 'procurement_manager':
-      return '/procurement/dashboard';
-      
-    case 'site_supervisor':
-    case 'site':
-      return '/site-supervisor/dashboard';
-      
-    case 'mep_supervisor':
-    case 'mep':
-      return '/mep-supervisor/dashboard';
-      
-    case 'project_manager':
-    case 'pm':
-      return '/project-manager/dashboard';
-      
-    case 'estimation':
-      return '/estimation/dashboard';
 
+  switch (normalizedRole) {
     case 'estimator':
       return '/estimator/dashboard';
-      
+
+    case 'project_manager':
+    case 'projectmanager':
+    case 'pm':
+      return '/project-manager/dashboard';
+
     case 'technical_director':
+    case 'technicaldirector':
     case 'td':
       return '/technical-director/dashboard';
-      
-    case 'accounts':
-    case 'accountant':
-      return '/accounts/dashboard';
-      
-    case 'design':
-    case 'designer':
-      return '/design/dashboard';
-      
+
+    case 'site_engineer':
+    case 'siteengineer':
+      return '/site-engineer/dashboard';
+
     case 'admin':
     case 'administrator':
       return '/admin/dashboard';
-      
+
     default:
       return '/dashboard';
   }
@@ -256,36 +313,22 @@ export const getRoleDashboardPath = (role: string): string => {
  */
 export const workflowHierarchy: Record<string, string[]> = {
   'material_purchases': [
-    'site_supervisor',
-    'mep_supervisor',
-    'procurement',
+    'site_engineer',
     'project_manager',
-    'estimation',
-    'technical_director',
-    'accounts',
-    'design'
+    'technical_director'
   ],
   'vendor_quotations': [
-    'procurement',
     'project_manager',
-    'estimation',
-    'technical_director',
-    'accounts'
+    'technical_director'
   ],
   'material_dispatch_production': [
-    'procurement',
     'project_manager',
-    'estimation',
-    'technical_director',
-    'design'
+    'technical_director'
   ],
   'material_dispatch_site': [
-    'site_supervisor',
-    'mep_supervisor',
-    'procurement',
+    'site_engineer',
     'project_manager',
-    'technical_director',
-    'design'
+    'technical_director'
   ]
 };
 
@@ -298,13 +341,13 @@ export const getNextApprover = (
 ): string | null => {
   const hierarchy = workflowHierarchy[workflowType];
   if (!hierarchy) return null;
-  
+
   const normalizedRole = currentRole.toLowerCase().replace(/\s+/g, '_');
   const currentIndex = hierarchy.indexOf(normalizedRole);
-  
+
   if (currentIndex === -1 || currentIndex === hierarchy.length - 1) {
     return null;
   }
-  
+
   return hierarchy[currentIndex + 1];
 };

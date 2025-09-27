@@ -38,11 +38,13 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from 'sonner';
+import BOQCreationForm from '@/components/forms/BOQCreationForm';
 
 const EstimatorDashboardNew: React.FC = () => {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedBoq, setSelectedBoq] = useState<any>(null);
+  const [showBOQForm, setShowBOQForm] = useState(false);
 
   const stats = {
     totalBoqs: 156,
@@ -429,7 +431,10 @@ const EstimatorDashboardNew: React.FC = () => {
                   <Download className="w-4 h-4" />
                   Export
                 </button>
-                <button className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+                <button
+                  onClick={() => setShowBOQForm(true)}
+                  className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                >
                   <Plus className="w-4 h-4" />
                   Create BOQ
                 </button>

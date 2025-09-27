@@ -29,8 +29,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import BOQUpload from '../components/BOQUpload';
 import BOQPreview from '../components/BOQPreview';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 import { estimatorService } from '../services/estimatorService';
 import { BOQ, BOQFilter, BOQStatus } from '../types';
 import { toast } from 'sonner';
@@ -55,23 +56,176 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { Label } from '@/components/ui/label';
+
+// Project Creation Form Component
+const ProjectCreationForm: React.FC<{
+  onSubmit: (data: any) => void;
+  onCancel: () => void;
+  initialData?: any;
+}> = ({ onSubmit, onCancel, initialData }) => {
+  const [formData, setFormData] = useState({
+    project_name: initialData?.project_name || '',
+    description: initialData?.description || '',
+    location: initialData?.location || '',
+    client: initialData?.client || '',
+    work_type: initialData?.work_type || '',
+    working_hours: initialData?.working_hours || '',
+    floor_name: initialData?.floor_name || '',
+    start_date: initialData?.start_date || '',
+    end_date: initialData?.end_date || '',
+    status: initialData?.status || 'active'
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.project_name.trim()) {
+      toast.error('Project name is required');
+      return;
+    }
+    onSubmit(formData);
+  };
+
+  const handleChange = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="project_name">Project Name *</Label>
+          <Input
+            id="project_name"
+            value={formData.project_name}
+            onChange={(e) => handleChange('project_name', e.target.value)}
+            placeholder="Enter project name"
+            required
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="client">Client</Label>
+          <Input
+            id="client"
+            value={formData.client}
+            onChange={(e) => handleChange('client', e.target.value)}
+            placeholder="Enter client name"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="location">Location</Label>
+          <Input
+            id="location"
+            value={formData.location}
+            onChange={(e) => handleChange('location', e.target.value)}
+            placeholder="Enter project location"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="work_type">Work Type</Label>
+          <Input
+            id="work_type"
+            value={formData.work_type}
+            onChange={(e) => handleChange('work_type', e.target.value)}
+            placeholder="e.g., Construction, Renovation"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="working_hours">Working Hours</Label>
+          <Input
+            id="working_hours"
+            value={formData.working_hours}
+            onChange={(e) => handleChange('working_hours', e.target.value)}
+            placeholder="e.g., 8 hours/day"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="floor_name">Floor Name</Label>
+          <Input
+            id="floor_name"
+            value={formData.floor_name}
+            onChange={(e) => handleChange('floor_name', e.target.value)}
+            placeholder="e.g., Ground Floor, 1st Floor"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="start_date">Start Date</Label>
+          <DatePicker
+            id="start_date"
+            selected={formData.start_date ? new Date(formData.start_date) : null}
+            onChange={(date: Date | null) => handleChange('start_date', date ? date.toISOString().split('T')[0] : '')}
+            dateFormat="dd/MM/yyyy"
+            placeholderText="Select start date"
+            minDate={new Date()}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            wrapperClassName="w-full"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="end_date">End Date</Label>
+          <DatePicker
+            id="end_date"
+            selected={formData.end_date ? new Date(formData.end_date) : null}
+            onChange={(date: Date | null) => handleChange('end_date', date ? date.toISOString().split('T')[0] : '')}
+            dateFormat="dd/MM/yyyy"
+            placeholderText="Select end date"
+            minDate={formData.start_date ? new Date(formData.start_date) : new Date()}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            wrapperClassName="w-full"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="description">Description</Label>
+        <Input
+          id="description"
+          value={formData.description}
+          onChange={(e) => handleChange('description', e.target.value)}
+          placeholder="Enter project description"
+        />
+      </div>
+
+      <div className="flex justify-end gap-2 pt-4">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" className="bg-green-600 hover:bg-green-700">
+          Create Project
+        </Button>
+      </div>
+    </form>
+  );
+};
 
 const EstimatorHub: React.FC = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('upload');
+  const [activeTab, setActiveTab] = useState('projects');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [boqs, setBOQs] = useState<BOQ[]>([]);
   const [filteredBOQs, setFilteredBOQs] = useState<BOQ[]>([]);
   const [selectedBOQ, setSelectedBOQ] = useState<BOQ | null>(null);
-  const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [showPreviewDialog, setShowPreviewDialog] = useState(false);
+  const [showProjectDialog, setShowProjectDialog] = useState(false);
+  const [editingProject, setEditingProject] = useState<any>(null);
+  const [viewingProject, setViewingProject] = useState<any>(null);
+  const [deletingProject, setDeletingProject] = useState<any>(null);
   const [extractedBOQ, setExtractedBOQ] = useState<BOQ | null>(null);
+  const [projects, setProjects] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<BOQStatus | 'all'>('all');
 
   useEffect(() => {
-    loadBOQs();
+    // loadBOQs(); // Disabled - backend endpoint not available
+    loadProjects();
   }, []);
 
   useEffect(() => {
@@ -86,16 +240,89 @@ const EstimatorHub: React.FC = () => {
         setBOQs(response.data);
       }
     } catch (error) {
-      console.error('Error loading BOQs:', error);
       toast.error('Failed to load BOQs');
     } finally {
       setLoading(false);
     }
   };
 
+  const loadProjects = async () => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/all_project`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setProjects(data.projects || []);
+      }
+    } catch (error) {
+    }
+  };
+
+  const handleCreateProject = async (projectData: any) => {
+    try {
+      const url = editingProject
+        ? `${import.meta.env.VITE_API_BASE_URL}/update_project/${editingProject.project_id}`
+        : `${import.meta.env.VITE_API_BASE_URL}/create_project`;
+
+      const response = await fetch(url, {
+        method: editingProject ? 'PUT' : 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(projectData)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        toast.success(editingProject ? 'Project updated successfully' : 'Project created successfully');
+        setShowProjectDialog(false);
+        setEditingProject(null);
+        await loadProjects();
+        return result.project;
+      } else {
+        const error = await response.json();
+        toast.error(error.error || (editingProject ? 'Failed to update project' : 'Failed to create project'));
+      }
+    } catch (error) {
+      toast.error(editingProject ? 'Failed to update project' : 'Failed to create project');
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    if (!deletingProject) return;
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/delete_project/${deletingProject.project_id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        toast.success('Project deleted successfully');
+        setDeletingProject(null);
+        await loadProjects();
+      } else {
+        const error = await response.json();
+        toast.error(error.error || 'Failed to delete project');
+      }
+    } catch (error) {
+      toast.error('Failed to delete project');
+    }
+  };
+
   const refreshData = async () => {
     setRefreshing(true);
-    await loadBOQs();
+    // await Promise.all([loadBOQs(), loadProjects()]); // BOQ endpoint not available
+    await loadProjects();
     setRefreshing(false);
     toast.success('Data refreshed');
   };
@@ -129,11 +356,6 @@ const EstimatorHub: React.FC = () => {
     setFilteredBOQs(filtered);
   };
 
-  const handleUploadSuccess = (boq: BOQ) => {
-    setExtractedBOQ(boq);
-    setShowUploadDialog(false);
-    setShowPreviewDialog(true);
-  };
 
   const handleConfirmBOQ = async () => {
     if (!extractedBOQ) return;
@@ -155,7 +377,6 @@ const EstimatorHub: React.FC = () => {
         toast.error(response.message);
       }
     } catch (error) {
-      console.error('Error creating BOQ:', error);
       toast.error('Failed to create BOQ');
     } finally {
       setLoading(false);
@@ -172,7 +393,6 @@ const EstimatorHub: React.FC = () => {
         toast.error(response.message);
       }
     } catch (error) {
-      console.error('Error sending BOQ:', error);
       toast.error('Failed to send BOQ for confirmation');
     }
   };
@@ -187,7 +407,6 @@ const EstimatorHub: React.FC = () => {
         toast.error(response.message);
       }
     } catch (error) {
-      console.error('Error approving BOQ:', error);
       toast.error('Failed to approve BOQ');
     }
   };
@@ -324,13 +543,6 @@ const EstimatorHub: React.FC = () => {
               <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
-            <Button
-              onClick={() => setShowUploadDialog(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Upload BOQ
-            </Button>
           </div>
         </div>
       </motion.div>
@@ -370,9 +582,9 @@ const EstimatorHub: React.FC = () => {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="upload" className="flex items-center gap-2">
-            <Upload className="h-4 w-4" />
-            Upload
+          <TabsTrigger value="projects" className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Projects ({projects.length})
           </TabsTrigger>
           <TabsTrigger value="pending" className="flex items-center gap-2">
             <Clock className="h-4 w-4" />
@@ -388,15 +600,102 @@ const EstimatorHub: React.FC = () => {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="upload" className="mt-6">
-          <Card>
-            <CardContent className="pt-6">
-              <BOQUpload
-                onUploadSuccess={handleUploadSuccess}
-                onCancel={() => setActiveTab('pending')}
-              />
-            </CardContent>
-          </Card>
+        <TabsContent value="projects" className="mt-6">
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-semibold">Projects</h2>
+              <Button onClick={() => setShowProjectDialog(true)} className="bg-green-600 hover:bg-green-700">
+                <Plus className="h-4 w-4 mr-2" />
+                Create Project
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {projects.map((project) => (
+                <Card key={project.project_id} className="hover:shadow-lg transition-shadow">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg">{project.project_name}</CardTitle>
+                    <p className="text-sm text-gray-600">{project.description || 'No description'}</p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm">
+                        <MapPin className="h-4 w-4 text-gray-400" />
+                        <span>{project.location || 'N/A'}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <DollarSign className="h-4 w-4 text-gray-400" />
+                        <span>Client: {project.client || 'N/A'}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <Calendar className="h-4 w-4 text-gray-400" />
+                        <span>Created: {project.created_at ? format(new Date(project.created_at), 'dd MMM yyyy') : 'N/A'}</span>
+                      </div>
+                      <div className="pt-3 space-y-2">
+                        <Button
+                          size="sm"
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                          onClick={() => {
+                            // TODO: Implement BOQ creation for this project
+                            toast.info('BOQ creation feature coming soon');
+                          }}
+                        >
+                          <Upload className="h-4 w-4 mr-2" />
+                          Create BOQ
+                        </Button>
+                        <div className="flex gap-1 justify-end">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0"
+                            onClick={() => setViewingProject(project)}
+                            title="View Project"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0"
+                            onClick={() => {
+                              setEditingProject(project);
+                              setShowProjectDialog(true);
+                            }}
+                            title="Edit Project"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => setDeletingProject(project)}
+                            title="Delete Project"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+
+              {projects.length === 0 && (
+                <Card className="col-span-full">
+                  <CardContent className="flex flex-col items-center justify-center py-12">
+                    <FileText className="h-12 w-12 text-gray-400 mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">No projects yet</h3>
+                    <p className="text-gray-600 mb-4 text-center">Create your first project to start managing BOQs</p>
+                    <Button onClick={() => setShowProjectDialog(true)} className="bg-green-600 hover:bg-green-700">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create Project
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="pending" className="mt-6">
@@ -433,23 +732,7 @@ const EstimatorHub: React.FC = () => {
         </TabsContent>
       </Tabs>
 
-      {/* Upload Dialog */}
-      <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Upload New BOQ</DialogTitle>
-            <DialogDescription>
-              Upload a PDF file to extract BOQ data automatically
-            </DialogDescription>
-          </DialogHeader>
-          <BOQUpload
-            onUploadSuccess={handleUploadSuccess}
-            onCancel={() => setShowUploadDialog(false)}
-          />
-        </DialogContent>
-      </Dialog>
-
-      {/* Preview Dialog */}
+{/* Preview Dialog */}
       <Dialog open={showPreviewDialog} onOpenChange={setShowPreviewDialog}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -468,6 +751,129 @@ const EstimatorHub: React.FC = () => {
               showActions={!!extractedBOQ}
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Project Creation/Edit Dialog */}
+      <Dialog open={showProjectDialog} onOpenChange={(open) => {
+        setShowProjectDialog(open);
+        if (!open) setEditingProject(null);
+      }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingProject ? 'Edit Project' : 'Create New Project'}</DialogTitle>
+            <DialogDescription>
+              {editingProject
+                ? 'Update project details'
+                : 'Create a new project to start managing BOQs and estimates'}
+            </DialogDescription>
+          </DialogHeader>
+          <ProjectCreationForm
+            onSubmit={handleCreateProject}
+            onCancel={() => {
+              setShowProjectDialog(false);
+              setEditingProject(null);
+            }}
+            initialData={editingProject}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* View Project Dialog */}
+      <Dialog open={!!viewingProject} onOpenChange={(open) => !open && setViewingProject(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Project Details</DialogTitle>
+          </DialogHeader>
+          {viewingProject && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Project Name</Label>
+                  <p className="text-sm font-medium">{viewingProject.project_name}</p>
+                </div>
+                <div>
+                  <Label>Client</Label>
+                  <p className="text-sm">{viewingProject.client || 'N/A'}</p>
+                </div>
+                <div>
+                  <Label>Location</Label>
+                  <p className="text-sm">{viewingProject.location || 'N/A'}</p>
+                </div>
+                <div>
+                  <Label>Work Type</Label>
+                  <p className="text-sm">{viewingProject.work_type || 'N/A'}</p>
+                </div>
+                <div>
+                  <Label>Working Hours</Label>
+                  <p className="text-sm">{viewingProject.working_hours || 'N/A'}</p>
+                </div>
+                <div>
+                  <Label>Floor Name</Label>
+                  <p className="text-sm">{viewingProject.floor_name || 'N/A'}</p>
+                </div>
+                <div>
+                  <Label>Start Date</Label>
+                  <p className="text-sm">{viewingProject.start_date || 'N/A'}</p>
+                </div>
+                <div>
+                  <Label>End Date</Label>
+                  <p className="text-sm">{viewingProject.end_date || 'N/A'}</p>
+                </div>
+              </div>
+              <div>
+                <Label>Description</Label>
+                <p className="text-sm">{viewingProject.description || 'No description provided'}</p>
+              </div>
+              <div className="flex justify-end gap-2 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditingProject(viewingProject);
+                    setViewingProject(null);
+                    setShowProjectDialog(true);
+                  }}
+                >
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit
+                </Button>
+                <Button onClick={() => setViewingProject(null)}>Close</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deletingProject} onOpenChange={(open) => !open && setDeletingProject(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertCircle className="h-5 w-5" />
+              Confirm Delete
+            </DialogTitle>
+            <DialogDescription className="pt-3">
+              Are you sure you want to delete the project <strong>"{deletingProject?.project_name}"</strong>?
+              <br />
+              <span className="text-red-500 text-sm mt-2 block">This action cannot be undone.</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-3 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setDeletingProject(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteProject}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Project
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

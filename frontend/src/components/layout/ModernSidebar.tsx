@@ -79,7 +79,7 @@ const NavigationItemComponent = memo<{
             'flex-1 group flex items-center transition-colors duration-150 text-xs font-medium rounded-lg',
             isCollapsed ? 'px-2 py-2 justify-center' : 'px-2.5 py-2',
             isActive
-              ? item.name === 'Procurement'
+              ? item.name === 'BOQ'
                 ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 shadow-md border border-red-200'
                 : item.name === 'Vendor Management'
                 ? 'bg-gradient-to-r from-blue-50 to-blue-100 text-blue-900 shadow-md border border-blue-200'
@@ -92,7 +92,7 @@ const NavigationItemComponent = memo<{
               'rounded-md transition-colors duration-150',
               isCollapsed ? 'p-1.5' : 'p-1.5 mr-2',
               isActive
-                ? item.name === 'Procurement'
+                ? item.name === 'BOQ'
                   ? 'bg-red-500 shadow-lg'
                   : item.name === 'Vendor Management'
                   ? 'bg-blue-500 shadow-lg'
@@ -147,7 +147,7 @@ const NavigationItemComponent = memo<{
       {isActive && (
         <div className={clsx(
           "absolute left-0 top-1/2 transform -translate-y-1/2 w-1 h-8 rounded-r-full",
-          item.name === 'Procurement' ? 'bg-red-500' :
+          item.name === 'BOQ' ? 'bg-red-500' :
           item.name === 'Vendor Management' ? 'bg-blue-500' : 'bg-[#243d8a]'
         )}></div>
       )}
@@ -243,7 +243,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-[#243d8a]'
       },
       {
-        name: 'Procurement',
+        name: 'BOQ',
         href: buildPath('/procurement'),
         icon: ShoppingCartIcon,
         iconSolid: ShoppingSolid,
