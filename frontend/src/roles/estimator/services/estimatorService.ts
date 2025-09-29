@@ -4,75 +4,131 @@
  */
 
 import { apiClient } from '@/api/config';
-import { BOQ, BOQFilter, BOQDashboardMetrics, BOQStatus, BOQUploadResponse } from '../types';
+import {
+  BOQ,
+  BOQFilter,
+  BOQDashboardMetrics,
+  BOQStatus,
+  BOQUploadResponse,
+  BOQCreatePayload,
+  BOQCreateResponse,
+  BOQGetResponse,
+  BOQListResponse,
+  BOQItemDetailed
+} from '../types';
 
 class EstimatorService {
   // BOQ CRUD Operations
-  async getAllBOQs(filter?: BOQFilter): Promise<{ success: boolean; data: BOQ[]; count: number }> {
+  async getAllBOQs(filter?: BOQFilter): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/all_boq');
+      const response = await apiClient.get<BOQListResponse>('/all_boq', { params: filter });
 
-      // Transform backend data to match our BOQ interface
-      const boqs = response.data.data || [];
-      let filteredBOQs = boqs.map((boq: any) => this.transformBOQFromBackend(boq));
-
-      // Apply client-side filtering if needed
-      if (filter) {
-        if (filter.status && filter.status.length > 0) {
-          filteredBOQs = filteredBOQs.filter(boq => filter.status?.includes(boq.status));
-        }
-        if (filter.project) {
-          filteredBOQs = filteredBOQs.filter(boq =>
-            boq.project.name.toLowerCase().includes(filter.project!.toLowerCase())
-          );
-        }
-        if (filter.client) {
-          filteredBOQs = filteredBOQs.filter(boq =>
-            boq.project.client.toLowerCase().includes(filter.client!.toLowerCase())
-          );
-        }
-        if (filter.searchTerm) {
-          filteredBOQs = filteredBOQs.filter(boq =>
-            boq.title?.toLowerCase().includes(filter.searchTerm!.toLowerCase()) ||
-            boq.project.name.toLowerCase().includes(filter.searchTerm!.toLowerCase()) ||
-            boq.project.client.toLowerCase().includes(filter.searchTerm!.toLowerCase())
-          );
-        }
+      if (response.data && response.data.data) {
+        return {
+          success: true,
+          data: response.data.data,
+          count: response.data.count
+        };
       }
 
       return {
         success: true,
-        data: filteredBOQs,
-        count: response.data.count || filteredBOQs.length
+        data: [],
+        count: 0
       };
     } catch (error: any) {
-      return { success: false, data: [], count: 0 };
+      console.error('Error fetching BOQs:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        count: 0
+      };
     }
   }
 
-  async getBOQById(boqId: number): Promise<{ success: boolean; data?: BOQ }> {
+  async getBOQById(boqId: number): Promise<{ success: boolean; data?: BOQGetResponse; message?: string }> {
     try {
-      const response = await apiClient.get(`/boq/${boqId}`);
+      const response = await apiClient.get<BOQGetResponse>(`/boq/${boqId}`);
       return {
         success: true,
-        data: this.transformBOQFromBackend(response.data.data)
+        data: response.data
       };
     } catch (error: any) {
-      return { success: false };
+      console.error('BOQ fetch error:', error.response?.data || error.message);
+
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'BOQ not found'
+        };
+      } else if (error.response?.status === 403) {
+        return {
+          success: false,
+          message: 'You do not have permission to view this BOQ'
+        };
+      }
+
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to fetch BOQ details'
+      };
     }
   }
 
-  async createBOQ(boq: Partial<BOQ>): Promise<{ success: boolean; boq_id?: number; message: string }> {
+  async createBOQ(payload: BOQCreatePayload): Promise<{ success: boolean; boq_id?: number; message: string }> {
     try {
-      // Transform BOQ data to backend format
-      const backendBOQ = this.transformBOQToBackend(boq);
-      const response = await apiClient.post('/boq_create', backendBOQ);
+      console.log('Creating BOQ with payload:', payload);
+
+      // Validate required fields
+      if (!payload.project_id) {
+        return {
+          success: false,
+          message: 'Project ID is required'
+        };
+      }
+
+      if (!payload.boq_name || !payload.boq_name.trim()) {
+        return {
+          success: false,
+          message: 'BOQ name is required'
+        };
+      }
+
+      if (!payload.items || payload.items.length === 0) {
+        return {
+          success: false,
+          message: 'At least one BOQ item is required'
+        };
+      }
+
+      const response = await apiClient.post<BOQCreateResponse>('/create_boq', payload);
+      console.log('BOQ creation response:', response.data);
+
       return {
         success: true,
-        boq_id: response.data.boq_id,
+        boq_id: response.data.boq?.boq_id,
         message: response.data.message || 'BOQ created successfully'
       };
     } catch (error: any) {
+      console.error('BOQ creation error:', error.response?.data || error.message);
+
+      if (error.response?.status === 400) {
+        return {
+          success: false,
+          message: error.response?.data?.error || 'Invalid BOQ data provided'
+        };
+      } else if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: error.response?.data?.error || 'Project not found'
+        };
+      } else if (error.response?.status === 500) {
+        return {
+          success: false,
+          message: 'Server error occurred while creating BOQ. Please try again.'
+        };
+      }
+
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to create BOQ'
@@ -80,15 +136,68 @@ class EstimatorService {
     }
   }
 
-  async updateBOQ(boqId: number, boq: Partial<BOQ>): Promise<{ success: boolean; message: string }> {
+  async updateBOQ(boqId: number, updateData: any): Promise<{ success: boolean; message: string }> {
     try {
-      const backendBOQ = this.transformBOQToBackend(boq);
-      const response = await apiClient.put(`/update_boq/${boqId}`, backendBOQ);
+      console.log('Updating BOQ with payload:', updateData);
+
+      // Validate required fields
+      if (!updateData.boq_name || !updateData.boq_name.trim()) {
+        return {
+          success: false,
+          message: 'BOQ name is required'
+        };
+      }
+
+      if (!updateData.items || updateData.items.length === 0) {
+        return {
+          success: false,
+          message: 'At least one BOQ item is required'
+        };
+      }
+
+      // Ensure all materials and labour have calculated totals
+      const processedData = {
+        ...updateData,
+        items: updateData.items.map((item: any) => ({
+          ...item,
+          materials: item.materials.map((mat: any) => ({
+            ...mat,
+            total_price: mat.quantity * mat.unit_price
+          })),
+          labour: item.labour.map((lab: any) => ({
+            ...lab,
+            total_cost: lab.hours * lab.rate_per_hour
+          }))
+        }))
+      };
+
+      const response = await apiClient.put(`/update_boq/${boqId}`, processedData);
+      console.log('BOQ update response:', response.data);
+
       return {
         success: true,
         message: response.data.message || 'BOQ updated successfully'
       };
     } catch (error: any) {
+      console.error('BOQ update error:', error.response?.data || error.message);
+
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'BOQ not found'
+        };
+      } else if (error.response?.status === 400) {
+        return {
+          success: false,
+          message: error.response?.data?.error || 'Invalid BOQ data provided'
+        };
+      } else if (error.response?.status === 500) {
+        return {
+          success: false,
+          message: 'Server error occurred while updating BOQ. Please try again.'
+        };
+      }
+
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to update BOQ'
@@ -98,12 +207,21 @@ class EstimatorService {
 
   async deleteBOQ(boqId: number): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await apiClient.get(`/delete_boq/${boqId}`);
+      const response = await apiClient.delete(`/delete_boq/${boqId}`);
       return {
         success: true,
         message: response.data.message || 'BOQ deleted successfully'
       };
     } catch (error: any) {
+      console.error('BOQ delete error:', error.response?.data || error.message);
+
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'BOQ delete endpoint not found or BOQ does not exist'
+        };
+      }
+
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to delete BOQ'
@@ -114,13 +232,26 @@ class EstimatorService {
   // BOQ Status Management
   async updateBOQStatus(boqId: number, status: BOQStatus): Promise<{ success: boolean; message: string }> {
     try {
-      // Update status through the update endpoint
       const response = await apiClient.put(`/update_boq/${boqId}`, { status });
       return {
         success: true,
         message: response.data.message || 'BOQ status updated successfully'
       };
     } catch (error: any) {
+      console.error('BOQ status update error:', error.response?.data || error.message);
+
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'BOQ not found'
+        };
+      } else if (error.response?.status === 400) {
+        return {
+          success: false,
+          message: 'Invalid status value provided'
+        };
+      }
+
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to update BOQ status'
@@ -130,9 +261,8 @@ class EstimatorService {
 
   async approveBOQ(boqId: number, notes?: string): Promise<{ success: boolean; message: string }> {
     try {
-      // Update status to approved
       const response = await apiClient.put(`/update_boq/${boqId}`, {
-        status: 'approved',
+        status: 'Approved',
         notes: notes
       });
       return {
@@ -140,6 +270,20 @@ class EstimatorService {
         message: response.data.message || 'BOQ approved successfully'
       };
     } catch (error: any) {
+      console.error('BOQ approval error:', error.response?.data || error.message);
+
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'BOQ not found'
+        };
+      } else if (error.response?.status === 403) {
+        return {
+          success: false,
+          message: 'You do not have permission to approve this BOQ'
+        };
+      }
+
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to approve BOQ'
@@ -149,9 +293,15 @@ class EstimatorService {
 
   async rejectBOQ(boqId: number, reason: string): Promise<{ success: boolean; message: string }> {
     try {
-      // Update status to rejected
+      if (!reason || !reason.trim()) {
+        return {
+          success: false,
+          message: 'Rejection reason is required'
+        };
+      }
+
       const response = await apiClient.put(`/update_boq/${boqId}`, {
-        status: 'rejected',
+        status: 'Rejected',
         notes: reason
       });
       return {
@@ -159,6 +309,20 @@ class EstimatorService {
         message: response.data.message || 'BOQ rejected successfully'
       };
     } catch (error: any) {
+      console.error('BOQ rejection error:', error.response?.data || error.message);
+
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'BOQ not found'
+        };
+      } else if (error.response?.status === 403) {
+        return {
+          success: false,
+          message: 'You do not have permission to reject this BOQ'
+        };
+      }
+
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to reject BOQ'
@@ -168,15 +332,33 @@ class EstimatorService {
 
   async sendBOQForConfirmation(boqId: number): Promise<{ success: boolean; message: string }> {
     try {
-      // Update status to sent_for_confirmation
       const response = await apiClient.put(`/update_boq/${boqId}`, {
-        status: 'sent_for_confirmation'
+        status: 'Sent_for_Confirmation'
       });
       return {
         success: true,
         message: response.data.message || 'BOQ sent for confirmation successfully'
       };
     } catch (error: any) {
+      console.error('BOQ send for confirmation error:', error.response?.data || error.message);
+
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'BOQ not found'
+        };
+      } else if (error.response?.status === 403) {
+        return {
+          success: false,
+          message: 'You do not have permission to send this BOQ for confirmation'
+        };
+      } else if (error.response?.status === 400) {
+        return {
+          success: false,
+          message: 'BOQ is not in a valid state to be sent for confirmation'
+        };
+      }
+
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to send BOQ for confirmation'
@@ -249,39 +431,29 @@ class EstimatorService {
   // Dashboard Metrics
   async getDashboardMetrics(): Promise<{ success: boolean; data?: BOQDashboardMetrics }> {
     try {
-      // Get dashboard data from estimator endpoint
-      const response = await apiClient.get('/estimator/dashboard');
+      // Since /estimator/dashboard doesn't exist yet, return mock data
+      // TODO: Implement this endpoint in the backend
+      console.log('getDashboardMetrics called - using mock data');
 
-      if (response.data) {
-        // Transform backend response to frontend format
-        const data = response.data;
-        return {
-          success: true,
-          data: {
-            totalBOQs: data.metrics?.total_boqs || 0,
-            pendingBOQs: data.metrics?.pending_boqs || 0,
-            approvedBOQs: data.metrics?.approved_boqs || 0,
-            totalProjectValue: data.metrics?.total_value || 0,
-            averageApprovalTime: 3.5, // Calculate from actual data if available
-            monthlyTrend: data.trend_data || [],
-            topProjects: data.recent_boqs?.slice(0, 3).map((boq: any) => ({
-              name: boq.title || 'Unknown Project',
-              value: boq.total_amount || 0,
-              status: boq.status || 'pending'
-            })) || [],
-            recentActivities: data.recent_boqs?.map((boq: any) => ({
-              id: boq.boq_id?.toString() || '',
-              action: boq.status === 'approved' ? 'Approved' : boq.status === 'pending' ? 'Created' : 'Updated',
-              boq: boq.title || 'Unknown BOQ',
-              user: data.user_info?.name || 'System',
-              timestamp: boq.created_at ? new Date(boq.created_at).toLocaleString() : 'Recently'
-            })) || []
-          }
-        };
-      }
-
-      return { success: false };
+      return {
+        success: true,
+        data: {
+          totalBOQs: 0,
+          pendingBOQs: 0,
+          approvedBOQs: 0,
+          totalProjectValue: 0,
+          averageApprovalTime: 3.5,
+          monthlyTrend: [
+            { month: 'Jan', count: 0, value: 0 },
+            { month: 'Feb', count: 0, value: 0 },
+            { month: 'Mar', count: 0, value: 0 }
+          ],
+          topProjects: [],
+          recentActivities: []
+        }
+      };
     } catch (error: any) {
+      console.error('Error in getDashboardMetrics:', error);
       return { success: false };
     }
   }
@@ -303,69 +475,114 @@ class EstimatorService {
   }
 
   // Dropdown Data Fetching
-  async getProjects(): Promise<{ id: string; name: string; client: string }[]> {
+  async getProjects(): Promise<{ id: string; name: string; client: string; location?: string }[]> {
     try {
-      const response = await apiClient.get('/estimator/dropdown-data');
+      const response = await apiClient.get('/all_project');
 
       if (response.data?.projects) {
         return response.data.projects.map((p: any) => ({
-          id: p.id?.toString() || '',
-          name: p.name || 'Unknown Project',
-          client: p.client || 'Unknown Client'
+          id: p.project_id?.toString() || '',
+          name: p.project_name || 'Unknown Project',
+          client: p.client || 'Unknown Client',
+          location: p.location || ''
         }));
       }
 
       return [];
     } catch (error) {
+      console.error('Failed to fetch projects:', error);
       return [];
     }
   }
 
-  async getClients(): Promise<{ id: string; name: string; contact?: string }[]> {
+  // Get all items from master table
+  async getAllItems(): Promise<{
+    item_id: number;
+    item_name: string;
+    default_overhead_percentage?: number;
+    default_profit_percentage?: number;
+    description?: string;
+  }[]> {
     try {
-      const response = await apiClient.get('/estimator/dropdown-data');
+      const response = await apiClient.get('/all_item');
 
-      if (response.data?.clients) {
-        return response.data.clients.map((c: any) => ({
-          id: c.id?.toString() || '',
-          name: c.name || 'Unknown Client',
-          contact: c.type || ''
+      if (response.data?.item_list) {
+        return response.data.item_list.map((item: any) => ({
+          item_id: item.item_id,
+          item_name: item.item_name || '',
+          default_overhead_percentage: item.default_overhead_percentage,
+          default_profit_percentage: item.default_profit_percentage,
+          description: item.description
         }));
       }
 
       return [];
     } catch (error) {
+      console.error('Failed to fetch items:', error);
       return [];
     }
   }
 
-  async getCategories(): Promise<string[]> {
+  // Get materials for a specific item
+  async getItemMaterials(itemId: number): Promise<{
+    material_id: number;
+    item_id: number;
+    item_name: string;
+    material_name: string;
+    current_market_price: number;
+    default_unit: string;
+  }[]> {
     try {
-      const response = await apiClient.get('/estimator/dropdown-data');
+      const response = await apiClient.get(`/item_material/${itemId}`);
 
-      if (response.data?.categories) {
-        return response.data.categories;
+      if (response.data?.materials) {
+        return response.data.materials.map((mat: any) => ({
+          material_id: mat.material_id,
+          item_id: mat.item_id,
+          item_name: mat.item_name || '',
+          material_name: mat.material_name || '',
+          current_market_price: mat.current_market_price || 0,
+          default_unit: mat.default_unit || 'nos'
+        }));
       }
 
       return [];
     } catch (error) {
+      console.error(`Failed to fetch materials for item ${itemId}:`, error);
       return [];
     }
   }
 
-  async getUnits(): Promise<string[]> {
+  // Get labour for a specific item
+  async getItemLabours(itemId: number): Promise<{
+    labour_id: number;
+    item_id: number;
+    item_name: string;
+    labour_role: string;
+    amount: number;
+    work_type: string;
+  }[]> {
     try {
-      const response = await apiClient.get('/estimator/dropdown-data');
+      const response = await apiClient.get(`/item_labour/${itemId}`);
 
-      if (response.data?.units) {
-        return response.data.units;
+      if (response.data?.labours) {
+        return response.data.labours.map((labour: any) => ({
+          labour_id: labour.labour_id,
+          item_id: labour.item_id,
+          item_name: labour.item_name || '',
+          labour_role: labour.labour_role || '',
+          amount: labour.amount || 0,
+          work_type: labour.work_type || 'contract'
+        }));
       }
 
       return [];
     } catch (error) {
+      console.error(`Failed to fetch labour for item ${itemId}:`, error);
       return [];
     }
   }
+
 
 
   // Helper method to transform extracted data from backend

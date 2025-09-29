@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 
 class Project(db.Model):
     __tablename__ = 'project'
-    __table_args__ = {'schema': 'public'}  # Explicitly set schema
+    # __table_args__ = {'schema': 'public'}  # Explicitly set schema
 
     project_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     project_name = db.Column(db.String(255), nullable=False)  # Required

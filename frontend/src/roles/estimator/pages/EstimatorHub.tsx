@@ -23,6 +23,9 @@ import {
 } from '@/components/ui/table';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQPreview from '../components/BOQPreview';
+import BOQCreationForm from '@/components/forms/BOQCreationForm';
+import BOQDetailsModal from '../components/BOQDetailsModal';
+import BOQEditModal from '../components/BOQEditModal';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { estimatorService } from '../services/estimatorService';
@@ -212,9 +215,17 @@ const EstimatorHub: React.FC = () => {
   const [extractedBOQ, setExtractedBOQ] = useState<BOQ | null>(null);
   const [projects, setProjects] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showBOQCreationDialog, setShowBOQCreationDialog] = useState(false);
+  const [selectedProjectForBOQ, setSelectedProjectForBOQ] = useState<any>(null);
+  const [showBoqDetails, setShowBoqDetails] = useState(false);
+  const [selectedBoqForDetails, setSelectedBoqForDetails] = useState<BOQ | null>(null);
+  const [editingBoq, setEditingBoq] = useState<BOQ | null>(null);
+  const [showBoqEdit, setShowBoqEdit] = useState(false);
+  const [deletingBoq, setDeletingBoq] = useState<any>(null);
 
   useEffect(() => {
     loadProjects();
+    loadBOQs();
   }, []);
 
   useEffect(() => {
@@ -226,7 +237,25 @@ const EstimatorHub: React.FC = () => {
       setLoading(true);
       const response = await estimatorService.getAllBOQs();
       if (response.success) {
-        setBOQs(response.data);
+        // Map the backend BOQ data to include proper project structure
+        const mappedBOQs = response.data.map((boq: any) => ({
+          ...boq,
+          boq_id: boq.boq_id,
+          title: boq.boq_name || boq.title || 'Unnamed BOQ',
+          project: {
+            project_id: boq.project_id,
+            name: boq.project_name || 'Unknown Project',
+            client: boq.client || 'Unknown Client',
+            location: boq.location || 'Unknown Location'
+          },
+          summary: {
+            grandTotal: boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0
+          },
+          total_cost: boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0,
+          status: boq.status || 'draft',
+          created_at: boq.created_at
+        }));
+        setBOQs(mappedBOQs);
       }
     } catch (error) {
       toast.error('Failed to load BOQs');
@@ -403,20 +432,51 @@ const EstimatorHub: React.FC = () => {
     }
   };
 
+  const handleCreateBOQ = (project: any) => {
+    setSelectedProjectForBOQ(project);
+    setShowBOQCreationDialog(true);
+  };
+
+  const handleBOQCreated = (boqId: number) => {
+    toast.success('BOQ created successfully!');
+    setShowBOQCreationDialog(false);
+    setSelectedProjectForBOQ(null);
+    setActiveTab('pending');
+    loadBOQs(); // Refresh the BOQ list
+  };
+
+  const handleDeleteBOQ = async () => {
+    if (!deletingBoq) return;
+
+    try {
+      const response = await estimatorService.deleteBOQ(deletingBoq.boq_id);
+      if (response.success) {
+        toast.success('BOQ deleted successfully');
+        setDeletingBoq(null);
+        await loadBOQs(); // Refresh the BOQ list
+      } else {
+        toast.error(response.message || 'Failed to delete BOQ');
+      }
+    } catch (error) {
+      toast.error('Failed to delete BOQ');
+    }
+  };
+
   const formatCurrency = (value: number) => {
     return `AED ${value.toLocaleString('en-AE', { minimumFractionDigits: 0 })}`;
   };
 
-  const getStatusBadge = (status: BOQStatus) => {
-    const config = {
+  const getStatusBadge = (status: string) => {
+    const normalizedStatus = status?.toLowerCase().replace('_', '') || 'draft';
+    const config: Record<string, { className: string; icon: any }> = {
       draft: { className: 'bg-gray-50 text-gray-600 border-gray-200', icon: FileText },
-      pending: { className: 'bg-yellow-50 text-yellow-700 border-yellow-200', icon: Clock },
+      inreview: { className: 'bg-yellow-50 text-yellow-700 border-yellow-200', icon: Clock },
       approved: { className: 'bg-green-50 text-green-700 border-green-200', icon: CheckCircle },
-      sent_for_confirmation: { className: 'bg-blue-50 text-blue-700 border-blue-200', icon: Send },
+      sentforconfirmation: { className: 'bg-blue-50 text-blue-700 border-blue-200', icon: Send },
       rejected: { className: 'bg-red-50 text-red-700 border-red-200', icon: AlertCircle }
     };
 
-    const { className, icon: Icon } = config[status] || config.draft;
+    const { className, icon: Icon } = config[normalizedStatus] || config.draft;
 
     return (
       <Badge variant="outline" className={`${className} flex items-center gap-1 border`}>
@@ -476,12 +536,36 @@ const EstimatorHub: React.FC = () => {
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        setSelectedBOQ(boq);
-                        setShowPreviewDialog(true);
+                        setSelectedBoqForDetails(boq);
+                        setShowBoqDetails(true);
                       }}
                       className="h-8 w-8 p-0"
+                      title="View BOQ Details"
                     >
                       <Eye className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEditingBoq(boq);
+                        setShowBoqEdit(true);
+                      }}
+                      className="h-8 w-8 p-0"
+                      title="Edit BOQ"
+                    >
+                      <Edit className="h-4 w-4 text-green-600" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setDeletingBoq(boq);
+                      }}
+                      className="h-8 w-8 p-0"
+                      title="Delete BOQ"
+                    >
+                      <Trash2 className="h-4 w-4 text-red-600" />
                     </Button>
                     {boq.status === 'pending' && (
                       <Button
@@ -524,11 +608,11 @@ const EstimatorHub: React.FC = () => {
         <div className="px-8 py-6">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-2xl font-medium text-gray-900">BOQ Management</h1>
-              <p className="text-gray-500 text-sm mt-1">Upload, manage and track Bills of Quantities</p>
+              <h1 className="text-2xl font-medium text-gray-900">Projects</h1>
+              <p className="text-gray-500 text-sm mt-1">Manage your projects and create BOQs</p>
             </div>
             <div className="text-right">
-              <p className="text-gray-400 text-xs">{format(new Date(), 'hh:mm a')}</p>
+              <p className="text-gray-400 text-xs">{format(new Date(), 'hh:mm:ss a')}</p>
               <p className="text-gray-400 text-xs">{format(new Date(), 'MMM dd, yyyy')}</p>
             </div>
           </div>
@@ -644,71 +728,159 @@ const EstimatorHub: React.FC = () => {
                   </Button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredProjects.map((project) => (
-                    <Card key={project.project_id} className="border border-gray-200 hover:border-gray-300 transition-colors duration-200">
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-base font-medium text-gray-900">{project.project_name}</CardTitle>
-                        <p className="text-sm text-gray-500">{project.description || 'No description'}</p>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-2 text-sm">
-                          <div className="flex items-center gap-2 text-gray-600">
-                            <MapPin className="h-3.5 w-3.5" />
-                            <span>{project.location || 'N/A'}</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-gray-600">
-                            <Users className="h-3.5 w-3.5" />
-                            <span>Client: {project.client || 'N/A'}</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-gray-600">
-                            <Calendar className="h-3.5 w-3.5" />
-                            <span>{project.created_at ? format(new Date(project.created_at), 'dd MMM yyyy') : 'N/A'}</span>
-                          </div>
-                        </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredProjects.map((project, index) => {
+                    // Count BOQs for this project
+                    const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+                    const boqCount = projectBoqs.length;
 
-                        <div className="mt-4 pt-4 border-t border-gray-100">
-                          <Button
-                            className="w-full bg-gray-900 hover:bg-gray-800 text-white"
-                            size="sm"
-                            onClick={() => toast.info('BOQ creation feature coming soon')}
-                          >
-                            <Upload className="h-4 w-4 mr-2" />
-                            Create BOQ
-                          </Button>
-                          <div className="flex gap-2 mt-2">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="flex-1 text-gray-600 hover:text-gray-900"
-                              onClick={() => setViewingProject(project)}
-                            >
-                              View
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="flex-1 text-gray-600 hover:text-gray-900"
-                              onClick={() => {
-                                setEditingProject(project);
-                                setShowProjectDialog(true);
-                              }}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="text-gray-400 hover:text-red-600"
-                              onClick={() => setDeletingProject(project)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                    return (
+                    <motion.div
+                      key={project.project_id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.1 * index }}
+                      className="bg-white rounded-2xl border border-blue-100 p-6 hover:shadow-lg transition-all hover:border-blue-300 hover:shadow-blue-100/50"
+                    >
+                      {/* Header */}
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg">
+                            <Building2 className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-gray-900 text-lg">{project.project_name}</h3>
+                            <p className="text-sm text-gray-500">Project ID: {project.project_id}</p>
                           </div>
                         </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                      </div>
+
+                      {/* Description */}
+                      <div className="mb-4">
+                        <p className="text-sm text-gray-600">{project.description || 'No description'}</p>
+                      </div>
+
+                      {/* BOQ Status */}
+                      <div className="mb-4">
+                        {boqCount > 0 ? (
+                          <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-3 border border-green-200">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <FileText className="h-4 w-4 text-green-600" />
+                                <span className="text-sm font-medium text-green-700">
+                                  {boqCount} BOQ{boqCount > 1 ? 's' : ''} Created
+                                </span>
+                              </div>
+                              <div className="flex gap-1">
+                                {projectBoqs.slice(0, 3).map((boq, idx) => {
+                                  const statusColors: Record<string, string> = {
+                                    'draft': 'bg-gray-200 text-gray-700',
+                                    'Draft': 'bg-gray-200 text-gray-700',
+                                    'pending': 'bg-yellow-200 text-yellow-700',
+                                    'approved': 'bg-green-200 text-green-700',
+                                    'sent_for_confirmation': 'bg-blue-200 text-blue-700'
+                                  };
+                                  const color = statusColors[boq.status] || 'bg-gray-200 text-gray-700';
+                                  return (
+                                    <span key={idx} className={`text-xs px-2 py-0.5 rounded ${color}`}>
+                                      {boq.status}
+                                    </span>
+                                  );
+                                })}
+                                {boqCount > 3 && (
+                                  <span className="text-xs text-gray-500">+{boqCount - 3}</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3 border border-gray-200">
+                            <div className="flex items-center gap-2">
+                              <FileText className="h-4 w-4 text-gray-400" />
+                              <span className="text-sm text-gray-500">No BOQ Created</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Content Grid */}
+                      <div className="grid grid-cols-1 gap-3 mb-6">
+                        <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 rounded-lg p-3">
+                          <div className="flex items-center gap-2 text-gray-600 mb-1">
+                            <MapPin className="h-4 w-4 text-blue-600" />
+                            <span className="text-xs font-medium text-blue-600">Location</span>
+                          </div>
+                          <p className="font-semibold text-gray-900 text-sm">{project.location || 'N/A'}</p>
+                        </div>
+                        <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 rounded-lg p-3">
+                          <div className="flex items-center gap-2 text-gray-600 mb-1">
+                            <Users className="h-4 w-4 text-blue-600" />
+                            <span className="text-xs font-medium text-blue-600">Client</span>
+                          </div>
+                          <p className="font-semibold text-gray-900 text-sm">{project.client || 'N/A'}</p>
+                        </div>
+                        <div className="bg-gradient-to-br from-green-50 to-green-100/50 rounded-lg p-3">
+                          <div className="flex items-center gap-2 text-gray-600 mb-1">
+                            <Calendar className="h-4 w-4 text-green-600" />
+                            <span className="text-xs font-medium text-green-600">Created</span>
+                          </div>
+                          <p className="font-semibold text-green-700 text-sm">
+                            {project.created_at ? format(new Date(project.created_at), 'dd MMM yyyy') : 'N/A'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Create BOQ Button */}
+                      <div className="mb-4">
+                        <Button
+                          className={`w-full font-medium ${
+                            boqCount > 0
+                              ? 'bg-blue-100 hover:bg-blue-200 text-blue-700 border border-blue-300'
+                              : 'bg-blue-600 hover:bg-blue-700 text-white'
+                          }`}
+                          size="sm"
+                          onClick={() => handleCreateBOQ(project)}
+                        >
+                          <Upload className="h-4 w-4 mr-2" />
+                          {boqCount > 0 ? 'Create Another BOQ' : 'Create BOQ'}
+                        </Button>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                            onClick={() => setViewingProject(project)}
+                          >
+                            View
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-100"
+                            onClick={() => {
+                              setEditingProject(project);
+                              setShowProjectDialog(true);
+                            }}
+                          >
+                            Edit
+                          </Button>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-gray-400 hover:text-red-600 hover:bg-red-50"
+                          onClick={() => setDeletingProject(project)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </motion.div>
+                    );
+                  })}
 
                   {projects.length === 0 && !searchTerm && (
                     <div className="col-span-full border-2 border-dashed border-gray-200 rounded-lg">
@@ -819,6 +991,105 @@ const EstimatorHub: React.FC = () => {
                   <p className="text-sm">{viewingProject.work_type || 'N/A'}</p>
                 </div>
               </div>
+
+              {/* BOQ Section */}
+              <div className="border-t pt-4">
+                <h3 className="font-medium text-sm mb-3 flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-blue-600" />
+                  Related BOQs
+                </h3>
+                {(() => {
+                  // Filter BOQs by matching project_id
+                  const projectBoqs = boqs.filter(boq => {
+                    // Handle both number and string comparison
+                    return boq.project?.project_id == viewingProject.project_id;
+                  });
+
+                  if (projectBoqs.length === 0) {
+                    return (
+                      <div className="bg-gray-50 rounded-lg p-4 text-center">
+                        <p className="text-sm text-gray-600">No BOQs created for this project yet</p>
+                        <Button
+                          size="sm"
+                          className="mt-3 bg-blue-600 hover:bg-blue-700 text-white"
+                          onClick={() => {
+                            handleCreateBOQ(viewingProject);
+                            setViewingProject(null);
+                          }}
+                        >
+                          <Plus className="h-4 w-4 mr-2" />
+                          Create BOQ
+                        </Button>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="space-y-2">
+                      {projectBoqs.map((boq) => (
+                        <div key={boq.boq_id} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <h4 className="font-medium text-sm">{boq.title}</h4>
+                              <div className="flex items-center gap-4 mt-1">
+                                <span className="text-xs text-gray-600">
+                                  Status: {getStatusBadge(boq.status).label}
+                                </span>
+                                {boq.total_cost && (
+                                  <span className="text-xs text-gray-600">
+                                    Total: {formatCurrency(boq.total_cost)}
+                                  </span>
+                                )}
+                                <span className="text-xs text-gray-600">
+                                  Created: {boq.created_at ? format(new Date(boq.created_at), 'dd MMM yyyy') : 'N/A'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                onClick={() => {
+                                  setSelectedBoqForDetails(boq);
+                                  setShowBoqDetails(true);
+                                  setViewingProject(null);
+                                }}
+                              >
+                                <Eye className="h-4 w-4 mr-1" />
+                                View
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                                onClick={() => {
+                                  setEditingBoq(boq);
+                                  setShowBoqEdit(true);
+                                  setViewingProject(null);
+                                }}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => {
+                                  setDeletingBoq(boq);
+                                  setViewingProject(null);
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+
               <div className="flex justify-end gap-2 pt-4 border-t">
                 <Button
                   variant="outline"
@@ -863,6 +1134,79 @@ const EstimatorHub: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* BOQ Delete Confirmation Dialog */}
+      <Dialog open={!!deletingBoq} onOpenChange={(open) => !open && setDeletingBoq(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertCircle className="h-5 w-5" />
+              Confirm Delete BOQ
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{deletingBoq?.title || deletingBoq?.boq_name}"?
+              This action cannot be undone and will permanently remove this BOQ.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDeletingBoq(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteBOQ}
+            >
+              Delete BOQ
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* BOQ Creation Dialog */}
+      <BOQCreationForm
+        isOpen={showBOQCreationDialog}
+        onClose={() => {
+          setShowBOQCreationDialog(false);
+          setSelectedProjectForBOQ(null);
+        }}
+        onSubmit={handleBOQCreated}
+        selectedProject={selectedProjectForBOQ}
+      />
+
+      {/* BOQ Details Modal */}
+      <BOQDetailsModal
+        isOpen={showBoqDetails}
+        onClose={() => {
+          setShowBoqDetails(false);
+          setSelectedBoqForDetails(null);
+        }}
+        boq={selectedBoqForDetails}
+        onEdit={() => {
+          if (selectedBoqForDetails) {
+            setShowBoqDetails(false);
+            setEditingBoq(selectedBoqForDetails);
+            setShowBoqEdit(true);
+          }
+        }}
+        onDownload={() => {
+          toast.info('BOQ download feature will be implemented soon');
+        }}
+      />
+
+      {/* BOQ Edit Modal */}
+      <BOQEditModal
+        isOpen={showBoqEdit}
+        onClose={() => {
+          setShowBoqEdit(false);
+          setEditingBoq(null);
+        }}
+        boq={editingBoq}
+        onSave={() => {
+          loadBOQs(); // Refresh the list
+          setShowBoqEdit(false);
+          setEditingBoq(null);
+        }}
+      />
     </div>
   );
 };
