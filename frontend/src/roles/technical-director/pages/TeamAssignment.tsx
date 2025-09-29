@@ -11,7 +11,7 @@ import {
   CalendarDaysIcon,
   ArrowRightIcon,
   MagnifyingGlassIcon,
-  FunnelIcon
+  FunnelIcon,
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 
@@ -56,7 +56,7 @@ const TeamAssignment: React.FC = () => {
       endDate: '2024-05-30',
       status: 'unassigned',
       location: 'Mumbai',
-      priority: 'high'
+      priority: 'high',
     },
     {
       id: 2,
@@ -67,7 +67,7 @@ const TeamAssignment: React.FC = () => {
       endDate: '2024-04-15',
       status: 'unassigned',
       location: 'Delhi',
-      priority: 'medium'
+      priority: 'medium',
     },
     {
       id: 3,
@@ -80,7 +80,7 @@ const TeamAssignment: React.FC = () => {
       location: 'Chennai',
       priority: 'high',
       projectManager: 'David Wilson',
-      siteEngineer: 'Kumar Raj'
+      siteEngineer: 'Kumar Raj',
     },
     {
       id: 4,
@@ -93,8 +93,8 @@ const TeamAssignment: React.FC = () => {
       location: 'Bangalore',
       priority: 'low',
       projectManager: 'Sarah Miller',
-      siteEngineer: 'John Doe'
-    }
+      siteEngineer: 'John Doe',
+    },
   ];
 
   const teamMembers: TeamMember[] = [
@@ -106,7 +106,7 @@ const TeamAssignment: React.FC = () => {
       currentProjects: 2,
       experience: '8 years',
       specialization: 'Commercial',
-      rating: 4.8
+      rating: 4.8,
     },
     {
       id: 2,
@@ -116,7 +116,7 @@ const TeamAssignment: React.FC = () => {
       currentProjects: 3,
       experience: '6 years',
       specialization: 'Retail',
-      rating: 4.6
+      rating: 4.6,
     },
     {
       id: 3,
@@ -126,7 +126,7 @@ const TeamAssignment: React.FC = () => {
       currentProjects: 1,
       experience: '10 years',
       specialization: 'Corporate',
-      rating: 4.9
+      rating: 4.9,
     },
     {
       id: 4,
@@ -136,7 +136,7 @@ const TeamAssignment: React.FC = () => {
       currentProjects: 2,
       experience: '5 years',
       specialization: 'Electrical',
-      rating: 4.5
+      rating: 4.5,
     },
     {
       id: 5,
@@ -146,7 +146,7 @@ const TeamAssignment: React.FC = () => {
       currentProjects: 3,
       experience: '4 years',
       specialization: 'Civil',
-      rating: 4.3
+      rating: 4.3,
     },
     {
       id: 6,
@@ -156,15 +156,18 @@ const TeamAssignment: React.FC = () => {
       currentProjects: 1,
       experience: '3 years',
       specialization: 'Interior',
-      rating: 4.7
-    }
+      rating: 4.7,
+    },
   ];
 
   const filteredProjects = projects.filter(project => {
-    const matchesStatus = filterStatus === 'all' ||
+    const matchesStatus =
+      filterStatus === 'all' ||
       (filterStatus === 'unassigned' && project.status === 'unassigned') ||
-      (filterStatus === 'assigned' && (project.status === 'assigned' || project.status === 'in-progress'));
-    const matchesSearch = project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (filterStatus === 'assigned' &&
+        (project.status === 'assigned' || project.status === 'in-progress'));
+    const matchesSearch =
+      project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       project.client.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesStatus && matchesSearch;
   });
@@ -184,19 +187,27 @@ const TeamAssignment: React.FC = () => {
 
   const getAvailabilityColor = (availability: string) => {
     switch (availability) {
-      case 'available': return 'bg-green-100 text-green-700';
-      case 'busy': return 'bg-yellow-100 text-yellow-700';
-      case 'on-leave': return 'bg-red-100 text-red-700';
-      default: return 'bg-gray-100 text-gray-700';
+      case 'available':
+        return 'bg-green-100 text-green-700';
+      case 'busy':
+        return 'bg-yellow-100 text-yellow-700';
+      case 'on-leave':
+        return 'bg-red-100 text-red-700';
+      default:
+        return 'bg-gray-100 text-gray-700';
     }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'bg-red-100 text-red-700 border-red-200';
-      case 'medium': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'low': return 'bg-green-100 text-green-700 border-green-200';
-      default: return 'bg-gray-100 text-gray-700 border-gray-200';
+      case 'high':
+        return 'bg-red-100 text-red-700 border-red-200';
+      case 'medium':
+        return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+      case 'low':
+        return 'bg-green-100 text-green-700 border-green-200';
+      default:
+        return 'bg-gray-100 text-gray-700 border-gray-200';
     }
   };
 
@@ -206,7 +217,7 @@ const TeamAssignment: React.FC = () => {
       <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg">
+            <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
               <UsersIcon className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-blue-900">Project Manager Assignment</h1>
@@ -263,9 +274,7 @@ const TeamAssignment: React.FC = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500">Total PMs</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {projectManagers.length}
-                </p>
+                <p className="text-2xl font-bold text-gray-900">{projectManagers.length}</p>
               </div>
               <div className="p-3 bg-green-100 rounded-lg">
                 <UserGroupIcon className="w-6 h-6 text-green-600" />
@@ -306,13 +315,13 @@ const TeamAssignment: React.FC = () => {
                       type="text"
                       placeholder="Search projects..."
                       value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
+                      onChange={e => setSearchTerm(e.target.value)}
                       className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                     />
                   </div>
                   <select
                     value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value as any)}
+                    onChange={e => setFilterStatus(e.target.value as any)}
                     className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                   >
                     <option value="all">All</option>
@@ -323,7 +332,7 @@ const TeamAssignment: React.FC = () => {
               </div>
 
               <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                {filteredProjects.map((project) => (
+                {filteredProjects.map(project => (
                   <motion.div
                     key={project.id}
                     whileHover={{ scale: 1.02 }}
@@ -336,7 +345,9 @@ const TeamAssignment: React.FC = () => {
                   >
                     <div className="flex items-start justify-between mb-2">
                       <h3 className="font-semibold text-gray-900">{project.name}</h3>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getPriorityColor(project.priority)}`}>
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-medium border ${getPriorityColor(project.priority)}`}
+                      >
                         {project.priority}
                       </span>
                     </div>
@@ -347,7 +358,9 @@ const TeamAssignment: React.FC = () => {
                       </div>
                       <div className="flex items-center gap-2">
                         <CalendarDaysIcon className="w-4 h-4" />
-                        <span>{project.startDate} to {project.endDate}</span>
+                        <span>
+                          {project.startDate} to {project.endDate}
+                        </span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="font-medium">₹{(project.value / 100000).toFixed(1)}L</span>
@@ -378,7 +391,8 @@ const TeamAssignment: React.FC = () => {
                       Selected Project: {selectedProject.name}
                     </p>
                     <p className="text-xs text-blue-700 mt-1">
-                      Client: {selectedProject.client} | Value: ₹{(selectedProject.value / 100000).toFixed(1)}L
+                      Client: {selectedProject.client} | Value: ₹
+                      {(selectedProject.value / 100000).toFixed(1)}L
                     </p>
                   </div>
 
@@ -388,7 +402,7 @@ const TeamAssignment: React.FC = () => {
                       Select Project Manager
                     </label>
                     <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                      {projectManagers.map((pm) => (
+                      {projectManagers.map(pm => (
                         <div
                           key={pm.id}
                           onClick={() => setSelectedPM(pm.name)}
@@ -402,7 +416,9 @@ const TeamAssignment: React.FC = () => {
                             <div>
                               <p className="font-medium text-gray-900">{pm.name}</p>
                               <div className="flex items-center gap-3 text-xs text-gray-600 mt-1">
-                                <span className={`px-2 py-0.5 rounded-full ${getAvailabilityColor(pm.availability)}`}>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full ${getAvailabilityColor(pm.availability)}`}
+                                >
                                   {pm.availability}
                                 </span>
                                 <span>{pm.experience}</span>
@@ -421,7 +437,8 @@ const TeamAssignment: React.FC = () => {
 
                   <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                     <p className="text-sm text-yellow-800">
-                      <strong>Note:</strong> After assigning the Project Manager, they will be responsible for selecting and assigning the Site Engineer for this project.
+                      <strong>Note:</strong> After assigning the Project Manager, they will be
+                      responsible for selecting and assigning the Site Engineer for this project.
                     </p>
                   </div>
 
@@ -431,7 +448,7 @@ const TeamAssignment: React.FC = () => {
                     disabled={!selectedPM}
                     className={`w-full py-3 rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${
                       selectedPM
-                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700'
+                        ? 'bg-gradient-to-r from-blue-50 to-blue-100 text-white hover:from-blue-600 hover:to-blue-700'
                         : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                     }`}
                   >

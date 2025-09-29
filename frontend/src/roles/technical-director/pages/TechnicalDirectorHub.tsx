@@ -370,7 +370,7 @@ const TechnicalDirectorDashboard: React.FC = () => {
         >
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg">
+              <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
                 <AlertCircle className="w-6 h-6 text-blue-600" />
               </div>
               Pending Estimations for Approval
@@ -385,7 +385,7 @@ const TechnicalDirectorDashboard: React.FC = () => {
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.1 * index }}
-                className="bg-gradient-to-r from-gray-50 to-blue-50/30 rounded-xl border border-gray-200 p-5 hover:shadow-lg transition-all hover:border-blue-200"
+                className="bg-gradient-to-r from-gray-50 to-blue-100/30 rounded-xl border border-gray-200 p-5 hover:shadow-lg transition-all hover:border-blue-200"
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
@@ -451,7 +451,7 @@ const TechnicalDirectorDashboard: React.FC = () => {
           transition={{ delay: 0.7 }}
         >
           <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg">
+            <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
               <BarChart3 className="w-6 h-6 text-blue-600" />
             </div>
             Active Projects Overview
@@ -492,8 +492,8 @@ const TechnicalDirectorDashboard: React.FC = () => {
                       <div
                         className={`h-2 rounded-full transition-all duration-500 ${
                           project.status === 'on-track'
-                            ? 'bg-gradient-to-r from-green-400 to-green-600'
-                            : 'bg-gradient-to-r from-red-400 to-red-600'
+                            ? 'bg-gradient-to-r from-green-50 to-green-100'
+                            : 'bg-gradient-to-r from-red-50 to-red-100'
                         }`}
                         style={{ width: `${project.progress}%` }}
                       />

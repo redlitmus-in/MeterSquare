@@ -221,7 +221,7 @@ const ProgressTracking: React.FC = () => {
       <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg">
+            <div className="p-2 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg">
               <ChartBarIcon className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-blue-900">Progress Tracking</h1>
@@ -262,7 +262,7 @@ const ProgressTracking: React.FC = () => {
           {/* Overall Progress Bar */}
           <div className="w-full bg-gray-200 rounded-full h-4">
             <div
-              className="bg-gradient-to-r from-blue-500 to-blue-600 h-4 rounded-full transition-all duration-500 flex items-center justify-end pr-2"
+              className="bg-gradient-to-r from-blue-50 to-blue-100 h-4 rounded-full transition-all duration-500 flex items-center justify-end pr-2"
               style={{ width: `${project.overallProgress}%` }}
             >
               <span className="text-xs text-white font-medium">{project.overallProgress}%</span>
@@ -496,7 +496,7 @@ const ProgressTracking: React.FC = () => {
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6"
+              className="bg-white rounded-2xl shadow-md max-w-lg w-full p-6"
             >
               <h3 className="text-xl font-bold text-gray-900 mb-4">Update Task Progress</h3>
 

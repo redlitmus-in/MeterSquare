@@ -258,7 +258,7 @@ const ProjectApprovals: React.FC = () => {
       <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-green-500 to-green-600 rounded-lg">
+            <div className="p-2 bg-gradient-to-br from-green-50 to-green-100 rounded-lg">
               <DocumentCheckIcon className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-blue-900">Project Approvals</h1>
@@ -350,7 +350,7 @@ const ProjectApprovals: React.FC = () => {
               onClick={() => setFilterStatus(status as any)}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
                 filterStatus === status
-                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md'
+                  ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 shadow-md'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
@@ -494,7 +494,7 @@ const ProjectApprovals: React.FC = () => {
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-2xl shadow-2xl max-w-lg w-full"
+              className="bg-white rounded-2xl shadow-md max-w-lg w-full"
             >
               <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-green-200">
                 <h2 className="text-xl font-bold text-green-900">Approve Project</h2>
@@ -566,7 +566,7 @@ const ProjectApprovals: React.FC = () => {
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-2xl shadow-2xl max-w-lg w-full"
+              className="bg-white rounded-2xl shadow-md max-w-lg w-full"
             >
               <div className="bg-gradient-to-r from-red-50 to-red-100 px-6 py-4 border-b border-red-200">
                 <h2 className="text-xl font-bold text-red-900">Reject Project</h2>
@@ -629,7 +629,7 @@ const ProjectApprovals: React.FC = () => {
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden"
+              className="bg-white rounded-2xl shadow-md max-w-6xl w-full max-h-[90vh] overflow-hidden"
             >
               <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-4 border-b border-blue-200">
                 <div className="flex items-center justify-between">
@@ -752,7 +752,7 @@ const ProjectApprovals: React.FC = () => {
                         </div>
 
                         {/* Estimated Selling Price */}
-                        <div className="bg-gradient-to-r from-green-100 to-green-200 rounded-lg p-3">
+                        <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg p-3">
                           <div className="flex justify-between items-center">
                             <span className="font-bold text-gray-900">Estimated Selling Price:</span>
                             <span className="text-xl font-bold text-green-900">₹{item.estimatedSellingPrice.toLocaleString()}</span>

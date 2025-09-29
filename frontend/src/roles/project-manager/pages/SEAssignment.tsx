@@ -13,7 +13,7 @@ import {
   StarIcon,
   CalendarDaysIcon,
   WrenchScrewdriverIcon,
-  AcademicCapIcon
+  AcademicCapIcon,
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 
@@ -61,7 +61,8 @@ const SEAssignment: React.FC = () => {
       endDate: '2024-03-31',
       siteEngineer: 'John Smith',
       priority: 'high',
-      workScope: 'Complete interior fitout including partitions, false ceiling, electrical, and HVAC'
+      workScope:
+        'Complete interior fitout including partitions, false ceiling, electrical, and HVAC',
     },
     {
       id: 2,
@@ -73,7 +74,7 @@ const SEAssignment: React.FC = () => {
       endDate: '2024-02-28',
       siteEngineer: 'Sarah Wilson',
       priority: 'medium',
-      workScope: 'Store renovation with display units, lighting, and flooring'
+      workScope: 'Store renovation with display units, lighting, and flooring',
     },
     {
       id: 3,
@@ -85,7 +86,7 @@ const SEAssignment: React.FC = () => {
       endDate: '2024-01-31',
       siteEngineer: 'Mike Johnson',
       priority: 'low',
-      workScope: 'Kitchen setup, dining area design, and bar counter installation'
+      workScope: 'Kitchen setup, dining area design, and bar counter installation',
     },
     {
       id: 4,
@@ -96,7 +97,7 @@ const SEAssignment: React.FC = () => {
       startDate: '2024-01-08',
       endDate: '2024-04-15',
       priority: 'high',
-      workScope: 'Medical equipment installation, sterile room setup, patient areas'
+      workScope: 'Medical equipment installation, sterile room setup, patient areas',
     },
     {
       id: 5,
@@ -107,8 +108,8 @@ const SEAssignment: React.FC = () => {
       startDate: '2024-02-01',
       endDate: '2024-04-30',
       priority: 'medium',
-      workScope: 'Security systems, teller counters, vault installation, customer areas'
-    }
+      workScope: 'Security systems, teller counters, vault installation, customer areas',
+    },
   ];
 
   const siteEngineers: SiteEngineer[] = [
@@ -124,7 +125,7 @@ const SEAssignment: React.FC = () => {
       availability: 'busy',
       rating: 4.8,
       completedProjects: 45,
-      skills: ['Electrical', 'HVAC', 'Partitions']
+      skills: ['Electrical', 'HVAC', 'Partitions'],
     },
     {
       id: 2,
@@ -138,7 +139,7 @@ const SEAssignment: React.FC = () => {
       availability: 'available',
       rating: 4.6,
       completedProjects: 32,
-      skills: ['Interior', 'Lighting', 'Display']
+      skills: ['Interior', 'Lighting', 'Display'],
     },
     {
       id: 3,
@@ -152,7 +153,7 @@ const SEAssignment: React.FC = () => {
       availability: 'busy',
       rating: 4.5,
       completedProjects: 28,
-      skills: ['Kitchen', 'Plumbing', 'Interior']
+      skills: ['Kitchen', 'Plumbing', 'Interior'],
     },
     {
       id: 4,
@@ -166,7 +167,7 @@ const SEAssignment: React.FC = () => {
       availability: 'available',
       rating: 4.9,
       completedProjects: 38,
-      skills: ['Medical Equipment', 'Sterile Rooms', 'HVAC']
+      skills: ['Medical Equipment', 'Sterile Rooms', 'HVAC'],
     },
     {
       id: 5,
@@ -180,12 +181,13 @@ const SEAssignment: React.FC = () => {
       availability: 'available',
       rating: 4.4,
       completedProjects: 20,
-      skills: ['Security Systems', 'Electrical', 'Networking']
-    }
+      skills: ['Security Systems', 'Electrical', 'Networking'],
+    },
   ];
 
   const filteredProjects = projects.filter(project => {
-    const matchesStatus = filterStatus === 'all' ||
+    const matchesStatus =
+      filterStatus === 'all' ||
       (filterStatus === 'unassigned' && project.status === 'unassigned') ||
       (filterStatus === 'assigned' && project.status === 'assigned');
     return matchesStatus;
@@ -203,19 +205,27 @@ const SEAssignment: React.FC = () => {
 
   const getAvailabilityColor = (availability: string) => {
     switch (availability) {
-      case 'available': return 'bg-green-100 text-green-700';
-      case 'busy': return 'bg-yellow-100 text-yellow-700';
-      case 'on-leave': return 'bg-red-100 text-red-700';
-      default: return 'bg-gray-100 text-gray-700';
+      case 'available':
+        return 'bg-green-100 text-green-700';
+      case 'busy':
+        return 'bg-yellow-100 text-yellow-700';
+      case 'on-leave':
+        return 'bg-red-100 text-red-700';
+      default:
+        return 'bg-gray-100 text-gray-700';
     }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'bg-red-100 text-red-700 border-red-200';
-      case 'medium': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'low': return 'bg-green-100 text-green-700 border-green-200';
-      default: return 'bg-gray-100 text-gray-700 border-gray-200';
+      case 'high':
+        return 'bg-red-100 text-red-700 border-red-200';
+      case 'medium':
+        return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+      case 'low':
+        return 'bg-green-100 text-green-700 border-green-200';
+      default:
+        return 'bg-gray-100 text-gray-700 border-gray-200';
     }
   };
 
@@ -225,7 +235,7 @@ const SEAssignment: React.FC = () => {
       <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-lg">
+            <div className="p-2 bg-gradient-to-br from-cyan-50 to-cyan-100 rounded-lg">
               <UsersIcon className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-blue-900">Site Engineer Assignment</h1>
@@ -300,7 +310,9 @@ const SEAssignment: React.FC = () => {
               <div>
                 <p className="text-sm text-gray-500">Avg Rating</p>
                 <p className="text-2xl font-bold text-gray-900">
-                  {(siteEngineers.reduce((sum, se) => sum + se.rating, 0) / siteEngineers.length).toFixed(1)}
+                  {(
+                    siteEngineers.reduce((sum, se) => sum + se.rating, 0) / siteEngineers.length
+                  ).toFixed(1)}
                 </p>
               </div>
               <div className="p-3 bg-purple-100 rounded-lg">
@@ -318,7 +330,7 @@ const SEAssignment: React.FC = () => {
                 <h2 className="text-lg font-bold text-gray-900">Projects</h2>
                 <select
                   value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value as any)}
+                  onChange={e => setFilterStatus(e.target.value as any)}
                   className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                 >
                   <option value="all">All</option>
@@ -328,7 +340,7 @@ const SEAssignment: React.FC = () => {
               </div>
 
               <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                {filteredProjects.map((project) => (
+                {filteredProjects.map(project => (
                   <motion.div
                     key={project.id}
                     whileHover={{ scale: 1.02 }}
@@ -343,7 +355,9 @@ const SEAssignment: React.FC = () => {
                   >
                     <div className="flex items-start justify-between mb-2">
                       <h3 className="font-semibold text-gray-900">{project.name}</h3>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getPriorityColor(project.priority)}`}>
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-medium border ${getPriorityColor(project.priority)}`}
+                      >
                         {project.priority}
                       </span>
                     </div>
@@ -358,7 +372,9 @@ const SEAssignment: React.FC = () => {
                       </div>
                       <div className="flex items-center gap-2">
                         <CalendarDaysIcon className="w-4 h-4" />
-                        <span>{project.startDate} to {project.endDate}</span>
+                        <span>
+                          {project.startDate} to {project.endDate}
+                        </span>
                       </div>
                       {project.status === 'assigned' && project.siteEngineer && (
                         <div className="mt-2 pt-2 border-t border-gray-200">
@@ -394,7 +410,7 @@ const SEAssignment: React.FC = () => {
                   </div>
 
                   <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                    {availableEngineers.map((se) => (
+                    {availableEngineers.map(se => (
                       <div
                         key={se.id}
                         onClick={() => setSelectedSE(se.name)}
@@ -426,19 +442,26 @@ const SEAssignment: React.FC = () => {
                           </div>
                           <div className="flex items-center gap-1">
                             <ClockIcon className="w-3 h-3" />
-                            <span className={`px-2 py-0.5 rounded-full ${getAvailabilityColor(se.availability)}`}>
+                            <span
+                              className={`px-2 py-0.5 rounded-full ${getAvailabilityColor(se.availability)}`}
+                            >
                               {se.availability}
                             </span>
                           </div>
                           <div className="flex items-center gap-1">
                             <UsersIcon className="w-3 h-3" />
-                            <span>{se.currentProjects}/{se.maxProjects} active</span>
+                            <span>
+                              {se.currentProjects}/{se.maxProjects} active
+                            </span>
                           </div>
                         </div>
 
                         <div className="flex flex-wrap gap-1 mb-2">
                           {se.skills.map((skill, index) => (
-                            <span key={index} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+                            <span
+                              key={index}
+                              className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
+                            >
                               {skill}
                             </span>
                           ))}
@@ -469,7 +492,7 @@ const SEAssignment: React.FC = () => {
                     disabled={!selectedSE}
                     className={`w-full py-3 rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${
                       selectedSE
-                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700'
+                        ? 'bg-gradient-to-r from-blue-50 to-blue-100 text-white hover:from-blue-600 hover:to-blue-700'
                         : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                     }`}
                   >
@@ -480,7 +503,9 @@ const SEAssignment: React.FC = () => {
               ) : (
                 <div className="text-center py-12">
                   <UsersIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500">Select an unassigned project to assign a Site Engineer</p>
+                  <p className="text-gray-500">
+                    Select an unassigned project to assign a Site Engineer
+                  </p>
                 </div>
               )}
             </div>

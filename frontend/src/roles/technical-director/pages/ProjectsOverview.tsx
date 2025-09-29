@@ -233,10 +233,10 @@ const ProjectsOverview: React.FC = () => {
   };
 
   const getProgressColor = (progress: number) => {
-    if (progress >= 80) return 'from-green-400 to-green-600';
-    if (progress >= 50) return 'from-blue-400 to-blue-600';
-    if (progress >= 30) return 'from-yellow-400 to-yellow-600';
-    return 'from-red-400 to-red-600';
+    if (progress >= 80) return 'from-green-50 to-green-100';
+    if (progress >= 50) return 'from-blue-50 to-blue-100';
+    if (progress >= 30) return 'from-yellow-50 to-yellow-100';
+    return 'from-red-50 to-red-100';
   };
 
   return (
@@ -246,7 +246,7 @@ const ProjectsOverview: React.FC = () => {
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg">
+              <div className="p-2 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg">
                 <BuildingOfficeIcon className="w-6 h-6 text-white" />
               </div>
               <h1 className="text-2xl font-bold text-blue-900">Projects Overview</h1>
