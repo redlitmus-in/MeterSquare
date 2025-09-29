@@ -26,11 +26,13 @@ import {
   DocumentCheckIcon,
   Bars3Icon
 } from '@heroicons/react/24/outline';
-import { 
+import {
   HomeIcon as HomeSolid,
   ShoppingCartIcon as ShoppingSolid,
   UsersIcon as UsersSolid,
-  ChartBarIcon as ChartSolid
+  ChartBarIcon as ChartSolid,
+  DocumentCheckIcon as DocumentCheckSolid,
+  BuildingOfficeIcon as BuildingOfficeSolid
 } from '@heroicons/react/24/solid';
 import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
@@ -241,69 +243,123 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: HomeIcon,
         iconSolid: HomeSolid,
         color: 'text-[#243d8a]'
-      },
-      {
-        name: 'Procurement',
-        href: buildPath('/procurement'),
-        icon: ShoppingCartIcon,
-        iconSolid: ShoppingSolid,
-        color: 'text-red-600'
       }
     ];
 
+    // Technical Director specific navigation items
+    const technicalDirectorItems: NavigationItem[] = [
+      {
+        name: 'Project Approvals',
+        href: buildPath('/project-approvals'),
+        icon: DocumentCheckIcon,
+        iconSolid: DocumentCheckSolid,
+        color: 'text-green-600'
+      },
+      {
+        name: 'PM Assignment',
+        href: buildPath('/team-assignment'),
+        icon: UsersIcon,
+        iconSolid: UsersSolid,
+        color: 'text-blue-600'
+      },
+      {
+        name: 'Projects Overview',
+        href: buildPath('/projects-overview'),
+        icon: BuildingOfficeIcon,
+        iconSolid: BuildingOfficeSolid,
+        color: 'text-purple-600'
+      }
+    ];
+
+    // Project Manager specific navigation items
+    const projectManagerItems: NavigationItem[] = [
+      {
+        name: 'My Projects',
+        href: buildPath('/projects'),
+        icon: BuildingOfficeIcon,
+        iconSolid: BuildingOfficeSolid,
+        color: 'text-blue-600'
+      },
+      {
+        name: 'SE Assignment',
+        href: buildPath('/se-assignment'),
+        icon: UsersIcon,
+        iconSolid: UsersSolid,
+        color: 'text-cyan-600'
+      },
+      {
+        name: 'Procurement',
+        href: buildPath('/procurement-tracking'),
+        icon: ShoppingCartIcon,
+        iconSolid: ShoppingSolid,
+        color: 'text-green-600'
+      },
+      {
+        name: 'Progress Tracking',
+        href: buildPath('/progress'),
+        icon: ChartBarIcon,
+        iconSolid: ChartSolid,
+        color: 'text-purple-600'
+      }
+    ];
+
+    // For other roles, keep procurement and vendor management
+    const procurementItem: NavigationItem = {
+      name: 'Procurement',
+      href: buildPath('/procurement'),
+      icon: ShoppingCartIcon,
+      iconSolid: ShoppingSolid,
+      color: 'text-red-600'
+    };
+
+    const vendorManagementItem: NavigationItem = {
+      name: 'Vendor Management',
+      href: buildPath('/vendor-management'),
+      icon: UsersIcon,
+      iconSolid: UsersSolid,
+      color: 'text-blue-600'
+    };
+
     // Only add Vendor Management for roles that have access to it
-    // According to PDF workflow: PM, Procurement, Estimation, TD, Accounts
-    // Site/MEP Supervisors do NOT have vendor access
+    // According to PDF workflow: PM, Procurement, Estimation, Accounts
+    // Site/MEP Supervisors and Technical Director do NOT have vendor access
     const vendorAllowedRoles = [
       UserRole.PROJECT_MANAGER,
       UserRole.PROCUREMENT,
       UserRole.ESTIMATION,
-      UserRole.TECHNICAL_DIRECTOR,
       UserRole.ACCOUNTS
     ];
 
     // Use utility function to get proper role name
     const currentRole = getRoleName(roleId);
-
-    if (vendorAllowedRoles.includes(currentRole as UserRole)) {
-      // Add vendor management for allowed roles
-      baseItems.push({
-        name: 'Vendor Management',
-        href: buildPath('/vendor-management'),
-        icon: UsersIcon,
-        iconSolid: UsersSolid,
-        color: 'text-blue-600'
-      });
-    }
-
-    const managerItems: NavigationItem[] = [
-      { 
-        name: 'Projects', 
-        href: buildPath('/projects'), 
-        icon: UsersIcon, 
-        iconSolid: UsersSolid,
-        color: 'text-cyan-600'
-      },
-    ];
-
-    const executiveItems: NavigationItem[] = [
-      { 
-        name: 'Analytics', 
-        href: buildPath('/analytics'), 
-        icon: ChartBarIcon, 
-        iconSolid: ChartSolid,
-        color: 'text-orange-600'
-      },
-    ];
-
-    // Profile items removed - accessible via header dropdown
+    const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
 
     let navigation = [...baseItems];
 
-    if (user?.role_id === UserRole.TECHNICAL_DIRECTOR) {
-      navigation.push(...managerItems, ...executiveItems);
-    } else if (user?.role_id === UserRole.PROJECT_MANAGER) {
-      navigation.push(...managerItems);
+    // Check for Technical Director with multiple format variations
+    // Also check the display name and role name
+    const isTechnicalDirector = user?.role_id === UserRole.TECHNICAL_DIRECTOR ||
+        roleId === 'technicalDirector' ||
+        roleIdLower === 'technical director' ||
+        roleIdLower === 'technical_director' ||
+        roleIdLower === 'technicaldirector' ||
+        currentRole === UserRole.TECHNICAL_DIRECTOR ||
+        getRoleDisplayName(roleId || '') === 'Technical Director';
+
+    if (isTechnicalDirector) {
+      // Technical Director gets specialized menu items
+      navigation.push(...technicalDirectorItems);
+    } else if (user?.role_id === UserRole.PROJECT_MANAGER || currentRole === UserRole.PROJECT_MANAGER) {
+      // Project Manager gets specialized menu items - NO procurement/vendor pages
+      navigation.push(...projectManagerItems);
+    } else {
+      // Other roles get procurement
+      navigation.push(procurementItem);
+
+      // Add vendor management for allowed roles (excluding Technical Director and PM)
+      if (vendorAllowedRoles.includes(currentRole as UserRole) && currentRole !== UserRole.PROJECT_MANAGER) {
+        navigation.push(vendorManagementItem);
+      }
     }
 
     // Profile removed from sidebar - use header dropdown instead

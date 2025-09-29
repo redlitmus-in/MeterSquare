@@ -44,6 +44,17 @@ const SiteSupervisorHub = lazy(() => import('@/roles/site-supervisor/pages/SiteS
 const MEPSupervisorHub = lazy(() => import('@/roles/mep-supervisor/pages/MEPSupervisorHub'));
 const AccountsHub = lazy(() => import('@/roles/accounts/pages/AccountsHub'));
 
+// Technical Director Pages
+const ProjectApprovals = lazy(() => import('@/pages/technical-director/ProjectApprovals'));
+const TeamAssignment = lazy(() => import('@/pages/technical-director/TeamAssignment'));
+const ProjectsOverview = lazy(() => import('@/pages/technical-director/ProjectsOverview'));
+
+// Project Manager Pages
+const MyProjects = lazy(() => import('@/pages/project-manager/MyProjects'));
+const SEAssignment = lazy(() => import('@/pages/project-manager/SEAssignment'));
+const ProcurementTracking = lazy(() => import('@/pages/project-manager/ProcurementTracking'));
+const ProgressTracking = lazy(() => import('@/pages/project-manager/ProgressTracking'));
+
 // Lazy load workflow pages
 const MaterialDispatchProductionPage = lazy(() => import('@/pages/workflows/MaterialDispatchProductionPage'));
 const MaterialDispatchSitePage = lazy(() => import('@/pages/workflows/MaterialDispatchSitePage'));
@@ -410,15 +421,23 @@ function App() {
             <Route path="site-supervisor" element={<SiteSupervisorHub />} />
             <Route path="mep-supervisor" element={<MEPSupervisorHub />} />
             <Route path="tasks" element={<TasksPage />} />
-            <Route path="projects" element={<ProjectsPage />} />
-            <Route path="projects/:id" element={<ProjectsPage />} />
-            <Route path="projects/:id/edit" element={<ProjectsPage />} />
             <Route path="process-flow" element={<ProcessFlowPage />} />
             <Route path="workflow-status" element={<WorkflowStatusPage />} />
             <Route path="workflows/material-dispatch-production" element={<MaterialDispatchProductionPage />} />
             <Route path="workflows/material-dispatch-site" element={<MaterialDispatchSitePage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="profile" element={<ProfilePage />} />
+
+            {/* Technical Director Routes */}
+            <Route path="project-approvals" element={<ProjectApprovals />} />
+            <Route path="team-assignment" element={<TeamAssignment />} />
+            <Route path="projects-overview" element={<ProjectsOverview />} />
+
+            {/* Project Manager specific routes */}
+            <Route path="projects" element={<MyProjects />} />
+            <Route path="se-assignment" element={<SEAssignment />} />
+            <Route path="procurement-tracking" element={<ProcurementTracking />} />
+            <Route path="progress" element={<ProgressTracking />} />
           </Route>
         </Route>
 

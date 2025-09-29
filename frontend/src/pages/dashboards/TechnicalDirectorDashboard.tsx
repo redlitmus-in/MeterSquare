@@ -1,74 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
+import Highcharts from 'highcharts';
+import HighchartsReact from 'highcharts-react-official';
 import {
-  Briefcase,
-  TrendingUp,
-  CheckSquare,
   AlertCircle,
-  FileText,
-  Users,
-  Building2,
-  DollarSign,
-  Clock,
-  Package,
-  BarChart3,
-  PieChart,
-  Target,
-  Activity,
-  ChevronRight,
-  ArrowUpRight,
-  ArrowDownRight,
   Eye,
-  CheckCircle,
-  XCircle,
-  Filter,
-  Calendar,
-  Download,
-  Bell,
-  Settings,
-  ClipboardList,
-  Layers,
-  Shield,
-  Award,
-  GitBranch,
-  Zap,
-  Flag,
   ThumbsUp,
-  ThumbsDown
+  ThumbsDown,
+  BarChart3
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from 'sonner';
 
 const TechnicalDirectorDashboard: React.FC = () => {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState('overview');
   const [selectedProject, setSelectedProject] = useState<any>(null);
-
-  const stats = {
-    pendingApprovals: 5,
-    activeProjects: 8,
-    completedThisMonth: 3,
-    totalProjectValue: 8750000,
-    avgApprovalTime: '2.5 days',
-    successRate: 94
-  };
-
-  const cardVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: (index: number) => ({
-      opacity: 1,
-      y: 0,
-      transition: {
-        delay: index * 0.1,
-        duration: 0.5,
-        ease: "easeOut"
-      }
-    }),
-    hover: {
-      y: -5,
-      transition: { duration: 0.2 }
-    }
-  };
 
   // Pending approvals data
   const pendingApprovals = [
@@ -138,327 +84,437 @@ const TechnicalDirectorDashboard: React.FC = () => {
     }
   ];
 
-  // Performance metrics
-  const performanceMetrics = [
-    { label: 'Project Success Rate', value: 94, target: 90, color: 'text-green-600' },
-    { label: 'On-Time Delivery', value: 87, target: 85, color: 'text-blue-600' },
-    { label: 'Budget Adherence', value: 92, target: 95, color: 'text-yellow-600' },
-    { label: 'Client Satisfaction', value: 96, target: 90, color: 'text-purple-600' }
-  ];
+  // Highcharts configurations
+  const projectStatusChart = {
+    chart: {
+      type: 'column',
+      backgroundColor: 'transparent',
+      style: {
+        fontFamily: 'inherit'
+      }
+    },
+    title: {
+      text: 'Project Status Overview',
+      style: {
+        fontSize: '16px',
+        fontWeight: '600'
+      }
+    },
+    xAxis: {
+      categories: ['In Progress', 'Completed', 'Pending', 'Delayed'],
+      labels: {
+        style: {
+          fontSize: '12px'
+        }
+      }
+    },
+    yAxis: {
+      title: {
+        text: 'Number of Projects',
+        style: {
+          fontSize: '12px'
+        }
+      }
+    },
+    series: [{
+      name: 'Projects',
+      data: [8, 12, 5, 2],
+      color: {
+        linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+        stops: [
+          [0, '#ef4444'],
+          [1, '#fca5a5']
+        ]
+      },
+      borderRadius: 8
+    }],
+    plotOptions: {
+      column: {
+        borderWidth: 0,
+        dataLabels: {
+          enabled: true,
+          style: {
+            fontSize: '11px',
+            fontWeight: 'bold'
+          }
+        }
+      }
+    },
+    legend: {
+      enabled: false
+    },
+    credits: {
+      enabled: false
+    }
+  };
+
+  const budgetDistributionChart = {
+    chart: {
+      type: 'pie',
+      backgroundColor: 'transparent',
+      style: {
+        fontFamily: 'inherit'
+      }
+    },
+    title: {
+      text: 'Budget Distribution',
+      style: {
+        fontSize: '16px',
+        fontWeight: '600'
+      }
+    },
+    plotOptions: {
+      pie: {
+        innerSize: '60%',
+        dataLabels: {
+          enabled: true,
+          format: '{point.name}: {point.percentage:.1f}%',
+          style: {
+            fontSize: '11px'
+          }
+        }
+      }
+    },
+    series: [{
+      name: 'Budget',
+      data: [
+        { name: 'Commercial', y: 45, color: '#ef4444' },
+        { name: 'Residential', y: 30, color: '#f87171' },
+        { name: 'Industrial', y: 15, color: '#fca5a5' },
+        { name: 'Institutional', y: 10, color: '#fecaca' }
+      ]
+    }],
+    credits: {
+      enabled: false
+    }
+  };
+
+  const performanceLineChart = {
+    chart: {
+      type: 'area',
+      backgroundColor: 'transparent',
+      style: {
+        fontFamily: 'inherit'
+      }
+    },
+    title: {
+      text: 'Monthly Performance Trend',
+      style: {
+        fontSize: '16px',
+        fontWeight: '600'
+      }
+    },
+    xAxis: {
+      categories: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+      labels: {
+        style: {
+          fontSize: '11px'
+        }
+      }
+    },
+    yAxis: {
+      title: {
+        text: 'Success Rate (%)',
+        style: {
+          fontSize: '12px'
+        }
+      }
+    },
+    series: [{
+      name: 'Success Rate',
+      data: [88, 90, 85, 92, 94, 91, 93, 95, 94, 96, 94, 94],
+      fillColor: {
+        linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+        stops: [
+          [0, 'rgba(239, 68, 68, 0.4)'],
+          [1, 'rgba(239, 68, 68, 0.1)']
+        ]
+      },
+      color: '#ef4444',
+      marker: {
+        radius: 3,
+        fillColor: '#ffffff',
+        lineWidth: 2,
+        lineColor: '#ef4444'
+      }
+    }],
+    legend: {
+      enabled: false
+    },
+    credits: {
+      enabled: false
+    }
+  };
+
+  const revenueGrowthChart = {
+    chart: {
+      type: 'spline',
+      backgroundColor: 'transparent',
+      style: {
+        fontFamily: 'inherit'
+      }
+    },
+    title: {
+      text: 'Revenue Growth',
+      style: {
+        fontSize: '16px',
+        fontWeight: '600'
+      }
+    },
+    xAxis: {
+      categories: ['Q1', 'Q2', 'Q3', 'Q4'],
+      labels: {
+        style: {
+          fontSize: '11px'
+        }
+      }
+    },
+    yAxis: {
+      title: {
+        text: 'Revenue (in Lakhs)',
+        style: {
+          fontSize: '12px'
+        }
+      }
+    },
+    series: [{
+      name: '2023',
+      data: [65, 72, 78, 85],
+      color: '#fca5a5',
+      marker: {
+        symbol: 'circle'
+      }
+    }, {
+      name: '2024',
+      data: [75, 82, 87, 94],
+      color: '#ef4444',
+      marker: {
+        symbol: 'diamond'
+      }
+    }],
+    plotOptions: {
+      spline: {
+        lineWidth: 3,
+        marker: {
+          enabled: true,
+          radius: 4
+        }
+      }
+    },
+    credits: {
+      enabled: false
+    }
+  };
 
   const handleApproval = (projectId: number, approved: boolean) => {
     const action = approved ? 'approved' : 'rejected';
     toast.success(`Project ${action} successfully`);
-    // Handle actual approval logic here
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                <Briefcase className="w-8 h-8 text-blue-600" />
-                Technical Director Dashboard
-              </h1>
-              <p className="text-sm text-gray-500 mt-1">Review, approve, and oversee all projects</p>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="bg-yellow-50 border border-yellow-200 px-3 py-1.5 rounded-lg flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-yellow-600" />
-                <span className="text-sm font-medium text-yellow-700">{stats.pendingApprovals} Pending Approvals</span>
-              </div>
-              <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors relative">
-                <Bell className="w-5 h-5 text-gray-600" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-              </button>
-              <div className="flex items-center gap-3 pl-4 border-l border-gray-200">
-                <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900">{user?.name || 'Director'}</p>
-                  <p className="text-xs text-gray-500">Technical Director</p>
-                </div>
-                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                  <Briefcase className="w-5 h-5 text-blue-600" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Navigation Tabs */}
-          <div className="flex gap-6 mt-6">
-            {['overview', 'approvals', 'projects', 'analytics', 'teams'].map(tab => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`pb-3 px-1 border-b-2 transition-colors capitalize ${
-                  activeTab === tab
-                    ? 'border-blue-600 text-blue-600 font-medium'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
+      {/* Simple Header with Blue Gradient */}
+      <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 py-5">
+          <h1 className="text-2xl font-bold text-blue-900">Technical Director Dashboard</h1>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-6 py-8">
-        {activeTab === 'overview' && (
-          <>
-            {/* Key Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              <motion.div
-                custom={0}
-                variants={cardVariants}
-                initial="hidden"
-                animate="visible"
-                whileHover="hover"
-                className="card bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-2 bg-yellow-100 rounded-lg">
-                    <Clock className="w-6 h-6 text-yellow-600" />
-                  </div>
-                  <Flag className="w-5 h-5 text-yellow-500" />
-                </div>
-                <h3 className="text-2xl font-bold text-gray-900">{stats.pendingApprovals}</h3>
-                <p className="text-sm text-gray-500 mt-1">Pending Approvals</p>
-                <p className="text-xs text-yellow-600 mt-2">Action required</p>
-              </motion.div>
+        {/* Charts Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6"
+          >
+            <HighchartsReact highcharts={Highcharts} options={projectStatusChart} />
+          </motion.div>
 
-              <motion.div
-                custom={1}
-                variants={cardVariants}
-                initial="hidden"
-                animate="visible"
-                whileHover="hover"
-                className="card bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-2 bg-blue-100 rounded-lg">
-                    <Briefcase className="w-6 h-6 text-blue-600" />
-                  </div>
-                  <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full flex items-center gap-1">
-                    <ArrowUpRight className="w-3 h-3" /> Active
-                  </span>
-                </div>
-                <h3 className="text-2xl font-bold text-gray-900">{stats.activeProjects}</h3>
-                <p className="text-sm text-gray-500 mt-1">Active Projects</p>
-                <p className="text-xs text-gray-400 mt-2">{stats.completedThisMonth} completed this month</p>
-              </motion.div>
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3 }}
+            className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6"
+          >
+            <HighchartsReact highcharts={Highcharts} options={budgetDistributionChart} />
+          </motion.div>
 
-              <motion.div
-                custom={2}
-                variants={cardVariants}
-                initial="hidden"
-                animate="visible"
-                whileHover="hover"
-                className="card bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-2 bg-green-100 rounded-lg">
-                    <DollarSign className="w-6 h-6 text-green-600" />
-                  </div>
-                  <TrendingUp className="w-5 h-5 text-green-500" />
-                </div>
-                <h3 className="text-2xl font-bold text-gray-900">₹{(stats.totalProjectValue / 100000).toFixed(1)}L</h3>
-                <p className="text-sm text-gray-500 mt-1">Total Project Value</p>
-                <p className="text-xs text-gray-400 mt-2">This quarter</p>
-              </motion.div>
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.4 }}
+            className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6"
+          >
+            <HighchartsReact highcharts={Highcharts} options={performanceLineChart} />
+          </motion.div>
 
-              <motion.div
-                custom={3}
-                variants={cardVariants}
-                initial="hidden"
-                animate="visible"
-                whileHover="hover"
-                className="card bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-2 bg-purple-100 rounded-lg">
-                    <Award className="w-6 h-6 text-purple-600" />
-                  </div>
-                  <span className="text-xs font-medium text-purple-600">{stats.successRate}%</span>
-                </div>
-                <h3 className="text-2xl font-bold text-gray-900">Excellent</h3>
-                <p className="text-sm text-gray-500 mt-1">Success Rate</p>
-                <p className="text-xs text-gray-400 mt-2">Above target</p>
-              </motion.div>
-            </div>
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.5 }}
+            className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6"
+          >
+            <HighchartsReact highcharts={Highcharts} options={revenueGrowthChart} />
+          </motion.div>
+        </div>
 
-            {/* Pending Approvals Section */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <AlertCircle className="w-5 h-5 text-yellow-500" />
-                  Pending Estimations for Approval
-                </h2>
-                <button className="text-sm text-blue-600 hover:text-blue-700">View all</button>
+        {/* Pending Approvals Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+          className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6 mb-8"
+        >
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg">
+                <AlertCircle className="w-6 h-6 text-blue-600" />
               </div>
-              <div className="space-y-4">
-                {pendingApprovals.map((project) => (
-                  <div key={project.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="font-semibold text-gray-900">{project.projectName}</h3>
-                          <span className={`text-xs px-2 py-1 rounded-full ${
-                            project.priority === 'high' ? 'bg-red-50 text-red-600' :
-                            project.priority === 'medium' ? 'bg-yellow-50 text-yellow-600' :
-                            'bg-gray-100 text-gray-600'
-                          }`}>
-                            {project.priority} priority
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-4 gap-4 text-sm">
-                          <div>
-                            <span className="text-gray-500">Estimator:</span>
-                            <p className="font-medium text-gray-900">{project.estimator}</p>
-                          </div>
-                          <div>
-                            <span className="text-gray-500">Project Value:</span>
-                            <p className="font-medium text-gray-900">₹{(project.value / 100000).toFixed(1)}L</p>
-                          </div>
-                          <div>
-                            <span className="text-gray-500">Profit Margin:</span>
-                            <p className="font-medium text-green-600">{project.profitMargin}%</p>
-                          </div>
-                          <div>
-                            <span className="text-gray-500">Items:</span>
-                            <p className="font-medium text-gray-900">{project.items} items</p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 ml-4">
-                        <button
-                          onClick={() => setSelectedProject(project)}
-                          className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
-                        >
-                          <Eye className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={() => handleApproval(project.id, true)}
-                          className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                        >
-                          <ThumbsUp className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={() => handleApproval(project.id, false)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        >
-                          <ThumbsDown className="w-5 h-5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
+              Pending Estimations for Approval
+            </h2>
+            <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">View all →</button>
+          </div>
 
-            {/* Performance Overview */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            {pendingApprovals.map((project, index) => (
               <motion.div
+                key={project.id}
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
+                transition={{ delay: 0.1 * index }}
+                className="bg-gradient-to-r from-gray-50 to-blue-50/30 rounded-xl border border-gray-200 p-5 hover:shadow-lg transition-all hover:border-blue-200"
               >
-                <h2 className="text-lg font-semibold text-gray-900 mb-6">Performance Metrics</h2>
-                <div className="space-y-4">
-                  {performanceMetrics.map((metric) => (
-                    <div key={metric.label}>
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-sm text-gray-600">{metric.label}</span>
-                        <div className="flex items-center gap-2">
-                          <span className={`font-semibold ${metric.color}`}>{metric.value}%</span>
-                          <span className="text-xs text-gray-400">/ {metric.target}%</span>
-                        </div>
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-3">
+                      <h3 className="font-bold text-gray-900 text-lg">{project.projectName}</h3>
+                      <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+                        project.priority === 'high' ? 'bg-red-100 text-red-700' :
+                        project.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        {project.priority} priority
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-6">
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Estimator</p>
+                        <p className="font-semibold text-gray-900">{project.estimator}</p>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2 relative">
-                        <div
-                          className={`h-2 rounded-full transition-all duration-500 ${
-                            metric.value >= metric.target ? 'bg-green-500' : 'bg-yellow-500'
-                          }`}
-                          style={{ width: `${metric.value}%` }}
-                        />
-                        <div
-                          className="absolute top-0 h-2 w-0.5 bg-gray-600"
-                          style={{ left: `${metric.target}%` }}
-                        />
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Project Value</p>
+                        <p className="font-semibold text-gray-900">₹{(project.value / 100000).toFixed(1)}L</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Profit Margin</p>
+                        <p className="font-semibold text-green-600">{project.profitMargin}%</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Items</p>
+                        <p className="font-semibold text-gray-900">{project.items} items</p>
                       </div>
                     </div>
-                  ))}
+                  </div>
+                  <div className="flex items-center gap-2 ml-6">
+                    <button
+                      onClick={() => setSelectedProject(project)}
+                      className="p-2.5 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors group"
+                    >
+                      <Eye className="w-5 h-5 text-gray-600 group-hover:text-gray-900" />
+                    </button>
+                    <button
+                      onClick={() => handleApproval(project.id, true)}
+                      className="p-2.5 bg-green-50 hover:bg-green-100 rounded-lg transition-colors group"
+                    >
+                      <ThumbsUp className="w-5 h-5 text-green-600 group-hover:text-green-700" />
+                    </button>
+                    <button
+                      onClick={() => handleApproval(project.id, false)}
+                      className="p-2.5 bg-red-50 hover:bg-red-100 rounded-lg transition-colors group"
+                    >
+                      <ThumbsDown className="w-5 h-5 text-red-600 group-hover:text-red-700" />
+                    </button>
+                  </div>
                 </div>
               </motion.div>
+            ))}
+          </div>
+        </motion.div>
 
+        {/* Active Projects Grid */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.7 }}
+        >
+          <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg">
+              <BarChart3 className="w-6 h-6 text-blue-600" />
+            </div>
+            Active Projects Overview
+          </h2>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {activeProjects.map((project, index) => (
               <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
+                key={project.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 * index }}
+                className="bg-white rounded-2xl border border-blue-100 p-5 hover:shadow-lg transition-all"
               >
-                <h2 className="text-lg font-semibold text-gray-900 mb-6">Active Projects Status</h2>
+                <div className="flex justify-between items-start mb-4">
+                  <h3 className="font-bold text-gray-900">{project.name}</h3>
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                    project.status === 'on-track'
+                      ? 'bg-green-100 text-green-700'
+                      : 'bg-red-100 text-red-700'
+                  }`}>
+                    {project.status === 'on-track' ? 'On Track' : 'Delayed'}
+                  </span>
+                </div>
+
                 <div className="space-y-3">
-                  {activeProjects.slice(0, 3).map((project) => (
-                    <div key={project.id} className="p-3 border border-gray-200 rounded-lg">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-medium text-gray-900">{project.name}</h4>
-                        <span className={`text-xs px-2 py-1 rounded-full ${
-                          project.status === 'on-track' ? 'bg-green-50 text-green-600' :
-                          'bg-red-50 text-red-600'
-                        }`}>
-                          {project.status === 'on-track' ? 'On Track' : 'Delayed'}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-500 mb-2">PM: {project.pm}</div>
-                      <div className="w-full bg-gray-200 rounded-full h-1.5">
-                        <div
-                          className={`h-1.5 rounded-full transition-all duration-500 ${
-                            project.status === 'on-track' ? 'bg-green-500' : 'bg-red-500'
-                          }`}
-                          style={{ width: `${project.progress}%` }}
-                        />
-                      </div>
-                      <div className="flex justify-between mt-2 text-xs text-gray-500">
-                        <span>{project.progress}% Complete</span>
-                        <span>Due: {project.dueDate}</span>
-                      </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Project Manager</p>
+                    <p className="font-medium text-gray-900">{project.pm}</p>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-gray-500">Progress</span>
+                      <span className="font-medium text-gray-900">{project.progress}%</span>
                     </div>
-                  ))}
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full transition-all duration-500 ${
+                          project.status === 'on-track'
+                            ? 'bg-gradient-to-r from-green-400 to-green-600'
+                            : 'bg-gradient-to-r from-red-400 to-red-600'
+                        }`}
+                        style={{ width: `${project.progress}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between pt-2 border-t border-gray-100">
+                    <div>
+                      <p className="text-xs text-gray-500">Budget Used</p>
+                      <p className="font-medium text-gray-900">₹{(project.spent / 100000).toFixed(1)}L</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">Due Date</p>
+                      <p className="font-medium text-gray-900">{project.dueDate}</p>
+                    </div>
+                  </div>
                 </div>
               </motion.div>
-            </div>
-          </>
-        )}
-
-        {activeTab === 'approvals' && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-          >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold text-gray-900">All Pending Approvals</h2>
-              <div className="flex items-center gap-3">
-                <button className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50">
-                  <Filter className="w-4 h-4" />
-                  Filter
-                </button>
-                <button className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50">
-                  <Calendar className="w-4 h-4" />
-                  Date Range
-                </button>
-              </div>
-            </div>
-            {/* Extended approvals list would go here */}
-          </motion.div>
-        )}
+            ))}
+          </div>
+        </motion.div>
       </div>
     </div>
   );
