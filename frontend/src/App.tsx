@@ -45,15 +45,15 @@ const MEPSupervisorHub = lazy(() => import('@/roles/mep-supervisor/pages/MEPSupe
 const AccountsHub = lazy(() => import('@/roles/accounts/pages/AccountsHub'));
 
 // Technical Director Pages
-const ProjectApprovals = lazy(() => import('@/pages/technical-director/ProjectApprovals'));
-const TeamAssignment = lazy(() => import('@/pages/technical-director/TeamAssignment'));
-const ProjectsOverview = lazy(() => import('@/pages/technical-director/ProjectsOverview'));
+const ProjectApprovals = lazy(() => import('@/roles/technical-director/pages/ProjectApprovals'));
+const TeamAssignment = lazy(() => import('@/roles/technical-director/pages/TeamAssignment'));
+const ProjectsOverview = lazy(() => import('@/roles/technical-director/pages/ProjectsOverview'));
 
 // Project Manager Pages
-const MyProjects = lazy(() => import('@/pages/project-manager/MyProjects'));
-const SEAssignment = lazy(() => import('@/pages/project-manager/SEAssignment'));
-const ProcurementTracking = lazy(() => import('@/pages/project-manager/ProcurementTracking'));
-const ProgressTracking = lazy(() => import('@/pages/project-manager/ProgressTracking'));
+const MyProjects = lazy(() => import('@/roles/project-manager/pages/MyProjects'));
+const SEAssignment = lazy(() => import('@/roles/project-manager/pages/SEAssignment'));
+const ProcurementTracking = lazy(() => import('@/roles/project-manager/pages/ProcurementTracking'));
+const ProgressTracking = lazy(() => import('@/roles/project-manager/pages/ProgressTracking'));
 
 // Lazy load workflow pages
 const MaterialDispatchProductionPage = lazy(() => import('@/pages/workflows/MaterialDispatchProductionPage'));

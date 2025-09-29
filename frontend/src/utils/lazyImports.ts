@@ -22,11 +22,14 @@ export const loadExcelLibrary = async () => {
   return XLSX;
 };
 
-// Lazy load chart libraries with better typing and error handling
+// Lazy load Highcharts libraries with better typing and error handling
 export const loadChartLibraries = async () => {
   try {
-    const recharts = await import('recharts');
-    return recharts;
+    const [Highcharts, { default: HighchartsReact }] = await Promise.all([
+      import('highcharts'),
+      import('highcharts-react-official')
+    ]);
+    return { Highcharts: Highcharts.default, HighchartsReact };
   } catch (error) {
     console.error('Failed to load chart libraries:', error);
     throw error;
@@ -72,26 +75,16 @@ export const prefetchRoleDashboard = (role: string) => {
 
   // Prefetch the appropriate dashboard based on role
   switch (roleLower) {
-    case 'procurement':
-      import('@/roles/procurement/pages/ProcurementHub');
-      break;
     case 'project manager':
     case 'projectmanager':
       import('@/roles/project-manager/pages/ProjectManagerHub');
       break;
-    case 'estimation':
-      import('@/roles/estimation/pages/EstimationHub');
+    case 'estimator':
+      import('@/roles/estimator/pages/EstimatorHub');
       break;
     case 'technical director':
     case 'technicaldirector':
       import('@/roles/technical-director/pages/TechnicalDirectorHub');
-      break;
-    case 'site supervisor':
-    case 'sitesupervisor':
-      import('@/roles/site-supervisor/pages/SiteSupervisorHub');
-      break;
-    case 'accounts':
-      import('@/roles/accounts/pages/AccountsHub');
       break;
   }
 };
