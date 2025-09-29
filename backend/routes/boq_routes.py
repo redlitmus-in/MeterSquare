@@ -32,3 +32,13 @@ def update_boq_route(boq_id):
 @jwt_required
 def delete_boq_route(boq_id):
     return delete_boq(boq_id)
+
+@boq_routes.route('/item_material/<int:item_id>', methods=['GET'])
+@jwt_required
+def get_item_material_route(item_id):
+    return get_item_material(item_id)
+
+@boq_routes.route('/item_labour/<int:item_id>', methods=['GET'])
+@jwt_required
+def get_item_labours_route(item_id):
+    return get_item_labours(item_id)

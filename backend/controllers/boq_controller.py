@@ -33,48 +33,64 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
     # Add to master materials (prevent duplicates) with item_id reference
     for mat_data in materials_data:
         material_name = mat_data.get("material_name")
+        unit_price = mat_data.get("unit_price", 0.0)
         master_material = MasterMaterial.query.filter_by(material_name=material_name).first()
         if not master_material:
             master_material = MasterMaterial(
                 material_name=material_name,
                 item_id=master_item_id,  # Set the item_id reference
                 default_unit=mat_data.get("unit", "nos"),
-                current_market_price=mat_data.get("unit_price", 0.0),
+                current_market_price=unit_price,
                 created_by=created_by
             )
             db.session.add(master_material)
             db.session.flush()
         else:
-            # If material exists but doesn't have item_id set, update it
+            # Update existing material: always update current_market_price and item_id if needed
             if master_material.item_id is None:
                 master_material.item_id = master_item_id
-                db.session.flush()
+
+            # Always update current_market_price with the new unit_price from BOQ
+            master_material.current_market_price = unit_price
+
+            # Update unit if different
+            new_unit = mat_data.get("unit", "nos")
+            if master_material.default_unit != new_unit:
+                master_material.default_unit = new_unit
+
+            db.session.flush()
         master_material_ids.append(master_material.material_id)
 
-    # Add to master labour (prevent duplicates) with material_id reference
+    # Add to master labour (prevent duplicates) with item_id reference
     for i, labour_data_item in enumerate(labour_data):
         labour_role = labour_data_item.get("labour_role")
-        master_labour = MasterLabour.query.filter_by(labour_role=labour_role).first()
+        # Calculate the amount (rate_per_hour * hours)
+        rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
+        hours = labour_data_item.get("hours", 0.0)
+        labour_amount = rate_per_hour * hours
 
-        # Get corresponding material_id if materials exist
-        material_id = master_material_ids[i] if i < len(master_material_ids) else None
+        master_labour = MasterLabour.query.filter_by(labour_role=labour_role).first()
 
         if not master_labour:
             master_labour = MasterLabour(
                 labour_role=labour_role,
-                material_id=material_id,  # Set the material_id reference
+                item_id=master_item_id,  # Set the item_id reference
                 work_type=work_type,  # Set the work_type
-                # current_market_rate=labour_data_item.get("rate_per_hour", 0.0),
+                amount=labour_amount,  # Set the calculated amount
                 created_by=created_by
             )
             db.session.add(master_labour)
             db.session.flush()
         else:
-            # If labour exists but doesn't have material_id or work_type set, update it
-            if master_labour.material_id is None and material_id is not None:
-                master_labour.material_id = material_id
+            # Update existing labour: always update item_id, work_type, and amount
+            if master_labour.item_id is None:
+                master_labour.item_id = master_item_id
             if master_labour.work_type is None and work_type:
                 master_labour.work_type = work_type
+
+            # Always update the amount with the latest calculation
+            master_labour.amount = labour_amount
+
             db.session.flush()
         master_labour_ids.append(master_labour.labour_id)
 
@@ -551,4 +567,56 @@ def delete_boq(boq_id):
     except Exception as e:
         db.session.rollback()
         log.error(f"Error deleting BOQ: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+def get_item_material(item_id):
+    try:
+        boq_item = MasterItem.query.filter_by(item_id=item_id).first()
+        if not boq_item:
+            return jsonify({"error": "BOQ Item not found"}), 404
+
+        material_details = []
+        boq_materials = MasterMaterial.query.filter_by(item_id=boq_item.item_id).all()
+        for material in boq_materials:
+            material_details.append({
+                "material_id": material.material_id,
+                "item_id" : material.item_id,
+                "item_name" : boq_item.item_name,
+                "material_name": material.material_name if hasattr(material, "material_name") else None,
+                "current_market_price": material.current_market_price if hasattr(material, "current_market_price") else None,
+                "default_unit": material.default_unit if material else None
+            })
+
+        return jsonify({
+            "materials": material_details
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching material: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+def get_item_labours(item_id):
+    try:
+        boq_item = MasterItem.query.filter_by(item_id=item_id).first()
+        if not boq_item:
+            return jsonify({"error": "BOQ Item not found"}), 404
+
+        labour_details = []
+        boq_labours = MasterLabour.query.filter_by(item_id=boq_item.item_id).all()
+        for labour in boq_labours:
+            labour_details.append({
+                "labour_id": labour.labour_id,
+                "item_id" : labour.item_id,
+                "item_name" : boq_item.item_name,
+                "labour_role" : labour.labour_role,
+                "amount" : labour.amount,
+                "work_type": labour.work_type if labour else None,
+            })
+
+        return jsonify({
+            "labours": labour_details
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching material: {str(e)}")
         return jsonify({"error": str(e)}), 500

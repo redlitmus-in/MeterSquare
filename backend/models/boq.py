@@ -52,8 +52,9 @@ class MasterLabour(db.Model):
 
     labour_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     labour_role = db.Column(db.String(255), nullable=False, unique=True)
-    material_id = db.Column(db.Integer)
+    item_id = db.Column(db.Integer)
     work_type = db.Column(db.String(100), nullable=True)  # Construction, Electrical, etc
+    amount = db.Column(db.Float, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
