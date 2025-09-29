@@ -235,7 +235,12 @@ class EnhancedBackgroundNotificationService {
       return;
     }
 
-    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+    const wsUrl = import.meta.env.VITE_WS_URL;
+
+    if (!wsUrl) {
+      console.error('VITE_WS_URL environment variable is not set');
+      return;
+    }
 
     try {
       this.websocket = new WebSocket(`${wsUrl}/notifications?token=${this.authToken}&userId=${this.userId}`);

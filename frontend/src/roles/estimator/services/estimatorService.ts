@@ -46,7 +46,6 @@ class EstimatorService {
         count: response.data.count || filteredBOQs.length
       };
     } catch (error: any) {
-      console.error('Error fetching BOQs:', error);
       return { success: false, data: [], count: 0 };
     }
   }
@@ -59,7 +58,6 @@ class EstimatorService {
         data: this.transformBOQFromBackend(response.data.data)
       };
     } catch (error: any) {
-      console.error('Error fetching BOQ:', error);
       return { success: false };
     }
   }
@@ -75,7 +73,6 @@ class EstimatorService {
         message: response.data.message || 'BOQ created successfully'
       };
     } catch (error: any) {
-      console.error('Error creating BOQ:', error);
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to create BOQ'
@@ -92,7 +89,6 @@ class EstimatorService {
         message: response.data.message || 'BOQ updated successfully'
       };
     } catch (error: any) {
-      console.error('Error updating BOQ:', error);
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to update BOQ'
@@ -108,7 +104,6 @@ class EstimatorService {
         message: response.data.message || 'BOQ deleted successfully'
       };
     } catch (error: any) {
-      console.error('Error deleting BOQ:', error);
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to delete BOQ'
@@ -126,7 +121,6 @@ class EstimatorService {
         message: response.data.message || 'BOQ status updated successfully'
       };
     } catch (error: any) {
-      console.error('Error updating BOQ status:', error);
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to update BOQ status'
@@ -146,7 +140,6 @@ class EstimatorService {
         message: response.data.message || 'BOQ approved successfully'
       };
     } catch (error: any) {
-      console.error('Error approving BOQ:', error);
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to approve BOQ'
@@ -166,7 +159,6 @@ class EstimatorService {
         message: response.data.message || 'BOQ rejected successfully'
       };
     } catch (error: any) {
-      console.error('Error rejecting BOQ:', error);
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to reject BOQ'
@@ -185,7 +177,6 @@ class EstimatorService {
         message: response.data.message || 'BOQ sent for confirmation successfully'
       };
     } catch (error: any) {
-      console.error('Error sending BOQ for confirmation:', error);
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to send BOQ for confirmation'
@@ -223,7 +214,6 @@ class EstimatorService {
         message: response.data?.error || 'Failed to process PDF'
       };
     } catch (error: any) {
-      console.error('Error uploading PDF:', error);
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to upload and process PDF'
@@ -249,7 +239,6 @@ class EstimatorService {
         message: response.data?.error || 'Failed to confirm BOQ'
       };
     } catch (error: any) {
-      console.error('Error confirming BOQ:', error);
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to confirm BOQ'
@@ -293,7 +282,6 @@ class EstimatorService {
 
       return { success: false };
     } catch (error: any) {
-      console.error('Error fetching dashboard metrics:', error);
       return { success: false };
     }
   }
@@ -307,7 +295,6 @@ class EstimatorService {
         message: response.data.message || 'Email sent successfully'
       };
     } catch (error: any) {
-      console.error('Error sending BOQ email:', error);
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to send email'
@@ -330,7 +317,6 @@ class EstimatorService {
 
       return [];
     } catch (error) {
-      console.error('Error fetching projects:', error);
       return [];
     }
   }
@@ -349,7 +335,6 @@ class EstimatorService {
 
       return [];
     } catch (error) {
-      console.error('Error fetching clients:', error);
       return [];
     }
   }
@@ -364,7 +349,6 @@ class EstimatorService {
 
       return [];
     } catch (error) {
-      console.error('Error fetching categories:', error);
       return [];
     }
   }
@@ -379,7 +363,6 @@ class EstimatorService {
 
       return [];
     } catch (error) {
-      console.error('Error fetching units:', error);
       return [];
     }
   }

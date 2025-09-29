@@ -24,10 +24,10 @@ export const getEnvironmentConfig = (): EnvironmentConfig => {
   const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-key';
 
   // API URL is required
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
   if (!apiBaseUrl) {
-    console.warn('VITE_API_BASE_URL not set, using default: http://localhost:5000');
+    throw new Error('VITE_API_BASE_URL environment variable is not set. Please configure it in your .env file');
   }
 
   return {
