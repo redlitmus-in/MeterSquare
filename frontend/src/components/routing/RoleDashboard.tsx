@@ -6,16 +6,10 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 // Lazy load all role-specific dashboards
 const AdminDashboard = lazy(() => import('@/pages/dashboards/AdminDashboard'));
-const TechnicalDirectorDashboard = lazy(() => import('@/pages/dashboards/TechnicalDirectorDashboard'));
-const EstimatorDashboard = lazy(() => import('@/pages/dashboards/EstimatorDashboardNew'));
-const ProjectManagerDashboard = lazy(() => import('@/pages/dashboards/ProjectManagerDashboard'));
+const TechnicalDirectorDashboard = lazy(() => import('@/roles/technical-director/pages/TechnicalDirectorHub'));
+const EstimatorDashboard = lazy(() => import('@/roles/estimator/pages/EstimatorDashboard'));
+const ProjectManagerDashboard = lazy(() => import('@/roles/project-manager/pages/ProjectManagerHub'));
 const SiteEngineerDashboard = lazy(() => import('@/pages/dashboards/SiteEngineerDashboard'));
-const ProcurementDashboard = lazy(() => import('@/pages/dashboards/ProcurementDashboard'));
-const SiteSupervisorDashboard = lazy(() => import('@/pages/dashboards/SiteSupervisorDashboard'));
-const MEPSupervisorDashboard = lazy(() => import('@/pages/dashboards/MEPSupervisorDashboard'));
-const EstimationDashboard = lazy(() => import('@/pages/dashboards/EstimationDashboard'));
-const AccountsDashboard = lazy(() => import('@/pages/dashboards/AccountsDashboard'));
-const DesignDashboard = lazy(() => import('@/pages/dashboards/DesignDashboard'));
 
 /**
  * Component that dynamically loads the appropriate dashboard based on user role
@@ -78,30 +72,6 @@ const RoleDashboard: React.FC = () => {
       DashboardComponent = SiteEngineerDashboard;
       break;
 
-    case UserRole.PROCUREMENT:
-      DashboardComponent = ProcurementDashboard;
-      break;
-
-    case UserRole.SITE_SUPERVISOR:
-    case 'sitesupervisor':
-      DashboardComponent = SiteSupervisorDashboard;
-      break;
-
-    case UserRole.MEP_SUPERVISOR:
-      DashboardComponent = MEPSupervisorDashboard;
-      break;
-
-    case UserRole.ESTIMATION:
-      DashboardComponent = EstimationDashboard;
-      break;
-
-    case UserRole.ACCOUNTS:
-      DashboardComponent = AccountsDashboard;
-      break;
-
-    case UserRole.DESIGN:
-      DashboardComponent = DesignDashboard;
-      break;
   }
 
   // Render the dashboard with Suspense boundary

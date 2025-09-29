@@ -250,17 +250,17 @@ export const getRoleDashboard = async (role: string) => {
 
   switch (normalizedRole) {
     case 'estimator':
-      return (await import('@/pages/dashboards/EstimatorDashboard')).default;
+      return (await import('@/roles/estimator/pages/EstimatorDashboard')).default;
 
     case 'project_manager':
     case 'projectmanager':
     case 'pm':
-      return (await import('@/pages/dashboards/ProjectManagerDashboard')).default;
+      return (await import('@/roles/project-manager/pages/ProjectManagerHub')).default;
 
     case 'technical_director':
     case 'technicaldirector':
     case 'td':
-      return (await import('@/pages/dashboards/TechnicalDirectorDashboard')).default;
+      return (await import('@/roles/technical-director/pages/TechnicalDirectorHub')).default;
 
     case 'site_engineer':
     case 'siteengineer':

@@ -3,7 +3,7 @@ import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
 import { motion } from 'framer-motion';
 
-const ProjectManagerDashboard: React.FC = () => {
+const ProjectManagerHub: React.FC = () => {
   useEffect(() => {
     // Set Highcharts global options for consistent theming
     Highcharts.setOptions({
@@ -281,4 +281,4 @@ const ProjectManagerDashboard: React.FC = () => {
   );
 };
 
-export default ProjectManagerDashboard;
+export default ProjectManagerHub;
