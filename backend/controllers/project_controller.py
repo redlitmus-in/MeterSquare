@@ -171,7 +171,7 @@ def get_project_by_id(project_id):
         ).first()
 
         if not project:
-            return jsonify({"error": "Project not found"}), 404
+            return jsonify({"project": []}), 200
 
         return jsonify({
             "project": project.to_dict()
