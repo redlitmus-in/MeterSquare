@@ -620,3 +620,23 @@ def get_item_labours(item_id):
     except Exception as e:
         log.error(f"Error fetching material: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+def get_all_item():
+    try:
+        boq_items = MasterItem.query.filter_by(is_deleted=False).all()
+        item_details = []
+        for item in boq_items:
+            item_details.append({
+                "item_id": item.item_id,
+                "item_name" : item.item_name,
+                "default_overhead_percentage" : item.default_overhead_percentage,
+                "default_profit_percentage" : item.default_profit_percentage,
+            })
+
+        return jsonify({
+            "item_list": item_details
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching item: {str(e)}")
+        return jsonify({"error": str(e)}), 500

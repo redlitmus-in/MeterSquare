@@ -31,6 +31,7 @@ class MasterItem(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
+    is_deleted = db.Column(db.Boolean, default=False)
 
 
 class MasterMaterial(db.Model):

@@ -42,3 +42,9 @@ def get_item_material_route(item_id):
 @jwt_required
 def get_item_labours_route(item_id):
     return get_item_labours(item_id)
+
+@boq_routes.route('/all_item', methods=['GET'])
+@jwt_required
+def get_all_item_route():
+    return get_all_item()
+    
