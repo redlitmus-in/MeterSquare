@@ -1,5 +1,6 @@
 from datetime import datetime
 from config.db import db
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 class BOQ(db.Model):
@@ -13,64 +14,66 @@ class BOQ(db.Model):
     created_by = db.Column(db.String(255), nullable=False)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     last_modified_by = db.Column(db.String(255), nullable=True)
+    is_deleted = db.Column(db.Boolean, default=False)
 
     project = db.relationship("Project", backref=db.backref("boqs", lazy=True))
 
 
-class BOQItem(db.Model):
+# Master Tables - No duplicates, reusable across BOQs
+class MasterItem(db.Model):
     __tablename__ = "boq_items"
 
     item_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False)
-    item_name = db.Column(db.String(255), nullable=False)
+    item_name = db.Column(db.String(255), nullable=False, unique=True)
     description = db.Column(db.Text, nullable=True)
-
-    # cost components
-    base_cost = db.Column(db.Float, default=0.0)
-    overhead_amount = db.Column(db.Float, default=0.0)
-    profit_margin_percentage = db.Column(db.Float, default=0.0)
-    profit_margin_amount = db.Column(db.Float, default=0.0)
-    total_cost = db.Column(db.Float, default=0.0)
-    selling_price = db.Column(db.Float, default=0.0)
-    status = db.Column(db.String(50), default="Active")
+    default_overhead_percentage = db.Column(db.Float, default=10.0)
+    default_profit_percentage = db.Column(db.Float, default=15.0)
+    is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
-    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
-    last_modified_by = db.Column(db.String(255), nullable=True)
-
-    boq = db.relationship("BOQ", backref=db.backref("items", lazy=True))
 
 
-class BOQMaterial(db.Model):
-    __tablename__ = "boq_materials"
+class MasterMaterial(db.Model):
+    __tablename__ = "boq_material"
 
     material_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    item_id = db.Column(db.Integer, db.ForeignKey("boq_items.item_id"), nullable=False)
-    material_name = db.Column(db.String(255), nullable=False)
-    quantity = db.Column(db.Float, nullable=False)
-    unit = db.Column(db.String(50), nullable=False)
-    unit_price = db.Column(db.Float, nullable=False)
-    total_price = db.Column(db.Float, nullable=False)
+    material_name = db.Column(db.String(255), nullable=False, unique=True)
+    item_id = db.Column(db.Integer)
+    default_unit = db.Column(db.String(50), nullable=False)
+    current_market_price = db.Column(db.Float, nullable=True)
+    # supplier = db.Column(db.String(255), nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
-    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
-    last_modified_by = db.Column(db.String(255), nullable=True)
-
-    item = db.relationship("BOQItem", backref=db.backref("materials", lazy=True))
 
 
-class BOQLabour(db.Model):
-    __tablename__ = "boq_labour"
+class MasterLabour(db.Model):
+    __tablename__ = "boq_labours"
 
     labour_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    item_id = db.Column(db.Integer, db.ForeignKey("boq_items.item_id"), nullable=False)
-    labour_role = db.Column(db.String(255), nullable=False)  # e.g., Fabricator, Installer
-    hours = db.Column(db.Float, nullable=False)
-    rate_per_hour = db.Column(db.Float, nullable=False)
-    total_cost = db.Column(db.Float, nullable=False)
+    labour_role = db.Column(db.String(255), nullable=False, unique=True)
+    material_id = db.Column(db.Integer)
+    work_type = db.Column(db.String(100), nullable=True)  # Construction, Electrical, etc
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+
+
+# BOQ Details Table - Stores JSON data for each BOQ
+class BOQDetails(db.Model):
+    __tablename__ = "boq_details"
+
+    boq_detail_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False)
+    boq_details = db.Column(JSONB, nullable=False)  # Stores complete BOQ structure
+    total_cost = db.Column(db.Float, default=0.0)
+    total_items = db.Column(db.Integer, default=0)
+    total_materials = db.Column(db.Integer, default=0)
+    total_labour = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     last_modified_by = db.Column(db.String(255), nullable=True)
-
-    item = db.relationship("BOQItem", backref=db.backref("labours", lazy=True))
+    is_deleted = db.Column(db.Boolean, default=False) 
+    
+    boq = db.relationship("BOQ", backref=db.backref("details", lazy=True))
