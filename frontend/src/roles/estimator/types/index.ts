@@ -175,6 +175,8 @@ export interface BOQDashboardMetrics {
   totalBOQs: number;
   pendingBOQs: number;
   approvedBOQs: number;
+  rejectedBOQs?: number;
+  sentForConfirmation?: number;
   totalProjectValue: number;
   averageApprovalTime: number;
   monthlyTrend: {
@@ -183,16 +185,19 @@ export interface BOQDashboardMetrics {
     value: number;
   }[];
   topProjects: {
+    id?: number;
     name: string;
     value: number;
     status: BOQStatus;
+    client?: string;
   }[];
-  recentActivities: {
-    id: string;
-    action: string;
-    boq: string;
-    user: string;
+  recentActivities?: {
+    id: number;
+    type: 'created' | 'updated';
+    description: string;
     timestamp: string;
+    project: string;
+    status: string;
   }[];
 }
 

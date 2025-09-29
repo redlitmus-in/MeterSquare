@@ -101,6 +101,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
   const [materialDropdownOpen, setMaterialDropdownOpen] = useState<Record<string, boolean>>({});
   const [labourDropdownOpen, setLabourDropdownOpen] = useState<Record<string, boolean>>({});
   const [loadingItemData, setLoadingItemData] = useState<Record<string, boolean>>({});
+  const [materialSearchTerms, setMaterialSearchTerms] = useState<Record<string, string>>({});
+  const [labourSearchTerms, setLabourSearchTerms] = useState<Record<string, string>>({});
+
+  // Reference panel state
+  const [showReferencePanel, setShowReferencePanel] = useState(false);
+  const [expandedReferenceItems, setExpandedReferenceItems] = useState<number[]>([]);
 
   // Load projects and master items on mount
   useEffect(() => {
@@ -227,7 +233,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
         loadItemLabours(masterItem.item_id)
       ]);
 
-    // Update the item with master data
+      // Update the item with master data
     setItems(items.map(item => {
       if (item.id === itemId) {
         // Convert master materials to form materials
@@ -337,6 +343,62 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
         ? { ...item, materials: [...item.materials, newMaterial] }
         : item
     ));
+  };
+
+  const selectMasterMaterial = (itemId: string, materialId: string, masterMaterial: MasterMaterial) => {
+    setItems(items.map(item => {
+      if (item.id === itemId) {
+        return {
+          ...item,
+          materials: item.materials.map(mat =>
+            mat.id === materialId ? {
+              ...mat,
+              material_name: masterMaterial.material_name,
+              unit: masterMaterial.default_unit,
+              unit_price: masterMaterial.current_market_price,
+              master_material_id: masterMaterial.material_id,
+              is_from_master: true,
+              is_new: false
+            } : mat
+          )
+        };
+      }
+      return item;
+    }));
+  };
+
+  const getAvailableMaterials = (itemId: string) => {
+    const item = items.find(i => i.id === itemId);
+    if (!item?.master_item_id) return [];
+    return itemMaterials[item.master_item_id] || [];
+  };
+
+  const getAvailableLabour = (itemId: string) => {
+    const item = items.find(i => i.id === itemId);
+    if (!item?.master_item_id) return [];
+    return itemLabours[item.master_item_id] || [];
+  };
+
+  const selectMasterLabour = (itemId: string, labourId: string, masterLabour: MasterLabour) => {
+    setItems(items.map(item => {
+      if (item.id === itemId) {
+        return {
+          ...item,
+          labour: item.labour.map(lab =>
+            lab.id === labourId ? {
+              ...lab,
+              labour_role: masterLabour.labour_role,
+              rate_per_hour: masterLabour.amount / 8, // Convert amount to hourly rate
+              hours: 8, // Default 8 hours
+              master_labour_id: masterLabour.labour_id,
+              is_from_master: true,
+              is_new: false
+            } : lab
+          )
+        };
+      }
+      return item;
+    }));
   };
 
   const removeMaterial = (itemId: string, materialId: string) => {
@@ -497,30 +559,30 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex items-center justify-center min-h-screen px-4">
-        <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="relative bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden"
+          className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden flex flex-col"
         >
-          {/* Header */}
-          <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-b border-blue-200 px-6 py-5">
+          {/* Header - Fixed */}
+          <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-b border-blue-200 px-6 py-4 flex-shrink-0">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-blue-200 rounded-xl">
                 <FileText className="w-8 h-8 text-blue-600" />
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-blue-900">Create New BOQ</h2>
-                <p className="text-sm text-blue-700">Build a detailed Bill of Quantities for your project</p>
+                <h2 className="text-xl font-bold text-blue-900">Create New BOQ</h2>
+                <p className="text-sm text-blue-700 mt-0.5">Build a detailed Bill of Quantities for your project</p>
               </div>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="absolute top-5 right-6 p-2 text-gray-600 hover:bg-blue-200 rounded-lg transition-colors"
+              className="absolute top-4 right-4 p-2 text-gray-600 hover:bg-blue-200 rounded-lg transition-colors"
               disabled={isSubmitting}
               aria-label="Close dialog"
             >
@@ -528,10 +590,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
             </button>
           </div>
 
-          {/* Content */}
-          <div className="overflow-y-auto max-h-[calc(90vh-140px)] p-6">
+          {/* Content - Scrollable */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
             {/* BOQ Details */}
-            <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 rounded-xl p-6 mb-6 border border-blue-100">
+            <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 rounded-xl p-5 mb-6 border border-blue-100">
               <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
                 <div className="p-2 bg-blue-100 rounded-lg">
                   <FileText className="w-5 h-5 text-blue-600" />
@@ -605,8 +667,168 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
               )}
             </div>
 
+            {/* Available Items Reference Panel */}
+            {masterItems.length > 0 && (
+              <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-200 mb-6">
+                <button
+                  type="button"
+                  onClick={() => setShowReferencePanel(!showReferencePanel)}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-indigo-100/50 transition-colors rounded-t-xl"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-200 rounded-lg">
+                      <Package className="w-5 h-5 text-indigo-600" />
+                    </div>
+                    <div className="text-left">
+                      <h3 className="text-sm font-bold text-indigo-900">Available Master Items</h3>
+                      <p className="text-xs text-indigo-700">{masterItems.length} items available for quick selection</p>
+                    </div>
+                  </div>
+                  <ChevronDown
+                    className={`w-5 h-5 text-indigo-600 transition-transform ${
+                      showReferencePanel ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+
+                {showReferencePanel && (
+                  <div className="px-6 py-4 max-h-64 overflow-y-auto">
+                    <div className="space-y-2">
+                      {masterItems.map((masterItem) => {
+                        const isExpanded = expandedReferenceItems.includes(masterItem.item_id);
+                        const materials = itemMaterials[masterItem.item_id] || [];
+                        const labours = itemLabours[masterItem.item_id] || [];
+
+                        return (
+                          <div key={masterItem.item_id} className="bg-white rounded-lg border border-indigo-100">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!isExpanded) {
+                                  // Load materials and labour if not already loaded
+                                  if (!itemMaterials[masterItem.item_id]) {
+                                    await loadItemMaterials(masterItem.item_id);
+                                  }
+                                  if (!itemLabours[masterItem.item_id]) {
+                                    await loadItemLabours(masterItem.item_id);
+                                  }
+                                  setExpandedReferenceItems([...expandedReferenceItems, masterItem.item_id]);
+                                } else {
+                                  setExpandedReferenceItems(
+                                    expandedReferenceItems.filter(id => id !== masterItem.item_id)
+                                  );
+                                }
+                              }}
+                              className="w-full px-4 py-3 flex items-center justify-between hover:bg-indigo-50 transition-colors rounded-t-lg"
+                            >
+                              <div className="flex items-center gap-3">
+                                <ChevronRight
+                                  className={`w-4 h-4 text-gray-500 transition-transform ${
+                                    isExpanded ? 'rotate-90' : ''
+                                  }`}
+                                />
+                                <div className="text-left">
+                                  <div className="font-medium text-gray-900">{masterItem.item_name}</div>
+                                  {masterItem.description && (
+                                    <div className="text-xs text-gray-500">{masterItem.description}</div>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // Add this item to the form
+                                  const newItem: BOQItemForm = {
+                                    id: Date.now().toString(),
+                                    item_name: masterItem.item_name,
+                                    description: masterItem.description || '',
+                                    work_type: 'contract',
+                                    materials: [],
+                                    labour: [],
+                                    overhead_percentage: masterItem.default_overhead_percentage || overallOverhead,
+                                    profit_margin_percentage: masterItem.default_profit_percentage || overallProfit,
+                                    master_item_id: masterItem.item_id,
+                                    is_new: false
+                                  };
+                                  setItems([...items, newItem]);
+                                  setExpandedItems([...expandedItems, newItem.id]);
+                                  setItemSearchTerms(prev => ({ ...prev, [newItem.id]: masterItem.item_name }));
+
+                                  // Auto-load materials and labour
+                                  selectMasterItem(newItem.id, masterItem);
+                                  toast.success(`Added "${masterItem.item_name}" to BOQ`);
+                                }}
+                                className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            </button>
+
+                            {isExpanded && (
+                              <div className="px-4 py-3 bg-gray-50 rounded-b-lg border-t border-indigo-100">
+                                {materials.length > 0 && (
+                                  <div className="mb-3">
+                                    <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                      <Package className="w-3 h-3" />
+                                      Materials ({materials.length})
+                                    </h4>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      {materials.map((mat) => (
+                                        <div key={mat.material_id} className="text-xs bg-white px-2 py-1 rounded border border-gray-200">
+                                          <span className="font-medium text-gray-700">{mat.material_name}</span>
+                                          <span className="text-gray-500 ml-2">
+                                            ₹{mat.current_market_price}/{mat.default_unit}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {labours.length > 0 && (
+                                  <div>
+                                    <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                      <Users className="w-3 h-3" />
+                                      Labour ({labours.length})
+                                    </h4>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      {labours.map((lab) => (
+                                        <div key={lab.labour_id} className="text-xs bg-white px-2 py-1 rounded border border-gray-200">
+                                          <span className="font-medium text-gray-700">{lab.labour_role}</span>
+                                          <span className="text-gray-500 ml-2">
+                                            ₹{lab.amount}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {materials.length === 0 && labours.length === 0 && (
+                                  <div className="text-xs text-gray-500 text-center py-2">
+                                    No materials or labour defined for this item
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {masterItems.length === 0 && (
+                        <div className="text-center py-4 text-sm text-gray-500">
+                          No master items available. Items will be added as you create BOQs.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Default Overhead & Profit */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-6">
               <div className="flex items-center gap-2 mb-3">
                 <Calculator className="w-5 h-5 text-blue-600" />
                 <h3 className="text-sm font-semibold text-blue-900">Default Overhead & Profit</h3>
@@ -614,34 +836,46 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="overhead-input" className="block text-sm text-blue-700 mb-1">Overhead %</label>
-                  <input
-                    id="overhead-input"
-                    type="number"
-                    value={overallOverhead}
-                    onChange={(e) => setOverallOverhead(Number(e.target.value))}
-                    className="w-full px-3 py-1.5 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    disabled={isSubmitting}
-                    placeholder="Enter overhead percentage"
-                  />
+                  <div className="relative">
+                    <input
+                      id="overhead-input"
+                      type="number"
+                      value={overallOverhead === 0 ? '' : overallOverhead}
+                      onChange={(e) => {
+                        const value = e.target.value === '' ? 0 : Number(e.target.value);
+                        setOverallOverhead(value);
+                      }}
+                      className="w-full px-3 py-1.5 pr-8 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={isSubmitting}
+                      placeholder="10.0"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-blue-600">%</span>
+                  </div>
                 </div>
                 <div>
                   <label htmlFor="profit-input" className="block text-sm text-blue-700 mb-1">Profit Margin %</label>
-                  <input
-                    id="profit-input"
-                    type="number"
-                    value={overallProfit}
-                    onChange={(e) => setOverallProfit(Number(e.target.value))}
-                    className="w-full px-3 py-1.5 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    disabled={isSubmitting}
-                    placeholder="Enter profit margin percentage"
-                  />
+                  <div className="relative">
+                    <input
+                      id="profit-input"
+                      type="number"
+                      value={overallProfit === 0 ? '' : overallProfit}
+                      onChange={(e) => {
+                        const value = e.target.value === '' ? 0 : Number(e.target.value);
+                        setOverallProfit(value);
+                      }}
+                      className="w-full px-3 py-1.5 pr-8 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={isSubmitting}
+                      placeholder="15.0"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-blue-600">%</span>
+                  </div>
                 </div>
               </div>
             </div>
 
             {/* BOQ Items */}
             <div className="mb-6">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-3">
                 <h3 className="text-lg font-semibold text-gray-900">BOQ Items</h3>
                 <div className="flex items-center gap-3">
                   {isLoadingMasterData && (
@@ -790,7 +1024,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                       </div>
                       <div className="flex items-center gap-2 ml-4">
                         <span className="text-sm font-medium text-gray-900">
-                          ₹{calculateItemCost(item).sellingPrice.toLocaleString()}
+                          ₹{calculateItemCost(item).sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </span>
                         <button
                           type="button"
@@ -806,7 +1040,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
 
                     {/* Item Details (Expandable) */}
                     {expandedItems.includes(item.id) && (
-                      <div className="p-4 space-y-4">
+                      <div className="p-4 space-y-4 bg-gray-50/50">
                         {/* Materials Section */}
                         <div>
                           <div className="flex items-center justify-between mb-2">
@@ -824,25 +1058,98 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                             </button>
                           </div>
                           <div className="space-y-2">
-                            {item.materials.map((material) => (
-                              <div key={material.id} className="flex items-center gap-2">
-                                <input
-                                  type="text"
-                                  value={material.material_name}
-                                  onChange={(e) => updateMaterial(item.id, material.id, 'material_name', e.target.value)}
-                                  className={`flex-1 px-2 py-1 text-sm border rounded ${
-                                    material.is_from_master
-                                      ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                      : 'border-gray-300'
-                                  }`}
-                                  placeholder="Material name"
-                                  disabled={isSubmitting || material.is_from_master}
-                                  title={material.is_from_master ? 'Material name from master data cannot be edited' : ''}
-                                />
+                            {item.materials.map((material) => {
+                              const availableMaterials = getAvailableMaterials(item.id);
+                              const materialDropdownId = `${item.id}-${material.id}`;
+
+                              return (
+                                <div key={material.id} className="flex items-center gap-2">
+                                  <div className="flex-1 relative">
+                                    <input
+                                      type="text"
+                                      value={materialSearchTerms[materialDropdownId] || material.material_name}
+                                      onChange={(e) => {
+                                        setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: e.target.value }));
+                                        if (!material.is_from_master) {
+                                          updateMaterial(item.id, material.id, 'material_name', e.target.value);
+                                        }
+                                        if (availableMaterials.length > 0) {
+                                          setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
+                                        }
+                                      }}
+                                      onFocus={() => {
+                                        if (availableMaterials.length > 0) {
+                                          setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
+                                        }
+                                      }}
+                                      className={`w-full px-2 py-1 pr-6 text-sm border rounded ${
+                                        material.is_from_master
+                                          ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
+                                          : 'border-gray-300'
+                                      }`}
+                                      placeholder={availableMaterials.length > 0 ? "Search materials or type new" : "Material name"}
+                                      disabled={isSubmitting || material.is_from_master}
+                                      title={material.is_from_master ? 'Material name from master data cannot be edited' : ''}
+                                    />
+                                    {availableMaterials.length > 0 && (
+                                      <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                                    )}
+
+                                    {materialDropdownOpen[materialDropdownId] && availableMaterials.length > 0 && (
+                                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-32 overflow-y-auto">
+                                        {availableMaterials
+                                          .filter(mat =>
+                                            !materialSearchTerms[materialDropdownId] ||
+                                            mat.material_name.toLowerCase().includes(materialSearchTerms[materialDropdownId].toLowerCase())
+                                          )
+                                          .map(masterMaterial => (
+                                            <button
+                                              key={masterMaterial.material_id}
+                                              type="button"
+                                              onClick={() => {
+                                                selectMasterMaterial(item.id, material.id, masterMaterial);
+                                                setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
+                                                setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: masterMaterial.material_name }));
+                                              }}
+                                              className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors"
+                                            >
+                                              <div className="font-medium text-gray-900">{masterMaterial.material_name}</div>
+                                              <div className="text-xs text-gray-500">
+                                                ₹{masterMaterial.current_market_price}/{masterMaterial.default_unit}
+                                              </div>
+                                            </button>
+                                          ))
+                                        }
+                                        {materialSearchTerms[materialDropdownId] &&
+                                         !availableMaterials.some(mat =>
+                                           mat.material_name.toLowerCase() === materialSearchTerms[materialDropdownId].toLowerCase()
+                                         ) && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              updateMaterial(item.id, material.id, 'material_name', materialSearchTerms[materialDropdownId]);
+                                              setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
+                                            }}
+                                            className="w-full px-3 py-2 text-left text-sm bg-green-50 hover:bg-green-100 transition-colors border-t border-gray-200"
+                                          >
+                                            <div className="flex items-center gap-2">
+                                              <PlusCircle className="w-3 h-3 text-green-600" />
+                                              <span className="text-green-700 font-medium">
+                                                Add "{materialSearchTerms[materialDropdownId]}" as new material
+                                              </span>
+                                            </div>
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
                                 <input
                                   type="number"
-                                  value={material.quantity}
-                                  onChange={(e) => updateMaterial(item.id, material.id, 'quantity', Number(e.target.value))}
+                                  value={material.quantity === 0 ? '' : material.quantity}
+                                  onChange={(e) => {
+                                    const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                    updateMaterial(item.id, material.id, 'quantity', value);
+                                  }}
                                   className="w-20 px-2 py-1 text-sm border border-gray-300 rounded"
                                   placeholder="Qty"
                                   min="0"
@@ -863,18 +1170,24 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                   <option value="sqm">Sqm</option>
                                   <option value="cum">Cum</option>
                                 </select>
-                                <input
-                                  type="number"
-                                  value={material.unit_price}
-                                  onChange={(e) => updateMaterial(item.id, material.id, 'unit_price', Number(e.target.value))}
-                                  className="w-24 px-2 py-1 text-sm border border-gray-300 rounded"
-                                  placeholder="Unit price"
-                                  min="0"
-                                  step="0.01"
-                                  disabled={isSubmitting}
-                                />
-                                <span className="w-20 px-2 py-1 text-xs text-gray-600 bg-gray-50 rounded text-center">
-                                  ₹{(material.quantity * material.unit_price).toFixed(2)}
+                                <div className="relative w-24">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">₹</span>
+                                  <input
+                                    type="number"
+                                    value={material.unit_price === 0 ? '' : material.unit_price}
+                                    onChange={(e) => {
+                                      const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                      updateMaterial(item.id, material.id, 'unit_price', value);
+                                    }}
+                                    className="w-full pl-6 pr-2 py-1 text-sm border border-gray-300 rounded"
+                                    placeholder="0.00"
+                                    min="0"
+                                    step="0.01"
+                                    disabled={isSubmitting}
+                                  />
+                                </div>
+                                <span className="w-20 px-2 py-1 text-xs text-gray-600 bg-gray-50 rounded text-center font-medium">
+                                  ₹{(material.quantity * material.unit_price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                                 <button
                                   type="button"
@@ -886,7 +1199,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                   <X className="w-3 h-3" />
                                 </button>
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -907,43 +1221,121 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                             </button>
                           </div>
                           <div className="space-y-2">
-                            {item.labour.map((labour) => (
-                              <div key={labour.id} className="flex items-center gap-2">
-                                <input
-                                  type="text"
-                                  value={labour.labour_role}
-                                  onChange={(e) => updateLabour(item.id, labour.id, 'labour_role', e.target.value)}
-                                  className={`flex-1 px-2 py-1 text-sm border rounded ${
-                                    labour.is_from_master
-                                      ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                      : 'border-gray-300'
-                                  }`}
-                                  placeholder="Labour role (e.g., Fabricator, Installer)"
-                                  disabled={isSubmitting || labour.is_from_master}
-                                  title={labour.is_from_master ? 'Labour role from master data cannot be edited' : ''}
-                                />
+                            {item.labour.map((labour) => {
+                              const availableLabour = getAvailableLabour(item.id);
+                              const labourDropdownId = `${item.id}-${labour.id}`;
+
+                              return (
+                                <div key={labour.id} className="flex items-center gap-2">
+                                  <div className="flex-1 relative">
+                                    <input
+                                      type="text"
+                                      value={labourSearchTerms[labourDropdownId] || labour.labour_role}
+                                      onChange={(e) => {
+                                        setLabourSearchTerms(prev => ({ ...prev, [labourDropdownId]: e.target.value }));
+                                        if (!labour.is_from_master) {
+                                          updateLabour(item.id, labour.id, 'labour_role', e.target.value);
+                                        }
+                                        if (availableLabour.length > 0) {
+                                          setLabourDropdownOpen(prev => ({ ...prev, [labourDropdownId]: true }));
+                                        }
+                                      }}
+                                      onFocus={() => {
+                                        if (availableLabour.length > 0) {
+                                          setLabourDropdownOpen(prev => ({ ...prev, [labourDropdownId]: true }));
+                                        }
+                                      }}
+                                      className={`w-full px-2 py-1 pr-6 text-sm border rounded ${
+                                        labour.is_from_master
+                                          ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
+                                          : 'border-gray-300'
+                                      }`}
+                                      placeholder={availableLabour.length > 0 ? "Search labour roles or type new" : "Labour role (e.g., Fabricator, Installer)"}
+                                      disabled={isSubmitting || labour.is_from_master}
+                                      title={labour.is_from_master ? 'Labour role from master data cannot be edited' : ''}
+                                    />
+                                    {availableLabour.length > 0 && (
+                                      <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                                    )}
+
+                                    {labourDropdownOpen[labourDropdownId] && availableLabour.length > 0 && (
+                                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-32 overflow-y-auto">
+                                        {availableLabour
+                                          .filter(lab =>
+                                            !labourSearchTerms[labourDropdownId] ||
+                                            lab.labour_role.toLowerCase().includes(labourSearchTerms[labourDropdownId].toLowerCase())
+                                          )
+                                          .map(masterLabour => (
+                                            <button
+                                              key={masterLabour.labour_id}
+                                              type="button"
+                                              onClick={() => {
+                                                selectMasterLabour(item.id, labour.id, masterLabour);
+                                                setLabourDropdownOpen(prev => ({ ...prev, [labourDropdownId]: false }));
+                                                setLabourSearchTerms(prev => ({ ...prev, [labourDropdownId]: masterLabour.labour_role }));
+                                              }}
+                                              className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors"
+                                            >
+                                              <div className="font-medium text-gray-900">{masterLabour.labour_role}</div>
+                                              <div className="text-xs text-gray-500">
+                                                ₹{masterLabour.amount} ({masterLabour.work_type})
+                                              </div>
+                                            </button>
+                                          ))}
+                                        {labourSearchTerms[labourDropdownId] &&
+                                         !availableLabour.some(lab =>
+                                           lab.labour_role.toLowerCase() === labourSearchTerms[labourDropdownId].toLowerCase()
+                                         ) && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              updateLabour(item.id, labour.id, 'labour_role', labourSearchTerms[labourDropdownId]);
+                                              setLabourDropdownOpen(prev => ({ ...prev, [labourDropdownId]: false }));
+                                            }}
+                                            className="w-full px-3 py-2 text-left text-sm bg-green-50 hover:bg-green-100 transition-colors border-t border-gray-200"
+                                          >
+                                            <div className="flex items-center gap-2">
+                                              <PlusCircle className="w-3 h-3 text-green-600" />
+                                              <span className="text-green-700 font-medium">
+                                                Add "{labourSearchTerms[labourDropdownId]}" as new labour
+                                              </span>
+                                            </div>
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
                                 <input
                                   type="number"
-                                  value={labour.hours}
-                                  onChange={(e) => updateLabour(item.id, labour.id, 'hours', Number(e.target.value))}
+                                  value={labour.hours === 0 ? '' : labour.hours}
+                                  onChange={(e) => {
+                                    const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                    updateLabour(item.id, labour.id, 'hours', value);
+                                  }}
                                   className="w-20 px-2 py-1 text-sm border border-gray-300 rounded"
                                   placeholder="Hours"
                                   min="0"
                                   step="0.5"
                                   disabled={isSubmitting}
                                 />
-                                <input
-                                  type="number"
-                                  value={labour.rate_per_hour}
-                                  onChange={(e) => updateLabour(item.id, labour.id, 'rate_per_hour', Number(e.target.value))}
-                                  className="w-24 px-2 py-1 text-sm border border-gray-300 rounded"
-                                  placeholder="Rate/hour"
-                                  min="0"
-                                  step="0.01"
-                                  disabled={isSubmitting}
-                                />
-                                <span className="w-20 px-2 py-1 text-xs text-gray-600 bg-gray-50 rounded text-center">
-                                  ₹{(labour.hours * labour.rate_per_hour).toFixed(2)}
+                                <div className="relative w-24">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">₹</span>
+                                  <input
+                                    type="number"
+                                    value={labour.rate_per_hour === 0 ? '' : labour.rate_per_hour}
+                                    onChange={(e) => {
+                                      const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                      updateLabour(item.id, labour.id, 'rate_per_hour', value);
+                                    }}
+                                    className="w-full pl-6 pr-2 py-1 text-sm border border-gray-300 rounded"
+                                    placeholder="0.00"
+                                    min="0"
+                                    step="0.01"
+                                    disabled={isSubmitting}
+                                  />
+                                </div>
+                                <span className="w-20 px-2 py-1 text-xs text-gray-600 bg-gray-50 rounded text-center font-medium">
+                                  ₹{(labour.hours * labour.rate_per_hour).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                                 <button
                                   type="button"
@@ -955,7 +1347,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                   <X className="w-3 h-3" />
                                 </button>
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -963,31 +1356,43 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                         <div className="grid grid-cols-2 gap-4 pt-2 border-t">
                           <div>
                             <label htmlFor={`overhead-${item.id}`} className="block text-xs text-gray-600 mb-1">Overhead %</label>
-                            <input
-                              id={`overhead-${item.id}`}
-                              type="number"
-                              value={item.overhead_percentage}
-                              onChange={(e) => updateItem(item.id, 'overhead_percentage', Number(e.target.value))}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                              min="0"
-                              step="0.1"
-                              disabled={isSubmitting}
-                              placeholder="0"
-                            />
+                            <div className="relative">
+                              <input
+                                id={`overhead-${item.id}`}
+                                type="number"
+                                value={item.overhead_percentage === 0 ? '' : item.overhead_percentage}
+                                onChange={(e) => {
+                                  const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                  updateItem(item.id, 'overhead_percentage', value);
+                                }}
+                                className="w-full px-2 py-1 pr-6 text-sm border border-gray-300 rounded"
+                                min="0"
+                                step="0.1"
+                                disabled={isSubmitting}
+                                placeholder="0.0"
+                              />
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">%</span>
+                            </div>
                           </div>
                           <div>
                             <label htmlFor={`profit-${item.id}`} className="block text-xs text-gray-600 mb-1">Profit Margin %</label>
-                            <input
-                              id={`profit-${item.id}`}
-                              type="number"
-                              value={item.profit_margin_percentage}
-                              onChange={(e) => updateItem(item.id, 'profit_margin_percentage', Number(e.target.value))}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                              min="0"
-                              step="0.1"
-                              disabled={isSubmitting}
-                              placeholder="0"
-                            />
+                            <div className="relative">
+                              <input
+                                id={`profit-${item.id}`}
+                                type="number"
+                                value={item.profit_margin_percentage === 0 ? '' : item.profit_margin_percentage}
+                                onChange={(e) => {
+                                  const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                  updateItem(item.id, 'profit_margin_percentage', value);
+                                }}
+                                className="w-full px-2 py-1 pr-6 text-sm border border-gray-300 rounded"
+                                min="0"
+                                step="0.1"
+                                disabled={isSubmitting}
+                                placeholder="0.0"
+                              />
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">%</span>
+                            </div>
                           </div>
                         </div>
 
@@ -1000,31 +1405,31 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                               <div className="grid grid-cols-2 gap-2 text-xs">
                                 <div className="flex justify-between">
                                   <span className="text-gray-600">Materials:</span>
-                                  <span className="font-medium">₹{costs.materialCost.toFixed(2)}</span>
+                                  <span className="font-medium">₹{costs.materialCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-gray-600">Labour:</span>
-                                  <span className="font-medium">₹{costs.labourCost.toFixed(2)}</span>
+                                  <span className="font-medium">₹{costs.labourCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-gray-600">Base Cost:</span>
-                                  <span className="font-medium">₹{costs.baseCost.toFixed(2)}</span>
+                                  <span className="font-medium">₹{costs.baseCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-gray-600">Overhead:</span>
-                                  <span className="font-medium">₹{costs.overheadAmount.toFixed(2)}</span>
+                                  <span className="font-medium">₹{costs.overheadAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-gray-600">Total Cost:</span>
-                                  <span className="font-medium">₹{costs.totalCost.toFixed(2)}</span>
+                                  <span className="font-medium">₹{costs.totalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-gray-600">Profit:</span>
-                                  <span className="font-medium">₹{costs.profitAmount.toFixed(2)}</span>
+                                  <span className="font-medium">₹{costs.profitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex justify-between font-bold border-t pt-1">
                                   <span className="text-gray-700">Selling Price:</span>
-                                  <span className="text-green-600">₹{costs.sellingPrice.toFixed(2)}</span>
+                                  <span className="text-green-600">₹{costs.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                               </div>
                             </div>
@@ -1037,9 +1442,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
               </div>
 
               {items.length === 0 && (
-                <div className="text-center py-12 border-2 border-dashed border-gray-300 rounded-lg">
-                  <FileText className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                  <p className="text-gray-500">No items added yet</p>
+                <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50/50">
+                  <FileText className="w-10 h-10 text-gray-400 mx-auto mb-2" />
+                  <p className="text-gray-500 font-medium">No items added yet</p>
                   <p className="text-sm text-gray-400 mt-1">Click "Add Item" to start building your BOQ</p>
                 </div>
               )}
@@ -1047,7 +1452,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
 
             {/* Total Summary */}
             {items.length > 0 && (
-              <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-xl p-6 border border-green-200">
+              <div className="sticky bottom-0 bg-gradient-to-r from-green-50 to-green-100 rounded-xl p-4 border border-green-200 shadow-lg">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-green-200 rounded-lg">
@@ -1063,18 +1468,22 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
             )}
           </div>
 
-          {/* Footer */}
-          <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+          {/* Footer - Fixed */}
+          <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-gray-700 hover:text-gray-900 transition-colors"
+              className="px-5 py-2.5 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
               disabled={isSubmitting}
             >
               Cancel
             </button>
             <div className="flex items-center gap-3">
-              <button type="button" className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium" disabled={isSubmitting}>
+              <button
+                type="button"
+                className="flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                disabled={isSubmitting}
+              >
                 <Upload className="w-4 h-4" />
                 Import Template
               </button>
@@ -1082,7 +1491,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                 type="button"
                 onClick={handleSubmit}
                 disabled={isSubmitting || !boqName || !selectedProjectId || items.length === 0}
-                className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+                className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium shadow-sm"
               >
                 {isSubmitting ? (
                   <>
@@ -1099,7 +1508,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
             </div>
           </div>
         </motion.div>
-      </div>
     </div>
   );
 };

@@ -12,11 +12,38 @@ import {
   AlertCircle,
   Loader2,
   Wrench,
-  DollarSign
+  DollarSign,
+  Search,
+  PlusCircle,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { BOQ, BOQItemDetailed, BOQUpdatePayload, BOQMaterial, BOQLabour } from '../types';
 import { estimatorService } from '../services/estimatorService';
+
+// Master data interfaces
+interface MasterItem {
+  item_id: number;
+  item_name: string;
+  description?: string;
+  default_overhead_percentage?: number;
+  default_profit_percentage?: number;
+}
+
+interface MasterMaterial {
+  material_id: number;
+  material_name: string;
+  current_market_price: number;
+  default_unit: string;
+}
+
+interface MasterLabour {
+  labour_id: number;
+  labour_role: string;
+  amount: number;
+  work_type: string;
+}
 
 interface BOQEditModalProps {
   isOpen: boolean;
@@ -38,11 +65,160 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
   const [activeTab, setActiveTab] = useState<'items' | 'summary'>('items');
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
 
+  // Master data states
+  const [masterItems, setMasterItems] = useState<MasterItem[]>([]);
+  const [itemMaterials, setItemMaterials] = useState<Record<number, MasterMaterial[]>>({});
+  const [itemLabours, setItemLabours] = useState<Record<number, MasterLabour[]>>({});
+  const [isLoadingMasterData, setIsLoadingMasterData] = useState(false);
+
+  // Search/dropdown states
+  const [itemSearchTerms, setItemSearchTerms] = useState<Record<number, string>>({});
+  const [itemDropdownOpen, setItemDropdownOpen] = useState<Record<number, boolean>>({});
+  const [loadingItemData, setLoadingItemData] = useState<Record<number, boolean>>({});
+
+  // Reference panel state
+  const [showReferencePanel, setShowReferencePanel] = useState(false);
+  const [expandedReferenceItems, setExpandedReferenceItems] = useState<number[]>([]);
+
   useEffect(() => {
     if (boq && boq.boq_id) {
       fetchBOQDetails();
+      loadMasterItems();
     }
   }, [boq]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.item-dropdown-container')) {
+        setItemDropdownOpen({});
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  const loadMasterItems = async () => {
+    setIsLoadingMasterData(true);
+    try {
+      const itemsData = await estimatorService.getAllItems();
+      setMasterItems(itemsData);
+    } catch (error) {
+      console.error('Failed to load master items');
+    } finally {
+      setIsLoadingMasterData(false);
+    }
+  };
+
+  const loadItemMaterials = async (itemId: number) => {
+    try {
+      const materials = await estimatorService.getItemMaterials(itemId);
+      setItemMaterials(prev => ({ ...prev, [itemId]: materials }));
+      return materials;
+    } catch (error) {
+      console.error('Failed to load materials for item:', error);
+      return [];
+    }
+  };
+
+  const loadItemLabours = async (itemId: number) => {
+    try {
+      const labours = await estimatorService.getItemLabours(itemId);
+      setItemLabours(prev => ({ ...prev, [itemId]: labours }));
+      return labours;
+    } catch (error) {
+      console.error('Failed to load labours for item:', error);
+      return [];
+    }
+  };
+
+  const getFilteredItems = (searchTerm: string) => {
+    if (!searchTerm) return [];
+    const term = searchTerm.toLowerCase();
+    return masterItems.filter(item =>
+      item.item_name.toLowerCase().includes(term)
+    ).slice(0, 10);
+  };
+
+  const handleItemNameChange = (itemIndex: number, value: string) => {
+    setItemSearchTerms(prev => ({ ...prev, [itemIndex]: value }));
+
+    // Update item name for new items
+    const item = editedBoq?.items[itemIndex];
+    if (item && !item.item_id) {
+      handleItemChange(itemIndex, 'item_name', value);
+    }
+
+    // Open dropdown if there's text
+    if (value.trim()) {
+      setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: true }));
+    } else {
+      setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: false }));
+    }
+  };
+
+  const selectMasterItem = async (itemIndex: number, masterItem: MasterItem) => {
+    setLoadingItemData(prev => ({ ...prev, [itemIndex]: true }));
+
+    try {
+      // Load materials and labour for this item
+      const [materials, labours] = await Promise.all([
+        loadItemMaterials(masterItem.item_id),
+        loadItemLabours(masterItem.item_id)
+      ]);
+
+      // Update the item with master data
+      const updatedItems = [...(editedBoq?.items || [])];
+      updatedItems[itemIndex] = {
+        ...updatedItems[itemIndex],
+        item_id: masterItem.item_id,
+        item_name: masterItem.item_name,
+        description: masterItem.description || updatedItems[itemIndex].description,
+        overhead_percentage: masterItem.default_overhead_percentage || updatedItems[itemIndex].overhead_percentage,
+        profit_margin_percentage: masterItem.default_profit_percentage || updatedItems[itemIndex].profit_margin_percentage,
+        materials: materials.map(mat => ({
+          material_id: mat.material_id,
+          material_name: mat.material_name,
+          quantity: 1,
+          unit: mat.default_unit,
+          unit_price: mat.current_market_price,
+          total_price: mat.current_market_price,
+          is_from_master: true
+        })),
+        labour: labours.map(lab => ({
+          labour_id: lab.labour_id,
+          labour_role: lab.labour_role,
+          hours: 8,
+          rate_per_hour: lab.amount / 8,
+          total_cost: lab.amount,
+          work_type: lab.work_type || 'contract',
+          is_from_master: true
+        }))
+      };
+
+      if (editedBoq) {
+        setEditedBoq({
+          ...editedBoq,
+          items: updatedItems
+        });
+      }
+
+      // Close dropdown
+      setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: false }));
+      setItemSearchTerms(prev => ({ ...prev, [itemIndex]: masterItem.item_name }));
+    } catch (error) {
+      toast.error('Failed to load item details');
+    } finally {
+      setLoadingItemData(prev => ({ ...prev, [itemIndex]: false }));
+    }
+  };
 
   const fetchBOQDetails = async () => {
     if (!boq?.boq_id) return;
@@ -397,6 +573,145 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                   </div>
                 </div>
 
+                {/* Available Items Reference Panel */}
+                {masterItems.length > 0 && (
+                  <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-200 mb-6">
+                    <button
+                      type="button"
+                      onClick={() => setShowReferencePanel(!showReferencePanel)}
+                      className="w-full px-6 py-4 flex items-center justify-between hover:bg-indigo-100/50 transition-colors rounded-t-xl"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-indigo-200 rounded-lg">
+                          <Package className="w-5 h-5 text-indigo-600" />
+                        </div>
+                        <div className="text-left">
+                          <h3 className="text-sm font-bold text-indigo-900">Available Master Items</h3>
+                          <p className="text-xs text-indigo-700">{masterItems.length} items available for quick selection</p>
+                        </div>
+                      </div>
+                      <ChevronDown
+                        className={`w-5 h-5 text-indigo-600 transition-transform ${
+                          showReferencePanel ? 'rotate-180' : ''
+                        }`}
+                      />
+                    </button>
+
+                    {showReferencePanel && (
+                      <div className="px-6 py-4 max-h-96 overflow-y-auto">
+                        <div className="space-y-2">
+                          {masterItems.map((masterItem) => {
+                            const isExpanded = expandedReferenceItems.includes(masterItem.item_id);
+                            const materials = itemMaterials[masterItem.item_id] || [];
+                            const labours = itemLabours[masterItem.item_id] || [];
+
+                            return (
+                              <div key={masterItem.item_id} className="bg-white rounded-lg border border-indigo-100">
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (!isExpanded) {
+                                      if (!itemMaterials[masterItem.item_id]) {
+                                        await loadItemMaterials(masterItem.item_id);
+                                      }
+                                      if (!itemLabours[masterItem.item_id]) {
+                                        await loadItemLabours(masterItem.item_id);
+                                      }
+                                      setExpandedReferenceItems([...expandedReferenceItems, masterItem.item_id]);
+                                    } else {
+                                      setExpandedReferenceItems(
+                                        expandedReferenceItems.filter(id => id !== masterItem.item_id)
+                                      );
+                                    }
+                                  }}
+                                  className="w-full px-4 py-3 flex items-center justify-between hover:bg-indigo-50 transition-colors rounded-t-lg"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <ChevronRight
+                                      className={`w-4 h-4 text-gray-500 transition-transform ${
+                                        isExpanded ? 'rotate-90' : ''
+                                      }`}
+                                    />
+                                    <div className="text-left">
+                                      <div className="font-medium text-gray-900">{masterItem.item_name}</div>
+                                      {masterItem.description && (
+                                        <div className="text-xs text-gray-500">{masterItem.description}</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      addItem();
+                                      const newIndex = editedBoq?.items.length || 0;
+                                      setTimeout(() => {
+                                        selectMasterItem(newIndex, masterItem);
+                                      }, 100);
+                                      toast.success(`Added "${masterItem.item_name}" to BOQ`);
+                                    }}
+                                    className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                  </button>
+                                </button>
+
+                                {isExpanded && (
+                                  <div className="px-4 py-3 bg-gray-50 rounded-b-lg border-t border-indigo-100">
+                                    {materials.length > 0 && (
+                                      <div className="mb-3">
+                                        <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                          <Package className="w-3 h-3" />
+                                          Materials ({materials.length})
+                                        </h4>
+                                        <div className="grid grid-cols-2 gap-2">
+                                          {materials.map((mat) => (
+                                            <div key={mat.material_id} className="text-xs bg-white px-2 py-1 rounded border border-gray-200">
+                                              <span className="font-medium text-gray-700">{mat.material_name}</span>
+                                              <span className="text-gray-500 ml-2">
+                                                ₹{mat.current_market_price}/{mat.default_unit}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {labours.length > 0 && (
+                                      <div>
+                                        <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                          <Users className="w-3 h-3" />
+                                          Labour ({labours.length})
+                                        </h4>
+                                        <div className="grid grid-cols-2 gap-2">
+                                          {labours.map((lab) => (
+                                            <div key={lab.labour_id} className="text-xs bg-white px-2 py-1 rounded border border-gray-200">
+                                              <span className="font-medium text-gray-700">{lab.labour_role}</span>
+                                              <span className="text-gray-500 ml-2">
+                                                ₹{lab.amount}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {materials.length === 0 && labours.length === 0 && (
+                                      <div className="text-xs text-gray-500 text-center py-2">
+                                        No materials or labour defined for this item
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Tabs */}
                 <div className="flex gap-2 mb-6">
                   <button
@@ -454,14 +769,80 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                           >
                             <div className="flex items-center justify-between">
                               <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <input
-                                  type="text"
-                                  value={item.item_name}
-                                  onChange={(e) => handleItemChange(itemIndex, 'item_name', e.target.value)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="px-3 py-2 border border-blue-300 rounded-lg bg-white"
-                                  placeholder="Item name"
-                                />
+                                <div className="relative item-dropdown-container">
+                                  <input
+                                    type="text"
+                                    value={itemSearchTerms[itemIndex] || item.item_name}
+                                    onChange={(e) => handleItemNameChange(itemIndex, e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onFocus={() => setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: true }))}
+                                    className="w-full px-3 py-2 pr-8 border border-blue-300 rounded-lg bg-white"
+                                    placeholder="Search or type new item"
+                                    disabled={loadingItemData[itemIndex]}
+                                  />
+                                  {loadingItemData[itemIndex] ? (
+                                    <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
+                                  ) : (
+                                    <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                  )}
+
+                                  {itemDropdownOpen[itemIndex] && (
+                                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                                      {(() => {
+                                        const filtered = getFilteredItems(itemSearchTerms[itemIndex] || '');
+                                        const showNewOption = itemSearchTerms[itemIndex] &&
+                                          !filtered.some(i => i.item_name.toLowerCase() === itemSearchTerms[itemIndex].toLowerCase());
+
+                                        if (filtered.length === 0 && !showNewOption) {
+                                          return (
+                                            <div className="px-3 py-2 text-sm text-gray-500">
+                                              Type to search items or add new
+                                            </div>
+                                          );
+                                        }
+
+                                        return (
+                                          <>
+                                            {filtered.map(masterItem => (
+                                              <button
+                                                key={masterItem.item_id}
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  selectMasterItem(itemIndex, masterItem);
+                                                }}
+                                                className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors"
+                                              >
+                                                <div className="font-medium text-gray-900">{masterItem.item_name}</div>
+                                                {masterItem.description && (
+                                                  <div className="text-xs text-gray-500">{masterItem.description}</div>
+                                                )}
+                                              </button>
+                                            ))}
+                                            {showNewOption && (
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleItemChange(itemIndex, 'item_name', itemSearchTerms[itemIndex]);
+                                                  setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: false }));
+                                                }}
+                                                className="w-full px-3 py-2 text-left text-sm bg-green-50 hover:bg-green-100 transition-colors border-t border-gray-200"
+                                              >
+                                                <div className="flex items-center gap-2">
+                                                  <PlusCircle className="w-4 h-4 text-green-600" />
+                                                  <span className="font-medium text-green-700">
+                                                    Add "{itemSearchTerms[itemIndex]}" as new item
+                                                  </span>
+                                                </div>
+                                              </button>
+                                            )}
+                                          </>
+                                        );
+                                      })()}
+                                    </div>
+                                  )}
+                                </div>
                                 <input
                                   type="text"
                                   value={item.description}
@@ -560,7 +941,13 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                                 type="text"
                                                 value={material.material_name}
                                                 onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'material_name', e.target.value)}
-                                                className="w-full px-2 py-1 border border-gray-300 rounded"
+                                                className={`w-full px-2 py-1 border rounded ${
+                                                  material.is_from_master
+                                                    ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
+                                                    : 'border-gray-300'
+                                                }`}
+                                                disabled={material.is_from_master}
+                                                title={material.is_from_master ? 'Material from master data cannot be edited' : ''}
                                               />
                                             </td>
                                             <td className="p-2">
@@ -647,7 +1034,13 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                                 type="text"
                                                 value={labour.labour_role}
                                                 onChange={(e) => handleLabourChange(itemIndex, labIndex, 'labour_role', e.target.value)}
-                                                className="w-full px-2 py-1 border border-gray-300 rounded"
+                                                className={`w-full px-2 py-1 border rounded ${
+                                                  labour.is_from_master
+                                                    ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
+                                                    : 'border-gray-300'
+                                                }`}
+                                                disabled={labour.is_from_master}
+                                                title={labour.is_from_master ? 'Labour role from master data cannot be edited' : ''}
                                               />
                                             </td>
                                             <td className="p-2">

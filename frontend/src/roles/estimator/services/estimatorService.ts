@@ -431,29 +431,142 @@ class EstimatorService {
   // Dashboard Metrics
   async getDashboardMetrics(): Promise<{ success: boolean; data?: BOQDashboardMetrics }> {
     try {
-      // Since /estimator/dashboard doesn't exist yet, return mock data
-      // TODO: Implement this endpoint in the backend
-      console.log('getDashboardMetrics called - using mock data');
+      // Fetch all BOQs and calculate metrics
+      const boqsResult = await this.getAllBOQs();
+
+      if (!boqsResult.success || !boqsResult.data) {
+        return {
+          success: false
+        };
+      }
+
+      const allBOQs = boqsResult.data;
+
+      // Calculate status-based counts
+      const totalBOQs = allBOQs.length;
+      const pendingBOQs = allBOQs.filter(boq =>
+        boq.status === 'Draft' || boq.status === 'pending' || boq.status === 'In_Review'
+      ).length;
+      const approvedBOQs = allBOQs.filter(boq =>
+        boq.status === 'Approved' || boq.status === 'approved'
+      ).length;
+      const rejectedBOQs = allBOQs.filter(boq =>
+        boq.status === 'Rejected' || boq.status === 'rejected'
+      ).length;
+      const sentForConfirmation = allBOQs.filter(boq =>
+        boq.status === 'Sent_for_Confirmation' || boq.status === 'sent_for_confirmation'
+      ).length;
+
+      // Calculate total project value
+      const totalProjectValue = allBOQs.reduce((sum, boq) => {
+        const value = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
+        return sum + value;
+      }, 0);
+
+      // Group BOQs by month for trend analysis
+      const monthlyData: { [key: string]: { count: number; value: number } } = {};
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const currentDate = new Date();
+      const currentYear = currentDate.getFullYear();
+
+      // Initialize last 6 months
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date(currentYear, currentDate.getMonth() - i, 1);
+        const monthKey = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+        monthlyData[monthKey] = { count: 0, value: 0 };
+      }
+
+      // Fill in actual data
+      allBOQs.forEach(boq => {
+        if (boq.created_at) {
+          const date = new Date(boq.created_at);
+          const monthKey = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+
+          if (monthlyData[monthKey]) {
+            monthlyData[monthKey].count++;
+            monthlyData[monthKey].value += boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
+          }
+        }
+      });
+
+      const monthlyTrend = Object.keys(monthlyData).map(month => ({
+        month: month.split(' ')[0], // Just the month name for display
+        count: monthlyData[month].count,
+        value: monthlyData[month].value
+      }));
+
+      // Get top projects by value
+      const topProjects = allBOQs
+        .filter(boq => boq.project_name)
+        .sort((a, b) => {
+          const aValue = a.total_cost || a.selling_price || a.estimatedSellingPrice || 0;
+          const bValue = b.total_cost || b.selling_price || b.estimatedSellingPrice || 0;
+          return bValue - aValue;
+        })
+        .slice(0, 5)
+        .map(boq => ({
+          id: boq.boq_id,
+          name: boq.project_name || `BOQ #${boq.boq_id}`,
+          value: boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0,
+          status: boq.status,
+          client: boq.client || 'Unknown Client'
+        }));
+
+      // Calculate average approval time (in days)
+      const approvedBOQsWithTime = allBOQs.filter(boq =>
+        (boq.status === 'Approved' || boq.status === 'approved') &&
+        boq.created_at && boq.last_modified_at
+      );
+
+      let averageApprovalTime = 0;
+      if (approvedBOQsWithTime.length > 0) {
+        const totalTime = approvedBOQsWithTime.reduce((sum, boq) => {
+          const created = new Date(boq.created_at).getTime();
+          const modified = new Date(boq.last_modified_at).getTime();
+          const days = (modified - created) / (1000 * 60 * 60 * 24);
+          return sum + days;
+        }, 0);
+        averageApprovalTime = totalTime / approvedBOQsWithTime.length;
+      }
+
+      // Get recent activities
+      const recentActivities = allBOQs
+        .filter(boq => boq.created_at || boq.last_modified_at)
+        .sort((a, b) => {
+          const aTime = new Date(a.last_modified_at || a.created_at).getTime();
+          const bTime = new Date(b.last_modified_at || b.created_at).getTime();
+          return bTime - aTime;
+        })
+        .slice(0, 10)
+        .map(boq => {
+          const isNew = !boq.last_modified_at || boq.created_at === boq.last_modified_at;
+          return {
+            id: boq.boq_id,
+            type: isNew ? 'created' : 'updated',
+            description: `${boq.boq_name || `BOQ #${boq.boq_id}`} ${isNew ? 'created' : 'updated'}`,
+            timestamp: boq.last_modified_at || boq.created_at,
+            project: boq.project_name || 'Unknown Project',
+            status: boq.status
+          };
+        });
 
       return {
         success: true,
         data: {
-          totalBOQs: 0,
-          pendingBOQs: 0,
-          approvedBOQs: 0,
-          totalProjectValue: 0,
-          averageApprovalTime: 3.5,
-          monthlyTrend: [
-            { month: 'Jan', count: 0, value: 0 },
-            { month: 'Feb', count: 0, value: 0 },
-            { month: 'Mar', count: 0, value: 0 }
-          ],
-          topProjects: [],
-          recentActivities: []
+          totalBOQs,
+          pendingBOQs,
+          approvedBOQs,
+          rejectedBOQs,
+          sentForConfirmation,
+          totalProjectValue,
+          averageApprovalTime: Math.round(averageApprovalTime * 10) / 10, // Round to 1 decimal
+          monthlyTrend,
+          topProjects,
+          recentActivities
         }
       };
     } catch (error: any) {
-      console.error('Error in getDashboardMetrics:', error);
+      console.error('Error calculating dashboard metrics:', error);
       return { success: false };
     }
   }

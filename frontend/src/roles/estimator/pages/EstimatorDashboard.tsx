@@ -170,10 +170,11 @@ const EstimatorDashboard: React.FC = () => {
       series: [{
         name: 'BOQs',
         data: [
-          { name: 'Pending', y: metrics.pendingBOQs, color: '#f59e0b' },
-          { name: 'Approved', y: metrics.approvedBOQs, color: '#10b981' },
-          { name: 'In Review', y: Math.max(0, metrics.totalBOQs - metrics.pendingBOQs - metrics.approvedBOQs), color: '#6366f1' }
-        ]
+          { name: 'Pending', y: metrics.pendingBOQs || 0, color: '#f59e0b' },
+          { name: 'Approved', y: metrics.approvedBOQs || 0, color: '#10b981' },
+          { name: 'Sent for Confirmation', y: metrics.sentForConfirmation || 0, color: '#3b82f6' },
+          { name: 'Rejected', y: metrics.rejectedBOQs || 0, color: '#ef4444' }
+        ].filter(item => item.y > 0) // Only show statuses with BOQs
       }],
       credits: {
         enabled: false
@@ -355,7 +356,7 @@ const EstimatorDashboard: React.FC = () => {
       <div className="max-w-7xl mx-auto px-6 py-8">
         {/* Metrics Cards */}
         {metrics && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
