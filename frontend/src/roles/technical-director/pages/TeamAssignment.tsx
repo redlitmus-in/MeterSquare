@@ -214,94 +214,18 @@ const TeamAssignment: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
+      <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
-              <UsersIcon className="w-6 h-6 text-white" />
+            <div className="p-2 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
+              <UsersIcon className="w-6 h-6 text-red-600" />
             </div>
-            <h1 className="text-2xl font-bold text-blue-900">Project Manager Assignment</h1>
+            <h1 className="text-2xl font-bold text-[#243d8a]">Project Manager Assignment</h1>
           </div>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-6">
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-xl shadow-md border border-orange-100 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Unassigned Projects</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {projects.filter(p => p.status === 'unassigned').length}
-                </p>
-              </div>
-              <div className="p-3 bg-orange-100 rounded-lg">
-                <ClockIcon className="w-6 h-6 text-orange-600" />
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-white rounded-xl shadow-md border border-blue-100 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Available PMs</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {projectManagers.filter(pm => pm.availability === 'available').length}
-                </p>
-              </div>
-              <div className="p-3 bg-blue-100 rounded-lg">
-                <UserGroupIcon className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-white rounded-xl shadow-md border border-green-100 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Total PMs</p>
-                <p className="text-2xl font-bold text-gray-900">{projectManagers.length}</p>
-              </div>
-              <div className="p-3 bg-green-100 rounded-lg">
-                <UserGroupIcon className="w-6 h-6 text-green-600" />
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="bg-white rounded-xl shadow-md border border-purple-100 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Active Projects</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {projects.filter(p => p.status === 'in-progress').length}
-                </p>
-              </div>
-              <div className="p-3 bg-purple-100 rounded-lg">
-                <BriefcaseIcon className="w-6 h-6 text-purple-600" />
-              </div>
-            </div>
-          </motion.div>
-        </div>
-
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Projects List */}
           <div>
@@ -448,7 +372,7 @@ const TeamAssignment: React.FC = () => {
                     disabled={!selectedPM}
                     className={`w-full py-3 rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${
                       selectedPM
-                        ? 'bg-gradient-to-r from-blue-50 to-blue-100 text-white hover:from-blue-600 hover:to-blue-700'
+                        ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 hover:from-red-100 hover:to-red-200 border border-red-200 shadow-md'
                         : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                     }`}
                   >

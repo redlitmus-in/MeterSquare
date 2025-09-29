@@ -255,93 +255,18 @@ const ProjectApprovals: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
+      <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-green-50 to-green-100 rounded-lg">
-              <DocumentCheckIcon className="w-6 h-6 text-white" />
+            <div className="p-2 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
+              <DocumentCheckIcon className="w-6 h-6 text-red-600" />
             </div>
-            <h1 className="text-2xl font-bold text-blue-900">Project Approvals</h1>
+            <h1 className="text-2xl font-bold text-[#243d8a]">Project Approvals</h1>
           </div>
         </div>
       </div>
 
-      {/* Stats Cards */}
       <div className="max-w-7xl mx-auto px-6 py-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-white rounded-xl shadow-md border border-yellow-100 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Pending Review</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {estimations.filter(e => e.status === 'pending').length}
-                </p>
-              </div>
-              <div className="p-3 bg-yellow-100 rounded-lg">
-                <ClockIcon className="w-6 h-6 text-yellow-600" />
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-white rounded-xl shadow-md border border-green-100 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Approved</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {estimations.filter(e => e.status === 'approved').length}
-                </p>
-              </div>
-              <div className="p-3 bg-green-100 rounded-lg">
-                <CheckCircleIcon className="w-6 h-6 text-green-600" />
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="bg-white rounded-xl shadow-md border border-blue-100 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Total Value</p>
-                <p className="text-2xl font-bold text-gray-900">₹118L</p>
-              </div>
-              <div className="p-3 bg-blue-100 rounded-lg">
-                <CurrencyDollarIcon className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            className="bg-white rounded-xl shadow-md border border-purple-100 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Avg. Profit Margin</p>
-                <p className="text-2xl font-bold text-gray-900">23.75%</p>
-              </div>
-              <div className="p-3 bg-purple-100 rounded-lg">
-                <ArrowTrendingUpIcon className="w-6 h-6 text-purple-600" />
-              </div>
-            </div>
-          </motion.div>
-        </div>
-
         {/* Filter Tabs */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 mb-6 inline-flex">
           {['all', 'pending', 'approved', 'rejected'].map((status) => (

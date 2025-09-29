@@ -242,14 +242,14 @@ const ProjectsOverview: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
+      <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg">
-                <BuildingOfficeIcon className="w-6 h-6 text-white" />
+              <div className="p-2 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
+                <BuildingOfficeIcon className="w-6 h-6 text-red-600" />
               </div>
-              <h1 className="text-2xl font-bold text-blue-900">Projects Overview</h1>
+              <h1 className="text-2xl font-bold text-[#243d8a]">Projects Overview</h1>
             </div>
             <div className="flex items-center gap-2">
               <button

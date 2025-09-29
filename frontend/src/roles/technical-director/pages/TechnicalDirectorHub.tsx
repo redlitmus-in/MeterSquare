@@ -313,10 +313,15 @@ const TechnicalDirectorDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Simple Header with Blue Gradient */}
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-5">
-          <h1 className="text-2xl font-bold text-blue-900">Technical Director Dashboard</h1>
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
+              <BarChart3 className="w-6 h-6 text-red-600" />
+            </div>
+            <h1 className="text-2xl font-bold text-[#243d8a]">Technical Director Dashboard</h1>
+          </div>
         </div>
       </div>
 
