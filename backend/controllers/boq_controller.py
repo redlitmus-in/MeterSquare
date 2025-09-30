@@ -4,6 +4,10 @@ from models.project import Project
 from models.boq import *
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
+from utils.boq_email_service import BOQEmailService
+from models.user import User
+from models.role import Role
+
 
 log = get_logger()
 
@@ -688,109 +692,132 @@ def get_all_item():
         log.error(f"Error fetching item: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# # SEND EMAIL - Separate API to send BOQ email notification
-# def send_boq_email(boq_id):
-#     """
-#     Separate API endpoint to send BOQ email notification
-#     Can be called independently after BOQ creation or update
-#     GET /api/send_boq_email/<boq_id>
-#     Optional query parameters:
-#         - email_type: 'created' or 'updated' (defaults to 'created')
-#     """
-#     try:
-#         current_user = g.user
+# SEND EMAIL - Send BOQ to Technical Director
+def send_boq_email(boq_id):
+    try:
+        # Get BOQ data
+        boq = BOQ.query.filter_by(boq_id=boq_id).first()
+        if not boq:
+            return jsonify({
+                "error": "BOQ not found",
+                "message": f"No BOQ found with ID {boq_id}"
+            }), 404
 
-#         # Get complete BOQ data
-#         complete_boq_data = get_boq_id(boq_id)
-#         if not complete_boq_data:
-#             return jsonify({
-#                 "error": "BOQ not found",
-#                 "message": f"No BOQ found with ID {boq_id}"
-#             }), 404
+        # Get BOQ details
+        boq_details = BOQDetails.query.filter_by(boq_id=boq_id).first()
+        if not boq_details:
+            return jsonify({
+                "error": "BOQ details not found",
+                "message": f"No BOQ details found for BOQ ID {boq_id}"
+            }), 404
 
-#         # Initialize email service
-#         boq_email_service = BOQEmailService()
+        # Get project data
+        project = Project.query.filter_by(project_id=boq.project_id).first()
+        if not project:
+            return jsonify({
+                "error": "Project not found",
+                "message": f"No project found with ID {boq.project_id}"
+            }), 404
 
-#         # Prepare BOQ data for email
-#         boq_data = {
-#             'boq_id': complete_boq_data.get('boq_id'),
-#             'title': complete_boq_data.get('title'),
-#             'status': complete_boq_data.get('status'),
-#             'total_amount': complete_boq_data.get('total_amount', 0)
-#         }
+        # Prepare BOQ data
+        boq_data = {
+            'boq_id': boq.boq_id,
+            'boq_name': boq.boq_name,
+            'status': boq.status,
+            'created_by': boq.created_by,
+            'created_at': boq.created_at.strftime('%d-%b-%Y %I:%M %p') if boq.created_at else 'N/A'
+        }
 
-#         # Prepare items data for email
-#         items_data = []
-#         for item in complete_boq_data.get('items', []):
-#             item_data = {
-#                 'item_no': item.get('item_no'),
-#                 'category': item.get('category'),
-#                 'section_name': item.get('section_details', {}).get('section_name', 'Unknown') if item.get('section_details') else 'Unknown',
-#                 'description': item.get('description'),
-#                 'quantity': item.get('quantity'),
-#                 'unit': item.get('unit'),
-#                 'rate': item.get('rate'),
-#                 'amount': item.get('amount')
-#             }
-#             items_data.append(item_data)
+        # Prepare project data
+        project_data = {
+            'project_name': project.project_name,
+            'client': project.client if hasattr(project, 'client') else 'N/A',
+            'location': project.location if hasattr(project, 'location') else 'N/A'
+        }
 
-#         # Prepare project info
-#         project_info = {
-#             'project_id': complete_boq_data.get('project_id'),
-#             'project_name': f"Project {complete_boq_data.get('project_id')}" if complete_boq_data.get('project_id') else "Not specified"
-#         }
+        # Prepare items summary from BOQ details JSON
+        items_summary = boq_details.boq_details.get('summary', {})
+        items_summary['items'] = boq_details.boq_details.get('items', [])
 
-#         # Prepare sender info (current user or BOQ creator)
-#         sender_info = {
-#             'full_name': current_user.get('full_name', complete_boq_data.get('raised_by', 'Unknown User')),
-#             'department': current_user.get('department', 'N/A')
-#         }
+        # Initialize email service
+        boq_email_service = BOQEmailService()
 
-#         # Get email type from query parameters (for GET request)
-#         email_type = request.args.get('email_type', 'created')  # 'created' or 'updated'
+        # Get TD email from request or fetch all Technical Directors
+        data = request.get_json() if request.is_json else {}
+        td_email = data.get('td_email')
 
-#         if email_type == 'updated':
-#             # For update notification, use default changes summary
-#             # Since GET request can't pass complex objects, use defaults
-#             changes_summary = {
-#                 'added': 0,
-#                 'modified': 0,
-#                 'removed': 0
-#             }
+        if td_email:
+            # Send to specific TD
+            email_sent = boq_email_service.send_boq_to_technical_director(
+                boq_data, project_data, items_summary, td_email
+            )
 
-#             email_sent = boq_email_service.send_boq_updated_notification(
-#                 boq_data, items_data, project_info, sender_info, changes_summary
-#             )
-#             notification_type = "update"
-#         else:
-#             # For creation notification
-#             email_sent = boq_email_service.send_boq_created_notification(
-#                 boq_data, items_data, project_info, sender_info
-#             )
-#             notification_type = "creation"
+            if email_sent:
+                return jsonify({
+                    "success": True,
+                    "message": "BOQ review email sent successfully to Technical Director",
+                    "boq_id": boq_id,
+                    "recipient": td_email
+                }), 200
+            else:
+                return jsonify({
+                    "success": False,
+                    "message": "Failed to send BOQ review email",
+                    "boq_id": boq_id,
+                    "error": "Email service failed"
+                }), 500
+        else:
+            # Send to the Technical Director (auto-detect)
+            td_role = Role.query.filter_by(role='technicalDirector').first()
 
-#         if email_sent:
-#             log.info(f"BOQ {notification_type} notification sent successfully for BOQ #{boq_id}")
-#             return jsonify({
-#                 "success": True,
-#                 "message": f"BOQ {notification_type} notification sent successfully",
-#                 "boq_id": boq_id,
-#                 "email_type": email_type,
-#                 "recipients": "Procurement team members"
-#             }), 200
-#         else:
-#             log.warning(f"Failed to send BOQ {notification_type} notification for BOQ #{boq_id}")
-#             return jsonify({
-#                 "success": False,
-#                 "message": f"Failed to send BOQ {notification_type} notification",
-#                 "boq_id": boq_id,
-#                 "error": "Email service failed to send notification"
-#             }), 500
+            if not td_role:
+                return jsonify({
+                    "error": "Technical Director role not found",
+                    "message": "Technical Director role not configured in the system"
+                }), 404
 
-#     except Exception as e:
-#         log.error(f"Error sending BOQ email for BOQ {boq_id}: {str(e)}")
-#         return jsonify({
-#             "success": False,
-#             "message": "Failed to send BOQ email notification",
-#             "error": str(e)
-#         }), 500
+            technical_director = User.query.filter_by(
+                role_id=td_role.role_id,
+                is_active=True,
+                is_deleted=False
+            ).first()
+
+            if not technical_director:
+                return jsonify({
+                    "error": "No Technical Director found",
+                    "message": "No active Technical Director found in the system"
+                }), 404
+
+            if not technical_director.email:
+                return jsonify({
+                    "error": "Technical Director has no email",
+                    "message": f"Technical Director {technical_director.full_name} does not have an email address"
+                }), 400
+
+            # Send email to the Technical Director
+            email_sent = boq_email_service.send_boq_to_technical_director(
+                boq_data, project_data, items_summary, technical_director.email
+            )
+
+            if email_sent:
+                return jsonify({
+                    "success": True,
+                    "message": "BOQ review email sent successfully to Technical Director",
+                    "boq_id": boq_id,
+                    "email": technical_director.email,
+                }), 200
+            else:
+                return jsonify({
+                    "success": False,
+                    "message": "Failed to send BOQ review email to Technical Director",
+                    "boq_id": boq_id,
+                    "error": "Email service failed"
+                }), 500
+
+    except Exception as e:
+        log.error(f"Error sending BOQ email for BOQ {boq_id}: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": "Failed to send BOQ email notification",
+            "error": str(e)
+        }), 500
