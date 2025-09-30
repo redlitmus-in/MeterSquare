@@ -217,8 +217,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
       profit_margin_percentage: overallProfit,
       is_new: true
     };
-    setItems([...items, newItem]);
-    setExpandedItems([...expandedItems, newItem.id]);
+    setItems(prevItems => [newItem, ...prevItems]); // Add new item at the beginning
+    setExpandedItems(prev => [newItem.id, ...prev]);
     setItemSearchTerms(prev => ({ ...prev, [newItem.id]: '' }));
   };
 
@@ -568,25 +568,25 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
           animate={{ opacity: 1, scale: 1 }}
           className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden flex flex-col"
         >
-          {/* Header - Fixed */}
-          <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-b border-blue-200 px-6 py-4 flex-shrink-0">
+          {/* Header - Match TD Style */}
+          <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 border-b border-blue-100 px-6 py-5 flex-shrink-0">
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-blue-200 rounded-xl">
+              <div className="p-3 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-md">
                 <FileText className="w-8 h-8 text-blue-600" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-blue-900">Create New BOQ</h2>
-                <p className="text-sm text-blue-700 mt-0.5">Build a detailed Bill of Quantities for your project</p>
+                <h2 className="text-2xl font-bold text-[#243d8a]">Create New BOQ</h2>
+                <p className="text-sm text-gray-600 mt-1">Build a detailed Bill of Quantities for your project</p>
               </div>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="absolute top-4 right-4 p-2 text-gray-600 hover:bg-blue-200 rounded-lg transition-colors"
+              className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
               disabled={isSubmitting}
               aria-label="Close dialog"
             >
-              <X className="w-5 h-5" />
+              <X className="w-6 h-6" />
             </button>
           </div>
 
@@ -827,56 +827,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
               </div>
             )}
 
-            {/* Default Overhead & Profit */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-6">
-              <div className="flex items-center gap-2 mb-3">
-                <Calculator className="w-5 h-5 text-blue-600" />
-                <h3 className="text-sm font-semibold text-blue-900">Default Overhead & Profit</h3>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="overhead-input" className="block text-sm text-blue-700 mb-1">Overhead %</label>
-                  <div className="relative">
-                    <input
-                      id="overhead-input"
-                      type="number"
-                      value={overallOverhead === 0 ? '' : overallOverhead}
-                      onChange={(e) => {
-                        const value = e.target.value === '' ? 0 : Number(e.target.value);
-                        setOverallOverhead(value);
-                      }}
-                      className="w-full px-3 py-1.5 pr-8 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      disabled={isSubmitting}
-                      placeholder="10.0"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-blue-600">%</span>
-                  </div>
-                </div>
-                <div>
-                  <label htmlFor="profit-input" className="block text-sm text-blue-700 mb-1">Profit Margin %</label>
-                  <div className="relative">
-                    <input
-                      id="profit-input"
-                      type="number"
-                      value={overallProfit === 0 ? '' : overallProfit}
-                      onChange={(e) => {
-                        const value = e.target.value === '' ? 0 : Number(e.target.value);
-                        setOverallProfit(value);
-                      }}
-                      className="w-full px-3 py-1.5 pr-8 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      disabled={isSubmitting}
-                      placeholder="15.0"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-blue-600">%</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* BOQ Items */}
+            {/* BOQ Items - Match TD Style */}
             <div className="mb-6">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-lg font-semibold text-gray-900">BOQ Items</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-gray-900">BOQ Items</h3>
                 <div className="flex items-center gap-3">
                   {isLoadingMasterData && (
                     <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -887,10 +841,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                   <button
                     type="button"
                     onClick={addItem}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                    className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-all font-semibold shadow-md"
+                    style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                     disabled={isSubmitting}
                   >
-                    <Plus className="w-4 h-4" />
+                    <Plus className="w-5 h-5" />
                     Add Item
                   </button>
                 </div>
@@ -915,32 +870,34 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                             <ChevronRight className="w-4 h-4" />
                           )}
                         </button>
-                        <span className="text-sm font-medium text-gray-700">Item #{index + 1}</span>
-                        {item.master_item_id && (
-                          <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">
-                            From Master
-                          </span>
-                        )}
-                        {item.is_new && item.item_name && (
-                          <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded-full">
-                            New Item
-                          </span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-gray-800">Item #{items.length - index}</span>
+                          {item.master_item_id && (
+                            <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">
+                              Master
+                            </span>
+                          )}
+                          {item.is_new && item.item_name && (
+                            <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded-full font-medium">
+                              New
+                            </span>
+                          )}
+                        </div>
                         <div className="flex-1 relative item-dropdown-container">
                           <div className="relative">
                             <input
                               type="text"
                               value={itemSearchTerms[item.id] || item.item_name}
                               onChange={(e) => handleItemNameChange(item.id, e.target.value)}
-                              className="w-full px-2 py-1 pr-8 text-sm border border-gray-300 rounded"
-                              placeholder="Search or type new item name"
+                              className="w-full px-3 py-2 pr-8 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                              placeholder="Search or type item name"
                               disabled={isSubmitting || loadingItemData[item.id]}
                               onFocus={() => setItemDropdownOpen(prev => ({ ...prev, [item.id]: true }))}
                             />
                             {loadingItemData[item.id] ? (
-                              <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 animate-spin" />
+                              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
                             ) : (
-                              <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                             )}
                           </div>
                           {itemDropdownOpen[item.id] && (
@@ -1006,14 +963,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                           type="text"
                           value={item.description}
                           onChange={(e) => updateItem(item.id, 'description', e.target.value)}
-                          className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded"
+                          className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                           placeholder="Description (optional)"
                           disabled={isSubmitting}
                         />
                         <select
                           value={item.work_type}
                           onChange={(e) => updateItem(item.id, 'work_type', e.target.value as WorkType)}
-                          className="px-2 py-1 text-sm border border-gray-300 rounded"
+                          className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                           disabled={isSubmitting}
                           aria-label="Work type"
                         >
@@ -1022,9 +979,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                           <option value="piece_rate">Piece Rate</option>
                         </select>
                       </div>
-                      <div className="flex items-center gap-2 ml-4">
-                        <span className="text-sm font-medium text-gray-900">
-                          ₹{calculateItemCost(item).sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      <div className="flex items-center gap-3 ml-4">
+                        <span className="text-sm font-semibold text-gray-900">
+                          AED {calculateItemCost(item).sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </span>
                         <button
                           type="button"
@@ -1041,17 +998,19 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                     {/* Item Details (Expandable) */}
                     {expandedItems.includes(item.id) && (
                       <div className="p-4 space-y-4 bg-gray-50/50">
-                        {/* Materials Section */}
-                        <div>
-                          <div className="flex items-center justify-between mb-2">
-                            <h4 className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                              <Package className="w-4 h-4" />
+                        {/* Materials Section - Blue Theme like PM */}
+                        <div className="bg-gradient-to-r from-blue-50 to-blue-100/30 rounded-lg p-4 border border-blue-200">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-sm font-bold text-blue-900 flex items-center gap-2">
+                              <div className="p-1.5 bg-white rounded shadow-sm">
+                                <Package className="w-4 h-4 text-blue-600" />
+                              </div>
                               Raw Materials
                             </h4>
                             <button
                               type="button"
                               onClick={() => addMaterial(item.id)}
-                              className="text-xs text-indigo-600 hover:text-indigo-700"
+                              className="text-xs font-semibold text-blue-700 hover:text-blue-800"
                               disabled={isSubmitting}
                             >
                               + Add Material
@@ -1082,10 +1041,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                           setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
                                         }
                                       }}
-                                      className={`w-full px-2 py-1 pr-6 text-sm border rounded ${
+                                      className={`w-full px-3 py-1.5 pr-8 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
                                         material.is_from_master
                                           ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                          : 'border-gray-300'
+                                          : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
                                       }`}
                                       placeholder={availableMaterials.length > 0 ? "Search materials or type new" : "Material name"}
                                       disabled={isSubmitting || material.is_from_master}
@@ -1143,23 +1102,53 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                       </div>
                                     )}
                                   </div>
-                                <input
-                                  type="number"
-                                  value={material.quantity === 0 ? '' : material.quantity}
-                                  onChange={(e) => {
-                                    const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                    updateMaterial(item.id, material.id, 'quantity', value);
-                                  }}
-                                  className="w-20 px-2 py-1 text-sm border border-gray-300 rounded"
-                                  placeholder="Qty"
-                                  min="0"
-                                  step="0.01"
-                                  disabled={isSubmitting}
-                                />
+                                <div className="relative">
+                                  <input
+                                    type="number"
+                                    value={material.quantity === 0 ? '' : material.quantity}
+                                    onChange={(e) => {
+                                      const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                      updateMaterial(item.id, material.id, 'quantity', value);
+                                    }}
+                                    className="w-24 px-3 py-1.5 pr-8 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    placeholder="1"
+                                    min="0"
+                                    step="0.01"
+                                    disabled={isSubmitting}
+                                  />
+                                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const newValue = (material.quantity || 0) + 1;
+                                        updateMaterial(item.id, material.id, 'quantity', newValue);
+                                      }}
+                                      className="px-1 hover:bg-blue-100 rounded text-blue-600"
+                                      disabled={isSubmitting}
+                                    >
+                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const newValue = Math.max(0, (material.quantity || 0) - 1);
+                                        updateMaterial(item.id, material.id, 'quantity', newValue);
+                                      }}
+                                      className="px-1 hover:bg-blue-100 rounded text-blue-600"
+                                      disabled={isSubmitting}
+                                    >
+                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                </div>
                                 <select
                                   value={material.unit}
                                   onChange={(e) => updateMaterial(item.id, material.id, 'unit', e.target.value)}
-                                  className="px-2 py-1 text-sm border border-gray-300 rounded"
+                                  className="px-3 py-1.5 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white"
                                   disabled={isSubmitting}
                                   aria-label="Material unit"
                                 >
@@ -1170,24 +1159,54 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                   <option value="sqm">Sqm</option>
                                   <option value="cum">Cum</option>
                                 </select>
-                                <div className="relative w-24">
-                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">₹</span>
-                                  <input
-                                    type="number"
-                                    value={material.unit_price === 0 ? '' : material.unit_price}
-                                    onChange={(e) => {
-                                      const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                      updateMaterial(item.id, material.id, 'unit_price', value);
-                                    }}
-                                    className="w-full pl-6 pr-2 py-1 text-sm border border-gray-300 rounded"
-                                    placeholder="0.00"
-                                    min="0"
-                                    step="0.01"
-                                    disabled={isSubmitting}
-                                  />
+                                <div className="flex items-center gap-1">
+                                  <span className="text-sm text-gray-500 font-medium">AED</span>
+                                  <div className="relative">
+                                    <input
+                                      type="number"
+                                      value={material.unit_price === 0 ? '' : material.unit_price}
+                                      onChange={(e) => {
+                                        const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                        updateMaterial(item.id, material.id, 'unit_price', value);
+                                      }}
+                                      className="w-28 px-3 py-1.5 pr-8 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                      placeholder="0.00"
+                                      min="0"
+                                      step="0.01"
+                                      disabled={isSubmitting}
+                                    />
+                                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const newValue = (material.unit_price || 0) + 10;
+                                          updateMaterial(item.id, material.id, 'unit_price', newValue);
+                                        }}
+                                        className="px-1 hover:bg-blue-100 rounded text-blue-600"
+                                        disabled={isSubmitting}
+                                      >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                        </svg>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const newValue = Math.max(0, (material.unit_price || 0) - 10);
+                                          updateMaterial(item.id, material.id, 'unit_price', newValue);
+                                        }}
+                                        className="px-1 hover:bg-blue-100 rounded text-blue-600"
+                                        disabled={isSubmitting}
+                                      >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  </div>
                                 </div>
-                                <span className="w-20 px-2 py-1 text-xs text-gray-600 bg-gray-50 rounded text-center font-medium">
-                                  ₹{(material.quantity * material.unit_price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                <span className="w-24 px-2 py-1 text-xs text-gray-600 bg-gray-50 rounded text-center font-medium">
+                                  AED {(material.quantity * material.unit_price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                                 <button
                                   type="button"
@@ -1204,17 +1223,19 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                           </div>
                         </div>
 
-                        {/* Labour Section */}
-                        <div>
-                          <div className="flex items-center justify-between mb-2">
-                            <h4 className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                              <Users className="w-4 h-4" />
+                        {/* Labour Section - Orange Theme */}
+                        <div className="bg-gradient-to-r from-orange-50 to-orange-100/30 rounded-lg p-4 border border-orange-200">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-sm font-bold text-orange-900 flex items-center gap-2">
+                              <div className="p-1.5 bg-white rounded shadow-sm">
+                                <Users className="w-4 h-4 text-orange-600" />
+                              </div>
                               Labour
                             </h4>
                             <button
                               type="button"
                               onClick={() => addLabour(item.id)}
-                              className="text-xs text-indigo-600 hover:text-indigo-700"
+                              className="text-xs font-semibold text-orange-700 hover:text-orange-800"
                               disabled={isSubmitting}
                             >
                               + Add Labour
@@ -1245,10 +1266,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                           setLabourDropdownOpen(prev => ({ ...prev, [labourDropdownId]: true }));
                                         }
                                       }}
-                                      className={`w-full px-2 py-1 pr-6 text-sm border rounded ${
+                                      className={`w-full px-3 py-1.5 pr-8 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
                                         labour.is_from_master
                                           ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                          : 'border-gray-300'
+                                          : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
                                       }`}
                                       placeholder={availableLabour.length > 0 ? "Search labour roles or type new" : "Labour role (e.g., Fabricator, Installer)"}
                                       disabled={isSubmitting || labour.is_from_master}
@@ -1305,37 +1326,97 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                       </div>
                                     )}
                                   </div>
-                                <input
-                                  type="number"
-                                  value={labour.hours === 0 ? '' : labour.hours}
-                                  onChange={(e) => {
-                                    const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                    updateLabour(item.id, labour.id, 'hours', value);
-                                  }}
-                                  className="w-20 px-2 py-1 text-sm border border-gray-300 rounded"
-                                  placeholder="Hours"
-                                  min="0"
-                                  step="0.5"
-                                  disabled={isSubmitting}
-                                />
-                                <div className="relative w-24">
-                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">₹</span>
+                                <div className="relative">
                                   <input
                                     type="number"
-                                    value={labour.rate_per_hour === 0 ? '' : labour.rate_per_hour}
+                                    value={labour.hours === 0 ? '' : labour.hours}
                                     onChange={(e) => {
                                       const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                      updateLabour(item.id, labour.id, 'rate_per_hour', value);
+                                      updateLabour(item.id, labour.id, 'hours', value);
                                     }}
-                                    className="w-full pl-6 pr-2 py-1 text-sm border border-gray-300 rounded"
-                                    placeholder="0.00"
+                                    className="w-24 px-3 py-1.5 pr-8 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    placeholder="8"
                                     min="0"
-                                    step="0.01"
+                                    step="0.5"
                                     disabled={isSubmitting}
                                   />
+                                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const newValue = (labour.hours || 0) + 1;
+                                        updateLabour(item.id, labour.id, 'hours', newValue);
+                                      }}
+                                      className="px-1 hover:bg-orange-100 rounded text-orange-600"
+                                      disabled={isSubmitting}
+                                    >
+                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const newValue = Math.max(0, (labour.hours || 0) - 1);
+                                        updateLabour(item.id, labour.id, 'hours', newValue);
+                                      }}
+                                      className="px-1 hover:bg-orange-100 rounded text-orange-600"
+                                      disabled={isSubmitting}
+                                    >
+                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                      </svg>
+                                    </button>
+                                  </div>
                                 </div>
-                                <span className="w-20 px-2 py-1 text-xs text-gray-600 bg-gray-50 rounded text-center font-medium">
-                                  ₹{(labour.hours * labour.rate_per_hour).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                <div className="flex items-center gap-1">
+                                  <span className="text-sm text-gray-500 font-medium">AED</span>
+                                  <div className="relative">
+                                    <input
+                                      type="number"
+                                      value={labour.rate_per_hour === 0 ? '' : labour.rate_per_hour}
+                                      onChange={(e) => {
+                                        const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                        updateLabour(item.id, labour.id, 'rate_per_hour', value);
+                                      }}
+                                      className="w-28 px-3 py-1.5 pr-8 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                      placeholder="0.00"
+                                      min="0"
+                                      step="0.01"
+                                      disabled={isSubmitting}
+                                    />
+                                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const newValue = (labour.rate_per_hour || 0) + 10;
+                                          updateLabour(item.id, labour.id, 'rate_per_hour', newValue);
+                                        }}
+                                        className="px-1 hover:bg-orange-100 rounded text-orange-600"
+                                        disabled={isSubmitting}
+                                      >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                        </svg>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const newValue = Math.max(0, (labour.rate_per_hour || 0) - 10);
+                                          updateLabour(item.id, labour.id, 'rate_per_hour', newValue);
+                                        }}
+                                        className="px-1 hover:bg-orange-100 rounded text-orange-600"
+                                        disabled={isSubmitting}
+                                      >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                                <span className="w-24 px-2 py-1 text-xs text-gray-600 bg-gray-50 rounded text-center font-medium">
+                                  AED {(labour.hours * labour.rate_per_hour).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                                 <button
                                   type="button"
@@ -1352,11 +1433,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                           </div>
                         </div>
 
-                        {/* Overhead & Profit for this item */}
-                        <div className="grid grid-cols-2 gap-4 pt-2 border-t">
+                        {/* Overhead & Profit for this item - Green Theme */}
+                        <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
+                          <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
+                            <div className="p-1.5 bg-white rounded shadow-sm">
+                              <Calculator className="w-4 h-4 text-green-600" />
+                            </div>
+                            Overheads & Profit
+                          </h5>
+                          <div className="grid grid-cols-2 gap-4">
                           <div>
                             <label htmlFor={`overhead-${item.id}`} className="block text-xs text-gray-600 mb-1">Overhead %</label>
-                            <div className="relative">
+                            <div className="flex items-center gap-2">
                               <input
                                 id={`overhead-${item.id}`}
                                 type="number"
@@ -1365,18 +1453,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                   const value = e.target.value === '' ? 0 : Number(e.target.value);
                                   updateItem(item.id, 'overhead_percentage', value);
                                 }}
-                                className="w-full px-2 py-1 pr-6 text-sm border border-gray-300 rounded"
+                                className="flex-1 px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
                                 min="0"
                                 step="0.1"
                                 disabled={isSubmitting}
-                                placeholder="0.0"
+                                placeholder="10"
                               />
-                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">%</span>
+                              <span className="text-sm text-gray-500">%</span>
                             </div>
                           </div>
                           <div>
                             <label htmlFor={`profit-${item.id}`} className="block text-xs text-gray-600 mb-1">Profit Margin %</label>
-                            <div className="relative">
+                            <div className="flex items-center gap-2">
                               <input
                                 id={`profit-${item.id}`}
                                 type="number"
@@ -1385,51 +1473,44 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                   const value = e.target.value === '' ? 0 : Number(e.target.value);
                                   updateItem(item.id, 'profit_margin_percentage', value);
                                 }}
-                                className="w-full px-2 py-1 pr-6 text-sm border border-gray-300 rounded"
+                                className="flex-1 px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
                                 min="0"
                                 step="0.1"
                                 disabled={isSubmitting}
-                                placeholder="0.0"
+                                placeholder="15"
                               />
-                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">%</span>
+                              <span className="text-sm text-gray-500">%</span>
                             </div>
+                          </div>
                           </div>
                         </div>
 
-                        {/* Cost Breakdown */}
+                        {/* Cost Summary - Neutral like PM */}
                         {(() => {
                           const costs = calculateItemCost(item);
                           return (
-                            <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-                              <h5 className="text-xs font-medium text-gray-700 mb-2">Cost Breakdown</h5>
-                              <div className="grid grid-cols-2 gap-2 text-xs">
-                                <div className="flex justify-between">
+                            <div className="mt-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                              <h5 className="text-sm font-bold text-gray-900 mb-3">Cost Summary</h5>
+                              <div className="space-y-1 text-xs">
+                                <div className="flex justify-between py-1">
                                   <span className="text-gray-600">Materials:</span>
-                                  <span className="font-medium">₹{costs.materialCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="font-semibold text-gray-900">AED {costs.materialCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
-                                <div className="flex justify-between">
+                                <div className="flex justify-between py-1">
                                   <span className="text-gray-600">Labour:</span>
-                                  <span className="font-medium">₹{costs.labourCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="font-semibold text-gray-900">AED {costs.labourCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Base Cost:</span>
-                                  <span className="font-medium">₹{costs.baseCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                </div>
-                                <div className="flex justify-between">
+                                <div className="flex justify-between py-1">
                                   <span className="text-gray-600">Overhead:</span>
-                                  <span className="font-medium">₹{costs.overheadAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="font-semibold text-gray-900">AED {costs.overheadAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Total Cost:</span>
-                                  <span className="font-medium">₹{costs.totalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                </div>
-                                <div className="flex justify-between">
+                                <div className="flex justify-between py-1">
                                   <span className="text-gray-600">Profit:</span>
-                                  <span className="font-medium">₹{costs.profitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="font-semibold text-gray-900">AED {costs.profitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
-                                <div className="flex justify-between font-bold border-t pt-1">
-                                  <span className="text-gray-700">Selling Price:</span>
-                                  <span className="text-green-600">₹{costs.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <div className="flex justify-between font-bold border-t border-gray-300 pt-2 mt-2">
+                                  <span className="text-gray-900">Selling Price:</span>
+                                  <span className="text-gray-900">AED {costs.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                               </div>
                             </div>
@@ -1452,28 +1533,28 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
 
             {/* Total Summary */}
             {items.length > 0 && (
-              <div className="sticky bottom-0 bg-gradient-to-r from-green-50 to-green-100 rounded-xl p-4 border border-green-200 shadow-lg">
+              <div className="mt-6 bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-5 border-2 border-green-300 shadow-xl">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 bg-green-200 rounded-lg">
-                      <Calculator className="w-5 h-5 text-green-600" />
+                    <div className="p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-xl shadow-md">
+                      <Calculator className="w-6 h-6 text-green-600" />
                     </div>
                     <h3 className="text-lg font-bold text-green-900">Total Project Value</h3>
                   </div>
-                  <span className="text-2xl font-bold text-green-900">
-                    ₹{calculateTotalCost().toLocaleString()}
+                  <span className="text-3xl font-bold text-green-900">
+                    AED {calculateTotalCost().toLocaleString()}
                   </span>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Footer - Fixed */}
-          <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
+          {/* Footer - Match TD Style */}
+          <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2.5 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+              className="px-6 py-2.5 text-gray-700 bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition-all font-semibold shadow-sm"
               disabled={isSubmitting}
             >
               Cancel
@@ -1481,17 +1562,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                className="flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                className="flex items-center gap-2 px-5 py-2.5 bg-white border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all font-semibold shadow-sm"
                 disabled={isSubmitting}
               >
-                <Upload className="w-4 h-4" />
+                <Upload className="w-5 h-5" />
                 Import Template
               </button>
               <button
                 type="button"
                 onClick={handleSubmit}
                 disabled={isSubmitting || !boqName || !selectedProjectId || items.length === 0}
-                className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium shadow-sm"
+                className="flex items-center gap-2 px-6 py-2.5 text-white rounded-lg hover:opacity-90 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed font-bold shadow-lg"
+                style={{ backgroundColor: isSubmitting || !boqName || !selectedProjectId || items.length === 0 ? '' : 'rgb(36, 61, 138)' }}
               >
                 {isSubmitting ? (
                   <>

@@ -362,13 +362,13 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       labour: []
     };
 
-    setEditedBoq({
-      ...editedBoq,
-      items: [...editedBoq.items, newItem]
-    });
+    setEditedBoq(prev => ({
+      ...prev,
+      items: [newItem, ...prev.items] // Add new item at the beginning
+    }));
 
-    // Expand the new item
-    setExpandedItems(new Set([...expandedItems, editedBoq.items.length]));
+    // Expand the new item (index 0 since it's now at the beginning)
+    setExpandedItems(prev => new Set([0, ...Array.from(prev).map(i => i + 1)]));
   };
 
   const removeItem = (itemIndex: number) => {
@@ -491,52 +491,40 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
+        {/* Backdrop */}
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.95 }}
-          className="bg-white rounded-2xl shadow-2xl max-w-7xl w-full max-h-[90vh] overflow-hidden"
+          className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden flex flex-col"
         >
-          {/* Header */}
-          <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-b border-blue-200 p-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="p-3 bg-blue-200 rounded-xl">
-                  <FileText className="w-8 h-8 text-blue-600" />
-                </div>
-                <div>
-                  <h2 className="text-2xl font-bold text-blue-900">Edit BOQ</h2>
-                  <p className="text-sm text-blue-700">
-                    {editedBoq.boq_name || `BOQ #${editedBoq.boq_id}`}
-                  </p>
-                </div>
+          {/* Header - Match TD Style */}
+          <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 border-b border-blue-100 px-6 py-5 flex-shrink-0">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-md">
+                <FileText className="w-8 h-8 text-blue-600" />
               </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleSave}
-                  disabled={isSaving}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                >
-                  {isSaving ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Save className="w-4 h-4" />
-                  )}
-                  {isSaving ? 'Saving...' : 'Save Changes'}
-                </button>
-                <button
-                  onClick={onClose}
-                  className="p-2 text-gray-600 hover:bg-blue-200 rounded-lg transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+              <div>
+                <h2 className="text-2xl font-bold text-[#243d8a]">Edit BOQ</h2>
+                <p className="text-sm text-gray-600 mt-1">Update Bill of Quantities for your project</p>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+              disabled={isSaving}
+              aria-label="Close dialog"
+            >
+              <X className="w-6 h-6" />
+            </button>
           </div>
 
-          {/* Content */}
-          <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+          {/* Content - Scrollable */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
@@ -546,29 +534,35 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
               </div>
             ) : (
               <>
-                {/* BOQ Info */}
-                <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 rounded-xl p-6 mb-6">
+                {/* BOQ Details */}
+                <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 rounded-xl p-5 mb-6 border border-blue-100">
+                  <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <FileText className="w-5 h-5 text-blue-600" />
+                    </div>
+                    BOQ Details
+                  </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">BOQ Name</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        BOQ Name *
+                      </label>
                       <input
                         type="text"
                         value={editedBoq.boq_name}
                         onChange={(e) => setEditedBoq({ ...editedBoq, boq_name: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="Enter BOQ name"
+                        disabled={isSaving}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
-                      <select
-                        value={editedBoq.status}
-                        onChange={(e) => setEditedBoq({ ...editedBoq, status: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      >
-                        <option value="Draft">Draft</option>
-                        <option value="In_Review">In Review</option>
-                        <option value="Sent_for_Confirmation">Sent for Confirmation</option>
-                      </select>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Total Project Value
+                      </label>
+                      <div className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 font-semibold">
+                        ₹{calculateGrandTotal().toLocaleString()}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -712,80 +706,76 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                   </div>
                 )}
 
-                {/* Tabs */}
-                <div className="flex gap-2 mb-6">
-                  <button
-                    onClick={() => setActiveTab('items')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      activeTab === 'items'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    <Package className="w-4 h-4 inline mr-2" />
-                    BOQ Items
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('summary')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      activeTab === 'summary'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    <Calculator className="w-4 h-4 inline mr-2" />
-                    Summary
-                  </button>
-                </div>
-
-                {activeTab === 'items' ? (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-bold text-gray-900">BOQ Items</h3>
+                {/* BOQ Items - Match TD Style */}
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-bold text-gray-900">BOQ Items</h3>
+                    <div className="flex items-center gap-3">
+                      {isLoadingMasterData && (
+                        <div className="flex items-center gap-2 text-sm text-gray-500">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Loading master data...</span>
+                        </div>
+                      )}
                       <button
+                        type="button"
                         onClick={addItem}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-all font-semibold shadow-md"
+                        style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                        disabled={isSaving}
                       >
-                        <Plus className="w-4 h-4" />
+                        <Plus className="w-5 h-5" />
                         Add Item
                       </button>
                     </div>
+                  </div>
+
+                  <div className="space-y-4">
 
                     {editedBoq.items.map((item, itemIndex) => {
                       const totals = calculateItemTotals(item);
                       const isExpanded = expandedItems.has(itemIndex);
 
                       return (
-                        <motion.div
-                          key={itemIndex}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="bg-white rounded-xl border border-gray-200 overflow-hidden"
-                        >
+                        <div key={itemIndex} className="border border-gray-200 rounded-lg">
                           {/* Item Header */}
-                          <div
-                            className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 cursor-pointer"
-                            onClick={() => toggleItemExpansion(itemIndex)}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div className="relative item-dropdown-container">
+                          <div className="bg-gray-50 px-4 py-3 flex items-center justify-between">
+                            <div className="flex items-center gap-3 flex-1">
+                              <button
+                                type="button"
+                                onClick={() => toggleItemExpansion(itemIndex)}
+                                className="p-1 hover:bg-gray-200 rounded"
+                                disabled={isSaving}
+                                aria-label="Toggle item details"
+                              >
+                                {expandedItems.has(itemIndex) ? (
+                                  <ChevronDown className="w-4 h-4" />
+                                ) : (
+                                  <ChevronRight className="w-4 h-4" />
+                                )}
+                              </button>
+                              <span className="text-sm font-medium text-gray-700">Item #{editedBoq.items.length - itemIndex}</span>
+                              {item.item_id && (
+                                <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">
+                                  From Master
+                                </span>
+                              )}
+                              <div className="flex-1 relative item-dropdown-container">
+                                <div className="relative">
                                   <input
                                     type="text"
                                     value={itemSearchTerms[itemIndex] || item.item_name}
                                     onChange={(e) => handleItemNameChange(itemIndex, e.target.value)}
-                                    onClick={(e) => e.stopPropagation()}
+                                    className="w-full px-2 py-1 pr-8 text-sm border border-gray-300 rounded"
+                                    placeholder="Search or type new item name"
+                                    disabled={isSaving || loadingItemData[itemIndex]}
                                     onFocus={() => setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: true }))}
-                                    className="w-full px-3 py-2 pr-8 border border-blue-300 rounded-lg bg-white"
-                                    placeholder="Search or type new item"
-                                    disabled={loadingItemData[itemIndex]}
                                   />
                                   {loadingItemData[itemIndex] ? (
-                                    <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
+                                    <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 animate-spin" />
                                   ) : (
-                                    <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
                                   )}
-
                                   {itemDropdownOpen[itemIndex] && (
                                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
                                       {(() => {
@@ -807,23 +797,24 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                               <button
                                                 key={masterItem.item_id}
                                                 type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  selectMasterItem(itemIndex, masterItem);
-                                                }}
-                                                className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors"
+                                                onClick={() => selectMasterItem(itemIndex, masterItem)}
+                                                className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors flex items-center justify-between group"
                                               >
-                                                <div className="font-medium text-gray-900">{masterItem.item_name}</div>
-                                                {masterItem.description && (
-                                                  <div className="text-xs text-gray-500">{masterItem.description}</div>
-                                                )}
+                                                <div>
+                                                  <div className="font-medium text-gray-900">{masterItem.item_name}</div>
+                                                  {masterItem.description && (
+                                                    <div className="text-xs text-gray-500 truncate">{masterItem.description}</div>
+                                                  )}
+                                                </div>
+                                                <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                  Select
+                                                </span>
                                               </button>
                                             ))}
                                             {showNewOption && (
                                               <button
                                                 type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
+                                                onClick={() => {
                                                   handleItemChange(itemIndex, 'item_name', itemSearchTerms[itemIndex]);
                                                   setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: false }));
                                                 }}
@@ -843,94 +834,69 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                     </div>
                                   )}
                                 </div>
-                                <input
-                                  type="text"
-                                  value={item.description}
-                                  onChange={(e) => handleItemChange(itemIndex, 'description', e.target.value)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="px-3 py-2 border border-blue-300 rounded-lg bg-white"
-                                  placeholder="Description"
-                                />
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm font-semibold text-blue-700">
-                                    Total: ₹{totals.sellingPrice.toLocaleString()}
-                                  </span>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      removeItem(itemIndex);
-                                    }}
-                                    className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
                               </div>
+                              <input
+                                type="text"
+                                value={item.description}
+                                onChange={(e) => handleItemChange(itemIndex, 'description', e.target.value)}
+                                className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded"
+                                placeholder="Description (optional)"
+                                disabled={isSaving}
+                              />
+                            </div>
+                            <div className="flex items-center gap-2 ml-4">
+                              <span className="text-sm font-medium text-gray-900">
+                                ₹{totals.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => removeItem(itemIndex)}
+                                className="p-1 text-red-500 hover:bg-red-50 rounded"
+                                disabled={isSaving}
+                                aria-label="Remove item"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </div>
                           </div>
 
-                          {/* Expanded Content */}
-                          {isExpanded && (
-                            <div className="p-4 space-y-6">
-                              {/* Margins */}
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Overhead Percentage (%)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    value={item.overhead_percentage}
-                                    onChange={(e) => handleItemChange(itemIndex, 'overhead_percentage', Number(e.target.value))}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                                    step="0.1"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Profit Margin (%)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    value={item.profit_margin_percentage}
-                                    onChange={(e) => handleItemChange(itemIndex, 'profit_margin_percentage', Number(e.target.value))}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                                    step="0.1"
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Materials Section */}
-                              <div>
+                          {/* Item Details (Expandable) */}
+                          {expandedItems.has(itemIndex) && (
+                            <div className="p-4 space-y-4 bg-gray-50/50">
+                              {/* Raw Materials Section */}
+                              <div className="bg-gradient-to-r from-blue-50 to-blue-100/30 rounded-lg p-4 border border-blue-200">
                                 <div className="flex items-center justify-between mb-3">
-                                  <h4 className="font-semibold text-gray-900 flex items-center gap-2">
-                                    <Package className="w-4 h-4 text-blue-600" />
-                                    Materials
+                                  <h4 className="text-sm font-bold text-blue-900 flex items-center gap-2">
+                                    <div className="p-1.5 bg-white rounded shadow-sm">
+                                      <Package className="w-4 h-4 text-blue-600" />
+                                    </div>
+                                    Raw Materials
                                   </h4>
                                   <button
+                                    type="button"
                                     onClick={() => addMaterial(itemIndex)}
-                                    className="flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm"
+                                    className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                                    disabled={isSaving}
                                   >
-                                    <Plus className="w-3 h-3" />
-                                    Add Material
+                                    + Add Material
                                   </button>
                                 </div>
 
                                 {item.materials.length === 0 ? (
-                                  <div className="text-center py-4 text-gray-500 bg-gray-50 rounded-lg">
-                                    No materials added
+                                  <div className="text-center py-4 text-blue-700 bg-blue-50 rounded-lg border border-blue-200">
+                                    No materials added yet
                                   </div>
                                 ) : (
-                                  <div className="overflow-x-auto">
+                                  <div className="overflow-x-auto bg-white rounded-lg">
                                     <table className="w-full">
-                                      <thead className="bg-gray-50">
+                                      <thead className="bg-blue-100 border-b border-blue-200">
                                         <tr>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600">Material</th>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600">Qty</th>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600">Unit</th>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600">Rate</th>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600">Total</th>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600"></th>
+                                          <th className="text-left p-3 text-xs font-bold text-blue-900">Material</th>
+                                          <th className="text-left p-3 text-xs font-bold text-blue-900">Qty</th>
+                                          <th className="text-left p-3 text-xs font-bold text-blue-900">Unit</th>
+                                          <th className="text-left p-3 text-xs font-bold text-blue-900">Rate</th>
+                                          <th className="text-left p-3 text-xs font-bold text-blue-900">Total</th>
+                                          <th className="text-left p-3 text-xs font-bold text-blue-900"></th>
                                         </tr>
                                       </thead>
                                       <tbody>
@@ -941,41 +907,91 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                                 type="text"
                                                 value={material.material_name}
                                                 onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'material_name', e.target.value)}
-                                                className={`w-full px-2 py-1 border rounded ${
+                                                className={`w-full px-3 py-1.5 border rounded-lg focus:outline-none focus:ring-2 ${
                                                   material.is_from_master
                                                     ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                                    : 'border-gray-300'
+                                                    : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
                                                 }`}
                                                 disabled={material.is_from_master}
+                                                placeholder="Material name"
                                                 title={material.is_from_master ? 'Material from master data cannot be edited' : ''}
                                               />
                                             </td>
                                             <td className="p-2">
-                                              <input
-                                                type="number"
-                                                value={material.quantity}
-                                                onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'quantity', Number(e.target.value))}
-                                                className="w-20 px-2 py-1 border border-gray-300 rounded"
-                                              />
+                                              <div className="relative">
+                                                <input
+                                                  type="number"
+                                                  value={material.quantity}
+                                                  onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'quantity', Number(e.target.value))}
+                                                  className="w-24 px-3 py-1.5 pr-9 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                  placeholder="1"
+                                                />
+                                                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleMaterialChange(itemIndex, matIndex, 'quantity', material.quantity + 1)}
+                                                    className="px-1 hover:bg-blue-100 rounded text-blue-600"
+                                                  >
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                                    </svg>
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleMaterialChange(itemIndex, matIndex, 'quantity', Math.max(0, material.quantity - 1))}
+                                                    className="px-1 hover:bg-blue-100 rounded text-blue-600"
+                                                  >
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                    </svg>
+                                                  </button>
+                                                </div>
+                                              </div>
                                             </td>
                                             <td className="p-2">
                                               <input
                                                 type="text"
                                                 value={material.unit}
                                                 onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'unit', e.target.value)}
-                                                className="w-20 px-2 py-1 border border-gray-300 rounded"
+                                                className="w-20 px-3 py-1.5 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white"
                                               />
                                             </td>
                                             <td className="p-2">
-                                              <input
-                                                type="number"
-                                                value={material.unit_price}
-                                                onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'unit_price', Number(e.target.value))}
-                                                className="w-24 px-2 py-1 border border-gray-300 rounded"
-                                              />
+                                              <div className="flex items-center gap-1">
+                                                <span className="text-sm text-gray-500 font-medium">AED</span>
+                                                <div className="relative">
+                                                  <input
+                                                    type="number"
+                                                    value={material.unit_price}
+                                                    onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'unit_price', Number(e.target.value))}
+                                                    className="w-28 px-3 py-1.5 pr-9 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                    placeholder="0.00"
+                                                  />
+                                                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleMaterialChange(itemIndex, matIndex, 'unit_price', material.unit_price + 10)}
+                                                      className="px-1 hover:bg-blue-100 rounded text-blue-600"
+                                                    >
+                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                                      </svg>
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleMaterialChange(itemIndex, matIndex, 'unit_price', Math.max(0, material.unit_price - 10))}
+                                                      className="px-1 hover:bg-blue-100 rounded text-blue-600"
+                                                    >
+                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                      </svg>
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              </div>
                                             </td>
                                             <td className="p-2">
-                                              <span className="font-medium">₹{material.total_price.toLocaleString()}</span>
+                                              <span className="font-medium">AED {material.total_price.toLocaleString()}</span>
                                             </td>
                                             <td className="p-2">
                                               <button
@@ -993,37 +1009,40 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                 )}
                               </div>
 
-                              {/* Labour Section */}
-                              <div>
+                              {/* Labour Section - Orange Card */}
+                              <div className="bg-gradient-to-r from-orange-50 to-orange-100/30 rounded-lg p-4 border border-orange-200">
                                 <div className="flex items-center justify-between mb-3">
-                                  <h4 className="font-semibold text-gray-900 flex items-center gap-2">
-                                    <Users className="w-4 h-4 text-blue-600" />
+                                  <h4 className="text-sm font-bold text-orange-900 flex items-center gap-2">
+                                    <div className="p-1.5 bg-white rounded shadow-sm">
+                                      <Users className="w-4 h-4 text-orange-600" />
+                                    </div>
                                     Labour
                                   </h4>
                                   <button
+                                    type="button"
                                     onClick={() => addLabour(itemIndex)}
-                                    className="flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm"
+                                    className="text-xs font-semibold text-orange-700 hover:text-orange-800"
+                                    disabled={isSaving}
                                   >
-                                    <Plus className="w-3 h-3" />
-                                    Add Labour
+                                    + Add Labour
                                   </button>
                                 </div>
 
                                 {item.labour.length === 0 ? (
-                                  <div className="text-center py-4 text-gray-500 bg-gray-50 rounded-lg">
-                                    No labour added
+                                  <div className="text-center py-4 text-orange-700 bg-orange-50 rounded-lg border border-orange-200">
+                                    No labour added yet
                                   </div>
                                 ) : (
-                                  <div className="overflow-x-auto">
+                                  <div className="overflow-x-auto bg-white rounded-lg">
                                     <table className="w-full">
-                                      <thead className="bg-gray-50">
+                                      <thead className="bg-orange-100 border-b border-orange-200">
                                         <tr>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600">Role</th>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600">Hours</th>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600">Rate/Hr</th>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600">Type</th>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600">Total</th>
-                                          <th className="text-left p-2 text-xs font-semibold text-gray-600"></th>
+                                          <th className="text-left p-3 text-xs font-bold text-orange-900">Role</th>
+                                          <th className="text-left p-3 text-xs font-bold text-orange-900">Hours</th>
+                                          <th className="text-left p-3 text-xs font-bold text-orange-900">Rate/Hr</th>
+                                          <th className="text-left p-3 text-xs font-bold text-orange-900">Type</th>
+                                          <th className="text-left p-3 text-xs font-bold text-orange-900">Total</th>
+                                          <th className="text-left p-3 text-xs font-bold text-orange-900"></th>
                                         </tr>
                                       </thead>
                                       <tbody>
@@ -1034,36 +1053,86 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                                 type="text"
                                                 value={labour.labour_role}
                                                 onChange={(e) => handleLabourChange(itemIndex, labIndex, 'labour_role', e.target.value)}
-                                                className={`w-full px-2 py-1 border rounded ${
+                                                className={`w-full px-3 py-1.5 border rounded-lg focus:outline-none focus:ring-2 ${
                                                   labour.is_from_master
                                                     ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                                    : 'border-gray-300'
+                                                    : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
                                                 }`}
                                                 disabled={labour.is_from_master}
+                                                placeholder="Labour role"
                                                 title={labour.is_from_master ? 'Labour role from master data cannot be edited' : ''}
                                               />
                                             </td>
                                             <td className="p-2">
-                                              <input
-                                                type="number"
-                                                value={labour.hours}
-                                                onChange={(e) => handleLabourChange(itemIndex, labIndex, 'hours', Number(e.target.value))}
-                                                className="w-20 px-2 py-1 border border-gray-300 rounded"
-                                              />
+                                              <div className="relative">
+                                                <input
+                                                  type="number"
+                                                  value={labour.hours}
+                                                  onChange={(e) => handleLabourChange(itemIndex, labIndex, 'hours', Number(e.target.value))}
+                                                  className="w-24 px-3 py-1.5 pr-9 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                  placeholder="8"
+                                                />
+                                                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleLabourChange(itemIndex, labIndex, 'hours', labour.hours + 1)}
+                                                    className="px-1 hover:bg-orange-100 rounded text-orange-600"
+                                                  >
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                                    </svg>
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleLabourChange(itemIndex, labIndex, 'hours', Math.max(0, labour.hours - 1))}
+                                                    className="px-1 hover:bg-orange-100 rounded text-orange-600"
+                                                  >
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                    </svg>
+                                                  </button>
+                                                </div>
+                                              </div>
                                             </td>
                                             <td className="p-2">
-                                              <input
-                                                type="number"
-                                                value={labour.rate_per_hour}
-                                                onChange={(e) => handleLabourChange(itemIndex, labIndex, 'rate_per_hour', Number(e.target.value))}
-                                                className="w-24 px-2 py-1 border border-gray-300 rounded"
-                                              />
+                                              <div className="flex items-center gap-1">
+                                                <span className="text-sm text-gray-500 font-medium">AED</span>
+                                                <div className="relative">
+                                                  <input
+                                                    type="number"
+                                                    value={labour.rate_per_hour}
+                                                    onChange={(e) => handleLabourChange(itemIndex, labIndex, 'rate_per_hour', Number(e.target.value))}
+                                                    className="w-28 px-3 py-1.5 pr-9 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                    placeholder="0.00"
+                                                  />
+                                                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleLabourChange(itemIndex, labIndex, 'rate_per_hour', labour.rate_per_hour + 10)}
+                                                      className="px-1 hover:bg-orange-100 rounded text-orange-600"
+                                                    >
+                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                                      </svg>
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleLabourChange(itemIndex, labIndex, 'rate_per_hour', Math.max(0, labour.rate_per_hour - 10))}
+                                                      className="px-1 hover:bg-orange-100 rounded text-orange-600"
+                                                    >
+                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                      </svg>
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              </div>
                                             </td>
                                             <td className="p-2">
                                               <select
                                                 value={labour.work_type}
                                                 onChange={(e) => handleLabourChange(itemIndex, labIndex, 'work_type', e.target.value)}
-                                                className="px-2 py-1 border border-gray-300 rounded text-sm"
+                                                className="px-3 py-1.5 border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white text-sm"
                                               >
                                                 <option value="contract">Contract</option>
                                                 <option value="daily_wages">Daily</option>
@@ -1071,7 +1140,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                               </select>
                                             </td>
                                             <td className="p-2">
-                                              <span className="font-medium">₹{labour.total_cost.toLocaleString()}</span>
+                                              <span className="font-medium">AED {labour.total_cost.toLocaleString()}</span>
                                             </td>
                                             <td className="p-2">
                                               <button
@@ -1089,91 +1158,143 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                 )}
                               </div>
 
-                              {/* Item Summary */}
-                              <div className="bg-gray-50 rounded-lg p-4">
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                              {/* Overheads & Profit Section */}
+                              <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
+                                <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
+                                  <div className="p-1.5 bg-white rounded shadow-sm">
+                                    <Calculator className="w-4 h-4 text-green-600" />
+                                  </div>
+                                  Overheads & Profit
+                                </h5>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                   <div>
-                                    <span className="text-gray-600">Material Cost:</span>
-                                    <span className="ml-2 font-medium">₹{totals.materialTotal.toLocaleString()}</span>
+                                    <label className="block text-xs font-semibold text-green-900 mb-2">
+                                      Overhead Percentage (%)
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="number"
+                                        value={item.overhead_percentage}
+                                        onChange={(e) => handleItemChange(itemIndex, 'overhead_percentage', Number(e.target.value))}
+                                        className="flex-1 px-3 py-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+                                        step="0.1"
+                                        disabled={isSaving}
+                                        placeholder="10"
+                                      />
+                                      <span className="text-sm text-gray-500">%</span>
+                                    </div>
                                   </div>
                                   <div>
-                                    <span className="text-gray-600">Labour Cost:</span>
-                                    <span className="ml-2 font-medium">₹{totals.labourTotal.toLocaleString()}</span>
+                                    <label className="block text-xs font-semibold text-green-900 mb-2">
+                                      Profit Margin (%)
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="number"
+                                        value={item.profit_margin_percentage}
+                                        onChange={(e) => handleItemChange(itemIndex, 'profit_margin_percentage', Number(e.target.value))}
+                                        className="flex-1 px-3 py-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+                                        step="0.1"
+                                        disabled={isSaving}
+                                        placeholder="15"
+                                      />
+                                      <span className="text-sm text-gray-500">%</span>
+                                    </div>
                                   </div>
-                                  <div>
-                                    <span className="text-gray-600">Base Cost:</span>
-                                    <span className="ml-2 font-medium">₹{totals.baseTotal.toLocaleString()}</span>
+                                </div>
+                              </div>
+
+                              {/* Cost Summary - Neutral like PM */}
+                              <div className="mt-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                                <h5 className="text-sm font-bold text-gray-900 mb-3">Cost Summary</h5>
+                                <div className="space-y-1 text-xs">
+                                  <div className="flex justify-between py-1">
+                                    <span className="text-gray-600">Materials:</span>
+                                    <span className="font-semibold text-gray-900">AED {totals.materialTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                   </div>
-                                  <div>
+                                  <div className="flex justify-between py-1">
+                                    <span className="text-gray-600">Labour:</span>
+                                    <span className="font-semibold text-gray-900">AED {totals.labourTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                  <div className="flex justify-between py-1">
                                     <span className="text-gray-600">Overhead:</span>
-                                    <span className="ml-2 font-medium">₹{totals.overheadAmount.toLocaleString()}</span>
+                                    <span className="font-semibold text-gray-900">AED {totals.overheadAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                   </div>
-                                  <div>
+                                  <div className="flex justify-between py-1">
                                     <span className="text-gray-600">Profit:</span>
-                                    <span className="ml-2 font-medium">₹{totals.profitAmount.toLocaleString()}</span>
+                                    <span className="font-semibold text-gray-900">AED {totals.profitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                   </div>
-                                  <div>
-                                    <span className="text-gray-600 font-semibold">Selling Price:</span>
-                                    <span className="ml-2 font-bold text-blue-600">₹{totals.sellingPrice.toLocaleString()}</span>
+                                  <div className="flex justify-between font-bold border-t border-gray-300 pt-2 mt-2">
+                                    <span className="text-gray-900">Selling Price:</span>
+                                    <span className="text-gray-900">AED {totals.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                   </div>
                                 </div>
                               </div>
                             </div>
                           )}
-                        </motion.div>
+                        </div>
                       );
                     })}
 
-                    {editedBoq.items.length === 0 && (
-                      <div className="text-center py-12 bg-gray-50 rounded-xl">
-                        <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                        <p className="text-gray-500">No items in this BOQ</p>
-                        <button
-                          onClick={addItem}
-                          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                        >
-                          Add First Item
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  /* Summary Tab */
-                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6">
-                    <h3 className="text-lg font-bold text-blue-900 mb-6 flex items-center gap-2">
-                      <Calculator className="w-5 h-5" />
-                      BOQ Summary
-                    </h3>
-
-                    <div className="space-y-4">
-                      {editedBoq.items.map((item, index) => {
-                        const totals = calculateItemTotals(item);
-                        return (
-                          <div key={index} className="bg-white rounded-lg p-4">
-                            <div className="flex justify-between items-center mb-2">
-                              <span className="font-medium text-gray-900">{item.item_name}</span>
-                              <span className="font-bold text-blue-600">₹{totals.sellingPrice.toLocaleString()}</span>
-                            </div>
-                            <div className="grid grid-cols-3 gap-2 text-sm text-gray-600">
-                              <div>Materials: ₹{totals.materialTotal.toLocaleString()}</div>
-                              <div>Labour: ₹{totals.labourTotal.toLocaleString()}</div>
-                              <div>Margins: ₹{(totals.overheadAmount + totals.profitAmount).toLocaleString()}</div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                  {editedBoq.items.length === 0 && (
+                    <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50/50">
+                      <FileText className="w-10 h-10 text-gray-400 mx-auto mb-2" />
+                      <p className="text-gray-500 font-medium">No items added yet</p>
+                      <p className="text-sm text-gray-400 mt-1">Click "Add Item" to start building your BOQ</p>
                     </div>
+                  )}
+                </div>
 
-                    <div className="mt-6 pt-6 border-t border-blue-200">
-                      <div className="flex justify-between items-center text-xl font-bold text-blue-900">
-                        <span>Grand Total:</span>
-                        <span>₹{calculateGrandTotal().toLocaleString()}</span>
+                {/* Total Summary */}
+                {editedBoq.items.length > 0 && (
+                  <div className="mt-6 bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-5 border-2 border-green-300 shadow-xl">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-xl shadow-md">
+                          <Calculator className="w-6 h-6 text-green-600" />
+                        </div>
+                        <h3 className="text-lg font-bold text-green-900">Total Project Value</h3>
                       </div>
+                      <span className="text-3xl font-bold text-green-900">
+                        AED {calculateGrandTotal().toLocaleString()}
+                      </span>
                     </div>
                   </div>
                 )}
+              </div>
               </>
             )}
+          </div>
+
+          {/* Footer - Match TD Style */}
+          <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-2.5 text-gray-700 bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition-all font-semibold shadow-sm"
+              disabled={isSaving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isSaving || !editedBoq.boq_name || editedBoq.items.length === 0}
+              className="flex items-center gap-2 px-6 py-2.5 text-white rounded-lg hover:opacity-90 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed font-bold shadow-lg"
+              style={{ backgroundColor: isSaving || !editedBoq.boq_name || editedBoq.items.length === 0 ? '' : 'rgb(36, 61, 138)' }}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Saving Changes...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  Save Changes
+                </>
+              )}
+            </button>
           </div>
         </motion.div>
       </div>

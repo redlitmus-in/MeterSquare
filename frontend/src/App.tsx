@@ -404,6 +404,7 @@ function App() {
             } />
 
             {/* Estimator Routes */}
+            <Route path="projects" element={<EstimatorHub />} />
             <Route path="boq-management" element={<EstimatorHub />} />
 
             {/* Vendor Management Routes - Role-specific vendor hub */}

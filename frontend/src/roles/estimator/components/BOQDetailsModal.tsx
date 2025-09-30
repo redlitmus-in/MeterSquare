@@ -116,16 +116,16 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
               className="relative bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden"
             >
               {/* Header */}
-              <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-b border-blue-200 px-6 py-5">
+              <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 border-b border-blue-100 px-6 py-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <div className="p-3 bg-blue-200 rounded-xl">
-                      <FileText className="w-8 h-8 text-blue-600" />
+                    <div className="p-3 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-sm border border-blue-200">
+                      <FileText className="w-6 h-6 text-blue-600" />
                     </div>
                     <div>
-                      <h2 className="text-2xl font-bold text-blue-900">BOQ Details</h2>
+                      <h2 className="text-2xl font-bold text-[#243d8a]">BOQ Details</h2>
                       {displayData && (
-                        <p className="text-sm text-blue-700">{displayData.boq_name || displayData.title || 'Unnamed BOQ'}</p>
+                        <p className="text-sm text-gray-600">{displayData.boq_name || displayData.title || 'Unnamed BOQ'}</p>
                       )}
                     </div>
                   </div>
@@ -133,7 +133,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                     {onEdit && (
                       <button
                         onClick={onEdit}
-                        className="p-2 text-blue-600 hover:bg-blue-200 rounded-lg transition-colors"
+                        className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
                         title="Edit BOQ"
                       >
                         <Edit className="w-5 h-5" />
@@ -142,24 +142,15 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                     {onDownload && (
                       <button
                         onClick={onDownload}
-                        className="p-2 text-blue-600 hover:bg-blue-200 rounded-lg transition-colors"
+                        className="p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
                         title="Download BOQ"
                       >
                         <Download className="w-5 h-5" />
                       </button>
                     )}
-                    {onPrint && (
-                      <button
-                        onClick={onPrint}
-                        className="p-2 text-blue-600 hover:bg-blue-200 rounded-lg transition-colors"
-                        title="Print BOQ"
-                      >
-                        <Printer className="w-5 h-5" />
-                      </button>
-                    )}
                     <button
                       onClick={onClose}
-                      className="p-2 text-gray-600 hover:bg-blue-200 rounded-lg transition-colors"
+                      className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                     >
                       <X className="w-5 h-5" />
                     </button>
@@ -179,84 +170,48 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                 ) : boqData ? (
                   <>
                     {/* Project Information */}
-                    <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 rounded-xl p-6 mb-6 border border-blue-100">
-                      <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                        <Building2 className="w-5 h-5 text-blue-600" />
+                    <div className="bg-gradient-to-r from-red-50 to-red-100/30 rounded-lg p-5 mb-6 border border-red-200">
+                      <h3 className="text-base font-bold text-red-900 mb-4 flex items-center gap-2">
+                        <div className="p-1.5 bg-white rounded-lg shadow-sm">
+                          <Building2 className="w-4 h-4 text-red-600" />
+                        </div>
                         Project Information
                       </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                         <div>
-                          <span className="text-sm text-gray-600">Project Name</span>
-                          <p className="font-medium">{boqData.project_details?.project_name || 'N/A'}</p>
+                          <span className="text-xs text-red-700 font-medium">Project Name:</span>
+                          <p className="font-semibold text-gray-900">{boqData.project_details?.project_name || 'N/A'}</p>
                         </div>
                         <div>
-                          <span className="text-sm text-gray-600">Location</span>
-                          <p className="font-medium flex items-center gap-1">
-                            <MapPin className="w-4 h-4 text-gray-400" />
+                          <span className="text-xs text-red-700 font-medium">Location:</span>
+                          <p className="font-medium text-gray-900 flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-red-500" />
                             {boqData.project_details?.location || 'N/A'}
                           </p>
                         </div>
                         <div>
-                          <span className="text-sm text-gray-600">Floor</span>
-                          <p className="font-medium">{boqData.project_details?.floor || 'N/A'}</p>
+                          <span className="text-xs text-red-700 font-medium">Floor:</span>
+                          <p className="font-medium text-gray-900">{boqData.project_details?.floor || 'N/A'}</p>
                         </div>
                         <div>
-                          <span className="text-sm text-gray-600">Working Hours</span>
-                          <p className="font-medium">{boqData.project_details?.hours || 'N/A'}</p>
+                          <span className="text-xs text-red-700 font-medium">Working Hours:</span>
+                          <p className="font-medium text-gray-900">{boqData.project_details?.hours || 'N/A'}</p>
                         </div>
                         <div>
-                          <span className="text-sm text-gray-600">Status</span>
-                          <span className={`inline-block px-2 py-1 rounded-lg text-xs font-medium ${getStatusColor(boqData.status)}`}>
+                          <span className="text-xs text-red-700 font-medium block mb-1">Status:</span>
+                          <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${getStatusColor(boqData.status)}`}>
                             {boqData.status}
                           </span>
                         </div>
                         <div>
-                          <span className="text-sm text-gray-600">Created</span>
-                          <p className="font-medium flex items-center gap-1">
-                            <Calendar className="w-4 h-4 text-gray-400" />
+                          <span className="text-xs text-red-700 font-medium">Created:</span>
+                          <p className="font-medium text-gray-900 flex items-center gap-1">
+                            <Calendar className="w-3 h-3 text-red-500" />
                             {boqData.created_at ? new Date(boqData.created_at).toLocaleDateString() : 'N/A'}
                           </p>
                         </div>
                       </div>
                     </div>
-
-                    {/* Summary */}
-                    {boqData.summary && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-                        <h3 className="text-lg font-semibold text-blue-900 mb-3 flex items-center gap-2">
-                          <Calculator className="w-5 h-5" />
-                          Cost Summary
-                        </h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <div>
-                            <span className="text-sm text-blue-700">Total Items</span>
-                            <p className="text-xl font-bold text-blue-900">{boqData.summary.total_items}</p>
-                          </div>
-                          <div>
-                            <span className="text-sm text-blue-700">Total Materials</span>
-                            <p className="text-xl font-bold text-blue-900">{boqData.summary.total_materials}</p>
-                          </div>
-                          <div>
-                            <span className="text-sm text-blue-700">Total Labour</span>
-                            <p className="text-xl font-bold text-blue-900">{boqData.summary.total_labour}</p>
-                          </div>
-                          <div>
-                            <span className="text-sm text-blue-700">Total Cost</span>
-                            <p className="text-xl font-bold text-blue-900">{formatCurrency(boqData.summary.selling_price)}</p>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-blue-200">
-                          <div>
-                            <span className="text-sm text-blue-700">Material Cost</span>
-                            <p className="text-lg font-semibold text-blue-900">{formatCurrency(boqData.summary.total_material_cost)}</p>
-                          </div>
-                          <div>
-                            <span className="text-sm text-blue-700">Labour Cost</span>
-                            <p className="text-lg font-semibold text-blue-900">{formatCurrency(boqData.summary.total_labour_cost)}</p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
 
                     {/* BOQ Items */}
                     <div>
@@ -290,7 +245,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 </div>
                               </div>
                               <div className="text-right">
-                                <p className="text-lg font-semibold text-gray-900">
+                                <p className="text-lg font-semibold text-green-600">
                                   {formatCurrency(item.selling_price)}
                                 </p>
                                 <p className="text-xs text-gray-600">Selling Price</p>
@@ -300,14 +255,16 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                             {/* Item Details (Expandable) */}
                             {expandedItems.includes(`item-${index}`) && (
                               <div className="p-4 space-y-4">
-                                {/* Materials */}
+                                {/* Materials - Blue Theme */}
                                 {item.materials?.length > 0 && (
-                                  <div>
-                                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                                      <Package className="w-4 h-4" />
-                                      Materials
+                                  <div className="bg-gradient-to-r from-blue-50 to-blue-100/30 rounded-lg p-4 border border-blue-200">
+                                    <h4 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
+                                      <div className="p-1.5 bg-white rounded shadow-sm">
+                                        <Package className="w-4 h-4 text-blue-600" />
+                                      </div>
+                                      Raw Materials Breakdown
                                     </h4>
-                                    <div className="bg-gray-50 rounded p-3 space-y-2">
+                                    <div className="space-y-2">
                                       {item.materials.map((material, mIndex) => (
                                         <div key={mIndex} className="flex justify-between text-sm">
                                           <span className="text-gray-600">
@@ -322,14 +279,16 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                   </div>
                                 )}
 
-                                {/* Labour */}
+                                {/* Labour - Orange Theme */}
                                 {item.labour?.length > 0 && (
-                                  <div>
-                                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                                      <Users className="w-4 h-4" />
-                                      Labour
+                                  <div className="bg-gradient-to-r from-orange-50 to-orange-100/30 rounded-lg p-4 border border-orange-200">
+                                    <h4 className="text-sm font-bold text-orange-900 mb-3 flex items-center gap-2">
+                                      <div className="p-1.5 bg-white rounded shadow-sm">
+                                        <Users className="w-4 h-4 text-orange-600" />
+                                      </div>
+                                      Labour Breakdown
                                     </h4>
-                                    <div className="bg-gray-50 rounded p-3 space-y-2">
+                                    <div className="space-y-2">
                                       {item.labour.map((labour, lIndex) => (
                                         <div key={lIndex} className="flex justify-between text-sm">
                                           <span className="text-gray-600">
@@ -344,28 +303,45 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                   </div>
                                 )}
 
-                                {/* Cost Breakdown */}
-                                <div className="bg-blue-50 rounded p-3">
-                                  <h5 className="text-sm font-medium text-blue-900 mb-2 flex items-center gap-2">
-                                    <DollarSign className="w-4 h-4" />
-                                    Cost Breakdown
+                                {/* Overheads & Profit - Green Theme */}
+                                <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
+                                  <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
+                                    <div className="p-1.5 bg-white rounded shadow-sm">
+                                      <Calculator className="w-4 h-4 text-green-600" />
+                                    </div>
+                                    Overheads & Profit
                                   </h5>
+                                  <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Overhead ({item.overhead_percentage}%):</span>
+                                      <span className="font-semibold">{formatCurrency(item.overhead_amount)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Profit Margin ({item.profit_margin_percentage}%):</span>
+                                      <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Cost Summary - Gray Theme */}
+                                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                                  <h5 className="text-sm font-bold text-gray-900 mb-3">Cost Summary</h5>
                                   <div className="space-y-1 text-sm">
                                     <div className="flex justify-between">
-                                      <span className="text-blue-700">Base Cost:</span>
-                                      <span className="font-medium">{formatCurrency(item.base_cost)}</span>
+                                      <span className="text-gray-600">Base Cost:</span>
+                                      <span className="font-semibold">{formatCurrency(item.base_cost)}</span>
                                     </div>
                                     <div className="flex justify-between">
-                                      <span className="text-blue-700">Overhead ({item.overhead_percentage}%):</span>
-                                      <span className="font-medium">{formatCurrency(item.overhead_amount)}</span>
+                                      <span className="text-gray-600">Total Overhead:</span>
+                                      <span className="font-semibold">{formatCurrency(item.overhead_amount)}</span>
                                     </div>
                                     <div className="flex justify-between">
-                                      <span className="text-blue-700">Profit Margin ({item.profit_margin_percentage}%):</span>
-                                      <span className="font-medium">{formatCurrency(item.profit_margin_amount)}</span>
+                                      <span className="text-gray-600">Total Profit:</span>
+                                      <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
                                     </div>
-                                    <div className="flex justify-between pt-2 border-t border-blue-200">
-                                      <span className="text-blue-900 font-semibold">Total Cost:</span>
-                                      <span className="font-bold text-blue-900">{formatCurrency(item.total_cost)}</span>
+                                    <div className="flex justify-between pt-2 border-t border-gray-300 font-bold">
+                                      <span className="text-gray-900">Selling Price:</span>
+                                      <span className="text-green-600">{formatCurrency(item.total_cost)}</span>
                                     </div>
                                   </div>
                                 </div>

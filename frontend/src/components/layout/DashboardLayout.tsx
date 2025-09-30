@@ -16,6 +16,8 @@ const DashboardLayout: React.FC = React.memo(() => {
     return saved === 'true';
   });
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [showHeader, setShowHeader] = useState(true);
+  const [lastScrollY, setLastScrollY] = useState(0);
   const { user } = useAuthStore();
   const { unreadCount } = useNotificationStore();
   const location = useLocation();
@@ -78,6 +80,32 @@ const DashboardLayout: React.FC = React.memo(() => {
     };
   }, []);
 
+  // Handle scroll to hide/show header
+  useEffect(() => {
+    const mainContent = document.querySelector('main');
+    if (!mainContent) return;
+
+    const handleScroll = () => {
+      const currentScrollY = mainContent.scrollTop;
+
+      if (currentScrollY > lastScrollY && currentScrollY > 50) {
+        // Scrolling down
+        setShowHeader(false);
+      } else {
+        // Scrolling up or at top
+        setShowHeader(true);
+      }
+
+      setLastScrollY(currentScrollY);
+    };
+
+    mainContent.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      mainContent.removeEventListener('scroll', handleScroll);
+    };
+  }, [lastScrollY]);
+
   return (
     <div className="h-screen flex overflow-hidden bg-gradient-to-br from-gray-50 via-white to-gray-100">
       {/* Mobile Menu Button */}
@@ -99,12 +127,12 @@ const DashboardLayout: React.FC = React.memo(() => {
       </div>
 
       {/* Floating Notifications - Positioned below time display */}
-      <div className="fixed top-16 right-4 z-[100]">
+      <div className={`fixed top-16 right-4 z-[100] transition-all duration-300 ${showHeader ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}`}>
         <NotificationSystem />
       </div>
 
       {/* Date and Time Display - Top Right Corner */}
-      <div className="fixed top-4 right-4 z-30 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-lg px-3 py-2 shadow-md">
+      <div className={`fixed top-4 right-4 z-30 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-lg px-3 py-2 shadow-md transition-all duration-300 ${showHeader ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}`}>
         <div className="flex items-center gap-2.5 text-sm">
           <Clock className="w-4 h-4 text-gray-500" />
           <div className="flex items-center gap-2.5">

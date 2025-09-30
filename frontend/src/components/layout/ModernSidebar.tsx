@@ -303,6 +303,17 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       }
     ];
 
+    // Estimator specific navigation items
+    const estimatorItems: NavigationItem[] = [
+      {
+        name: 'Projects',
+        href: buildPath('/projects'),
+        icon: BuildingOfficeIcon,
+        iconSolid: BuildingOfficeSolid,
+        color: 'text-blue-600'
+      }
+    ];
+
     // For other roles, keep procurement and vendor management
     const procurementItem: NavigationItem = {
       name: 'Procurement',
@@ -346,9 +357,20 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         currentRole === UserRole.TECHNICAL_DIRECTOR ||
         getRoleDisplayName(roleId || '') === 'Technical Director';
 
+    // Check for Estimator with multiple format variations
+    const isEstimator = user?.role_id === UserRole.ESTIMATION ||
+        roleId === 'estimation' ||
+        roleIdLower === 'estimation' ||
+        roleIdLower === 'estimator' ||
+        currentRole === UserRole.ESTIMATION ||
+        getRoleDisplayName(roleId || '') === 'Estimator';
+
     if (isTechnicalDirector) {
       // Technical Director gets specialized menu items
       navigation.push(...technicalDirectorItems);
+    } else if (isEstimator) {
+      // Estimator gets Projects page, not Procurement
+      navigation.push(...estimatorItems);
     } else if (user?.role_id === UserRole.PROJECT_MANAGER || currentRole === UserRole.PROJECT_MANAGER) {
       // Project Manager gets specialized menu items - NO procurement/vendor pages
       navigation.push(...projectManagerItems);
@@ -356,8 +378,10 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       // Other roles get procurement
       navigation.push(procurementItem);
 
-      // Add vendor management for allowed roles (excluding Technical Director and PM)
-      if (vendorAllowedRoles.includes(currentRole as UserRole) && currentRole !== UserRole.PROJECT_MANAGER) {
+      // Add vendor management for allowed roles (excluding Technical Director, Estimator, and PM)
+      if (vendorAllowedRoles.includes(currentRole as UserRole) &&
+          currentRole !== UserRole.PROJECT_MANAGER &&
+          currentRole !== UserRole.ESTIMATION) {
         navigation.push(vendorManagementItem);
       }
     }

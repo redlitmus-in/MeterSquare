@@ -48,6 +48,9 @@ import {
   Building2,
   Users,
   FolderOpen,
+  LayoutGrid,
+  List,
+  ShoppingCart,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Label } from '@/components/ui/label';
@@ -191,9 +194,13 @@ const ProjectCreationForm: React.FC<{
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white">
-          Create Project
-        </Button>
+        <button
+          type="submit"
+          className="px-6 py-2 text-white rounded-lg hover:opacity-90 transition-all font-semibold"
+          style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+        >
+          {initialData ? 'Update Project' : 'Create Project'}
+        </button>
       </div>
     </form>
   );
@@ -222,6 +229,9 @@ const EstimatorHub: React.FC = () => {
   const [editingBoq, setEditingBoq] = useState<BOQ | null>(null);
   const [showBoqEdit, setShowBoqEdit] = useState(false);
   const [deletingBoq, setDeletingBoq] = useState<any>(null);
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10; // Fixed at 10 items per page
 
   useEffect(() => {
     loadProjects();
@@ -357,12 +367,14 @@ const EstimatorHub: React.FC = () => {
       let filtered = [...boqs];
 
       // Filter by tab status
-      if (activeTab === 'pending') {
-        filtered = filtered.filter(boq => boq.status === 'pending');
-      } else if (activeTab === 'approved') {
+      if (activeTab === 'approved') {
         filtered = filtered.filter(boq => boq.status === 'approved');
       } else if (activeTab === 'sent') {
         filtered = filtered.filter(boq => boq.status === 'sent_for_confirmation');
+      } else if (activeTab === 'rejected') {
+        filtered = filtered.filter(boq => boq.status === 'rejected');
+      } else if (activeTab === 'completed') {
+        filtered = filtered.filter(boq => boq.status === 'completed');
       }
 
       // Filter by search term
@@ -597,79 +609,33 @@ const EstimatorHub: React.FC = () => {
     </div>
   );
 
-  if (loading && boqs.length === 0) {
-    return <ModernLoadingSpinners variant="pulse" color="blue" />;
+  if (loading && boqs.length === 0 && projects.length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <ModernLoadingSpinners variant="pulse" color="blue" />
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      {/* Professional Header */}
-      <div className="border-b border-gray-200 bg-white">
-        <div className="px-8 py-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-2xl font-medium text-gray-900">Projects</h1>
-              <p className="text-gray-500 text-sm mt-1">Manage your projects and create BOQs</p>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
+      {/* Header - Match TD Style */}
+      <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 py-5">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
+              <FolderOpen className="w-6 h-6 text-red-600" />
             </div>
-            <div className="text-right">
-              <p className="text-gray-400 text-xs">{format(new Date(), 'hh:mm:ss a')}</p>
-              <p className="text-gray-400 text-xs">{format(new Date(), 'MMM dd, yyyy')}</p>
-            </div>
+            <h1 className="text-2xl font-bold text-[#243d8a]">Projects & BOQ Management</h1>
           </div>
         </div>
       </div>
 
-      {/* Stats Section */}
-      <div className="border-b border-gray-100 bg-gray-50/50">
-        <div className="px-8 py-4">
-          <div className="grid grid-cols-4 gap-8">
-            <div className="flex items-center gap-4">
-              <div className="p-2 bg-gray-100 rounded">
-                <FolderOpen className="h-5 w-5 text-gray-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-medium text-gray-900">{projects.length}</p>
-                <p className="text-xs text-gray-500">Total Projects</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="p-2 bg-yellow-50 rounded">
-                <Clock className="h-5 w-5 text-yellow-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-medium text-gray-900">{boqs.filter(b => b.status === 'pending').length}</p>
-                <p className="text-xs text-gray-500">Pending</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="p-2 bg-green-50 rounded">
-                <CheckCircle className="h-5 w-5 text-green-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-medium text-gray-900">{boqs.filter(b => b.status === 'approved').length}</p>
-                <p className="text-xs text-gray-500">Approved</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="p-2 bg-blue-50 rounded">
-                <Send className="h-5 w-5 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-medium text-gray-900">{boqs.filter(b => b.status === 'sent_for_confirmation').length}</p>
-                <p className="text-xs text-gray-500">Sent</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="px-8 py-6">
-        {/* Search Bar */}
-        <div className="mb-6">
-          <div className="relative max-w-md">
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* Search Bar with Controls */}
+        <div className="mb-6 flex items-center gap-4">
+          <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
             <Input
               placeholder="Search by title, project, or client..."
@@ -678,240 +644,420 @@ const EstimatorHub: React.FC = () => {
               className="pl-10 border-gray-200 focus:border-gray-300 focus:ring-0"
             />
           </div>
+
+          {/* View Mode Toggle */}
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+            <Button
+              size="sm"
+              variant={viewMode === 'cards' ? 'default' : 'ghost'}
+              className={`h-8 px-3 ${viewMode === 'cards' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
+              style={viewMode === 'cards' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
+              onClick={() => {
+                setViewMode('cards');
+                setCurrentPage(1);
+              }}
+            >
+              <LayoutGrid className="h-4 w-4 mr-1.5" />
+              Cards
+            </Button>
+            <Button
+              size="sm"
+              variant={viewMode === 'table' ? 'default' : 'ghost'}
+              className={`h-8 px-3 ${viewMode === 'table' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
+              style={viewMode === 'table' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
+              onClick={() => {
+                setViewMode('table');
+                setCurrentPage(1);
+              }}
+            >
+              <List className="h-4 w-4 mr-1.5" />
+              Table
+            </Button>
+          </div>
+
+          {/* New Project Button */}
+          <Button
+            onClick={() => setShowProjectDialog(true)}
+            className="bg-red-600 hover:bg-red-700 text-white shadow-md h-8"
+            size="sm"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New Project
+          </Button>
         </div>
 
-        {/* Content Tabs */}
-        <div className="bg-white">
+        {/* Content Tabs - Match TD Style */}
+        <div className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200">
+            <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200 mb-6">
               <TabsTrigger
                 value="projects"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-gray-900 data-[state=active]:text-gray-900 text-gray-500 px-4 py-3"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 text-gray-500 px-4 py-3 font-semibold"
               >
-                Projects
+                All Projects
                 <span className="ml-2 text-gray-400">({projects.length})</span>
               </TabsTrigger>
               <TabsTrigger
-                value="pending"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-gray-900 data-[state=active]:text-gray-900 text-gray-500 px-4 py-3"
+                value="sent"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:text-gray-500 px-4 py-3 font-semibold"
+                style={{
+                  borderBottomColor: activeTab === 'sent' ? 'rgb(36, 61, 138)' : 'transparent',
+                  color: activeTab === 'sent' ? 'rgb(36, 61, 138)' : ''
+                }}
               >
-                Pending
-                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status === 'pending').length})</span>
+                Send BOQ
+                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status === 'sent_for_confirmation').length})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="approved"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-gray-900 data-[state=active]:text-gray-900 text-gray-500 px-4 py-3"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-4 py-3 font-semibold"
               >
-                Approved
+                Approved BOQ
                 <span className="ml-2 text-gray-400">({boqs.filter(b => b.status === 'approved').length})</span>
               </TabsTrigger>
               <TabsTrigger
-                value="sent"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-gray-900 data-[state=active]:text-gray-900 text-gray-500 px-4 py-3"
+                value="rejected"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-4 py-3 font-semibold"
               >
-                Sent
-                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status === 'sent_for_confirmation').length})</span>
+                Rejected BOQ
+                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status === 'rejected').length})</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="completed"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-600 data-[state=active]:text-green-700 text-gray-500 px-4 py-3 font-semibold"
+              >
+                Completed BOQ
+                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status === 'completed').length})</span>
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="projects" className="p-6">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h2 className="text-lg font-medium text-gray-900">Projects</h2>
-                  <Button
-                    onClick={() => setShowProjectDialog(true)}
-                    className="bg-gray-900 hover:bg-gray-800 text-white"
-                    size="sm"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    New Project
-                  </Button>
-                </div>
+            <TabsContent value="projects" className="mt-0 p-0">
+              <div className="space-y-6">
+                <h2 className="text-xl font-bold text-gray-900">All Projects</h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredProjects.map((project, index) => {
+                {(() => {
+                  // Pagination logic
+                  const startIndex = (currentPage - 1) * itemsPerPage;
+                  const endIndex = startIndex + itemsPerPage;
+                  const paginatedProjects = filteredProjects.slice(startIndex, endIndex);
+                  const totalPages = Math.ceil(filteredProjects.length / itemsPerPage);
+
+                  return (
+                    <>
+                      {viewMode === 'cards' ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+                  {paginatedProjects.map((project, index) => {
                     // Count BOQs for this project
                     const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
                     const boqCount = projectBoqs.length;
+                    const pendingBoqs = projectBoqs.filter(boq => boq.status === 'pending').length;
 
                     return (
                     <motion.div
                       key={project.project_id}
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.1 * index }}
-                      className="bg-white rounded-2xl border border-blue-100 p-6 hover:shadow-lg transition-all hover:border-blue-300 hover:shadow-blue-100/50"
+                      transition={{ delay: 0.05 * index }}
+                      className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
                     >
                       {/* Header */}
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg">
-                            <Building2 className="w-5 h-5 text-blue-600" />
+                      <div className="p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <h3 className="font-semibold text-gray-900 text-base flex-1">{project.project_name}</h3>
+                          <div className="flex items-center gap-1">
+                            <button
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
+                              onClick={() => {
+                                setEditingProject(project);
+                                setShowProjectDialog(true);
+                              }}
+                              title="Edit Project"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
+                              onClick={() => setDeletingProject(project)}
+                              title="Delete Project"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
                           </div>
-                          <div>
-                            <h3 className="font-bold text-gray-900 text-lg">{project.project_name}</h3>
-                            <p className="text-sm text-gray-500">Project ID: {project.project_id}</p>
+                        </div>
+
+                        <div className="space-y-1 text-sm text-gray-600">
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5 text-gray-400" />
+                            <span className="truncate">{project.client || 'No client'}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                            <span className="truncate">{project.location || 'No location'}</span>
                           </div>
                         </div>
                       </div>
 
-                      {/* Description */}
-                      <div className="mb-4">
-                        <p className="text-sm text-gray-600">{project.description || 'No description'}</p>
+                      {/* Stats */}
+                      <div className="px-4 pb-3 text-center text-sm">
+                        <span className="font-bold text-blue-600 text-lg">{boqCount}</span>
+                        <span className="text-gray-600 ml-1">BOQ Items</span>
                       </div>
 
-                      {/* BOQ Status */}
-                      <div className="mb-4">
-                        {boqCount > 0 ? (
-                          <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-3 border border-green-200">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <FileText className="h-4 w-4 text-green-600" />
-                                <span className="text-sm font-medium text-green-700">
-                                  {boqCount} BOQ{boqCount > 1 ? 's' : ''} Created
-                                </span>
-                              </div>
-                              <div className="flex gap-1">
-                                {projectBoqs.slice(0, 3).map((boq, idx) => {
-                                  const statusColors: Record<string, string> = {
-                                    'draft': 'bg-gray-200 text-gray-700',
-                                    'Draft': 'bg-gray-200 text-gray-700',
-                                    'pending': 'bg-yellow-200 text-yellow-700',
-                                    'approved': 'bg-green-200 text-green-700',
-                                    'sent_for_confirmation': 'bg-blue-200 text-blue-700'
-                                  };
-                                  const color = statusColors[boq.status] || 'bg-gray-200 text-gray-700';
-                                  return (
-                                    <span key={idx} className={`text-xs px-2 py-0.5 rounded ${color}`}>
-                                      {boq.status}
-                                    </span>
-                                  );
-                                })}
-                                {boqCount > 3 && (
-                                  <span className="text-xs text-gray-500">+{boqCount - 3}</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3 border border-gray-200">
-                            <div className="flex items-center gap-2">
-                              <FileText className="h-4 w-4 text-gray-400" />
-                              <span className="text-sm text-gray-500">No BOQ Created</span>
-                            </div>
+                      {/* Info */}
+                      <div className="px-4 pb-3 space-y-1.5 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Work Type:</span>
+                          <span className="font-medium text-gray-700">{project.work_type || 'Contract'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Site Engineer:</span>
+                          <span className="font-medium text-gray-700">{project.site_engineer || 'Not Assigned'}</span>
+                        </div>
+                        {project.created_at && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Created:</span>
+                            <span className="font-medium text-gray-700">{format(new Date(project.created_at), 'dd MMM yyyy')}</span>
                           </div>
                         )}
                       </div>
 
-                      {/* Content Grid */}
-                      <div className="grid grid-cols-1 gap-3 mb-6">
-                        <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 rounded-lg p-3">
-                          <div className="flex items-center gap-2 text-gray-600 mb-1">
-                            <MapPin className="h-4 w-4 text-blue-600" />
-                            <span className="text-xs font-medium text-blue-600">Location</span>
-                          </div>
-                          <p className="font-semibold text-gray-900 text-sm">{project.location || 'N/A'}</p>
-                        </div>
-                        <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 rounded-lg p-3">
-                          <div className="flex items-center gap-2 text-gray-600 mb-1">
-                            <Users className="h-4 w-4 text-blue-600" />
-                            <span className="text-xs font-medium text-blue-600">Client</span>
-                          </div>
-                          <p className="font-semibold text-gray-900 text-sm">{project.client || 'N/A'}</p>
-                        </div>
-                        <div className="bg-gradient-to-br from-green-50 to-green-100/50 rounded-lg p-3">
-                          <div className="flex items-center gap-2 text-gray-600 mb-1">
-                            <Calendar className="h-4 w-4 text-green-600" />
-                            <span className="text-xs font-medium text-green-600">Created</span>
-                          </div>
-                          <p className="font-semibold text-green-700 text-sm">
-                            {project.created_at ? format(new Date(project.created_at), 'dd MMM yyyy') : 'N/A'}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Create BOQ Button */}
-                      <div className="mb-4">
-                        <Button
-                          className={`w-full font-medium ${
-                            boqCount > 0
-                              ? 'bg-blue-100 hover:bg-blue-200 text-blue-700 border border-blue-300'
-                              : 'bg-blue-600 hover:bg-blue-700 text-white'
-                          }`}
-                          size="sm"
+                      {/* Actions */}
+                      <div className="border-t border-gray-200 p-3 grid grid-cols-3 gap-2">
+                        <button
+                          className="bg-white border-2 text-xs h-8 rounded hover:bg-gray-50 transition-all flex items-center justify-center gap-1 font-semibold"
+                          style={{ borderColor: 'rgb(36, 61, 138)', color: 'rgb(36, 61, 138)' }}
+                          onClick={() => setViewingProject(project)}
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          View Details
+                        </button>
+                        <button
+                          className="bg-white border-2 border-red-500 text-red-600 text-xs h-8 rounded hover:bg-red-50 transition-all flex items-center justify-center gap-1 font-semibold"
                           onClick={() => handleCreateBOQ(project)}
                         >
-                          <Upload className="h-4 w-4 mr-2" />
-                          {boqCount > 0 ? 'Create Another BOQ' : 'Create BOQ'}
-                        </Button>
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-                            onClick={() => setViewingProject(project)}
-                          >
-                            View
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-100"
-                            onClick={() => {
-                              setEditingProject(project);
-                              setShowProjectDialog(true);
-                            }}
-                          >
-                            Edit
-                          </Button>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-gray-400 hover:text-red-600 hover:bg-red-50"
-                          onClick={() => setDeletingProject(project)}
+                          <Plus className="h-3.5 w-3.5" />
+                          Create BOQ
+                        </button>
+                        <button
+                          className="text-white text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1"
+                          style={{ backgroundColor: 'rgb(22, 163, 74)' }}
+                          onClick={() => toast.info('Send to TM feature coming soon')}
                         >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                          <Send className="h-3.5 w-3.5" />
+                          Send to TM
+                        </button>
                       </div>
                     </motion.div>
                     );
                   })}
 
                   {projects.length === 0 && !searchTerm && (
-                    <div className="col-span-full border-2 border-dashed border-gray-200 rounded-lg">
-                      <div className="flex flex-col items-center justify-center py-12">
-                        <FolderOpen className="h-10 w-10 text-gray-300 mb-4" />
-                        <h3 className="text-base font-medium text-gray-900 mb-1">No projects yet</h3>
-                        <p className="text-sm text-gray-500 mb-4">Create your first project to start managing BOQs</p>
+                    <div className="col-span-full bg-gradient-to-br from-gray-50 to-blue-50/30 border-2 border-dashed border-blue-200 rounded-2xl">
+                      <div className="flex flex-col items-center justify-center py-16">
+                        <div className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-full mb-4">
+                          <FolderOpen className="h-12 w-12 text-blue-600" />
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">No projects yet</h3>
+                        <p className="text-sm text-gray-500 mb-6">Create your first project to start managing BOQs</p>
                         <Button
                           onClick={() => setShowProjectDialog(true)}
-                          className="bg-gray-900 hover:bg-gray-800 text-white"
-                          size="sm"
+                          className="bg-green-600 hover:bg-green-700 text-white shadow-md"
                         >
-                          <Plus className="h-4 w-4 mr-2" />
-                          Create Project
+                          <Plus className="h-5 w-5 mr-2" />
+                          Create First Project
                         </Button>
                       </div>
                     </div>
                   )}
                 </div>
+                ) : (
+                  <div className="overflow-x-auto bg-white rounded-lg shadow-sm">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-red-50/50 border-b-2 border-red-100">
+                          <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[200px]">Project</TableHead>
+                          <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[180px]">Client & Location</TableHead>
+                          <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[140px]">Work Type</TableHead>
+                          <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 text-center min-w-[100px]">BOQ Items</TableHead>
+                          <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[100px]">Status</TableHead>
+                          <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[120px]">Created</TableHead>
+                          <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 text-center min-w-[140px]">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedProjects.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center py-12 text-gray-500">
+                              <div className="flex flex-col items-center">
+                                <FolderOpen className="h-12 w-12 text-gray-300 mb-3" />
+                                <p className="text-base">No projects found</p>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          paginatedProjects.map((project) => {
+                            const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+                            const boqCount = projectBoqs.length;
+
+                            return (
+                              <TableRow key={project.project_id} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors duration-150">
+                                <TableCell className="py-5 px-6">
+                                  <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-blue-50 rounded-lg">
+                                      <Building2 className="h-4 w-4 text-blue-600" />
+                                    </div>
+                                    <div className="max-w-[180px] break-words">
+                                      <div className="font-semibold text-gray-900">{project.project_name}</div>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="py-5 px-6">
+                                  <div className="space-y-1">
+                                    <div className="text-gray-900 font-medium break-words max-w-[160px]">{project.client || 'N/A'}</div>
+                                    <div className="flex items-center gap-1.5 text-gray-500 text-sm">
+                                      <MapPin className="h-3.5 w-3.5 flex-shrink-0" />
+                                      <span className="break-words">{project.location || 'N/A'}</span>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="py-5 px-6">
+                                  <div className="text-gray-700 break-words max-w-[140px]">{project.work_type || 'N/A'}</div>
+                                </TableCell>
+                                <TableCell className="py-5 px-6 text-center">
+                                  <div className="inline-flex items-center gap-1.5">
+                                    <FileText className="h-4 w-4 text-gray-400" />
+                                    <span className="font-semibold text-gray-900">{boqCount}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="py-5 px-6">
+                                  <Badge className={`${project.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'} px-3 py-1 rounded-full font-medium text-xs`}>
+                                    {project.status || 'active'}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="py-5 px-6">
+                                  <div className="text-gray-600 text-sm whitespace-nowrap">
+                                    {project.created_at ? format(new Date(project.created_at), 'dd MMM yyyy') : 'N/A'}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="py-5 px-6">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setViewingProject(project)}
+                                      className="h-7 w-7 p-0 hover:bg-gray-100"
+                                      title="View Details"
+                                    >
+                                      <Eye className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleCreateBOQ(project)}
+                                      className="h-7 w-7 p-0 hover:bg-green-50"
+                                      title="Create BOQ"
+                                    >
+                                      <Plus className="h-3.5 w-3.5 text-green-600" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => toast.info('Send to TM feature coming soon')}
+                                      className="h-7 w-7 p-0 hover:bg-green-50"
+                                      title="Send to TM"
+                                    >
+                                      <Send className="h-3.5 w-3.5 text-green-600" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        setEditingProject(project);
+                                        setShowProjectDialog(true);
+                                      }}
+                                      className="h-7 w-7 p-0 hover:bg-blue-50"
+                                      title="Edit Project"
+                                    >
+                                      <Edit className="h-3.5 w-3.5 text-blue-600" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setDeletingProject(project)}
+                                      className="h-7 w-7 p-0 hover:bg-red-50"
+                                      title="Delete Project"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5 text-red-600" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between border-t pt-4 mt-6">
+                    <div className="text-sm text-gray-600">
+                      Showing {startIndex + 1} to {Math.min(endIndex, filteredProjects.length)} of {filteredProjects.length} projects
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1}
+                        className="h-8"
+                      >
+                        Previous
+                      </Button>
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                        <Button
+                          key={page}
+                          size="sm"
+                          variant={currentPage === page ? 'default' : 'outline'}
+                          onClick={() => setCurrentPage(page)}
+                          className={`h-8 w-8 ${currentPage === page ? 'bg-blue-600 text-white' : ''}`}
+                        >
+                          {page}
+                        </Button>
+                      ))}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                        disabled={currentPage === totalPages}
+                        className="h-8"
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                    </>
+                  );
+                })()}
               </div>
             </TabsContent>
 
-            <TabsContent value="pending" className="p-6">
+            <TabsContent value="sent" className="mt-0 p-0">
               <BOQTable boqList={filteredBOQs} />
             </TabsContent>
 
-            <TabsContent value="approved" className="p-6">
+            <TabsContent value="approved" className="mt-0 p-0">
               <BOQTable boqList={filteredBOQs} />
             </TabsContent>
 
-            <TabsContent value="sent" className="p-6">
+            <TabsContent value="rejected" className="mt-0 p-0">
+              <BOQTable boqList={filteredBOQs} />
+            </TabsContent>
+
+            <TabsContent value="completed" className="mt-0 p-0">
               <BOQTable boqList={filteredBOQs} />
             </TabsContent>
           </Tabs>
@@ -967,37 +1113,103 @@ const EstimatorHub: React.FC = () => {
       </Dialog>
 
       <Dialog open={!!viewingProject} onOpenChange={(open) => !open && setViewingProject(null)}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Project Details</DialogTitle>
-          </DialogHeader>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           {viewingProject && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-xs text-gray-500">Project Name</Label>
-                  <p className="text-sm font-medium">{viewingProject.project_name}</p>
-                </div>
-                <div>
-                  <Label className="text-xs text-gray-500">Client</Label>
-                  <p className="text-sm">{viewingProject.client || 'N/A'}</p>
-                </div>
-                <div>
-                  <Label className="text-xs text-gray-500">Location</Label>
-                  <p className="text-sm">{viewingProject.location || 'N/A'}</p>
-                </div>
-                <div>
-                  <Label className="text-xs text-gray-500">Work Type</Label>
-                  <p className="text-sm">{viewingProject.work_type || 'N/A'}</p>
+            <>
+              {/* Header */}
+              <div className="bg-gradient-to-r from-blue-50 to-blue-100/30 -m-6 mb-6 p-6 border-b border-blue-200">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl">
+                    <Building2 className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900">{viewingProject.project_name}</h2>
+                    <p className="text-sm text-gray-500">Project ID: #{viewingProject.project_id}</p>
+                  </div>
                 </div>
               </div>
 
+              {/* Project Information Grid */}
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                <div className="bg-gradient-to-br from-blue-50 to-blue-100/20 rounded-lg p-3 border border-blue-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Users className="h-3.5 w-3.5 text-blue-600" />
+                    <Label className="text-xs font-semibold text-blue-900">Client</Label>
+                  </div>
+                  <p className="text-sm font-medium text-gray-900">{viewingProject.client || 'Not assigned'}</p>
+                </div>
+
+                <div className="bg-gradient-to-br from-purple-50 to-purple-100/20 rounded-lg p-3 border border-purple-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <MapPin className="h-3.5 w-3.5 text-purple-600" />
+                    <Label className="text-xs font-semibold text-purple-900">Location</Label>
+                  </div>
+                  <p className="text-sm font-medium text-gray-900">{viewingProject.location || 'Not specified'}</p>
+                </div>
+
+                <div className="bg-gradient-to-br from-orange-50 to-orange-100/20 rounded-lg p-3 border border-orange-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Building2 className="h-3.5 w-3.5 text-orange-600" />
+                    <Label className="text-xs font-semibold text-orange-900">Work Type</Label>
+                  </div>
+                  <p className="text-sm font-medium text-gray-900">{viewingProject.work_type || 'Not specified'}</p>
+                </div>
+
+                <div className="bg-gradient-to-br from-green-50 to-green-100/20 rounded-lg p-3 border border-green-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Clock className="h-3.5 w-3.5 text-green-600" />
+                    <Label className="text-xs font-semibold text-green-900">Working Hours</Label>
+                  </div>
+                  <p className="text-sm font-medium text-gray-900">{viewingProject.working_hours || 'Not specified'}</p>
+                </div>
+
+                {viewingProject.floor_name && (
+                  <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/20 rounded-lg p-3 border border-indigo-200">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Building2 className="h-3.5 w-3.5 text-indigo-600" />
+                      <Label className="text-xs font-semibold text-indigo-900">Floor Name</Label>
+                    </div>
+                    <p className="text-sm font-medium text-gray-900">{viewingProject.floor_name}</p>
+                  </div>
+                )}
+
+                <div className="bg-gradient-to-br from-gray-50 to-gray-100/20 rounded-lg p-3 border border-gray-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Calendar className="h-3.5 w-3.5 text-gray-600" />
+                    <Label className="text-xs font-semibold text-gray-900">Created Date</Label>
+                  </div>
+                  <p className="text-base font-medium text-gray-900">
+                    {viewingProject.created_at ? format(new Date(viewingProject.created_at), 'dd MMM yyyy') : 'N/A'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Description */}
+              {viewingProject.description && (
+                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 mb-6">
+                  <Label className="text-xs font-semibold text-gray-700 mb-2 block">Description</Label>
+                  <p className="text-sm text-gray-700">{viewingProject.description}</p>
+                </div>
+              )}
+
               {/* BOQ Section */}
-              <div className="border-t pt-4">
-                <h3 className="font-medium text-sm mb-3 flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-blue-600" />
-                  Related BOQs
-                </h3>
+              <div className="border-t border-gray-200 pt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-blue-600" />
+                    Related BOQs
+                  </h3>
+                  <button
+                    className="px-4 py-2 bg-white border-2 border-red-500 text-red-600 text-sm rounded-lg hover:bg-red-50 transition-all font-semibold flex items-center gap-2"
+                    onClick={() => {
+                      handleCreateBOQ(viewingProject);
+                      setViewingProject(null);
+                    }}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Create New BOQ
+                  </button>
+                </div>
                 {(() => {
                   // Filter BOQs by matching project_id
                   const projectBoqs = boqs.filter(boq => {
@@ -1007,61 +1219,64 @@ const EstimatorHub: React.FC = () => {
 
                   if (projectBoqs.length === 0) {
                     return (
-                      <div className="bg-gray-50 rounded-lg p-4 text-center">
-                        <p className="text-sm text-gray-600">No BOQs created for this project yet</p>
-                        <Button
-                          size="sm"
-                          className="mt-3 bg-blue-600 hover:bg-blue-700 text-white"
-                          onClick={() => {
-                            handleCreateBOQ(viewingProject);
-                            setViewingProject(null);
-                          }}
-                        >
-                          <Plus className="h-4 w-4 mr-2" />
-                          Create BOQ
-                        </Button>
+                      <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 border-2 border-dashed border-blue-300 rounded-xl p-8 text-center">
+                        <div className="p-4 bg-blue-50 rounded-full inline-block mb-3">
+                          <FileText className="h-8 w-8 text-blue-600" />
+                        </div>
+                        <p className="text-sm text-gray-600 mb-2">No BOQs created for this project yet</p>
+                        <p className="text-xs text-gray-500">Create your first BOQ to start estimating costs</p>
                       </div>
                     );
                   }
                   return (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {projectBoqs.map((boq) => (
-                        <div key={boq.boq_id} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors">
-                          <div className="flex items-center justify-between">
+                        <div key={boq.boq_id} className="bg-white border border-blue-100 rounded-lg p-4 hover:shadow-lg hover:border-blue-300 transition-all">
+                          <div className="flex items-start justify-between">
                             <div className="flex-1">
-                              <h4 className="font-medium text-sm">{boq.title}</h4>
-                              <div className="flex items-center gap-4 mt-1">
-                                <span className="text-xs text-gray-600">
-                                  Status: {getStatusBadge(boq.status).label}
-                                </span>
+                              <div className="flex items-center gap-3 mb-2">
+                                <div className="p-2 bg-blue-50 rounded-lg">
+                                  <FileText className="h-4 w-4 text-blue-600" />
+                                </div>
+                                <div>
+                                  <h4 className="font-bold text-gray-900">{boq.title}</h4>
+                                  <p className="text-xs text-gray-500">BOQ ID: #{boq.boq_id}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-6 ml-11">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-gray-500">Status:</span>
+                                  {getStatusBadge(boq.status)}
+                                </div>
                                 {boq.total_cost && (
-                                  <span className="text-xs text-gray-600">
-                                    Total: {formatCurrency(boq.total_cost)}
-                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-gray-500">Total:</span>
+                                    <span className="text-sm font-bold text-green-700">{formatCurrency(boq.total_cost)}</span>
+                                  </div>
                                 )}
-                                <span className="text-xs text-gray-600">
-                                  Created: {boq.created_at ? format(new Date(boq.created_at), 'dd MMM yyyy') : 'N/A'}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-gray-500">Created:</span>
+                                  <span className="text-xs text-gray-700">{boq.created_at ? format(new Date(boq.created_at), 'dd MMM yyyy') : 'N/A'}</span>
+                                </div>
                               </div>
                             </div>
                             <div className="flex gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              <button
+                                className="px-4 py-2 text-white text-sm rounded-lg hover:opacity-90 transition-all font-semibold flex items-center gap-2"
+                                style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                                 onClick={() => {
                                   setSelectedBoqForDetails(boq);
                                   setShowBoqDetails(true);
                                   setViewingProject(null);
                                 }}
                               >
-                                <Eye className="h-4 w-4 mr-1" />
+                                <Eye className="h-4 w-4" />
                                 View
-                              </Button>
+                              </button>
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                                className="text-green-600 hover:text-green-700 hover:bg-green-50 border-green-300"
                                 onClick={() => {
                                   setEditingBoq(boq);
                                   setShowBoqEdit(true);
@@ -1073,7 +1288,7 @@ const EstimatorHub: React.FC = () => {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-300"
                                 onClick={() => {
                                   setDeletingBoq(boq);
                                   setViewingProject(null);
@@ -1090,9 +1305,11 @@ const EstimatorHub: React.FC = () => {
                 })()}
               </div>
 
-              <div className="flex justify-end gap-2 pt-4 border-t">
+              {/* Footer Actions */}
+              <div className="flex justify-end gap-3 pt-6 border-t border-gray-200 mt-6">
                 <Button
                   variant="outline"
+                  className="border-blue-300 text-blue-700 hover:bg-blue-50"
                   onClick={() => {
                     setEditingProject(viewingProject);
                     setViewingProject(null);
@@ -1100,11 +1317,16 @@ const EstimatorHub: React.FC = () => {
                   }}
                 >
                   <Edit className="h-4 w-4 mr-2" />
-                  Edit
+                  Edit Project
                 </Button>
-                <Button onClick={() => setViewingProject(null)}>Close</Button>
+                <Button
+                  className="bg-gray-600 hover:bg-gray-700 text-white"
+                  onClick={() => setViewingProject(null)}
+                >
+                  Close
+                </Button>
               </div>
-            </div>
+            </>
           )}
         </DialogContent>
       </Dialog>
