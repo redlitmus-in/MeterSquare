@@ -7,7 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 log = get_logger()
 
-def add_to_master_tables(item_name, description, work_type, materials_data, labour_data, created_by):
+def add_to_master_tables(item_name, description, work_type, materials_data, labour_data, created_by, overhead_percentage=None, overhead_amount=None, profit_margin_percentage=None, profit_margin_amount=None):
     """Add items, materials, and labour to master tables if they don't exist"""
     master_item_id = None
     master_material_ids = []
@@ -19,15 +19,26 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
         master_item = MasterItem(
             item_name=item_name,
             description=description,
+            overhead_percentage=overhead_percentage,
+            overhead_amount=overhead_amount,
+            profit_margin_percentage=profit_margin_percentage,
+            profit_margin_amount=profit_margin_amount,
             created_by=created_by
         )
         db.session.add(master_item)
         db.session.flush()
     else:
-        # If item exists but doesn't have description, update it
-        if master_item.description is None and description:
+        # If item exists, update description and overhead/profit values
+        if description:
             master_item.description = description
-            db.session.flush()
+
+        # Always update overhead and profit values with latest calculations
+        master_item.overhead_percentage = overhead_percentage
+        master_item.overhead_amount = overhead_amount
+        master_item.profit_margin_percentage = profit_margin_percentage
+        master_item.profit_margin_amount = profit_margin_amount
+
+        db.session.flush()
     master_item_id = master_item.item_id
 
     # Add to master materials (prevent duplicates) with item_id reference
@@ -137,27 +148,52 @@ def create_boq():
             materials_data = item_data.get("materials", [])
             labour_data = item_data.get("labour", [])
 
-            # Add to master tables and get IDs
+            # First calculate costs to get overhead and profit amounts
+            materials_cost = 0
+            for mat_data in materials_data:
+                quantity = mat_data.get("quantity", 1.0)
+                unit_price = mat_data.get("unit_price", 0.0)
+                materials_cost += quantity * unit_price
+
+            labour_cost = 0
+            for labour_data_item in labour_data:
+                hours = labour_data_item.get("hours", 0.0)
+                rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
+                labour_cost += hours * rate_per_hour
+
+            # Calculate item costs
+            base_cost = materials_cost + labour_cost
+
+            # Use provided percentages, default to 10% overhead and 15% profit if not provided
+            overhead_percentage = item_data.get("overhead_percentage", 10.0)
+            profit_margin_percentage = item_data.get("profit_margin_percentage", 15.0)
+
+            # Calculate amounts based on percentages
+            overhead_amount = (base_cost * overhead_percentage) / 100
+            profit_margin_amount = (base_cost * profit_margin_percentage) / 100
+            total_cost = base_cost + overhead_amount
+            selling_price = total_cost + profit_margin_amount
+
+            # Now add to master tables with calculated values
             master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
                 item_data.get("item_name"),
                 item_data.get("description"),
-                item_data.get("work_type", "contract"),  # Default to "contract" if not specified
+                item_data.get("work_type", "contract"),
                 materials_data,
                 labour_data,
-                created_by
+                created_by,
+                overhead_percentage,
+                overhead_amount,
+                profit_margin_percentage,
+                profit_margin_amount
             )
 
-            # Calculate costs
-            materials_cost = 0
-            labour_cost = 0
-
-            # Process materials with calculations
+            # Process materials for BOQ details
             item_materials = []
             for i, mat_data in enumerate(materials_data):
                 quantity = mat_data.get("quantity", 1.0)
                 unit_price = mat_data.get("unit_price", 0.0)
                 total_price = quantity * unit_price
-                materials_cost += total_price
 
                 item_materials.append({
                     "master_material_id": master_material_ids[i] if i < len(master_material_ids) else None,
@@ -168,30 +204,20 @@ def create_boq():
                     "total_price": total_price
                 })
 
-            # Process labour with calculations
+            # Process labour for BOQ details
             item_labour = []
             for i, labour_data_item in enumerate(labour_data):
                 hours = labour_data_item.get("hours", 0.0)
                 rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
-                total_cost = hours * rate_per_hour
-                labour_cost += total_cost
+                total_cost_labour = hours * rate_per_hour
 
                 item_labour.append({
                     "master_labour_id": master_labour_ids[i] if i < len(master_labour_ids) else None,
                     "labour_role": labour_data_item.get("labour_role"),
                     "hours": hours,
                     "rate_per_hour": rate_per_hour,
-                    "total_cost": total_cost
+                    "total_cost": total_cost_labour
                 })
-
-            # Calculate item costs
-            base_cost = materials_cost + labour_cost
-            overhead_percentage = item_data.get("overhead_percentage", 10.0)
-            overhead_amount = (base_cost * overhead_percentage) / 100
-            profit_margin_percentage = item_data.get("profit_margin_percentage", 15.0)
-            profit_margin_amount = (base_cost * profit_margin_percentage) / 100
-            total_cost = base_cost + overhead_amount
-            selling_price = total_cost + profit_margin_amount
 
             # Create item JSON structure
             item_json = {
@@ -426,27 +452,54 @@ def update_boq(boq_id):
                 materials_data = item_data.get("materials", [])
                 labour_data = item_data.get("labour", [])
 
-                # Add new items/materials/labour to master tables if needed
-                master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
-                    item_data.get("item_name"),
-                    item_data.get("description"),
-                    item_data.get("work_type", "contract"),  # Default to "contract" if not specified
-                    materials_data,
-                    labour_data,
-                    created_by
-                )
-
-                # Calculate costs (same as create)
+                # Calculate costs first to get overhead and profit amounts
                 materials_cost = 0
                 labour_cost = 0
 
-                # Process materials with calculations
+                # Calculate material and labour costs
+                for mat_data in materials_data:
+                    quantity = mat_data.get("quantity", 1.0)
+                    unit_price = mat_data.get("unit_price", 0.0)
+                    materials_cost += quantity * unit_price
+
+                for labour_data_item in labour_data:
+                    hours = labour_data_item.get("hours", 0.0)
+                    rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
+                    labour_cost += hours * rate_per_hour
+
+                # Calculate item costs
+                base_cost = materials_cost + labour_cost
+
+                # Use provided percentages, default to 10% overhead and 15% profit if not provided
+                overhead_percentage = item_data.get("overhead_percentage", 10.0)
+                profit_margin_percentage = item_data.get("profit_margin_percentage", 15.0)
+
+                # Calculate amounts based on percentages
+                overhead_amount = (base_cost * overhead_percentage) / 100
+                profit_margin_amount = (base_cost * profit_margin_percentage) / 100
+                total_cost = base_cost + overhead_amount
+                selling_price = total_cost + profit_margin_amount
+
+                # Add new items/materials/labour to master tables with calculated values
+                master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
+                    item_data.get("item_name"),
+                    item_data.get("description"),
+                    item_data.get("work_type", "contract"),
+                    materials_data,
+                    labour_data,
+                    created_by,
+                    overhead_percentage,
+                    overhead_amount,
+                    profit_margin_percentage,
+                    profit_margin_amount
+                )
+
+                # Process materials with master IDs
                 processed_materials = []
                 for i, mat_data in enumerate(materials_data):
                     quantity = mat_data.get("quantity", 1.0)
                     unit_price = mat_data.get("unit_price", 0.0)
                     total_price = quantity * unit_price
-                    materials_cost += total_price
 
                     processed_materials.append({
                         "master_material_id": master_material_ids[i] if i < len(master_material_ids) else None,
@@ -457,29 +510,20 @@ def update_boq(boq_id):
                         "total_price": total_price
                     })
 
-                # Process labour with calculations
+                # Process labour with master IDs
                 processed_labour = []
                 for i, labour_data_item in enumerate(labour_data):
                     hours = labour_data_item.get("hours", 0.0)
                     rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
-                    total_cost = hours * rate_per_hour
-                    labour_cost += total_cost
+                    total_cost_labour = hours * rate_per_hour
 
                     processed_labour.append({
                         "master_labour_id": master_labour_ids[i] if i < len(master_labour_ids) else None,
                         "labour_role": labour_data_item.get("labour_role"),
                         "hours": hours,
                         "rate_per_hour": rate_per_hour,
-                        "total_cost": total_cost
+                        "total_cost": total_cost_labour
                     })
-
-                base_cost = materials_cost + labour_cost
-                overhead_percentage = item_data.get("overhead_percentage", 10.0)
-                overhead_amount = (base_cost * overhead_percentage) / 100
-                profit_margin_percentage = item_data.get("profit_margin_percentage", 15.0)
-                profit_margin_amount = (base_cost * profit_margin_percentage) / 100
-                total_cost = base_cost + overhead_amount
-                selling_price = total_cost + profit_margin_amount
 
                 # Build updated item JSON
                 item_json = {
@@ -628,9 +672,12 @@ def get_all_item():
         for item in boq_items:
             item_details.append({
                 "item_id": item.item_id,
-                "item_name" : item.item_name,
-                "default_overhead_percentage" : item.default_overhead_percentage,
-                "default_profit_percentage" : item.default_profit_percentage,
+                "item_name": item.item_name,
+                "description": item.description,
+                "overhead_percentage": item.overhead_percentage,
+                "overhead_amount": item.overhead_amount,
+                "profit_margin_percentage": item.profit_margin_percentage,
+                "profit_margin_amount": item.profit_margin_amount
             })
 
         return jsonify({
@@ -640,3 +687,110 @@ def get_all_item():
     except Exception as e:
         log.error(f"Error fetching item: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+# # SEND EMAIL - Separate API to send BOQ email notification
+# def send_boq_email(boq_id):
+#     """
+#     Separate API endpoint to send BOQ email notification
+#     Can be called independently after BOQ creation or update
+#     GET /api/send_boq_email/<boq_id>
+#     Optional query parameters:
+#         - email_type: 'created' or 'updated' (defaults to 'created')
+#     """
+#     try:
+#         current_user = g.user
+
+#         # Get complete BOQ data
+#         complete_boq_data = get_boq_id(boq_id)
+#         if not complete_boq_data:
+#             return jsonify({
+#                 "error": "BOQ not found",
+#                 "message": f"No BOQ found with ID {boq_id}"
+#             }), 404
+
+#         # Initialize email service
+#         boq_email_service = BOQEmailService()
+
+#         # Prepare BOQ data for email
+#         boq_data = {
+#             'boq_id': complete_boq_data.get('boq_id'),
+#             'title': complete_boq_data.get('title'),
+#             'status': complete_boq_data.get('status'),
+#             'total_amount': complete_boq_data.get('total_amount', 0)
+#         }
+
+#         # Prepare items data for email
+#         items_data = []
+#         for item in complete_boq_data.get('items', []):
+#             item_data = {
+#                 'item_no': item.get('item_no'),
+#                 'category': item.get('category'),
+#                 'section_name': item.get('section_details', {}).get('section_name', 'Unknown') if item.get('section_details') else 'Unknown',
+#                 'description': item.get('description'),
+#                 'quantity': item.get('quantity'),
+#                 'unit': item.get('unit'),
+#                 'rate': item.get('rate'),
+#                 'amount': item.get('amount')
+#             }
+#             items_data.append(item_data)
+
+#         # Prepare project info
+#         project_info = {
+#             'project_id': complete_boq_data.get('project_id'),
+#             'project_name': f"Project {complete_boq_data.get('project_id')}" if complete_boq_data.get('project_id') else "Not specified"
+#         }
+
+#         # Prepare sender info (current user or BOQ creator)
+#         sender_info = {
+#             'full_name': current_user.get('full_name', complete_boq_data.get('raised_by', 'Unknown User')),
+#             'department': current_user.get('department', 'N/A')
+#         }
+
+#         # Get email type from query parameters (for GET request)
+#         email_type = request.args.get('email_type', 'created')  # 'created' or 'updated'
+
+#         if email_type == 'updated':
+#             # For update notification, use default changes summary
+#             # Since GET request can't pass complex objects, use defaults
+#             changes_summary = {
+#                 'added': 0,
+#                 'modified': 0,
+#                 'removed': 0
+#             }
+
+#             email_sent = boq_email_service.send_boq_updated_notification(
+#                 boq_data, items_data, project_info, sender_info, changes_summary
+#             )
+#             notification_type = "update"
+#         else:
+#             # For creation notification
+#             email_sent = boq_email_service.send_boq_created_notification(
+#                 boq_data, items_data, project_info, sender_info
+#             )
+#             notification_type = "creation"
+
+#         if email_sent:
+#             log.info(f"BOQ {notification_type} notification sent successfully for BOQ #{boq_id}")
+#             return jsonify({
+#                 "success": True,
+#                 "message": f"BOQ {notification_type} notification sent successfully",
+#                 "boq_id": boq_id,
+#                 "email_type": email_type,
+#                 "recipients": "Procurement team members"
+#             }), 200
+#         else:
+#             log.warning(f"Failed to send BOQ {notification_type} notification for BOQ #{boq_id}")
+#             return jsonify({
+#                 "success": False,
+#                 "message": f"Failed to send BOQ {notification_type} notification",
+#                 "boq_id": boq_id,
+#                 "error": "Email service failed to send notification"
+#             }), 500
+
+#     except Exception as e:
+#         log.error(f"Error sending BOQ email for BOQ {boq_id}: {str(e)}")
+#         return jsonify({
+#             "success": False,
+#             "message": "Failed to send BOQ email notification",
+#             "error": str(e)
+#         }), 500
