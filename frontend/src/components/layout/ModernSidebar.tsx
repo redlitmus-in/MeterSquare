@@ -275,7 +275,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     const projectManagerItems: NavigationItem[] = [
       {
         name: 'My Projects',
-        href: buildPath('/projects'),
+        href: buildPath('/my-projects'),
         icon: BuildingOfficeIcon,
         iconSolid: BuildingOfficeSolid,
         color: 'text-blue-600'

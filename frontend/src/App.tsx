@@ -435,7 +435,7 @@ function App() {
             <Route path="projects-overview" element={<ProjectsOverview />} />
 
             {/* Project Manager specific routes */}
-            <Route path="projects" element={<MyProjects />} />
+            <Route path="my-projects" element={<MyProjects />} />
             <Route path="se-assignment" element={<SEAssignment />} />
             <Route path="procurement-tracking" element={<ProcurementTracking />} />
             <Route path="progress" element={<ProgressTracking />} />

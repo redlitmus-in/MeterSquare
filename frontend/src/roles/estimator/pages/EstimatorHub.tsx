@@ -231,10 +231,16 @@ const EstimatorHub: React.FC = () => {
   const [deletingBoq, setDeletingBoq] = useState<any>(null);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalProjects, setTotalProjects] = useState(0);
   const itemsPerPage = 10; // Fixed at 10 items per page
 
   useEffect(() => {
-    loadProjects();
+    loadProjects(currentPage);
+    loadBOQs();
+  }, [currentPage]);
+
+  useEffect(() => {
+    loadProjects(1);
     loadBOQs();
   }, []);
 
@@ -274,9 +280,9 @@ const EstimatorHub: React.FC = () => {
     }
   };
 
-  const loadProjects = async () => {
+  const loadProjects = async (page: number = 1) => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/all_project`, {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/all_project?page=${page}&per_page=10`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
           'Content-Type': 'application/json'
@@ -286,6 +292,9 @@ const EstimatorHub: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         setProjects(data.projects || []);
+        // Total count is inside pagination object
+        const totalCount = data.pagination?.total || 0;
+        setTotalProjects(totalCount);
       }
     } catch (error) {
     }
@@ -455,6 +464,43 @@ const EstimatorHub: React.FC = () => {
     setSelectedProjectForBOQ(null);
     setActiveTab('pending');
     loadBOQs(); // Refresh the BOQ list
+  };
+
+  const handleSendToTD = async (project: any) => {
+    try {
+      // Find BOQs for this project
+      const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+
+      if (projectBoqs.length === 0) {
+        toast.error('No BOQ found for this project. Please create a BOQ first.');
+        return;
+      }
+
+      // Send all BOQs for this project to TD
+      let successCount = 0;
+      let failureCount = 0;
+
+      for (const boq of projectBoqs) {
+        const response = await estimatorService.sendBOQForConfirmation(boq.boq_id!);
+        if (response.success) {
+          successCount++;
+        } else {
+          failureCount++;
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`Successfully sent ${successCount} BOQ(s) to Technical Director`);
+        await loadBOQs(); // Refresh the BOQ list
+        setActiveTab('sent'); // Switch to "Send BOQ" tab
+      }
+
+      if (failureCount > 0) {
+        toast.warning(`${failureCount} BOQ(s) failed to send`);
+      }
+    } catch (error) {
+      toast.error('Failed to send BOQ to Technical Director');
+    }
   };
 
   const handleDeleteBOQ = async () => {
@@ -736,17 +782,15 @@ const EstimatorHub: React.FC = () => {
                 <h2 className="text-xl font-bold text-gray-900">All Projects</h2>
 
                 {(() => {
-                  // Pagination logic
+                  // Pagination logic - backend returns paginated data
+                  const totalPages = Math.ceil(totalProjects / itemsPerPage);
                   const startIndex = (currentPage - 1) * itemsPerPage;
-                  const endIndex = startIndex + itemsPerPage;
-                  const paginatedProjects = filteredProjects.slice(startIndex, endIndex);
-                  const totalPages = Math.ceil(filteredProjects.length / itemsPerPage);
 
                   return (
                     <>
                       {viewMode === 'cards' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
-                  {paginatedProjects.map((project, index) => {
+                  {filteredProjects.map((project, index) => {
                     // Count BOQs for this project
                     const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
                     const boqCount = projectBoqs.length;
@@ -824,15 +868,26 @@ const EstimatorHub: React.FC = () => {
                       {/* Actions */}
                       <div className="border-t border-gray-200 p-3 grid grid-cols-3 gap-2">
                         <button
-                          className="bg-white border-2 text-xs h-8 rounded hover:bg-gray-50 transition-all flex items-center justify-center gap-1 font-semibold"
-                          style={{ borderColor: 'rgb(36, 61, 138)', color: 'rgb(36, 61, 138)' }}
+                          className="text-white text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 font-semibold"
+                          style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                           onClick={() => setViewingProject(project)}
                         >
                           <Eye className="h-3.5 w-3.5" />
                           View Details
                         </button>
                         <button
-                          className="bg-white border-2 border-red-500 text-red-600 text-xs h-8 rounded hover:bg-red-50 transition-all flex items-center justify-center gap-1 font-semibold"
+                          className="bg-transparent border-2 border-red-500 text-red-600 text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-1 font-semibold"
+                          style={{
+                            boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.15)'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '#ef4444';
+                            e.currentTarget.style.color = 'white';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                            e.currentTarget.style.color = '#ef4444';
+                          }}
                           onClick={() => handleCreateBOQ(project)}
                         >
                           <Plus className="h-3.5 w-3.5" />
@@ -841,10 +896,10 @@ const EstimatorHub: React.FC = () => {
                         <button
                           className="text-white text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1"
                           style={{ backgroundColor: 'rgb(22, 163, 74)' }}
-                          onClick={() => toast.info('Send to TM feature coming soon')}
+                          onClick={() => handleSendToTD(project)}
                         >
                           <Send className="h-3.5 w-3.5" />
-                          Send to TM
+                          Send to TD
                         </button>
                       </div>
                     </motion.div>
@@ -885,7 +940,7 @@ const EstimatorHub: React.FC = () => {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {paginatedProjects.length === 0 ? (
+                        {filteredProjects.length === 0 ? (
                           <TableRow>
                             <TableCell colSpan={7} className="text-center py-12 text-gray-500">
                               <div className="flex flex-col items-center">
@@ -895,7 +950,7 @@ const EstimatorHub: React.FC = () => {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          paginatedProjects.map((project) => {
+                          filteredProjects.map((project) => {
                             const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
                             const boqCount = projectBoqs.length;
 
@@ -962,9 +1017,9 @@ const EstimatorHub: React.FC = () => {
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      onClick={() => toast.info('Send to TM feature coming soon')}
+                                      onClick={() => handleSendToTD(project)}
                                       className="h-7 w-7 p-0 hover:bg-green-50"
-                                      title="Send to TM"
+                                      title="Send to TD"
                                     >
                                       <Send className="h-3.5 w-3.5 text-green-600" />
                                     </Button>
@@ -1001,41 +1056,42 @@ const EstimatorHub: React.FC = () => {
                 )}
 
                 {/* Pagination */}
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-between border-t pt-4 mt-6">
-                    <div className="text-sm text-gray-600">
-                      Showing {startIndex + 1} to {Math.min(endIndex, filteredProjects.length)} of {filteredProjects.length} projects
+                {totalProjects > itemsPerPage && (
+                  <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                    <div className="text-sm text-gray-600 font-medium">
+                      Showing {startIndex + 1} to {Math.min(startIndex + filteredProjects.length, totalProjects)} of {totalProjects} projects
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <button
                         onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                         disabled={currentPage === 1}
-                        className="h-8"
+                        className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        style={{ color: 'rgb(36, 61, 138)' }}
                       >
                         Previous
-                      </Button>
+                      </button>
                       {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                        <Button
+                        <button
                           key={page}
-                          size="sm"
-                          variant={currentPage === page ? 'default' : 'outline'}
                           onClick={() => setCurrentPage(page)}
-                          className={`h-8 w-8 ${currentPage === page ? 'bg-blue-600 text-white' : ''}`}
+                          className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                            currentPage === page
+                              ? 'border-[rgb(36,61,138)] bg-blue-50'
+                              : 'border-gray-300 hover:bg-gray-50'
+                          }`}
+                          style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
                         >
                           {page}
-                        </Button>
+                        </button>
                       ))}
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <button
                         onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                         disabled={currentPage === totalPages}
-                        className="h-8"
+                        className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        style={{ color: 'rgb(36, 61, 138)' }}
                       >
                         Next
-                      </Button>
+                      </button>
                     </div>
                   </div>
                 )}
