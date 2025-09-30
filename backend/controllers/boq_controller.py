@@ -78,10 +78,10 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
     # Add to master labour (prevent duplicates) with item_id reference
     for i, labour_data_item in enumerate(labour_data):
         labour_role = labour_data_item.get("labour_role")
-        # Calculate the amount (rate_per_hour * hours)
+        # Get hours and rate_per_hour
         rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
         hours = labour_data_item.get("hours", 0.0)
-        labour_amount = rate_per_hour * hours
+        labour_amount = float(rate_per_hour) * float(hours)
 
         master_labour = MasterLabour.query.filter_by(labour_role=labour_role).first()
 
@@ -90,19 +90,23 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
                 labour_role=labour_role,
                 item_id=master_item_id,  # Set the item_id reference
                 work_type=work_type,  # Set the work_type
+                hours=str(hours),  # Store hours as string
+                rate_per_hour=str(rate_per_hour),  # Store rate per hour as string
                 amount=labour_amount,  # Set the calculated amount
                 created_by=created_by
             )
             db.session.add(master_labour)
             db.session.flush()
         else:
-            # Update existing labour: always update item_id, work_type, and amount
+            # Update existing labour: always update item_id, work_type, hours, rate_per_hour, and amount
             if master_labour.item_id is None:
                 master_labour.item_id = master_item_id
             if master_labour.work_type is None and work_type:
                 master_labour.work_type = work_type
 
-            # Always update the amount with the latest calculation
+            # Always update hours, rate_per_hour, and amount with the latest values
+            master_labour.hours = str(hours)
+            master_labour.rate_per_hour = str(rate_per_hour)
             master_labour.amount = labour_amount
 
             db.session.flush()
@@ -374,6 +378,7 @@ def get_all_boq():
                 "client": project.client if project else None,
                 "location": project.location if project else None,
                 "status": boq.status,
+                "email_sent" : boq.email_sent,
                 "items_count": boq_detail.total_items,
                 "material_count": boq_detail.total_materials,
                 "labour_count": boq_detail.total_labour,
@@ -744,6 +749,8 @@ def send_boq_email(boq_id):
         # Get TD email from request or fetch all Technical Directors
         data = request.get_json() if request.is_json else {}
         td_email = data.get('td_email')
+        td_name = data.get('full_name')
+        comments = data.get('comments')  # Get comments from request
 
         if td_email:
             # Send to specific TD
@@ -752,6 +759,46 @@ def send_boq_email(boq_id):
             )
 
             if email_sent:
+                # Update BOQ email_sent flag and status
+                boq.email_sent = True
+                boq.status = "Pending"
+
+                # Check if history entry already exists for this BOQ with EMAIL_SENT action
+                existing_history = BOQHistory.query.filter_by(boq_id=boq_id).filter(
+                    BOQHistory.action['type'].astext == 'EMAIL_SENT'
+                ).first()
+
+                if not existing_history:
+                    # Create history record with complete action data
+                    action_data = {
+                        "type": "EMAIL_SENT",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "boq_name": boq.boq_name,
+                        "project_name": project_data.get("project_name"),
+                        "client": project_data.get("client"),
+                        "location": project_data.get("location"),
+                        "total_cost": items_summary.get("total_cost"),
+                        "recipient_email": td_email,
+                        "recipient_name": td_name if td_name else None,
+                        "sent_at": datetime.utcnow().strftime('%d-%b-%Y %I:%M %p'),
+                        "description": f"BOQ review email sent to Technical Director at {td_email}"
+                    }
+
+                    boq_history = BOQHistory(
+                        boq_id=boq_id,
+                        action=action_data,
+                        action_by=boq.created_by,
+                        boq_status="Pending",
+                        sender=boq.created_by,
+                        receiver=td_name if td_name else td_email,
+                        comments=comments if comments else "BOQ sent for review and approval",
+                        action_date=datetime.utcnow(),
+                        created_by=boq.created_by
+                    )
+                    db.session.add(boq_history)
+
+                db.session.commit()
+
                 return jsonify({
                     "success": True,
                     "message": "BOQ review email sent successfully to Technical Director",
@@ -799,6 +846,46 @@ def send_boq_email(boq_id):
             )
 
             if email_sent:
+                # Update BOQ email_sent flag and status
+                boq.email_sent = True
+                boq.status = "Pending"
+
+                # Check if history entry already exists for this BOQ with EMAIL_SENT action
+                existing_history = BOQHistory.query.filter_by(boq_id=boq_id).filter(
+                    BOQHistory.action['type'].astext == 'EMAIL_SENT'
+                ).first()
+
+                if not existing_history:
+                    # Create history record with complete action data
+                    action_data = {
+                        "type": "EMAIL_SENT",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "boq_name": boq.boq_name,
+                        "project_name": project_data.get("project_name"),
+                        "client": project_data.get("client"),
+                        "location": project_data.get("location"),
+                        "total_cost": items_summary.get("total_cost"),
+                        "recipient_email": technical_director.email if technical_director.email else None,
+                        "recipient_name": technical_director.full_name if technical_director.full_name else None,
+                        "sent_at": datetime.utcnow().strftime('%d-%b-%Y %I:%M %p'),
+                        "description": f"BOQ review email sent to Technical Director {technical_director.full_name if technical_director.full_name else 'N/A'} at {technical_director.email}"
+                    }
+
+                    boq_history = BOQHistory(
+                        boq_id=boq_id,
+                        action=action_data,
+                        action_by=boq.created_by,
+                        boq_status="Pending",
+                        sender=boq.created_by,
+                        receiver=technical_director.full_name if technical_director.full_name else technical_director.email,
+                        comments=comments if comments else "BOQ sent for review and approval",
+                        action_date=datetime.utcnow(),
+                        created_by=boq.created_by
+                    )
+                    db.session.add(boq_history)
+
+                db.session.commit()
+
                 return jsonify({
                     "success": True,
                     "message": "BOQ review email sent successfully to Technical Director",

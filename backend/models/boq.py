@@ -15,6 +15,7 @@ class BOQ(db.Model):
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     last_modified_by = db.Column(db.String(255), nullable=True)
     is_deleted = db.Column(db.Boolean, default=False)
+    email_sent = db.Column(db.Boolean, default=False)
 
     project = db.relationship("Project", backref=db.backref("boqs", lazy=True))
 
@@ -56,7 +57,9 @@ class MasterLabour(db.Model):
     labour_role = db.Column(db.String(255), nullable=False, unique=True)
     item_id = db.Column(db.Integer)
     work_type = db.Column(db.String(100), nullable=True)  # Construction, Electrical, etc
-    amount = db.Column(db.Float, nullable=True)
+    hours = db.Column(db.String(255), nullable=True)  # Labour hours
+    rate_per_hour = db.Column(db.String(255), nullable=True)  # Rate per hour
+    amount = db.Column(db.Float, nullable=True)  # Total amount (hours * rate_per_hour)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
@@ -82,3 +85,24 @@ class BOQDetails(db.Model):
     is_deleted = db.Column(db.Boolean, default=False)
 
     boq = db.relationship("BOQ", backref=db.backref("details", lazy=True))
+
+
+# BOQ History Table - Stores all BOQ actions and changes
+class BOQHistory(db.Model):
+    __tablename__ = "boq_history"
+
+    boq_history_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False)
+    action = db.Column(JSONB, nullable=True)  # EMAIL_SENT, STATUS_CHANGED, CREATED, UPDATED, APPROVED, REJECTED
+    action_by = db.Column(db.String(100), nullable=False)
+    boq_status = db.Column(db.String(50), nullable=True)  # BOQ status at the time of action
+    sender = db.Column(db.String(255), nullable=True)  # Email sender or action performer
+    receiver = db.Column(db.String(255), nullable=True)  # Email receiver or affected user
+    comments = db.Column(db.Text, nullable=True)  # Additional comments
+    action_date = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
+    last_modified_by = db.Column(db.String(255), nullable=True)
+    
+    boq = db.relationship("BOQ", backref=db.backref("history", lazy=True))
