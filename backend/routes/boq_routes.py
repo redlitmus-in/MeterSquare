@@ -48,6 +48,9 @@ def get_item_labours_route(item_id):
 def get_all_item_route():
     return get_all_item()
 
+# BOQ Email Notification
+@boq_routes.route('/boq_email/<int:boq_id>', methods=['GET'])
+@jwt_required
 def send_boq_email_route(boq_id):
     """Send BOQ review email to Technical Director"""
     return send_boq_email(boq_id)
