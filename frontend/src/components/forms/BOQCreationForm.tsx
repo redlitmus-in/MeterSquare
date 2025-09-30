@@ -132,8 +132,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
     setIsLoadingMasterData(true);
     try {
       const itemsData = await estimatorService.getAllItems();
+      console.log('Master items loaded:', itemsData.length, 'items');
+      if (itemsData.length > 0) {
+        console.log('Sample item:', itemsData[0]);
+      }
       setMasterItems(itemsData);
     } catch (error) {
+      console.error('Failed to load master items:', error);
       toast.error('Failed to load master items');
     } finally {
       setIsLoadingMasterData(false);
@@ -302,7 +307,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
   };
 
   const getFilteredItems = (searchTerm: string) => {
-    if (!searchTerm) return [];
+    if (!searchTerm) return masterItems.slice(0, 10); // Show first 10 items when no search term
     const term = searchTerm.toLowerCase();
     return masterItems.filter(item =>
       item.item_name.toLowerCase().includes(term)
@@ -830,7 +835,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
             {/* BOQ Items - Match TD Style */}
             <div className="mb-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-gray-900">BOQ Items</h3>
+                <div className="flex items-center gap-3">
+                  <h3 className="text-xl font-bold text-gray-900">BOQ Items</h3>
+                  {masterItems.length > 0 && (
+                    <span className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">
+                      {masterItems.length} master items available
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-3">
                   {isLoadingMasterData && (
                     <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -853,7 +865,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
 
               <div className="space-y-4">
                 {items.map((item, index) => (
-                  <div key={item.id} className="border border-gray-200 rounded-lg">
+                  <div key={item.id} className="border border-gray-200 rounded-lg relative">
                     {/* Item Header */}
                     <div className="bg-gray-50 px-4 py-3 flex items-center justify-between">
                       <div className="flex items-center gap-3 flex-1">
@@ -901,7 +913,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                             )}
                           </div>
                           {itemDropdownOpen[item.id] && (
-                            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                            <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
                               {(() => {
                                 const filtered = getFilteredItems(itemSearchTerms[item.id] || '');
                                 const showNewOption = itemSearchTerms[item.id] &&
@@ -910,7 +922,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                 if (filtered.length === 0 && !showNewOption) {
                                   return (
                                     <div className="px-3 py-2 text-sm text-gray-500">
-                                      Type to search items or add new
+                                      {masterItems.length === 0 ? 'No master items available yet' : 'Type to search items or add new'}
                                     </div>
                                   );
                                 }
