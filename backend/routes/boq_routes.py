@@ -4,7 +4,6 @@ BOQ Routes - API endpoints for Bill of Quantities management
 from flask import Blueprint
 from utils.authentication import jwt_required
 from controllers.boq_controller import *
-from controllers.boq_upload_controller import *
 
 boq_routes = Blueprint('boq_routes', __name__, url_prefix='/api')
 
@@ -48,17 +47,4 @@ def get_item_labours_route(item_id):
 @jwt_required
 def get_all_item_route():
     return get_all_item()
-
-# BOQ Email Notification
-@boq_routes.route('/boq_email/<int:boq_id>', methods=['GET'])
-@jwt_required
-def send_boq_email_route(boq_id):
-    """Send BOQ review email to Technical Director"""
-    return send_boq_email(boq_id)
-
-# BOQ Upload and Extraction Routes
-# @boq_routes.route('/boq/upload', methods=['POST'])
-# @jwt_required
-# def upload_boq_route():
-#     """Upload BOQ file (PDF, Excel) and extract data"""
-#     return upload_boq_file()
+    
