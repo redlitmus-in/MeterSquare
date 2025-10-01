@@ -19,7 +19,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { BOQ, BOQItemDetailed, BOQUpdatePayload, BOQMaterial, BOQLabour } from '../types';
+import { BOQ, BOQItemDetailed, BOQUpdatePayload, BOQMaterial, BOQLabour, WorkType } from '../types';
 import { estimatorService } from '../services/estimatorService';
 
 // Master data interfaces
@@ -75,10 +75,6 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
   const [itemSearchTerms, setItemSearchTerms] = useState<Record<number, string>>({});
   const [itemDropdownOpen, setItemDropdownOpen] = useState<Record<number, boolean>>({});
   const [loadingItemData, setLoadingItemData] = useState<Record<number, boolean>>({});
-
-  // Reference panel state
-  const [showReferencePanel, setShowReferencePanel] = useState(false);
-  const [expandedReferenceItems, setExpandedReferenceItems] = useState<number[]>([]);
 
   useEffect(() => {
     if (boq && boq.boq_id) {
@@ -140,7 +136,10 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
   };
 
   const getFilteredItems = (searchTerm: string) => {
-    if (!searchTerm) return [];
+    if (!searchTerm || searchTerm.trim() === '') {
+      // Show all items when search is empty
+      return masterItems.slice(0, 10);
+    }
     const term = searchTerm.toLowerCase();
     return masterItems.filter(item =>
       item.item_name.toLowerCase().includes(term)
@@ -150,14 +149,11 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
   const handleItemNameChange = (itemIndex: number, value: string) => {
     setItemSearchTerms(prev => ({ ...prev, [itemIndex]: value }));
 
-    // Update item name for new items
-    const item = editedBoq?.items[itemIndex];
-    if (item && !item.item_id) {
-      handleItemChange(itemIndex, 'item_name', value);
-    }
+    // Always update item name in real-time
+    handleItemChange(itemIndex, 'item_name', value);
 
-    // Open dropdown if there's text
-    if (value.trim()) {
+    // Open dropdown if there's text and show suggestions
+    if (value.trim().length > 0) {
       setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: true }));
     } else {
       setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: false }));
@@ -239,6 +235,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
             item_id: item.master_item_id,
             item_name: item.item_name,
             description: item.description || '',
+            work_type: item.work_type || 'contract',
             overhead_percentage: item.overhead_percentage || 8,
             profit_margin_percentage: item.profit_margin_percentage || 12,
             status: 'Active',
@@ -248,20 +245,28 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
               quantity: mat.quantity,
               unit: mat.unit,
               unit_price: mat.unit_price,
-              total_price: mat.total_price
+              total_price: mat.total_price || (mat.quantity * mat.unit_price)
             })),
             labour: (item.labour || []).map(lab => ({
               labour_id: lab.master_labour_id,
               labour_role: lab.labour_role,
               hours: lab.hours,
               rate_per_hour: lab.rate_per_hour,
-              total_cost: lab.total_cost,
-              work_type: 'contract'
+              total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour),
+              work_type: lab.work_type || 'contract'
             }))
           }))
         };
 
         setEditedBoq(editableBoq);
+
+        // Initialize search terms with item names
+        const initialSearchTerms: Record<number, string> = {};
+        editableBoq.items.forEach((item, index) => {
+          initialSearchTerms[index] = item.item_name;
+        });
+        setItemSearchTerms(initialSearchTerms);
+
         // Expand first item by default
         if (editableBoq.items.length > 0) {
           setExpandedItems(new Set([0]));
@@ -353,30 +358,75 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
 
   const addItem = () => {
     const newItem = {
-      item_name: 'New Item',
-      description: 'Item description',
+      item_name: '',
+      description: '',
       overhead_percentage: 8,
       profit_margin_percentage: 12,
       status: 'Active',
+      work_type: 'contract' as WorkType,
       materials: [],
       labour: []
     };
+
+    const newIndex = 0;
 
     setEditedBoq(prev => ({
       ...prev,
       items: [newItem, ...prev.items] // Add new item at the beginning
     }));
 
-    // Expand the new item (index 0 since it's now at the beginning)
-    setExpandedItems(prev => new Set([0, ...Array.from(prev).map(i => i + 1)]));
+    // Expand the new item and shift other expanded items
+    setExpandedItems(prev => {
+      const shiftedIndexes = Array.from(prev).map(i => i + 1);
+      return new Set([newIndex, ...shiftedIndexes]);
+    });
+
+    // Clear search term for new item and open dropdown
+    setItemSearchTerms(prev => ({ ...prev, [newIndex]: '' }));
+    setItemDropdownOpen(prev => ({ ...prev, [newIndex]: false }));
+
+    // Focus on the new item input after a short delay
+    setTimeout(() => {
+      const inputElement = document.querySelector(`input[data-item-index="${newIndex}"]`) as HTMLInputElement;
+      if (inputElement) {
+        inputElement.focus();
+      }
+    }, 100);
   };
 
   const removeItem = (itemIndex: number) => {
     const updatedItems = editedBoq.items.filter((_, index) => index !== itemIndex);
+
     setEditedBoq({
       ...editedBoq,
       items: updatedItems
     });
+
+    // Update expanded items - shift down indexes
+    const newExpandedItems = new Set<number>();
+    expandedItems.forEach(index => {
+      if (index < itemIndex) {
+        newExpandedItems.add(index);
+      } else if (index > itemIndex) {
+        newExpandedItems.add(index - 1);
+      }
+    });
+    setExpandedItems(newExpandedItems);
+
+    // Update search terms - reindex
+    const newSearchTerms: Record<number, string> = {};
+    Object.entries(itemSearchTerms).forEach(([key, value]) => {
+      const index = parseInt(key);
+      if (index < itemIndex) {
+        newSearchTerms[index] = value;
+      } else if (index > itemIndex) {
+        newSearchTerms[index - 1] = value;
+      }
+    });
+    setItemSearchTerms(newSearchTerms);
+
+    // Close all dropdowns
+    setItemDropdownOpen({});
   };
 
   const addMaterial = (itemIndex: number) => {
@@ -468,7 +518,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
         return;
       }
 
-      // Send the update payload to backend
+      // Service layer handles total_price and total_cost calculation
       const result = await estimatorService.updateBOQ(editedBoq.boq_id, editedBoq);
 
       if (result.success) {
@@ -567,145 +617,6 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                   </div>
                 </div>
 
-                {/* Available Items Reference Panel */}
-                {masterItems.length > 0 && (
-                  <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-200 mb-6">
-                    <button
-                      type="button"
-                      onClick={() => setShowReferencePanel(!showReferencePanel)}
-                      className="w-full px-6 py-4 flex items-center justify-between hover:bg-indigo-100/50 transition-colors rounded-t-xl"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-indigo-200 rounded-lg">
-                          <Package className="w-5 h-5 text-indigo-600" />
-                        </div>
-                        <div className="text-left">
-                          <h3 className="text-sm font-bold text-indigo-900">Available Master Items</h3>
-                          <p className="text-xs text-indigo-700">{masterItems.length} items available for quick selection</p>
-                        </div>
-                      </div>
-                      <ChevronDown
-                        className={`w-5 h-5 text-indigo-600 transition-transform ${
-                          showReferencePanel ? 'rotate-180' : ''
-                        }`}
-                      />
-                    </button>
-
-                    {showReferencePanel && (
-                      <div className="px-6 py-4 max-h-96 overflow-y-auto">
-                        <div className="space-y-2">
-                          {masterItems.map((masterItem) => {
-                            const isExpanded = expandedReferenceItems.includes(masterItem.item_id);
-                            const materials = itemMaterials[masterItem.item_id] || [];
-                            const labours = itemLabours[masterItem.item_id] || [];
-
-                            return (
-                              <div key={masterItem.item_id} className="bg-white rounded-lg border border-indigo-100">
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    if (!isExpanded) {
-                                      if (!itemMaterials[masterItem.item_id]) {
-                                        await loadItemMaterials(masterItem.item_id);
-                                      }
-                                      if (!itemLabours[masterItem.item_id]) {
-                                        await loadItemLabours(masterItem.item_id);
-                                      }
-                                      setExpandedReferenceItems([...expandedReferenceItems, masterItem.item_id]);
-                                    } else {
-                                      setExpandedReferenceItems(
-                                        expandedReferenceItems.filter(id => id !== masterItem.item_id)
-                                      );
-                                    }
-                                  }}
-                                  className="w-full px-4 py-3 flex items-center justify-between hover:bg-indigo-50 transition-colors rounded-t-lg"
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <ChevronRight
-                                      className={`w-4 h-4 text-gray-500 transition-transform ${
-                                        isExpanded ? 'rotate-90' : ''
-                                      }`}
-                                    />
-                                    <div className="text-left">
-                                      <div className="font-medium text-gray-900">{masterItem.item_name}</div>
-                                      {masterItem.description && (
-                                        <div className="text-xs text-gray-500">{masterItem.description}</div>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      addItem();
-                                      const newIndex = editedBoq?.items.length || 0;
-                                      setTimeout(() => {
-                                        selectMasterItem(newIndex, masterItem);
-                                      }, 100);
-                                      toast.success(`Added "${masterItem.item_name}" to BOQ`);
-                                    }}
-                                    className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                                  >
-                                    <Plus className="w-3 h-3" />
-                                  </button>
-                                </button>
-
-                                {isExpanded && (
-                                  <div className="px-4 py-3 bg-gray-50 rounded-b-lg border-t border-indigo-100">
-                                    {materials.length > 0 && (
-                                      <div className="mb-3">
-                                        <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
-                                          <Package className="w-3 h-3" />
-                                          Materials ({materials.length})
-                                        </h4>
-                                        <div className="grid grid-cols-2 gap-2">
-                                          {materials.map((mat) => (
-                                            <div key={mat.material_id} className="text-xs bg-white px-2 py-1 rounded border border-gray-200">
-                                              <span className="font-medium text-gray-700">{mat.material_name}</span>
-                                              <span className="text-gray-500 ml-2">
-                                                ₹{mat.current_market_price}/{mat.default_unit}
-                                              </span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-
-                                    {labours.length > 0 && (
-                                      <div>
-                                        <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
-                                          <Users className="w-3 h-3" />
-                                          Labour ({labours.length})
-                                        </h4>
-                                        <div className="grid grid-cols-2 gap-2">
-                                          {labours.map((lab) => (
-                                            <div key={lab.labour_id} className="text-xs bg-white px-2 py-1 rounded border border-gray-200">
-                                              <span className="font-medium text-gray-700">{lab.labour_role}</span>
-                                              <span className="text-gray-500 ml-2">
-                                                ₹{lab.amount}
-                                              </span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-
-                                    {materials.length === 0 && labours.length === 0 && (
-                                      <div className="text-xs text-gray-500 text-center py-2">
-                                        No materials or labour defined for this item
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 {/* BOQ Items - Match TD Style */}
                 <div className="mb-6">
                   <div className="flex items-center justify-between mb-4">
@@ -764,12 +675,15 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                 <div className="relative">
                                   <input
                                     type="text"
-                                    value={itemSearchTerms[itemIndex] || item.item_name}
+                                    data-item-index={itemIndex}
+                                    value={itemSearchTerms[itemIndex] !== undefined ? itemSearchTerms[itemIndex] : item.item_name}
                                     onChange={(e) => handleItemNameChange(itemIndex, e.target.value)}
-                                    className="w-full px-2 py-1 pr-8 text-sm border border-gray-300 rounded"
-                                    placeholder="Search or type new item name"
+                                    className="w-full px-2 py-1 pr-8 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="Search master items or type new item name"
                                     disabled={isSaving || loadingItemData[itemIndex]}
-                                    onFocus={() => setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: true }))}
+                                    onFocus={() => {
+                                      setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: true }));
+                                    }}
                                   />
                                   {loadingItemData[itemIndex] ? (
                                     <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 animate-spin" />
@@ -777,11 +691,13 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                     <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
                                   )}
                                   {itemDropdownOpen[itemIndex] && (
-                                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                                    <div className="absolute z-[20] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
                                       {(() => {
-                                        const filtered = getFilteredItems(itemSearchTerms[itemIndex] || '');
-                                        const showNewOption = itemSearchTerms[itemIndex] &&
-                                          !filtered.some(i => i.item_name.toLowerCase() === itemSearchTerms[itemIndex].toLowerCase());
+                                        const searchTerm = itemSearchTerms[itemIndex] !== undefined ? itemSearchTerms[itemIndex] : item.item_name;
+                                        const filtered = getFilteredItems(searchTerm);
+                                        const currentSearchTerm = itemSearchTerms[itemIndex] || '';
+                                        const showNewOption = currentSearchTerm.trim().length > 0 &&
+                                          !filtered.some(i => i.item_name.toLowerCase() === currentSearchTerm.toLowerCase());
 
                                         if (filtered.length === 0 && !showNewOption) {
                                           return (

@@ -67,11 +67,13 @@ export interface BOQCreatePayload {
       quantity: number;
       unit: string;
       unit_price: number;
+      total_price?: number;
     }[];
     labour: {
       labour_role: string;
       hours: number;
       rate_per_hour: number;
+      total_cost?: number;
     }[];
   }[];
 }
@@ -246,6 +248,7 @@ export interface BOQUpdatePayload {
     item_id?: number;
     item_name: string;
     description: string;
+    work_type?: WorkType;
     overhead_percentage?: number;
     profit_margin_percentage?: number;
     status?: string;

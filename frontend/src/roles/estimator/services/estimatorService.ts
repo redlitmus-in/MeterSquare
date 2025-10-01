@@ -101,7 +101,25 @@ class EstimatorService {
         };
       }
 
-      const response = await apiClient.post<BOQCreateResponse>('/create_boq', payload);
+      // Calculate total_price and total_cost before sending
+      const processedPayload = {
+        ...payload,
+        items: payload.items.map((item) => ({
+          ...item,
+          materials: item.materials.map((mat) => ({
+            ...mat,
+            total_price: mat.quantity * mat.unit_price
+          })),
+          labour: item.labour.map((lab) => ({
+            ...lab,
+            total_cost: lab.hours * lab.rate_per_hour
+          }))
+        }))
+      };
+
+      console.log('Processed BOQ payload with totals:', processedPayload);
+
+      const response = await apiClient.post<BOQCreateResponse>('/create_boq', processedPayload);
       console.log('BOQ creation response:', response.data);
 
       return {
@@ -138,7 +156,7 @@ class EstimatorService {
 
   async updateBOQ(boqId: number, updateData: any): Promise<{ success: boolean; message: string }> {
     try {
-      console.log('Updating BOQ with payload:', updateData);
+      console.log('=== ORIGINAL PAYLOAD ===', JSON.stringify(updateData, null, 2));
 
       // Validate required fields
       if (!updateData.boq_name || !updateData.boq_name.trim()) {
@@ -155,21 +173,34 @@ class EstimatorService {
         };
       }
 
-      // Ensure all materials and labour have calculated totals
+      // Ensure total_price and total_cost are included in the payload
       const processedData = {
         ...updateData,
-        items: updateData.items.map((item: any) => ({
-          ...item,
-          materials: item.materials.map((mat: any) => ({
-            ...mat,
-            total_price: mat.quantity * mat.unit_price
-          })),
-          labour: item.labour.map((lab: any) => ({
-            ...lab,
-            total_cost: lab.hours * lab.rate_per_hour
-          }))
-        }))
+        items: updateData.items.map((item: any) => {
+          console.log('Processing item:', item.item_name);
+          return {
+            ...item,
+            materials: item.materials.map((mat: any) => {
+              const total_price = mat.total_price || (mat.quantity * mat.unit_price);
+              console.log(`Material ${mat.material_name}: qty=${mat.quantity}, price=${mat.unit_price}, total=${total_price}`);
+              return {
+                ...mat,
+                total_price: total_price
+              };
+            }),
+            labour: item.labour.map((lab: any) => {
+              const total_cost = lab.total_cost || (lab.hours * lab.rate_per_hour);
+              console.log(`Labour ${lab.labour_role}: hours=${lab.hours}, rate=${lab.rate_per_hour}, total=${total_cost}`);
+              return {
+                ...lab,
+                total_cost: total_cost
+              };
+            })
+          };
+        })
       };
+
+      console.log('=== PROCESSED PAYLOAD WITH TOTALS ===', JSON.stringify(processedData, null, 2));
 
       const response = await apiClient.put(`/update_boq/${boqId}`, processedData);
       console.log('BOQ update response:', response.data);

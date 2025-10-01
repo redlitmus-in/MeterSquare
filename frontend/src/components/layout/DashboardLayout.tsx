@@ -38,6 +38,26 @@ const DashboardLayout: React.FC = React.memo(() => {
     }
   }, [location.pathname]);
 
+  // Check if current page is a dashboard
+  const isDashboardPage = useMemo(() => {
+    const path = location.pathname;
+    return path === '/dashboard' || path.endsWith('/dashboard') || path.includes('/dashboard/');
+  }, [location.pathname]);
+
+  // Memoize time and date formatting
+  const formattedTime = useMemo(() => currentTime.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }), [currentTime]);
+
+  const formattedDate = useMemo(() => currentTime.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  }), [currentTime]);
+
   // Update browser title with user role and notification count
   useEffect(() => {
     const roleName = user?.role_id ? getRoleDisplayName(String(user.role_id)) : 'User';
@@ -126,35 +146,30 @@ const DashboardLayout: React.FC = React.memo(() => {
         </main>
       </div>
 
-      {/* Floating Notifications - Positioned below time display */}
-      <div className={`fixed top-16 right-4 z-[100] transition-all duration-300 ${showHeader ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}`}>
-        <NotificationSystem />
-      </div>
+      {/* Floating Notifications - Show only on dashboard pages */}
+      {isDashboardPage && (
+        <div className={`fixed top-16 right-4 z-[100] transition-all duration-300 ${showHeader ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}`}>
+          <NotificationSystem />
+        </div>
+      )}
 
-      {/* Date and Time Display - Top Right Corner */}
-      <div className={`fixed top-4 right-4 z-30 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-lg px-3 py-2 shadow-md transition-all duration-300 ${showHeader ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}`}>
-        <div className="flex items-center gap-2.5 text-sm">
-          <Clock className="w-4 h-4 text-gray-500" />
-          <div className="flex items-center gap-2.5">
-            <span className="font-semibold text-gray-800">
-              {useMemo(() => currentTime.toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: true
-              }), [currentTime])}
-            </span>
-            <span className="text-gray-300">|</span>
-            <span className="text-gray-600 font-medium">
-              {useMemo(() => currentTime.toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric'
-              }), [currentTime])}
-            </span>
+      {/* Date and Time Display - Show only on dashboard pages */}
+      {isDashboardPage && (
+        <div className={`fixed top-4 right-4 z-30 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-lg px-3 py-2 shadow-md transition-all duration-300 ${showHeader ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}`}>
+          <div className="flex items-center gap-2.5 text-sm">
+            <Clock className="w-4 h-4 text-gray-500" />
+            <div className="flex items-center gap-2.5">
+              <span className="font-semibold text-gray-800">
+                {formattedTime}
+              </span>
+              <span className="text-gray-300">|</span>
+              <span className="text-gray-600 font-medium">
+                {formattedDate}
+              </span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 });

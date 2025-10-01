@@ -235,14 +235,25 @@ const EstimatorHub: React.FC = () => {
   const itemsPerPage = 10; // Fixed at 10 items per page
 
   useEffect(() => {
-    loadProjects(currentPage);
-    loadBOQs();
-  }, [currentPage]);
+    const abortController = new AbortController();
 
-  useEffect(() => {
-    loadProjects(1);
-    loadBOQs();
-  }, []);
+    const fetchData = async () => {
+      try {
+        await loadProjects(currentPage);
+        await loadBOQs();
+      } catch (error: any) {
+        if (error.name !== 'AbortError') {
+          console.error('Error fetching data:', error);
+        }
+      }
+    };
+
+    fetchData();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [currentPage]);
 
   useEffect(() => {
     applyFilters();
@@ -252,7 +263,7 @@ const EstimatorHub: React.FC = () => {
     try {
       setLoading(true);
       const response = await estimatorService.getAllBOQs();
-      if (response.success) {
+      if (response.success && response.data) {
         // Map the backend BOQ data to include proper project structure
         const mappedBOQs = response.data.map((boq: any) => ({
           ...boq,
@@ -272,9 +283,15 @@ const EstimatorHub: React.FC = () => {
           created_at: boq.created_at
         }));
         setBOQs(mappedBOQs);
+      } else {
+        setBOQs([]);
       }
-    } catch (error) {
-      toast.error('Failed to load BOQs');
+    } catch (error: any) {
+      console.error('Error loading BOQs:', error);
+      if (error.name !== 'AbortError') {
+        toast.error('Failed to load BOQs');
+      }
+      setBOQs([]);
     } finally {
       setLoading(false);
     }
