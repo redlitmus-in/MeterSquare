@@ -879,6 +879,8 @@ def send_boq_email(boq_id):
                         sender=boq.created_by,
                         receiver=technical_director.full_name if technical_director.full_name else technical_director.email,
                         comments=comments if comments else "BOQ sent for review and approval",
+                        sender_role='estimator', 
+                        receiver_role='technicalDirector',
                         action_date=datetime.utcnow(),
                         created_by=boq.created_by
                     )
@@ -907,3 +909,193 @@ def send_boq_email(boq_id):
             "message": "Failed to send BOQ email notification",
             "error": str(e)
         }), 500
+
+def get_boq_history(boq_id):
+    try:
+        boq_history_records = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).all()
+
+        history_list = []
+        for h in boq_history_records:
+            history_list.append({
+                "boq_history_id": h.boq_history_id,
+                "boq_id": h.boq_id,
+                "action": h.action,
+                "action_by": h.action_by,
+                "boq_status": h.boq_status,
+                "sender": h.sender,
+                "receiver": h.receiver,
+                "comments": h.comments,
+                "sender_role": h.sender_role,
+                "receiver_role": h.receiver_role,
+                "action_date": h.action_date.isoformat() if h.action_date else None,
+                "created_at": h.created_at.isoformat() if h.created_at else None,
+                "created_by": h.created_by
+            })
+
+        return jsonify({
+            "boq_history": history_list
+        }), 200
+    except Exception as e:
+        log.error(f"Error fetching BOQ history: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+def get_estimator_dashboard():
+    try:
+        from datetime import datetime, timedelta
+        from collections import defaultdict
+
+        # Get all BOQs and Projects
+        all_boqs = BOQ.query.filter_by(is_deleted=False).all()
+        projects = Project.query.filter_by(is_deleted=False).all()
+
+        # Initialize lists BEFORE using them
+        monthly_trend = []
+        top_projects = []
+        recent_activities = []
+
+        # Get current month start date
+        now = datetime.utcnow()
+        current_month_start = datetime(now.year, now.month, 1)
+
+        # Initialize totals
+        total_selling_amount = 0
+        total_profit_amount = 0
+        total_material_cost = 0
+        total_labor_cost = 0
+        total_item_count = 0
+        total_material_count = 0
+        total_labor_count = 0
+
+        # Monthly trend tracking
+        monthly_data = defaultdict(lambda: {"count": 0, "value": 0})
+
+        # Calculate metrics for each project
+        for project in projects:
+            project_boqs = BOQ.query.filter_by(project_id=project.project_id, is_deleted=False).all()
+            if not project_boqs:
+                continue
+
+            project_total_value = 0
+            project_total_material = 0
+            project_total_labor = 0
+            project_total_items = 0
+            project_material_count = 0
+            project_labor_count = 0
+
+            for boq in project_boqs:
+                boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+
+                if boq_details:
+                    selling_price = float(boq_details.total_cost) if boq_details.total_cost else 0.0
+                    project_total_value += selling_price
+                    total_selling_amount += selling_price
+
+                    items_count = int(boq_details.total_items) if boq_details.total_items else 0
+                    project_total_items += items_count
+                    total_item_count += items_count
+
+                    # Get material and labor costs from JSON
+                    if boq_details.boq_details and 'summary' in boq_details.boq_details:
+                        summary = boq_details.boq_details['summary']
+                        material_cost = float(summary.get('total_material_cost', 0))
+                        labor_cost = float(summary.get('total_labor_cost', 0))
+
+                        project_total_material += material_cost
+                        total_material_cost += material_cost
+
+                        project_total_labor += labor_cost
+                        total_labor_cost += labor_cost
+
+                        # Count items with material/labor
+                        items = boq_details.boq_details.get('items', [])
+                        for item in items:
+                            if item.get('material_cost', 0) > 0:
+                                project_material_count += 1
+                                total_material_count += 1
+                            if item.get('labor_cost', 0) > 0:
+                                project_labor_count += 1
+                                total_labor_count += 1
+
+                            base_cost = float(item.get('base_cost', 0))
+                            item_selling_price = float(item.get('selling_price', 0))
+                            profit = item_selling_price - base_cost
+                            total_profit_amount += profit
+
+                    # Monthly trend data
+                    if boq.created_at:
+                        month_key = boq.created_at.strftime('%B %Y')
+                        monthly_data[month_key]["count"] += 1
+                        monthly_data[month_key]["value"] += selling_price
+
+            # Store project details with all metrics
+            top_projects.append({
+                "project_id": project.project_id,
+                "project_name": project.project_name,
+                "boq_count": len(project_boqs),
+                "total_value": round(project_total_value, 2),
+                "total_items": project_total_items,
+                "material_count": project_material_count,
+                "labor_count": project_labor_count,
+                "material_cost": round(project_total_material, 2),
+                "labor_cost": round(project_total_labor, 2)
+            })
+
+            recent_activities.append({
+                "project_id": project.project_id,
+                "project_name": project.project_name,
+                "boq_count": len(project_boqs),
+                "value": round(project_total_value, 2)
+            })
+
+        # Monthly trend (last 6 months)
+        for i in range(5, -1, -1):
+            month_date = now - timedelta(days=30*i)
+            month_key = month_date.strftime('%B %Y')
+            monthly_trend.append({
+                "month": month_key,
+                "count": monthly_data[month_key]["count"],
+                "value": round(monthly_data[month_key]["value"], 2)
+            })
+
+        # Sort top projects by value
+        top_projects = sorted(top_projects, key=lambda x: x['total_value'], reverse=True)[:5]
+
+        # Calculate average approval time
+        approved_boqs = [boq for boq in all_boqs if boq.status == 'Approved' and boq.last_modified_at and boq.created_at]
+        average_approval_time = 0
+        if approved_boqs:
+            total_days = sum([(boq.last_modified_at - boq.created_at).days for boq in approved_boqs])
+            average_approval_time = round(total_days / len(approved_boqs), 1)
+
+        return jsonify({
+            # Summary metrics
+            "total_projects": len(projects),
+            "total_boqs": len(all_boqs),
+            "total_selling_amount": round(total_selling_amount, 2),
+            "total_profit_amount": round(total_profit_amount, 2),
+            "total_material_cost": round(total_material_cost, 2),
+            "total_labor_cost": round(total_labor_cost, 2),
+            "total_items": total_item_count,
+            "total_material_count": total_material_count,
+            "total_labor_count": total_labor_count,
+
+            # Status breakdown
+            "pending_boqs": len([boq for boq in all_boqs if boq.status == 'Pending']),
+            "approved_boqs": len([boq for boq in all_boqs if boq.status == 'Approved']),
+            "rejected_boqs": len([boq for boq in all_boqs if boq.status == 'Rejected']),
+            "draft_boqs": len([boq for boq in all_boqs if boq.status == 'Draft']),
+            "sent_for_confirmation_boqs": len([boq for boq in all_boqs if boq.status == 'Sent_for_Confirmation']),
+
+            # Additional metrics
+            "average_approval_time": average_approval_time,
+
+            # Detailed data
+            "monthly_trend": monthly_trend,
+            "top_projects": top_projects,
+            "recent_activities": recent_activities
+        }), 200
+    except Exception as e:
+        log.error(f"Error fetching Estimator dashboard: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500

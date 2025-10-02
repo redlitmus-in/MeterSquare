@@ -10,7 +10,8 @@ class Project(db.Model):
     project_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     project_name = db.Column(db.String(255), nullable=False)  # Required
     user_id = db.Column(db.Integer, nullable=True)
-    location = db.Column(db.String(255), nullable=True)  # Optional - changed from required
+    location = db.Column(db.String(255), nullable=True) 
+    area = db.Column(db.String(100), nullable=True)
     floor_name = db.Column(db.String(255), nullable=True)  # Optional
     working_hours = db.Column(db.String(255), nullable=True)
     client = db.Column(db.String(255), nullable=True)  # Optional
@@ -34,6 +35,7 @@ class Project(db.Model):
             'project_id': self.project_id,
             'project_name': self.project_name,
             'user_id': self.user_id,
+            'area': self.area,
             'location': self.location,
             'floor_name': self.floor_name,
             'working_hours':self.working_hours,
