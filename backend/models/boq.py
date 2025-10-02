@@ -57,8 +57,8 @@ class MasterLabour(db.Model):
     labour_role = db.Column(db.String(255), nullable=False, unique=True)
     item_id = db.Column(db.Integer)
     work_type = db.Column(db.String(100), nullable=True)  # Construction, Electrical, etc
-    hours = db.Column(db.String(255), nullable=True)  # Labour hours
-    rate_per_hour = db.Column(db.String(255), nullable=True)  # Rate per hour
+    hours = db.Column(db.Float, nullable=True)  # Labour hours (changed to Float)
+    rate_per_hour = db.Column(db.Float, nullable=True)  # Rate per hour (changed to Float)
     amount = db.Column(db.Float, nullable=True)  # Total amount (hours * rate_per_hour)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -71,13 +71,20 @@ class BOQDetails(db.Model):
 
     boq_detail_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False)
+
+    # Complete BOQ structure stored as JSONB
     boq_details = db.Column(JSONB, nullable=False)  # Stores complete BOQ structure
+
+    # Summary fields
     total_cost = db.Column(db.Float, default=0.0)
     total_items = db.Column(db.Integer, default=0)
     total_materials = db.Column(db.Integer, default=0)
     total_labour = db.Column(db.Integer, default=0)
+
     # File upload related fields
     file_name = db.Column(db.String(255), nullable=True)
+
+    # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
@@ -99,6 +106,8 @@ class BOQHistory(db.Model):
     sender = db.Column(db.String(255), nullable=True)  # Email sender or action performer
     receiver = db.Column(db.String(255), nullable=True)  # Email receiver or affected user
     comments = db.Column(db.Text, nullable=True)  # Additional comments
+    sender_role = db.Column(db.String(255), nullable=True)
+    receiver_role = db.Column(db.String(255), nullable=True)
     action_date = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
