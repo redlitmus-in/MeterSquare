@@ -523,10 +523,6 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
 
       if (result.success) {
         toast.success('BOQ updated successfully');
-
-        // Send update email notification
-        await estimatorService.sendBOQEmail(editedBoq.boq_id, 'updated');
-
         onSave();
         onClose();
       } else {
