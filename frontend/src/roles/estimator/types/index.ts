@@ -149,6 +149,7 @@ export interface BOQ {
   submission_date?: string;
   pdf_url?: string;
   notes?: string;
+  email_sent?: boolean; // Track if BOQ has been emailed to TD
 
   // Backend response fields
   items?: BOQItemDetailed[];

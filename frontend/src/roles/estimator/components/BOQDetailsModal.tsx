@@ -15,11 +15,13 @@ import {
   Download,
   Printer,
   Edit,
-  Eye
+  Eye,
+  Clock
 } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
 import { BOQGetResponse, BOQItemDetailed } from '../types';
 import { toast } from 'sonner';
+import BOQHistoryTimeline from './BOQHistoryTimeline';
 
 interface BOQDetailsModalProps {
   isOpen: boolean;
@@ -41,6 +43,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
   const [boqData, setBoqData] = useState<BOQGetResponse | null>(null);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'details' | 'history'>('details');
 
   useEffect(() => {
     if (isOpen && boq?.boq_id) {
@@ -158,8 +161,40 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                 </div>
               </div>
 
+              {/* Tabs */}
+              <div className="border-b border-gray-200 bg-gray-50 px-6">
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => setActiveTab('details')}
+                    className={`px-4 py-3 text-sm font-medium border-b-2 transition-all ${
+                      activeTab === 'details'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4" />
+                      BOQ Details
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('history')}
+                    className={`px-4 py-3 text-sm font-medium border-b-2 transition-all ${
+                      activeTab === 'history'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      History & Timeline
+                    </div>
+                  </button>
+                </div>
+              </div>
+
               {/* Content */}
-              <div className="overflow-y-auto max-h-[calc(90vh-140px)] p-6">
+              <div className="overflow-y-auto max-h-[calc(90vh-200px)] p-6">
                 {isLoading ? (
                   <div className="flex items-center justify-center py-12">
                     <div className="text-center">
@@ -167,6 +202,8 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                       <p className="mt-4 text-gray-600">Loading BOQ details...</p>
                     </div>
                   </div>
+                ) : activeTab === 'history' ? (
+                  <BOQHistoryTimeline boqId={displayData?.boq_id || boq?.boq_id} />
                 ) : boqData ? (
                   <>
                     {/* Project Information */}

@@ -747,7 +747,13 @@ def send_boq_email(boq_id):
         boq_email_service = BOQEmailService()
 
         # Get TD email from request or fetch all Technical Directors
-        data = request.get_json() if request.is_json else {}
+        # Handle GET request with optional JSON body (non-standard but supported)
+        try:
+            data = request.get_json(silent=True) or {}
+        except Exception as e:
+            log.warning(f"Failed to parse JSON body: {e}")
+            data = {}
+
         td_email = data.get('td_email')
         td_name = data.get('full_name')
         comments = data.get('comments')  # Get comments from request

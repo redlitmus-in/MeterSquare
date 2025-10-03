@@ -403,8 +403,8 @@ class EstimatorService {
       const formData = new FormData();
       formData.append('file', file);
 
-      // Upload PDF to estimator endpoint
-      const response = await apiClient.post('/estimator/upload-pdf', formData, {
+      // Upload PDF to BOQ upload endpoint
+      const response = await apiClient.post('/boq/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
@@ -462,7 +462,20 @@ class EstimatorService {
   // Dashboard Metrics
   async getDashboardMetrics(): Promise<{ success: boolean; data?: BOQDashboardMetrics }> {
     try {
-      // Fetch all BOQs and calculate metrics
+      // Try to fetch from backend API first
+      try {
+        const response = await apiClient.get('/estimator_dashboard');
+        if (response.data && response.data.data) {
+          return {
+            success: true,
+            data: response.data.data
+          };
+        }
+      } catch (apiError) {
+        console.log('Backend dashboard API not available, falling back to client-side calculation');
+      }
+
+      // Fallback: Fetch all BOQs and calculate metrics client-side
       const boqsResult = await this.getAllBOQs();
 
       if (!boqsResult.success || !boqsResult.data) {
@@ -602,18 +615,61 @@ class EstimatorService {
     }
   }
 
-  // Send BOQ Email
-  async sendBOQEmail(boqId: number, emailType: 'created' | 'updated' = 'created'): Promise<{ success: boolean; message: string }> {
+  // Send BOQ Email to Technical Director
+  async sendBOQEmail(
+    boqId: number,
+    params?: { td_email?: string; full_name?: string; comments?: string }
+  ): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await apiClient.get(`/send_boq_email/${boqId}?email_type=${emailType}`);
+      const response = await apiClient.get(`/boq_email/${boqId}`, {
+        params: params || {}
+      });
       return {
         success: response.data.success !== false,
-        message: response.data.message || 'Email sent successfully'
+        message: response.data.message || 'Email sent successfully to Technical Director'
       };
     } catch (error: any) {
+      console.error('Email sending error:', error.response?.data || error.message);
       return {
         success: false,
-        message: error.response?.data?.error || 'Failed to send email'
+        message: error.response?.data?.error || error.response?.data?.message || 'Failed to send email'
+      };
+    }
+  }
+
+  // Get BOQ History
+  async getBOQHistory(boqId: number): Promise<{
+    success: boolean;
+    data?: any[];
+    message?: string
+  }> {
+    try {
+      const response = await apiClient.get(`/boq_history/${boqId}`);
+
+      if (response.data && response.data.history) {
+        return {
+          success: true,
+          data: response.data.history
+        };
+      }
+
+      return {
+        success: true,
+        data: []
+      };
+    } catch (error: any) {
+      console.error('Error fetching BOQ history:', error.response?.data || error.message);
+
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'BOQ not found'
+        };
+      }
+
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to fetch BOQ history'
       };
     }
   }

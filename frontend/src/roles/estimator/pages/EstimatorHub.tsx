@@ -26,6 +26,7 @@ import BOQPreview from '../components/BOQPreview';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
 import BOQDetailsModal from '../components/BOQDetailsModal';
 import BOQEditModal from '../components/BOQEditModal';
+import SendBOQEmailModal from '../components/SendBOQEmailModal';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { estimatorService } from '../services/estimatorService';
@@ -51,6 +52,7 @@ import {
   LayoutGrid,
   List,
   ShoppingCart,
+  Mail,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Label } from '@/components/ui/label';
@@ -233,6 +235,8 @@ const EstimatorHub: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalProjects, setTotalProjects] = useState(0);
   const itemsPerPage = 10; // Fixed at 10 items per page
+  const [showSendEmailModal, setShowSendEmailModal] = useState(false);
+  const [boqToEmail, setBoqToEmail] = useState<BOQ | null>(null);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -280,7 +284,8 @@ const EstimatorHub: React.FC = () => {
           },
           total_cost: boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0,
           status: boq.status || 'draft',
-          created_at: boq.created_at
+          created_at: boq.created_at,
+          email_sent: boq.email_sent || false
         }));
         setBOQs(mappedBOQs);
       } else {
@@ -394,13 +399,28 @@ const EstimatorHub: React.FC = () => {
 
       // Filter by tab status
       if (activeTab === 'approved') {
-        filtered = filtered.filter(boq => boq.status === 'approved');
+        filtered = filtered.filter(boq =>
+          boq.status?.toLowerCase() === 'approved' ||
+          boq.status?.toLowerCase() === 'Approved'
+        );
       } else if (activeTab === 'sent') {
-        filtered = filtered.filter(boq => boq.status === 'sent_for_confirmation');
+        // Show BOQs that have been sent to TD for review (status = pending or sent_for_confirmation OR email_sent = true)
+        filtered = filtered.filter(boq =>
+          boq.email_sent === true ||
+          boq.status?.toLowerCase() === 'pending' ||
+          boq.status?.toLowerCase() === 'sent_for_confirmation' ||
+          boq.status?.toLowerCase() === 'sentforconfirmation'
+        );
       } else if (activeTab === 'rejected') {
-        filtered = filtered.filter(boq => boq.status === 'rejected');
+        filtered = filtered.filter(boq =>
+          boq.status?.toLowerCase() === 'rejected' ||
+          boq.status?.toLowerCase() === 'Rejected'
+        );
       } else if (activeTab === 'completed') {
-        filtered = filtered.filter(boq => boq.status === 'completed');
+        filtered = filtered.filter(boq =>
+          boq.status?.toLowerCase() === 'completed' ||
+          boq.status?.toLowerCase() === 'Completed'
+        );
       }
 
       // Filter by search term
@@ -493,22 +513,33 @@ const EstimatorHub: React.FC = () => {
         return;
       }
 
-      // Send all BOQs for this project to TD
+      // Send all BOQs for this project to TD via email
       let successCount = 0;
       let failureCount = 0;
 
       for (const boq of projectBoqs) {
-        const response = await estimatorService.sendBOQForConfirmation(boq.boq_id!);
-        if (response.success) {
+        // Use the email API endpoint to actually send the email
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/boq_email/${boq.boq_id}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
           successCount++;
         } else {
           failureCount++;
+          console.error('Failed to send BOQ:', data.message || data.error);
         }
       }
 
       if (successCount > 0) {
-        toast.success(`Successfully sent ${successCount} BOQ(s) to Technical Director`);
-        await loadBOQs(); // Refresh the BOQ list
+        toast.success(`Successfully sent ${successCount} BOQ(s) via email to Technical Director`);
+        await loadBOQs(); // Refresh the BOQ list to get updated email_sent status
         setActiveTab('sent'); // Switch to "Send BOQ" tab
       }
 
@@ -516,6 +547,7 @@ const EstimatorHub: React.FC = () => {
         toast.warning(`${failureCount} BOQ(s) failed to send`);
       }
     } catch (error) {
+      console.error('Error sending BOQ to TD:', error);
       toast.error('Failed to send BOQ to Technical Director');
     }
   };
@@ -630,6 +662,18 @@ const EstimatorHub: React.FC = () => {
                       title="Edit BOQ"
                     >
                       <Edit className="h-4 w-4 text-green-600" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setBoqToEmail(boq);
+                        setShowSendEmailModal(true);
+                      }}
+                      className="h-8 w-8 p-0"
+                      title="Send to Technical Director"
+                    >
+                      <Mail className="h-4 w-4 text-purple-600" />
                     </Button>
                     <Button
                       variant="ghost"
@@ -769,28 +813,33 @@ const EstimatorHub: React.FC = () => {
                 }}
               >
                 Send BOQ
-                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status === 'sent_for_confirmation').length})</span>
+                <span className="ml-2 text-gray-400">({boqs.filter(b =>
+                  b.email_sent === true ||
+                  b.status?.toLowerCase() === 'pending' ||
+                  b.status?.toLowerCase() === 'sent_for_confirmation' ||
+                  b.status?.toLowerCase() === 'sentforconfirmation'
+                ).length})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="approved"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-4 py-3 font-semibold"
               >
                 Approved BOQ
-                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status === 'approved').length})</span>
+                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'approved').length})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="rejected"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-4 py-3 font-semibold"
               >
                 Rejected BOQ
-                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status === 'rejected').length})</span>
+                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'rejected').length})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="completed"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-600 data-[state=active]:text-green-700 text-gray-500 px-4 py-3 font-semibold"
               >
                 Completed BOQ
-                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status === 'completed').length})</span>
+                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'completed').length})</span>
               </TabsTrigger>
             </TabsList>
 
@@ -892,28 +941,43 @@ const EstimatorHub: React.FC = () => {
                           <Eye className="h-3.5 w-3.5" />
                           View Details
                         </button>
+                        {boqCount === 0 ? (
+                          <button
+                            className="bg-transparent border-2 border-red-500 text-red-600 text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-1 font-semibold"
+                            style={{
+                              boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.15)'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = '#ef4444';
+                              e.currentTarget.style.color = 'white';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                              e.currentTarget.style.color = '#ef4444';
+                            }}
+                            onClick={() => handleCreateBOQ(project)}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Create BOQ
+                          </button>
+                        ) : (
+                          <button
+                            className="bg-gray-100 text-gray-400 text-xs h-8 rounded cursor-not-allowed flex items-center justify-center gap-1 font-semibold"
+                            disabled
+                            title="BOQ already created for this project"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            BOQ Created
+                          </button>
+                        )}
                         <button
-                          className="bg-transparent border-2 border-red-500 text-red-600 text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-1 font-semibold"
-                          style={{
-                            boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.15)'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = '#ef4444';
-                            e.currentTarget.style.color = 'white';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                            e.currentTarget.style.color = '#ef4444';
-                          }}
-                          onClick={() => handleCreateBOQ(project)}
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          Create BOQ
-                        </button>
-                        <button
-                          className="text-white text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1"
-                          style={{ backgroundColor: 'rgb(22, 163, 74)' }}
+                          className={`text-white text-xs h-8 rounded transition-all flex items-center justify-center gap-1 ${
+                            boqCount === 0 ? 'bg-gray-300 cursor-not-allowed' : 'hover:opacity-90'
+                          }`}
+                          style={{ backgroundColor: boqCount === 0 ? '#d1d5db' : 'rgb(22, 163, 74)' }}
                           onClick={() => handleSendToTD(project)}
+                          disabled={boqCount === 0}
+                          title={boqCount === 0 ? 'Create a BOQ first' : 'Send to Technical Director'}
                         >
                           <Send className="h-3.5 w-3.5" />
                           Send to TD
@@ -1022,23 +1086,36 @@ const EstimatorHub: React.FC = () => {
                                     >
                                       <Eye className="h-3.5 w-3.5" />
                                     </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleCreateBOQ(project)}
-                                      className="h-7 w-7 p-0 hover:bg-green-50"
-                                      title="Create BOQ"
-                                    >
-                                      <Plus className="h-3.5 w-3.5 text-green-600" />
-                                    </Button>
+                                    {boqCount === 0 ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleCreateBOQ(project)}
+                                        className="h-7 w-7 p-0 hover:bg-green-50"
+                                        title="Create BOQ"
+                                      >
+                                        <Plus className="h-3.5 w-3.5 text-green-600" />
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        disabled
+                                        className="h-7 w-7 p-0 cursor-not-allowed opacity-40"
+                                        title="BOQ already created for this project"
+                                      >
+                                        <FileText className="h-3.5 w-3.5 text-gray-400" />
+                                      </Button>
+                                    )}
                                     <Button
                                       variant="ghost"
                                       size="sm"
                                       onClick={() => handleSendToTD(project)}
-                                      className="h-7 w-7 p-0 hover:bg-green-50"
-                                      title="Send to TD"
+                                      className="h-7 w-7 p-0 hover:bg-green-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                      title={boqCount === 0 ? 'Create a BOQ first' : 'Send to TD'}
+                                      disabled={boqCount === 0}
                                     >
-                                      <Send className="h-3.5 w-3.5 text-green-600" />
+                                      <Send className={`h-3.5 w-3.5 ${boqCount === 0 ? 'text-gray-400' : 'text-green-600'}`} />
                                     </Button>
                                     <Button
                                       variant="ghost"
@@ -1119,19 +1196,51 @@ const EstimatorHub: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="sent" className="mt-0 p-0">
-              <BOQTable boqList={filteredBOQs} />
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-bold text-gray-900">BOQs Sent for Review</h2>
+                  <div className="text-sm text-gray-600">
+                    {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} pending Technical Director review
+                  </div>
+                </div>
+                <BOQTable boqList={filteredBOQs} />
+              </div>
             </TabsContent>
 
             <TabsContent value="approved" className="mt-0 p-0">
-              <BOQTable boqList={filteredBOQs} />
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-bold text-gray-900">Approved BOQs</h2>
+                  <div className="text-sm text-gray-600">
+                    {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} approved by Technical Director
+                  </div>
+                </div>
+                <BOQTable boqList={filteredBOQs} />
+              </div>
             </TabsContent>
 
             <TabsContent value="rejected" className="mt-0 p-0">
-              <BOQTable boqList={filteredBOQs} />
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-bold text-gray-900">Rejected BOQs</h2>
+                  <div className="text-sm text-gray-600">
+                    {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} rejected by Technical Director
+                  </div>
+                </div>
+                <BOQTable boqList={filteredBOQs} />
+              </div>
             </TabsContent>
 
             <TabsContent value="completed" className="mt-0 p-0">
-              <BOQTable boqList={filteredBOQs} />
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-bold text-gray-900">Completed BOQs</h2>
+                  <div className="text-sm text-gray-600">
+                    {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} marked as completed
+                  </div>
+                </div>
+                <BOQTable boqList={filteredBOQs} />
+              </div>
             </TabsContent>
           </Tabs>
         </div>
@@ -1267,22 +1376,6 @@ const EstimatorHub: React.FC = () => {
 
               {/* BOQ Section */}
               <div className="border-t border-gray-200 pt-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <FileText className="h-5 w-5 text-blue-600" />
-                    Related BOQs
-                  </h3>
-                  <button
-                    className="px-4 py-2 bg-white border-2 border-red-500 text-red-600 text-sm rounded-lg hover:bg-red-50 transition-all font-semibold flex items-center gap-2"
-                    onClick={() => {
-                      handleCreateBOQ(viewingProject);
-                      setViewingProject(null);
-                    }}
-                  >
-                    <Plus className="h-4 w-4" />
-                    Create New BOQ
-                  </button>
-                </div>
                 {(() => {
                   // Filter BOQs by matching project_id
                   const projectBoqs = boqs.filter(boq => {
@@ -1290,18 +1383,36 @@ const EstimatorHub: React.FC = () => {
                     return boq.project?.project_id == viewingProject.project_id;
                   });
 
-                  if (projectBoqs.length === 0) {
-                    return (
-                      <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 border-2 border-dashed border-blue-300 rounded-xl p-8 text-center">
-                        <div className="p-4 bg-blue-50 rounded-full inline-block mb-3">
-                          <FileText className="h-8 w-8 text-blue-600" />
-                        </div>
-                        <p className="text-sm text-gray-600 mb-2">No BOQs created for this project yet</p>
-                        <p className="text-xs text-gray-500">Create your first BOQ to start estimating costs</p>
-                      </div>
-                    );
-                  }
                   return (
+                    <>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                          <FileText className="h-5 w-5 text-blue-600" />
+                          Related BOQs
+                        </h3>
+                        {projectBoqs.length === 0 && (
+                          <button
+                            className="px-4 py-2 bg-white border-2 border-red-500 text-red-600 text-sm rounded-lg hover:bg-red-50 transition-all font-semibold flex items-center gap-2"
+                            onClick={() => {
+                              handleCreateBOQ(viewingProject);
+                              setViewingProject(null);
+                            }}
+                          >
+                            <Plus className="h-4 w-4" />
+                            Create New BOQ
+                          </button>
+                        )}
+                      </div>
+
+                      {projectBoqs.length === 0 ? (
+                        <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 border-2 border-dashed border-blue-300 rounded-xl p-8 text-center">
+                          <div className="p-4 bg-blue-50 rounded-full inline-block mb-3">
+                            <FileText className="h-8 w-8 text-blue-600" />
+                          </div>
+                          <p className="text-sm text-gray-600 mb-2">No BOQs created for this project yet</p>
+                          <p className="text-xs text-gray-500">Create your first BOQ to start estimating costs</p>
+                        </div>
+                      ) : (
                     <div className="space-y-3">
                       {projectBoqs.map((boq) => (
                         <div key={boq.boq_id} className="bg-white border border-blue-100 rounded-lg p-4 hover:shadow-lg hover:border-blue-300 transition-all">
@@ -1374,6 +1485,8 @@ const EstimatorHub: React.FC = () => {
                         </div>
                       ))}
                     </div>
+                      )}
+                    </>
                   );
                 })()}
               </div>
@@ -1502,6 +1615,23 @@ const EstimatorHub: React.FC = () => {
           setEditingBoq(null);
         }}
       />
+
+      {/* Send BOQ Email Modal */}
+      {boqToEmail && (
+        <SendBOQEmailModal
+          isOpen={showSendEmailModal}
+          onClose={() => {
+            setShowSendEmailModal(false);
+            setBoqToEmail(null);
+          }}
+          boqId={boqToEmail.boq_id!}
+          boqName={boqToEmail.boq_name || boqToEmail.title || ''}
+          projectName={boqToEmail.project?.name || ''}
+          onEmailSent={() => {
+            loadBOQs(); // Refresh to get updated email_sent status
+          }}
+        />
+      )}
     </div>
   );
 };
