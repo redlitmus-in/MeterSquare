@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
+import { estimatorService } from '../services/estimatorService';
 
 interface SendBOQEmailModalProps {
   isOpen: boolean;
@@ -35,35 +36,20 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
     setIsSending(true);
 
     try {
-      // Backend expects GET request but can optionally read JSON body
-      // If no custom email provided, backend will auto-detect default TD
-      const hasCustomData = tdEmail || tdName || comments;
+      // Prepare params for custom email data
+      const params: { td_email?: string; full_name?: string; comments?: string } = {};
+      if (tdEmail && tdEmail.trim()) params.td_email = tdEmail.trim();
+      if (tdName && tdName.trim()) params.full_name = tdName.trim();
+      if (comments && comments.trim()) params.comments = comments.trim();
 
-      const requestOptions: RequestInit = {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json'
-        }
-      };
+      const response = await estimatorService.sendBOQEmail(
+        boqId,
+        Object.keys(params).length > 0 ? params : undefined
+      );
 
-      // Only add body if custom data is provided (non-standard for GET but backend supports it)
-      if (hasCustomData) {
-        const requestBody: any = {};
-        if (tdEmail && tdEmail.trim()) requestBody.td_email = tdEmail.trim();
-        if (tdName && tdName.trim()) requestBody.full_name = tdName.trim();
-        if (comments && comments.trim()) requestBody.comments = comments.trim();
-
-        requestOptions.body = JSON.stringify(requestBody);
-      }
-
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/boq_email/${boqId}`, requestOptions);
-
-      const data = await response.json();
-
-      if (response.ok && data.success) {
+      if (response.success) {
         setEmailSent(true);
-        toast.success(data.message || 'BOQ review email sent successfully to Technical Director');
+        toast.success(response.message);
 
         // Wait 2 seconds to show success message before closing
         setTimeout(() => {
@@ -71,7 +57,7 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
           handleClose();
         }, 2000);
       } else {
-        toast.error(data.message || data.error || 'Failed to send BOQ email');
+        toast.error(response.message);
       }
     } catch (error: any) {
       console.error('Error sending BOQ email:', error);
@@ -152,6 +138,7 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                         onClick={handleClose}
                         className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                         disabled={isSending}
+                        title="Close"
                       >
                         <X className="w-5 h-5" />
                       </button>

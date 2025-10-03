@@ -133,7 +133,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {onEdit && (
+                    {onEdit && !(displayData?.email_sent || displayData?.status?.toLowerCase() === 'pending' || displayData?.status?.toLowerCase() === 'sent_for_confirmation') && (
                       <button
                         onClick={onEdit}
                         className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
@@ -154,6 +154,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                     <button
                       onClick={onClose}
                       className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                      title="Close"
                     >
                       <X className="w-5 h-5" />
                     </button>
@@ -162,32 +163,34 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
               </div>
 
               {/* Tabs */}
-              <div className="border-b border-gray-200 bg-gray-50 px-6">
+              <div className="border-b border-gray-200 bg-gray-50 px-3 sm:px-6">
                 <div className="flex gap-1">
                   <button
                     onClick={() => setActiveTab('details')}
-                    className={`px-4 py-3 text-sm font-medium border-b-2 transition-all ${
+                    className={`px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 transition-all ${
                       activeTab === 'details'
                         ? 'border-blue-600 text-blue-600'
                         : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4" />
-                      BOQ Details
+                    <div className="flex items-center gap-1 sm:gap-2">
+                      <FileText className="w-3 h-3 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">BOQ Details</span>
+                      <span className="sm:hidden">Details</span>
                     </div>
                   </button>
                   <button
                     onClick={() => setActiveTab('history')}
-                    className={`px-4 py-3 text-sm font-medium border-b-2 transition-all ${
+                    className={`px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 transition-all ${
                       activeTab === 'history'
                         ? 'border-blue-600 text-blue-600'
                         : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4" />
-                      History & Timeline
+                    <div className="flex items-center gap-1 sm:gap-2">
+                      <Clock className="w-3 h-3 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">History & Timeline</span>
+                      <span className="sm:hidden">History</span>
                     </div>
                   </button>
                 </div>

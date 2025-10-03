@@ -56,6 +56,8 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Label } from '@/components/ui/label';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // Project Creation Form Component
 const ProjectCreationForm: React.FC<{
@@ -304,49 +306,30 @@ const EstimatorHub: React.FC = () => {
 
   const loadProjects = async (page: number = 1) => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/all_project?page=${page}&per_page=10`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setProjects(data.projects || []);
-        // Total count is inside pagination object
-        const totalCount = data.pagination?.total || 0;
-        setTotalProjects(totalCount);
+      const response = await estimatorService.getProjectsPaginated(page, 10);
+      if (response.success) {
+        setProjects(response.projects);
+        setTotalProjects(response.total);
       }
     } catch (error) {
+      console.error('Error loading projects:', error);
     }
   };
 
   const handleCreateProject = async (projectData: any) => {
     try {
-      const url = editingProject
-        ? `${import.meta.env.VITE_API_BASE_URL}/update_project/${editingProject.project_id}`
-        : `${import.meta.env.VITE_API_BASE_URL}/create_project`;
+      const response = editingProject
+        ? await estimatorService.updateProject(editingProject.project_id, projectData)
+        : await estimatorService.createProject(projectData);
 
-      const response = await fetch(url, {
-        method: editingProject ? 'PUT' : 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(projectData)
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        toast.success(editingProject ? 'Project updated successfully' : 'Project created successfully');
+      if (response.success) {
+        toast.success(response.message);
         setShowProjectDialog(false);
         setEditingProject(null);
         await loadProjects();
-        return result.project;
+        return response.project;
       } else {
-        const error = await response.json();
-        toast.error(error.error || (editingProject ? 'Failed to update project' : 'Failed to create project'));
+        toast.error(response.message);
       }
     } catch (error) {
       toast.error(editingProject ? 'Failed to update project' : 'Failed to create project');
@@ -357,21 +340,13 @@ const EstimatorHub: React.FC = () => {
     if (!deletingProject) return;
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/delete_project/${deletingProject.project_id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        toast.success('Project deleted successfully');
+      const response = await estimatorService.deleteProject(deletingProject.project_id);
+      if (response.success) {
+        toast.success(response.message);
         setDeletingProject(null);
         await loadProjects();
       } else {
-        const error = await response.json();
-        toast.error(error.error || 'Failed to delete project');
+        toast.error(response.message);
       }
     } catch (error) {
       toast.error('Failed to delete project');
@@ -397,29 +372,36 @@ const EstimatorHub: React.FC = () => {
       // Filter BOQs
       let filtered = [...boqs];
 
-      // Filter by tab status
+      // Filter by tab status - Status takes priority over email_sent
       if (activeTab === 'approved') {
         filtered = filtered.filter(boq =>
-          boq.status?.toLowerCase() === 'approved' ||
-          boq.status?.toLowerCase() === 'Approved'
+          boq.status?.toLowerCase() === 'approved'
         );
       } else if (activeTab === 'sent') {
-        // Show BOQs that have been sent to TD for review (status = pending or sent_for_confirmation OR email_sent = true)
-        filtered = filtered.filter(boq =>
-          boq.email_sent === true ||
-          boq.status?.toLowerCase() === 'pending' ||
-          boq.status?.toLowerCase() === 'sent_for_confirmation' ||
-          boq.status?.toLowerCase() === 'sentforconfirmation'
-        );
+        // Show BOQs that have been sent but not yet approved/rejected (In_Review, Pending, Sent_for_Confirmation)
+        filtered = filtered.filter(boq => {
+          const status = boq.status?.toLowerCase();
+          return (
+            boq.email_sent === true &&
+            status !== 'approved' &&
+            status !== 'rejected' &&
+            status !== 'completed' &&
+            status !== 'draft'
+          ) || (
+            status === 'in_review' ||
+            status === 'inreview' ||
+            status === 'pending' ||
+            status === 'sent_for_confirmation' ||
+            status === 'sentforconfirmation'
+          );
+        });
       } else if (activeTab === 'rejected') {
         filtered = filtered.filter(boq =>
-          boq.status?.toLowerCase() === 'rejected' ||
-          boq.status?.toLowerCase() === 'Rejected'
+          boq.status?.toLowerCase() === 'rejected'
         );
       } else if (activeTab === 'completed') {
         filtered = filtered.filter(boq =>
-          boq.status?.toLowerCase() === 'completed' ||
-          boq.status?.toLowerCase() === 'Completed'
+          boq.status?.toLowerCase() === 'completed'
         );
       }
 
@@ -518,22 +500,13 @@ const EstimatorHub: React.FC = () => {
       let failureCount = 0;
 
       for (const boq of projectBoqs) {
-        // Use the email API endpoint to actually send the email
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/boq_email/${boq.boq_id}`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-            'Content-Type': 'application/json'
-          }
-        });
+        const response = await estimatorService.sendBOQEmail(boq.boq_id);
 
-        const data = await response.json();
-
-        if (response.ok && data.success) {
+        if (response.success) {
           successCount++;
         } else {
           failureCount++;
-          console.error('Failed to send BOQ:', data.message || data.error);
+          console.error('Failed to send BOQ:', response.message);
         }
       }
 
@@ -573,6 +546,165 @@ const EstimatorHub: React.FC = () => {
     return `AED ${value.toLocaleString('en-AE', { minimumFractionDigits: 0 })}`;
   };
 
+  const handleDownloadBOQ = async (boq: any) => {
+    try {
+      // Fetch full BOQ details
+      const result = await estimatorService.getBOQById(boq.boq_id);
+      if (!result.success || !result.data) {
+        toast.error('Failed to fetch BOQ details');
+        return;
+      }
+
+      const boqData = result.data;
+      const doc = new jsPDF();
+
+      // Header
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Bill of Quantities (BOQ)', 14, 20);
+
+      // BOQ Info
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`BOQ Name: ${boqData.boq_name || 'N/A'}`, 14, 30);
+      doc.text(`Project: ${boqData.project_details?.project_name || 'N/A'}`, 14, 36);
+      doc.text(`Location: ${boqData.project_details?.location || 'N/A'}`, 14, 42);
+      doc.text(`Status: ${boqData.status || 'N/A'}`, 14, 48);
+      doc.text(`Created: ${boqData.created_at ? format(new Date(boqData.created_at), 'dd MMM yyyy') : 'N/A'}`, 14, 54);
+
+      let currentY = 64;
+
+      // Items
+      boqData.items?.forEach((item: any, index: number) => {
+        // Check if we need a new page
+        if (currentY > 250) {
+          doc.addPage();
+          currentY = 20;
+        }
+
+        // Item Header
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`${index + 1}. ${item.item_name}`, 14, currentY);
+        currentY += 6;
+
+        if (item.description) {
+          doc.setFontSize(9);
+          doc.setFont('helvetica', 'italic');
+          doc.text(`${item.description}`, 20, currentY);
+          currentY += 6;
+        }
+
+        // Materials Table
+        if (item.materials && item.materials.length > 0) {
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Materials:', 20, currentY);
+          currentY += 6;
+
+          autoTable(doc, {
+            startY: currentY,
+            head: [['Material', 'Quantity', 'Unit', 'Unit Price', 'Total']],
+            body: item.materials.map((m: any) => [
+              m.material_name,
+              m.quantity.toFixed(2),
+              m.unit,
+              `AED ${m.unit_price.toFixed(2)}`,
+              `AED ${m.total_price.toFixed(2)}`
+            ]),
+            margin: { left: 20 },
+            theme: 'grid',
+            headStyles: { fillColor: [59, 130, 246], fontSize: 9 },
+            bodyStyles: { fontSize: 8 },
+          });
+
+          currentY = (doc as any).lastAutoTable.finalY + 6;
+        }
+
+        // Labour Table
+        if (item.labour && item.labour.length > 0) {
+          if (currentY > 250) {
+            doc.addPage();
+            currentY = 20;
+          }
+
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Labour:', 20, currentY);
+          currentY += 6;
+
+          autoTable(doc, {
+            startY: currentY,
+            head: [['Role', 'Hours', 'Rate/Hour', 'Total']],
+            body: item.labour.map((l: any) => [
+              l.labour_role,
+              l.hours.toFixed(2),
+              `AED ${l.rate_per_hour.toFixed(2)}`,
+              `AED ${l.total_cost.toFixed(2)}`
+            ]),
+            margin: { left: 20 },
+            theme: 'grid',
+            headStyles: { fillColor: [249, 115, 22], fontSize: 9 },
+            bodyStyles: { fontSize: 8 },
+          });
+
+          currentY = (doc as any).lastAutoTable.finalY + 6;
+        }
+
+        // Item Costs
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`Base Cost: AED ${item.base_cost?.toFixed(2) || '0.00'}`, 20, currentY);
+        currentY += 5;
+        doc.text(`Overhead (${item.overhead_percentage || 0}%): AED ${item.overhead_amount?.toFixed(2) || '0.00'}`, 20, currentY);
+        currentY += 5;
+        doc.text(`Profit Margin (${item.profit_margin_percentage || 0}%): AED ${item.profit_margin_amount?.toFixed(2) || '0.00'}`, 20, currentY);
+        currentY += 5;
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Selling Price: AED ${item.selling_price?.toFixed(2) || '0.00'}`, 20, currentY);
+        currentY += 10;
+      });
+
+      // Summary
+      if (currentY > 240) {
+        doc.addPage();
+        currentY = 20;
+      }
+
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Summary', 14, currentY);
+      currentY += 8;
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Total Items: ${boqData.summary?.total_items || 0}`, 20, currentY);
+      currentY += 6;
+      doc.text(`Total Materials: ${boqData.summary?.total_materials || 0}`, 20, currentY);
+      currentY += 6;
+      doc.text(`Total Labour: ${boqData.summary?.total_labour || 0}`, 20, currentY);
+      currentY += 6;
+      doc.text(`Material Cost: AED ${boqData.summary?.total_material_cost?.toFixed(2) || '0.00'}`, 20, currentY);
+      currentY += 6;
+      doc.text(`Labour Cost: AED ${boqData.summary?.total_labour_cost?.toFixed(2) || '0.00'}`, 20, currentY);
+      currentY += 6;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text(`Total Cost: AED ${boqData.summary?.total_cost?.toFixed(2) || '0.00'}`, 20, currentY);
+      currentY += 6;
+      doc.text(`Selling Price: AED ${boqData.summary?.selling_price?.toFixed(2) || '0.00'}`, 20, currentY);
+
+      // Save PDF
+      const fileName = `BOQ_${boqData.boq_name?.replace(/[^a-z0-9]/gi, '_')}_${format(new Date(), 'yyyyMMdd')}.pdf`;
+      doc.save(fileName);
+
+      toast.success('BOQ downloaded successfully');
+    } catch (error) {
+      console.error('Error downloading BOQ:', error);
+      toast.error('Failed to download BOQ');
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const normalizedStatus = status?.toLowerCase().replace('_', '') || 'draft';
     const config: Record<string, { className: string; icon: any }> = {
@@ -580,6 +712,7 @@ const EstimatorHub: React.FC = () => {
       inreview: { className: 'bg-yellow-50 text-yellow-700 border-yellow-200', icon: Clock },
       approved: { className: 'bg-green-50 text-green-700 border-green-200', icon: CheckCircle },
       sentforconfirmation: { className: 'bg-blue-50 text-blue-700 border-blue-200', icon: Send },
+      pending: { className: 'bg-orange-50 text-orange-700 border-orange-200', icon: Clock },
       rejected: { className: 'bg-red-50 text-red-700 border-red-200', icon: AlertCircle }
     };
 
@@ -590,6 +723,150 @@ const EstimatorHub: React.FC = () => {
         <Icon className="h-3 w-3" />
         {status.replace('_', ' ').toUpperCase()}
       </Badge>
+    );
+  };
+
+  const BOQCard = ({ boq }: { boq: BOQ }) => {
+    const isSent = boq.email_sent || boq.status?.toLowerCase() === 'pending' || boq.status?.toLowerCase() === 'sent_for_confirmation';
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
+      >
+        {/* Header */}
+        <div className="p-4">
+          <div className="flex items-start justify-between mb-2">
+            <h3 className="font-semibold text-gray-900 text-base flex-1">{boq.title}</h3>
+            <div className="flex items-center gap-1">
+              <button
+                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
+                onClick={() => {
+                  setSelectedBoqForDetails(boq);
+                  setShowBoqDetails(true);
+                }}
+                title="View Details"
+              >
+                <Eye className="h-4 w-4" />
+              </button>
+              {!isSent && (
+                <>
+                  <button
+                    className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-all"
+                    onClick={() => {
+                      setEditingBoq(boq);
+                      setShowBoqEdit(true);
+                    }}
+                    title="Edit BOQ"
+                  >
+                    <Edit className="h-4 w-4" />
+                  </button>
+                  <button
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
+                    onClick={() => setDeletingBoq(boq)}
+                    title="Delete BOQ"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-1 text-sm text-gray-600">
+            <div className="flex items-center gap-1.5">
+              <Building2 className="h-3.5 w-3.5 text-gray-400" />
+              <span className="truncate">{boq.project?.name || 'No project'}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Users className="h-3.5 w-3.5 text-gray-400" />
+              <span className="truncate">{boq.project?.client || 'No client'}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <MapPin className="h-3.5 w-3.5 text-gray-400" />
+              <span className="truncate">{boq.project?.location || 'No location'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="px-4 pb-3 text-center text-sm">
+          <span className="font-bold text-blue-600 text-lg">{boq.total_cost ? formatCurrency(boq.total_cost) : 'AED 0'}</span>
+          <span className="text-gray-600 ml-1 text-xs">Total Value</span>
+        </div>
+
+        {/* Info */}
+        <div className="px-4 pb-3 space-y-1.5 text-xs">
+          <div className="flex justify-between">
+            <span className="text-gray-500">Status:</span>
+            {getStatusBadge(boq.status)}
+          </div>
+          {boq.created_at && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Created:</span>
+              <span className="font-medium text-gray-700">{format(new Date(boq.created_at), 'dd MMM yyyy')}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="border-t border-gray-200 p-2 sm:p-3 grid grid-cols-3 gap-1 sm:gap-2">
+          <button
+            className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+            onClick={() => {
+              setSelectedBoqForDetails(boq);
+              setShowBoqDetails(true);
+            }}
+          >
+            <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+            <span className="hidden sm:inline">View Details</span>
+            <span className="sm:hidden">View</span>
+          </button>
+          {!isSent ? (
+            <>
+              <button
+                className="bg-transparent border-2 border-green-500 text-green-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                style={{ boxShadow: '0 0 0 3px rgba(34, 197, 94, 0.15)' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#22c55e';
+                  e.currentTarget.style.color = 'white';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = '#22c55e';
+                }}
+                onClick={() => {
+                  setEditingBoq(boq);
+                  setShowBoqEdit(true);
+                }}
+              >
+                <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Edit BOQ</span>
+                <span className="sm:hidden">Edit</span>
+              </button>
+              <button
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+                style={{ backgroundColor: 'rgb(168, 85, 247)' }}
+                onClick={() => {
+                  setBoqToEmail(boq);
+                  setShowSendEmailModal(true);
+                }}
+              >
+                <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Send Email</span>
+                <span className="sm:hidden">Email</span>
+              </button>
+            </>
+          ) : (
+            <div className="col-span-2 flex items-center justify-center text-xs text-gray-500">
+              <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
+              Sent to TD
+            </div>
+          )}
+        </div>
+      </motion.div>
     );
   };
 
@@ -651,60 +928,44 @@ const EstimatorHub: React.FC = () => {
                     >
                       <Eye className="h-4 w-4" />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setEditingBoq(boq);
-                        setShowBoqEdit(true);
-                      }}
-                      className="h-8 w-8 p-0"
-                      title="Edit BOQ"
-                    >
-                      <Edit className="h-4 w-4 text-green-600" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setBoqToEmail(boq);
-                        setShowSendEmailModal(true);
-                      }}
-                      className="h-8 w-8 p-0"
-                      title="Send to Technical Director"
-                    >
-                      <Mail className="h-4 w-4 text-purple-600" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setDeletingBoq(boq);
-                      }}
-                      className="h-8 w-8 p-0"
-                      title="Delete BOQ"
-                    >
-                      <Trash2 className="h-4 w-4 text-red-600" />
-                    </Button>
-                    {boq.status === 'pending' && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleApproveBOQ(boq.boq_id!)}
-                        className="h-8 w-8 p-0"
-                      >
-                        <CheckCircle className="h-4 w-4 text-green-600" />
-                      </Button>
-                    )}
-                    {boq.status === 'approved' && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleSendForConfirmation(boq.boq_id!)}
-                        className="h-8 w-8 p-0"
-                      >
-                        <Send className="h-4 w-4 text-blue-600" />
-                      </Button>
+                    {!(boq.email_sent || boq.status?.toLowerCase() === 'pending' || boq.status?.toLowerCase() === 'sent_for_confirmation') && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setEditingBoq(boq);
+                            setShowBoqEdit(true);
+                          }}
+                          className="h-8 w-8 p-0"
+                          title="Edit BOQ"
+                        >
+                          <Edit className="h-4 w-4 text-green-600" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setBoqToEmail(boq);
+                            setShowSendEmailModal(true);
+                          }}
+                          className="h-8 w-8 p-0"
+                          title="Send to Technical Director"
+                        >
+                          <Mail className="h-4 w-4 text-purple-600" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setDeletingBoq(boq);
+                          }}
+                          className="h-8 w-8 p-0"
+                          title="Delete BOQ"
+                        >
+                          <Trash2 className="h-4 w-4 text-red-600" />
+                        </Button>
+                      </>
                     )}
                   </div>
                 </TableCell>
@@ -739,58 +1000,60 @@ const EstimatorHub: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
         {/* Search Bar with Controls */}
-        <div className="mb-6 flex items-center gap-4">
-          <div className="relative flex-1 max-w-md">
+        <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
+          <div className="relative flex-1 max-w-full sm:max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
             <Input
               placeholder="Search by title, project, or client..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 border-gray-200 focus:border-gray-300 focus:ring-0"
+              className="pl-10 border-gray-200 focus:border-gray-300 focus:ring-0 text-sm"
             />
           </div>
 
-          {/* View Mode Toggle */}
-          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+          <div className="flex items-center gap-3">
+            {/* View Mode Toggle */}
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+              <Button
+                size="sm"
+                variant={viewMode === 'cards' ? 'default' : 'ghost'}
+                className={`h-8 px-2 sm:px-3 ${viewMode === 'cards' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
+                style={viewMode === 'cards' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
+                onClick={() => {
+                  setViewMode('cards');
+                  setCurrentPage(1);
+                }}
+              >
+                <LayoutGrid className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">Cards</span>
+              </Button>
+              <Button
+                size="sm"
+                variant={viewMode === 'table' ? 'default' : 'ghost'}
+                className={`h-8 px-2 sm:px-3 ${viewMode === 'table' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
+                style={viewMode === 'table' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
+                onClick={() => {
+                  setViewMode('table');
+                  setCurrentPage(1);
+                }}
+              >
+                <List className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">Table</span>
+              </Button>
+            </div>
+
+            {/* New Project Button */}
             <Button
+              onClick={() => setShowProjectDialog(true)}
+              className="bg-red-600 hover:bg-red-700 text-white shadow-md h-8 whitespace-nowrap"
               size="sm"
-              variant={viewMode === 'cards' ? 'default' : 'ghost'}
-              className={`h-8 px-3 ${viewMode === 'cards' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
-              style={viewMode === 'cards' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
-              onClick={() => {
-                setViewMode('cards');
-                setCurrentPage(1);
-              }}
             >
-              <LayoutGrid className="h-4 w-4 mr-1.5" />
-              Cards
-            </Button>
-            <Button
-              size="sm"
-              variant={viewMode === 'table' ? 'default' : 'ghost'}
-              className={`h-8 px-3 ${viewMode === 'table' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
-              style={viewMode === 'table' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
-              onClick={() => {
-                setViewMode('table');
-                setCurrentPage(1);
-              }}
-            >
-              <List className="h-4 w-4 mr-1.5" />
-              Table
+              <Plus className="h-4 w-4 mr-1 sm:mr-2" />
+              <span className="text-xs sm:text-sm">New Project</span>
             </Button>
           </div>
-
-          {/* New Project Button */}
-          <Button
-            onClick={() => setShowProjectDialog(true)}
-            className="bg-red-600 hover:bg-red-700 text-white shadow-md h-8"
-            size="sm"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            New Project
-          </Button>
         </div>
 
         {/* Content Tabs - Match TD Style */}
@@ -799,53 +1062,75 @@ const EstimatorHub: React.FC = () => {
             <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200 mb-6">
               <TabsTrigger
                 value="projects"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 text-gray-500 px-4 py-3 font-semibold"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
-                All Projects
-                <span className="ml-2 text-gray-400">({projects.length})</span>
+                <span className="hidden sm:inline">Pending</span>
+                <span className="sm:hidden">Pending</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({projects.filter(p => {
+                  const projectBoqs = boqs.filter(boq => boq.project?.project_id == p.project_id);
+                  return !projectBoqs.some(boq =>
+                    boq.email_sent === true ||
+                    boq.status?.toLowerCase() === 'pending' ||
+                    boq.status?.toLowerCase() === 'sent_for_confirmation'
+                  );
+                }).length})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="sent"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:text-gray-500 px-4 py-3 font-semibold"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
                 style={{
                   borderBottomColor: activeTab === 'sent' ? 'rgb(36, 61, 138)' : 'transparent',
                   color: activeTab === 'sent' ? 'rgb(36, 61, 138)' : ''
                 }}
               >
-                Send BOQ
-                <span className="ml-2 text-gray-400">({boqs.filter(b =>
-                  b.email_sent === true ||
-                  b.status?.toLowerCase() === 'pending' ||
-                  b.status?.toLowerCase() === 'sent_for_confirmation' ||
-                  b.status?.toLowerCase() === 'sentforconfirmation'
-                ).length})</span>
+                <span className="hidden sm:inline">Send BOQ</span>
+                <span className="sm:hidden">Sent</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
+                  const status = b.status?.toLowerCase();
+                  return (
+                    b.email_sent === true &&
+                    status !== 'approved' &&
+                    status !== 'rejected' &&
+                    status !== 'completed' &&
+                    status !== 'draft'
+                  ) || (
+                    status === 'in_review' ||
+                    status === 'inreview' ||
+                    status === 'pending' ||
+                    status === 'sent_for_confirmation' ||
+                    status === 'sentforconfirmation'
+                  );
+                }).length})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="approved"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-4 py-3 font-semibold"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
-                Approved BOQ
-                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'approved').length})</span>
+                <span className="hidden sm:inline">Approved BOQ</span>
+                <span className="sm:hidden">Approved</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'approved').length})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="rejected"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-4 py-3 font-semibold"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
-                Rejected BOQ
-                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'rejected').length})</span>
+                <span className="hidden sm:inline">Rejected BOQ</span>
+                <span className="sm:hidden">Rejected</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'rejected').length})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="completed"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-600 data-[state=active]:text-green-700 text-gray-500 px-4 py-3 font-semibold"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-600 data-[state=active]:text-green-700 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
-                Completed BOQ
-                <span className="ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'completed').length})</span>
+                <span className="hidden sm:inline">Completed BOQ</span>
+                <span className="sm:hidden">Completed</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'completed').length})</span>
               </TabsTrigger>
             </TabsList>
 
             <TabsContent value="projects" className="mt-0 p-0">
-              <div className="space-y-6">
-                <h2 className="text-xl font-bold text-gray-900">All Projects</h2>
+              <div className="space-y-4 sm:space-y-6">
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending Projects</h2>
 
                 {(() => {
                   // Pagination logic - backend returns paginated data
@@ -855,12 +1140,27 @@ const EstimatorHub: React.FC = () => {
                   return (
                     <>
                       {viewMode === 'cards' ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
-                  {filteredProjects.map((project, index) => {
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                  {filteredProjects
+                    .filter(project => {
+                      // Filter out projects with sent BOQs from All Projects tab
+                      const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+                      const hasSentBoq = projectBoqs.some(boq =>
+                        boq.email_sent === true ||
+                        boq.status?.toLowerCase() === 'pending' ||
+                        boq.status?.toLowerCase() === 'sent_for_confirmation'
+                      );
+                      return !hasSentBoq; // Only show projects that haven't been sent
+                    })
+                    .map((project, index) => {
                     // Count BOQs for this project
                     const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
                     const boqCount = projectBoqs.length;
-                    const pendingBoqs = projectBoqs.filter(boq => boq.status === 'pending').length;
+                    const hasSentBoq = projectBoqs.some(boq =>
+                      boq.email_sent === true ||
+                      boq.status?.toLowerCase() === 'pending' ||
+                      boq.status?.toLowerCase() === 'sent_for_confirmation'
+                    );
 
                     return (
                     <motion.div
@@ -932,18 +1232,19 @@ const EstimatorHub: React.FC = () => {
                       </div>
 
                       {/* Actions */}
-                      <div className="border-t border-gray-200 p-3 grid grid-cols-3 gap-2">
+                      <div className="border-t border-gray-200 p-2 sm:p-3 grid grid-cols-3 gap-1 sm:gap-2">
                         <button
-                          className="text-white text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 font-semibold"
+                          className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
                           style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                           onClick={() => setViewingProject(project)}
                         >
-                          <Eye className="h-3.5 w-3.5" />
-                          View Details
+                          <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                          <span className="hidden sm:inline">View Details</span>
+                          <span className="sm:hidden">View</span>
                         </button>
                         {boqCount === 0 ? (
                           <button
-                            className="bg-transparent border-2 border-red-500 text-red-600 text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-1 font-semibold"
+                            className="bg-transparent border-2 border-red-500 text-red-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
                             style={{
                               boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.15)'
                             }}
@@ -957,31 +1258,45 @@ const EstimatorHub: React.FC = () => {
                             }}
                             onClick={() => handleCreateBOQ(project)}
                           >
-                            <Plus className="h-3.5 w-3.5" />
-                            Create BOQ
+                            <Plus className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                            <span className="hidden sm:inline">Create BOQ</span>
+                            <span className="sm:hidden">Create</span>
+                          </button>
+                        ) : hasSentBoq ? (
+                          <button
+                            className="bg-green-100 text-green-600 text-[10px] sm:text-xs h-8 rounded cursor-not-allowed flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                            disabled
+                            title="BOQ already sent to TD"
+                          >
+                            <CheckCircle className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                            <span className="hidden sm:inline">BOQ Sent</span>
+                            <span className="sm:hidden">Sent</span>
                           </button>
                         ) : (
                           <button
-                            className="bg-gray-100 text-gray-400 text-xs h-8 rounded cursor-not-allowed flex items-center justify-center gap-1 font-semibold"
+                            className="bg-gray-100 text-gray-400 text-[10px] sm:text-xs h-8 rounded cursor-not-allowed flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
                             disabled
                             title="BOQ already created for this project"
                           >
-                            <FileText className="h-3.5 w-3.5" />
-                            BOQ Created
+                            <FileText className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                            <span className="hidden sm:inline">BOQ Created</span>
+                            <span className="sm:hidden">Created</span>
                           </button>
                         )}
-                        <button
-                          className={`text-white text-xs h-8 rounded transition-all flex items-center justify-center gap-1 ${
-                            boqCount === 0 ? 'bg-gray-300 cursor-not-allowed' : 'hover:opacity-90'
-                          }`}
-                          style={{ backgroundColor: boqCount === 0 ? '#d1d5db' : 'rgb(22, 163, 74)' }}
-                          onClick={() => handleSendToTD(project)}
-                          disabled={boqCount === 0}
-                          title={boqCount === 0 ? 'Create a BOQ first' : 'Send to Technical Director'}
-                        >
-                          <Send className="h-3.5 w-3.5" />
-                          Send to TD
-                        </button>
+                        {!hasSentBoq && boqCount > 0 ? (
+                          <button
+                            className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+                            style={{ backgroundColor: 'rgb(22, 163, 74)' }}
+                            onClick={() => handleSendToTD(project)}
+                            title="Send to Technical Director"
+                          >
+                            <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                            <span className="hidden sm:inline">Send to TD</span>
+                            <span className="sm:hidden">Send</span>
+                          </button>
+                        ) : (
+                          <div className="text-xs h-8 flex items-center justify-center"></div>
+                        )}
                       </div>
                     </motion.div>
                     );
@@ -1031,9 +1346,25 @@ const EstimatorHub: React.FC = () => {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          filteredProjects.map((project) => {
+                          filteredProjects
+                            .filter(project => {
+                              // Filter out projects with sent BOQs from All Projects tab
+                              const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+                              const hasSentBoq = projectBoqs.some(boq =>
+                                boq.email_sent === true ||
+                                boq.status?.toLowerCase() === 'pending' ||
+                                boq.status?.toLowerCase() === 'sent_for_confirmation'
+                              );
+                              return !hasSentBoq;
+                            })
+                            .map((project) => {
                             const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
                             const boqCount = projectBoqs.length;
+                            const hasSentBoq = projectBoqs.some(boq =>
+                              boq.email_sent === true ||
+                              boq.status?.toLowerCase() === 'pending' ||
+                              boq.status?.toLowerCase() === 'sent_for_confirmation'
+                            );
 
                             return (
                               <TableRow key={project.project_id} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors duration-150">
@@ -1096,6 +1427,16 @@ const EstimatorHub: React.FC = () => {
                                       >
                                         <Plus className="h-3.5 w-3.5 text-green-600" />
                                       </Button>
+                                    ) : hasSentBoq ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        disabled
+                                        className="h-7 w-7 p-0 cursor-not-allowed opacity-60"
+                                        title="BOQ already sent to TD"
+                                      >
+                                        <CheckCircle className="h-3.5 w-3.5 text-green-600" />
+                                      </Button>
                                     ) : (
                                       <Button
                                         variant="ghost"
@@ -1107,16 +1448,17 @@ const EstimatorHub: React.FC = () => {
                                         <FileText className="h-3.5 w-3.5 text-gray-400" />
                                       </Button>
                                     )}
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleSendToTD(project)}
-                                      className="h-7 w-7 p-0 hover:bg-green-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                                      title={boqCount === 0 ? 'Create a BOQ first' : 'Send to TD'}
-                                      disabled={boqCount === 0}
-                                    >
-                                      <Send className={`h-3.5 w-3.5 ${boqCount === 0 ? 'text-gray-400' : 'text-green-600'}`} />
-                                    </Button>
+                                    {!hasSentBoq && boqCount > 0 && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleSendToTD(project)}
+                                        className="h-7 w-7 p-0 hover:bg-green-50"
+                                        title="Send to TD"
+                                      >
+                                        <Send className="h-3.5 w-3.5 text-green-600" />
+                                      </Button>
+                                    )}
                                     <Button
                                       variant="ghost"
                                       size="sm"
@@ -1196,50 +1538,82 @@ const EstimatorHub: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="sent" className="mt-0 p-0">
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-gray-900">BOQs Sent for Review</h2>
-                  <div className="text-sm text-gray-600">
+              <div className="space-y-4 sm:space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">BOQs Sent for Review</h2>
+                  <div className="text-xs sm:text-sm text-gray-600">
                     {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} pending Technical Director review
                   </div>
                 </div>
-                <BOQTable boqList={filteredBOQs} />
+                {viewMode === 'cards' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                    {filteredBOQs.map((boq) => (
+                      <BOQCard key={boq.boq_id} boq={boq} />
+                    ))}
+                  </div>
+                ) : (
+                  <BOQTable boqList={filteredBOQs} />
+                )}
               </div>
             </TabsContent>
 
             <TabsContent value="approved" className="mt-0 p-0">
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-gray-900">Approved BOQs</h2>
-                  <div className="text-sm text-gray-600">
+              <div className="space-y-4 sm:space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Approved BOQs</h2>
+                  <div className="text-xs sm:text-sm text-gray-600">
                     {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} approved by Technical Director
                   </div>
                 </div>
-                <BOQTable boqList={filteredBOQs} />
+                {viewMode === 'cards' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                    {filteredBOQs.map((boq) => (
+                      <BOQCard key={boq.boq_id} boq={boq} />
+                    ))}
+                  </div>
+                ) : (
+                  <BOQTable boqList={filteredBOQs} />
+                )}
               </div>
             </TabsContent>
 
             <TabsContent value="rejected" className="mt-0 p-0">
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-gray-900">Rejected BOQs</h2>
-                  <div className="text-sm text-gray-600">
+              <div className="space-y-4 sm:space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Rejected BOQs</h2>
+                  <div className="text-xs sm:text-sm text-gray-600">
                     {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} rejected by Technical Director
                   </div>
                 </div>
-                <BOQTable boqList={filteredBOQs} />
+                {viewMode === 'cards' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                    {filteredBOQs.map((boq) => (
+                      <BOQCard key={boq.boq_id} boq={boq} />
+                    ))}
+                  </div>
+                ) : (
+                  <BOQTable boqList={filteredBOQs} />
+                )}
               </div>
             </TabsContent>
 
             <TabsContent value="completed" className="mt-0 p-0">
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-gray-900">Completed BOQs</h2>
-                  <div className="text-sm text-gray-600">
+              <div className="space-y-4 sm:space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Completed BOQs</h2>
+                  <div className="text-xs sm:text-sm text-gray-600">
                     {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} marked as completed
                   </div>
                 </div>
-                <BOQTable boqList={filteredBOQs} />
+                {viewMode === 'cards' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                    {filteredBOQs.map((boq) => (
+                      <BOQCard key={boq.boq_id} boq={boq} />
+                    ))}
+                  </div>
+                ) : (
+                  <BOQTable boqList={filteredBOQs} />
+                )}
               </div>
             </TabsContent>
           </Tabs>
@@ -1597,7 +1971,9 @@ const EstimatorHub: React.FC = () => {
           }
         }}
         onDownload={() => {
-          toast.info('BOQ download feature will be implemented soon');
+          if (selectedBoqForDetails) {
+            handleDownloadBOQ(selectedBoqForDetails);
+          }
         }}
       />
 

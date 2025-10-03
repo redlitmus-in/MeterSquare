@@ -959,6 +959,83 @@ class EstimatorService {
     return Array.from(sectionsMap.values());
   }
 
+  // Project Management Methods
+  async getProjectsPaginated(page: number = 1, perPage: number = 10): Promise<{
+    success: boolean;
+    projects: any[];
+    total: number;
+    pagination?: any;
+  }> {
+    try {
+      const response = await apiClient.get('/all_project', {
+        params: { page, per_page: perPage }
+      });
+
+      return {
+        success: true,
+        projects: response.data.projects || [],
+        total: response.data.pagination?.total || 0,
+        pagination: response.data.pagination
+      };
+    } catch (error) {
+      console.error('Failed to fetch paginated projects:', error);
+      return {
+        success: false,
+        projects: [],
+        total: 0
+      };
+    }
+  }
+
+  async createProject(projectData: any): Promise<{ success: boolean; message: string; project?: any }> {
+    try {
+      const response = await apiClient.post('/create_project', projectData);
+      return {
+        success: true,
+        message: response.data.message || 'Project created successfully',
+        project: response.data.project
+      };
+    } catch (error: any) {
+      console.error('Failed to create project:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to create project'
+      };
+    }
+  }
+
+  async updateProject(projectId: number | string, projectData: any): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await apiClient.put(`/update_project/${projectId}`, projectData);
+      return {
+        success: true,
+        message: response.data.message || 'Project updated successfully'
+      };
+    } catch (error: any) {
+      console.error('Failed to update project:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to update project'
+      };
+    }
+  }
+
+  async deleteProject(projectId: number | string): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await apiClient.delete(`/delete_project/${projectId}`);
+      return {
+        success: true,
+        message: response.data.message || 'Project deleted successfully'
+      };
+    } catch (error: any) {
+      console.error('Failed to delete project:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to delete project'
+      };
+    }
+  }
+
 }
 
 export const estimatorService = new EstimatorService();

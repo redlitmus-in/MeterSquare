@@ -296,6 +296,7 @@ export interface BOQGetResponse {
   status: string;
   created_at: string;
   created_by: string;
+  email_sent?: boolean;
   project_details: {
     project_name: string | null;
     location: string | null;
@@ -327,6 +328,7 @@ export interface BOQListResponse {
     client: string | null;
     location: string | null;
     status: string;
+    email_sent?: boolean;
     items_count: number;
     material_count: number;
     labour_count: number;

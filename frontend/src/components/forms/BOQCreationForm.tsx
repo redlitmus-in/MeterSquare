@@ -46,6 +46,7 @@ interface BOQLabourForm extends Omit<BOQLabour, 'labour_id' | 'total_cost'> {
   master_labour_id?: number; // Track if this is an existing labour
   is_new?: boolean; // Track if this is a new labour
   is_from_master?: boolean; // Track if selected from dropdown
+  work_type?: 'piece_rate' | 'contract' | 'daily_wages'; // Labour-specific work type
 }
 
 interface BOQCreationFormProps {
@@ -429,6 +430,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
       labour_role: '',
       hours: 1,
       rate_per_hour: 0,
+      work_type: 'piece_rate', // Default to piece rate
       is_new: true
     };
 
@@ -815,17 +817,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                           placeholder="Description (optional)"
                           disabled={isSubmitting}
                         />
-                        <select
-                          value={item.work_type}
-                          onChange={(e) => updateItem(item.id, 'work_type', e.target.value as WorkType)}
-                          className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                          disabled={isSubmitting}
-                          aria-label="Work type"
-                        >
-                          <option value="contract">Contract</option>
-                          <option value="daily_wages">Daily Wages</option>
-                          <option value="piece_rate">Piece Rate</option>
-                        </select>
                       </div>
                       <div className="flex items-center gap-3 ml-4">
                         <span className="text-sm font-semibold text-gray-900">
@@ -973,6 +964,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                       }}
                                       className="px-1 hover:bg-blue-100 rounded text-blue-600"
                                       disabled={isSubmitting}
+                                      title="Increase quantity"
                                     >
                                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
@@ -986,6 +978,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                       }}
                                       className="px-1 hover:bg-blue-100 rounded text-blue-600"
                                       disabled={isSubmitting}
+                                      title="Decrease quantity"
                                     >
                                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -1032,6 +1025,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                         }}
                                         className="px-1 hover:bg-blue-100 rounded text-blue-600"
                                         disabled={isSubmitting}
+                                        title="Increase price"
                                       >
                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
@@ -1045,6 +1039,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                         }}
                                         className="px-1 hover:bg-blue-100 rounded text-blue-600"
                                         disabled={isSubmitting}
+                                        title="Decrease price"
                                       >
                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -1174,6 +1169,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                       </div>
                                     )}
                                   </div>
+                                <div className="flex items-center gap-2">
+                                  <select
+                                    value={labour.work_type || 'piece_rate'}
+                                    onChange={(e) => updateLabour(item.id, labour.id, 'work_type', e.target.value)}
+                                    className="px-3 py-1.5 text-xs border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white"
+                                    disabled={isSubmitting}
+                                  >
+                                    <option value="piece_rate">Piece Rate</option>
+                                    <option value="contract">Contract</option>
+                                    <option value="daily_wages">Daily Wages</option>
+                                  </select>
+                                </div>
                                 <div className="relative">
                                   <input
                                     type="number"
@@ -1197,6 +1204,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                       }}
                                       className="px-1 hover:bg-orange-100 rounded text-orange-600"
                                       disabled={isSubmitting}
+                                      title="Increase hours"
                                     >
                                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
@@ -1210,6 +1218,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                       }}
                                       className="px-1 hover:bg-orange-100 rounded text-orange-600"
                                       disabled={isSubmitting}
+                                      title="Decrease hours"
                                     >
                                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -1242,6 +1251,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                         }}
                                         className="px-1 hover:bg-orange-100 rounded text-orange-600"
                                         disabled={isSubmitting}
+                                        title="Increase rate"
                                       >
                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
@@ -1255,6 +1265,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
                                         }}
                                         className="px-1 hover:bg-orange-100 rounded text-orange-600"
                                         disabled={isSubmitting}
+                                        title="Decrease rate"
                                       >
                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
