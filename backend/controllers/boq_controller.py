@@ -331,6 +331,7 @@ def get_boq(boq_id):
             "boq_name": boq.boq_name,
             "project_id": boq.project_id,
             "status": boq.status,
+            "email_sent": boq.email_sent,
             "created_at": boq.created_at.isoformat() if boq.created_at else None,
             "created_by": boq.created_by,
             "project_details": {
