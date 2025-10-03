@@ -55,6 +55,13 @@ const SEAssignment = lazy(() => import('@/roles/project-manager/pages/SEAssignme
 const ProcurementTracking = lazy(() => import('@/roles/project-manager/pages/ProcurementTracking'));
 const ProgressTracking = lazy(() => import('@/roles/project-manager/pages/ProgressTracking'));
 
+// Site Engineer Pages
+const SEDashboard = lazy(() => import('@/roles/site-engineer/pages/SEDashboard'));
+const MyProject = lazy(() => import('@/roles/site-engineer/pages/MyProject'));
+const TaskExecution = lazy(() => import('@/roles/site-engineer/pages/TaskExecution'));
+const MaterialUsage = lazy(() => import('@/roles/site-engineer/pages/MaterialUsage'));
+const ReportIssue = lazy(() => import('@/roles/site-engineer/pages/ReportIssue'));
+
 // Lazy load workflow pages
 const MaterialDispatchProductionPage = lazy(() => import('@/pages/workflows/MaterialDispatchProductionPage'));
 const MaterialDispatchSitePage = lazy(() => import('@/pages/workflows/MaterialDispatchSitePage'));
@@ -439,6 +446,12 @@ function App() {
             <Route path="se-assignment" element={<SEAssignment />} />
             <Route path="procurement-tracking" element={<ProcurementTracking />} />
             <Route path="progress" element={<ProgressTracking />} />
+
+            {/* Site Engineer specific routes */}
+            <Route path="my-project" element={<MyProject />} />
+            <Route path="task-execution" element={<TaskExecution />} />
+            <Route path="material-usage" element={<MaterialUsage />} />
+            <Route path="report-issue" element={<ReportIssue />} />
           </Route>
         </Route>
 

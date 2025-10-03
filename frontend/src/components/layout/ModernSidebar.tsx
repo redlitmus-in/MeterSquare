@@ -2,9 +2,9 @@ import React, { Fragment, useState, useMemo, useCallback, memo } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
+import {
   XMarkIcon,
-  HomeIcon, 
+  HomeIcon,
   CheckCircleIcon,
   UsersIcon,
   ChartBarIcon,
@@ -24,7 +24,9 @@ import {
   WrenchScrewdriverIcon,
   ClipboardDocumentCheckIcon,
   DocumentCheckIcon,
-  Bars3Icon
+  Bars3Icon,
+  CubeIcon,
+  ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -32,7 +34,10 @@ import {
   UsersIcon as UsersSolid,
   ChartBarIcon as ChartSolid,
   DocumentCheckIcon as DocumentCheckSolid,
-  BuildingOfficeIcon as BuildingOfficeSolid
+  BuildingOfficeIcon as BuildingOfficeSolid,
+  ClipboardDocumentCheckIcon as ClipboardDocumentCheckSolid,
+  CubeIcon as CubeSolid,
+  ExclamationTriangleIcon as ExclamationTriangleSolid
 } from '@heroicons/react/24/solid';
 import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
@@ -288,13 +293,6 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-cyan-600'
       },
       {
-        name: 'Procurement',
-        href: buildPath('/procurement-tracking'),
-        icon: ShoppingCartIcon,
-        iconSolid: ShoppingSolid,
-        color: 'text-green-600'
-      },
-      {
         name: 'Progress Tracking',
         href: buildPath('/progress'),
         icon: ChartBarIcon,
@@ -311,6 +309,38 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: BuildingOfficeIcon,
         iconSolid: BuildingOfficeSolid,
         color: 'text-blue-600'
+      }
+    ];
+
+    // Site Engineer specific navigation items
+    const siteEngineerItems: NavigationItem[] = [
+      {
+        name: 'My Project',
+        href: buildPath('/my-project'),
+        icon: BuildingOfficeIcon,
+        iconSolid: BuildingOfficeSolid,
+        color: 'text-blue-600'
+      },
+      {
+        name: 'Task Execution',
+        href: buildPath('/task-execution'),
+        icon: ClipboardDocumentCheckIcon,
+        iconSolid: ClipboardDocumentCheckSolid,
+        color: 'text-green-600'
+      },
+      {
+        name: 'Material Usage',
+        href: buildPath('/material-usage'),
+        icon: CubeIcon,
+        iconSolid: CubeSolid,
+        color: 'text-purple-600'
+      },
+      {
+        name: 'Report Issue',
+        href: buildPath('/report-issue'),
+        icon: ExclamationTriangleIcon,
+        iconSolid: ExclamationTriangleSolid,
+        color: 'text-red-600'
       }
     ];
 
@@ -365,6 +395,15 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         currentRole === UserRole.ESTIMATION ||
         getRoleDisplayName(roleId || '') === 'Estimator';
 
+    // Check for Site Engineer with multiple format variations
+    const isSiteEngineer = user?.role_id === UserRole.SITE_ENGINEER ||
+        roleId === 'siteEngineer' ||
+        roleIdLower === 'site engineer' ||
+        roleIdLower === 'site_engineer' ||
+        roleIdLower === 'siteengineer' ||
+        currentRole === UserRole.SITE_ENGINEER ||
+        getRoleDisplayName(roleId || '') === 'Site Engineer';
+
     if (isTechnicalDirector) {
       // Technical Director gets specialized menu items
       navigation.push(...technicalDirectorItems);
@@ -374,14 +413,18 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     } else if (user?.role_id === UserRole.PROJECT_MANAGER || currentRole === UserRole.PROJECT_MANAGER) {
       // Project Manager gets specialized menu items - NO procurement/vendor pages
       navigation.push(...projectManagerItems);
+    } else if (isSiteEngineer) {
+      // Site Engineer gets limited access - task execution focused
+      navigation.push(...siteEngineerItems);
     } else {
       // Other roles get procurement
       navigation.push(procurementItem);
 
-      // Add vendor management for allowed roles (excluding Technical Director, Estimator, and PM)
+      // Add vendor management for allowed roles (excluding Technical Director, Estimator, PM, and SE)
       if (vendorAllowedRoles.includes(currentRole as UserRole) &&
           currentRole !== UserRole.PROJECT_MANAGER &&
-          currentRole !== UserRole.ESTIMATION) {
+          currentRole !== UserRole.ESTIMATION &&
+          currentRole !== UserRole.SITE_ENGINEER) {
         navigation.push(vendorManagementItem);
       }
     }

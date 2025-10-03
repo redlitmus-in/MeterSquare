@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   DocumentCheckIcon,
@@ -16,6 +16,8 @@ import {
   XMarkIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
+import { estimatorService } from '@/roles/estimator/services/estimatorService';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface BOQItem {
   id: number;
@@ -68,167 +70,145 @@ interface EstimationItem {
 
 const ProjectApprovals: React.FC = () => {
   const [selectedEstimation, setSelectedEstimation] = useState<EstimationItem | null>(null);
-  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [filterStatus, setFilterStatus] = useState<'pending' | 'approved' | 'rejected' | 'completed'>('pending');
   const [showBOQModal, setShowBOQModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [approvalNotes, setApprovalNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
+  const [boqs, setBOQs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const estimations: EstimationItem[] = [
-    {
-      id: 1,
-      projectName: 'Corporate Office - Tower A',
-      clientName: 'Tech Solutions Inc.',
-      estimator: 'John Anderson',
-      totalValue: 4500000,
-      itemCount: 52,
-      laborCost: 1200000,
-      materialCost: 2500000,
-      profitMargin: 18,
-      overheadPercentage: 10,
-      submittedDate: '2024-01-20',
-      status: 'pending',
-      priority: 'high',
-      location: 'Mumbai',
-      floor: '5th Floor',
-      workingHours: '9:00 AM - 6:00 PM',
-      projectDuration: '4 months',
-      boqItems: [
-        {
-          id: 1,
-          description: 'PW-01 - Glass Partition Wall',
-          briefDescription: 'Supply and installation of 10mm toughened glass partition with aluminium frames',
-          unit: 'sqm',
-          quantity: 120,
-          rate: 935,
-          amount: 112200,
-          materials: [
-            { name: 'Glass Panel', quantity: 120, unit: 'sqft', rate: 500, amount: 60000 },
-            { name: 'Aluminium Frame', quantity: 80, unit: 'rft', rate: 200, amount: 16000 },
-            { name: 'Sealant', quantity: 5, unit: 'tubes', rate: 300, amount: 1500 }
-          ],
-          labour: [
-            { type: 'Fabricator', quantity: 40, unit: 'hrs', rate: 500, amount: 20000 },
-            { type: 'Installer', quantity: 24, unit: 'hrs', rate: 400, amount: 9600 },
-            { type: 'Helper', quantity: 16, unit: 'hrs', rate: 200, amount: 3200 }
-          ],
-          laborCost: 32800,
-          estimatedSellingPrice: 112035
-        },
-        {
-          id: 2,
-          description: 'FC-02 - False Ceiling Grid System',
-          briefDescription: 'Supply and installation of mineral fiber false ceiling with grid system',
-          unit: 'sqm',
-          quantity: 180,
-          rate: 1200,
-          amount: 216000,
-          materials: [
-            { name: 'Ceiling Tiles 2x2', quantity: 180, unit: 'sqm', rate: 650, amount: 117000 },
-            { name: 'Grid System', quantity: 200, unit: 'meter', rate: 280, amount: 56000 },
-            { name: 'Hangers & Wires', quantity: 100, unit: 'pcs', rate: 150, amount: 15000 }
-          ],
-          labour: [
-            { type: 'Ceiling Installer', quantity: 48, unit: 'hrs', rate: 450, amount: 21600 },
-            { type: 'Helper', quantity: 32, unit: 'hrs', rate: 200, amount: 6400 }
-          ],
-          laborCost: 28000,
-          estimatedSellingPrice: 245000
-        },
-        {
-          id: 3,
-          description: 'EL-03 - Electrical Wiring Concealed',
-          briefDescription: 'Concealed electrical wiring with modular switches and sockets',
-          unit: 'point',
-          quantity: 45,
-          rate: 2500,
-          amount: 112500,
-          materials: [
-            { name: 'Electrical Wire 2.5mm', quantity: 500, unit: 'meter', rate: 45, amount: 22500 },
-            { name: 'Conduit Pipes', quantity: 200, unit: 'meter', rate: 60, amount: 12000 },
-            { name: 'Switch & Sockets', quantity: 45, unit: 'pcs', rate: 850, amount: 38250 }
-          ],
-          labour: [
-            { type: 'Electrician', quantity: 60, unit: 'hrs', rate: 550, amount: 33000 },
-            { type: 'Helper', quantity: 40, unit: 'hrs', rate: 200, amount: 8000 }
-          ],
-          laborCost: 41000,
-          estimatedSellingPrice: 128500
-        }
-      ]
-    },
-    {
-      id: 2,
-      projectName: 'Retail Store Renovation',
-      clientName: 'Fashion Retail Ltd.',
-      estimator: 'Sarah Miller',
-      totalValue: 2300000,
-      itemCount: 38,
-      laborCost: 600000,
-      materialCost: 1300000,
-      profitMargin: 15,
-      overheadPercentage: 7,
-      submittedDate: '2024-01-19',
-      status: 'pending',
-      priority: 'medium',
-      location: 'Delhi',
-      floor: 'Ground Floor',
-      workingHours: '10:00 AM - 7:00 PM',
-      projectDuration: '3 months'
-    },
-    {
-      id: 3,
-      projectName: 'Restaurant Interior Design',
-      clientName: 'Gourmet Foods Pvt Ltd.',
-      estimator: 'Mike Johnson',
-      totalValue: 1800000,
-      itemCount: 28,
-      laborCost: 450000,
-      materialCost: 950000,
-      profitMargin: 17,
-      overheadPercentage: 8,
-      submittedDate: '2024-01-18',
-      status: 'pending',
-      priority: 'low',
-      location: 'Bangalore',
-      floor: '1st Floor',
-      workingHours: '8:00 AM - 5:00 PM',
-      projectDuration: '2 months'
-    },
-    {
-      id: 4,
-      projectName: 'Bank Branch Setup',
-      clientName: 'National Bank',
-      estimator: 'Emily Chen',
-      totalValue: 3200000,
-      itemCount: 45,
-      laborCost: 900000,
-      materialCost: 1800000,
-      profitMargin: 12,
-      overheadPercentage: 8,
-      submittedDate: '2024-01-17',
-      status: 'approved',
-      priority: 'high',
-      location: 'Chennai',
-      floor: 'Ground Floor',
-      workingHours: '9:00 AM - 6:00 PM',
-      projectDuration: '3.5 months',
-      approvalNotes: 'Approved with condition to maintain quality standards for bank premises'
+  // Load BOQs on mount
+  useEffect(() => {
+    loadBOQs();
+  }, []);
+
+  const loadBOQs = async () => {
+    setLoading(true);
+    try {
+      const response = await estimatorService.getAllBOQs();
+      if (response.success && response.data) {
+        console.log('Loaded BOQs:', response.data);
+        console.log('BOQ Statuses:', response.data.map((b: any) => ({ id: b.boq_id, status: b.status })));
+        setBOQs(response.data);
+      } else {
+        console.log('No BOQs loaded or response failed');
+      }
+    } catch (error) {
+      console.error('Error loading BOQs:', error);
+      toast.error('Failed to load BOQs');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
-  const filteredEstimations = estimations.filter(est =>
-    filterStatus === 'all' || est.status === filterStatus
-  );
+  // Transform BOQ data to match EstimationItem structure
+  const transformBOQToEstimation = (boq: any): EstimationItem => {
+    return {
+      id: boq.boq_id,
+      projectName: boq.project_name || 'Unnamed Project',
+      clientName: boq.client || 'Unknown Client',
+      estimator: boq.created_by_name || 'Unknown',
+      totalValue: boq.total_cost || 0,
+      itemCount: boq.items?.length || 0,
+      laborCost: boq.items?.reduce((sum: number, item: any) => {
+        const labourTotal = item.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || 0), 0) || 0;
+        return sum + labourTotal;
+      }, 0) || 0,
+      materialCost: boq.items?.reduce((sum: number, item: any) => {
+        const materialTotal = item.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || 0), 0) || 0;
+        return sum + materialTotal;
+      }, 0) || 0,
+      profitMargin: boq.items?.[0]?.profit_percentage || 0,
+      overheadPercentage: boq.items?.[0]?.overhead_percentage || 0,
+      submittedDate: boq.created_at ? new Date(boq.created_at).toISOString().split('T')[0] : '',
+      status: mapBOQStatus(boq.status),
+      priority: 'medium',
+      location: boq.location || 'N/A',
+      floor: boq.floor_name || 'N/A',
+      workingHours: boq.working_hours || 'N/A',
+      projectDuration: 'N/A',
+      boqItems: boq.items?.map((item: any) => ({
+        id: item.item_id,
+        description: item.item_name,
+        briefDescription: item.description || '',
+        unit: item.materials?.[0]?.unit || 'nos',
+        quantity: item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 0,
+        rate: 0,
+        amount: item.selling_price || 0,
+        materials: item.materials?.map((mat: any) => ({
+          name: mat.material_name,
+          quantity: mat.quantity,
+          unit: mat.unit,
+          rate: mat.unit_price,
+          amount: mat.total_price
+        })) || [],
+        labour: item.labour?.map((lab: any) => ({
+          type: lab.labour_role,
+          quantity: lab.hours,
+          unit: 'hrs',
+          rate: lab.rate_per_hour,
+          amount: lab.total_cost
+        })) || [],
+        laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+        estimatedSellingPrice: item.selling_price || 0
+      })) || []
+    };
+  };
 
-  const handleApproval = (id: number, approved: boolean, notes?: string) => {
-    const action = approved ? 'approved' : 'rejected';
-    const message = approved
-      ? `Project approved${notes ? ' with notes' : ''}`
-      : `Project rejected${notes ? ' with reason' : ''}`;
-    toast.success(message);
-    // Here you would make API call to update status with notes/reason
+  // Map BOQ status to estimation status
+  const mapBOQStatus = (status: string): 'pending' | 'approved' | 'rejected' => {
+    const normalizedStatus = status?.toLowerCase();
+    if (normalizedStatus === 'approved') return 'approved';
+    if (normalizedStatus === 'rejected') return 'rejected';
+    return 'pending'; // sent_for_confirmation, draft, etc. -> pending
+  };
+
+  // Transform BOQs to estimations
+  const estimations = boqs.map(transformBOQToEstimation);
+
+  const filteredEstimations = estimations.filter(est => {
+    if (filterStatus === 'pending') {
+      // Pending includes: sent_for_confirmation, draft, in_review
+      const boq = boqs.find(b => b.boq_id === est.id);
+      const status = boq?.status?.toLowerCase().replace(/_/g, '');
+      console.log('BOQ Status (normalized):', status, 'Original:', boq?.status);
+      return status === 'sentforconfirmation' || status === 'draft' || status === 'inreview' || status === 'pending';
+    } else if (filterStatus === 'completed') {
+      const boq = boqs.find(b => b.boq_id === est.id);
+      const status = boq?.status?.toLowerCase();
+      return status === 'completed';
+    }
+    return est.status === filterStatus;
+  });
+
+  const handleApproval = async (id: number, approved: boolean, notes?: string) => {
+    try {
+      if (approved) {
+        const response = await estimatorService.approveBOQ(id, notes);
+        if (response.success) {
+          toast.success('Project approved successfully');
+          await loadBOQs(); // Reload data
+        } else {
+          toast.error(response.message || 'Failed to approve project');
+        }
+      } else {
+        if (!notes || !notes.trim()) {
+          toast.error('Please provide a rejection reason');
+          return;
+        }
+        const response = await estimatorService.rejectBOQ(id, notes);
+        if (response.success) {
+          toast.success('Project rejected successfully');
+          await loadBOQs(); // Reload data
+        } else {
+          toast.error(response.message || 'Failed to reject project');
+        }
+      }
+    } catch (error) {
+      toast.error('An error occurred while processing the request');
+    }
     setShowApprovalModal(false);
     setShowRejectionModal(false);
     setApprovalNotes('');
@@ -252,6 +232,14 @@ const ProjectApprovals: React.FC = () => {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <ModernLoadingSpinners variant="pulse" color="blue" />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
       {/* Header */}
@@ -269,7 +257,7 @@ const ProjectApprovals: React.FC = () => {
       <div className="max-w-7xl mx-auto px-6 py-6">
         {/* Filter Tabs */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 mb-6 inline-flex">
-          {['all', 'pending', 'approved', 'rejected'].map((status) => (
+          {['pending', 'approved', 'rejected', 'completed'].map((status) => (
             <button
               key={status}
               onClick={() => setFilterStatus(status as any)}

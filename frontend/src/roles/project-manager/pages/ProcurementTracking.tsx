@@ -88,10 +88,15 @@ interface Project {
   boqItems: BOQItem[];
 }
 
-const ProcurementTracking: React.FC = () => {
+interface ProcurementTrackingProps {
+  projectId?: number;
+  embedded?: boolean;
+}
+
+const ProcurementTracking: React.FC<ProcurementTrackingProps> = ({ projectId: propProjectId, embedded = false }) => {
   const location = useLocation();
   const [selectedProject, setSelectedProject] = useState<number | null>(
-    location.state?.projectId || null
+    propProjectId || location.state?.projectId || null
   );
   const [selectedBOQItem, setSelectedBOQItem] = useState<BOQItem | null>(null);
   const [showBOQDetailsModal, setShowBOQDetailsModal] = useState(false);
@@ -103,12 +108,14 @@ const ProcurementTracking: React.FC = () => {
     'all' | 'pending' | 'approved' | 'ordered' | 'delivered'
   >('all');
 
-  // Update selected project when navigation state changes
+  // Update selected project when navigation state or prop changes
   useEffect(() => {
-    if (location.state?.projectId) {
+    if (propProjectId) {
+      setSelectedProject(propProjectId);
+    } else if (location.state?.projectId) {
       setSelectedProject(location.state.projectId);
     }
-  }, [location.state]);
+  }, [propProjectId, location.state]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -518,22 +525,25 @@ const ProcurementTracking: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-green-50 to-green-100 rounded-lg">
-              <ShoppingCartIcon className="w-6 h-6 text-white" />
+    <div className={embedded ? '' : 'min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100'}>
+      {/* Header - Only show when not embedded */}
+      {!embedded && (
+        <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
+          <div className="max-w-7xl mx-auto px-6 py-5">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-br from-green-50 to-green-100 rounded-lg">
+                <ShoppingCartIcon className="w-6 h-6 text-white" />
+              </div>
+              <h1 className="text-2xl font-bold text-blue-900">Procurement Tracking</h1>
             </div>
-            <h1 className="text-2xl font-bold text-blue-900">Procurement Tracking</h1>
           </div>
         </div>
-      </div>
+      )}
 
-      <div className="max-w-7xl mx-auto px-6 py-6">
-        {/* Project Selection Section */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
+      <div className={embedded ? 'p-6' : 'max-w-7xl mx-auto px-6 py-6'}>
+        {/* Project Selection Section - Only show when not embedded */}
+        {!embedded && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold text-gray-900">Select Project</h3>
             <span className="text-xs text-gray-500">
@@ -625,6 +635,7 @@ const ProcurementTracking: React.FC = () => {
             )}
           </div>
         </div>
+        )}
 
         {/* Enhanced Project Summary - Only show when project selected */}
         {currentProject && (
