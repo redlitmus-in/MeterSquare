@@ -274,3 +274,267 @@ class BOQEmailService:
         except Exception as e:
             log.error(f"Error sending BOQ to Technical Director: {e}")
             return False
+
+    def generate_boq_approval_email(self, boq_data, project_data, items_summary, comments):
+        """
+        Generate BOQ approval email for Project Manager
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            items_summary: Dictionary containing items summary
+            comments: Approval comments from TD
+
+        Returns:
+            str: HTML formatted email content
+        """
+        boq_id = boq_data.get('boq_id', 'N/A')
+        boq_name = boq_data.get('boq_name', 'N/A')
+        created_by = boq_data.get('created_by', 'System')
+
+        project_name = project_data.get('project_name', 'N/A')
+        client = project_data.get('client', 'N/A')
+        location = project_data.get('location', 'N/A')
+
+        total_cost = items_summary.get('total_cost', 0)
+        estimated_selling_price = items_summary.get('estimatedSellingPrice', 0)
+
+        email_body = f"""
+        <div class="email-container">
+            <!-- Header -->
+            <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                <h1>BOQ APPROVED ✓</h1>
+                <h2>Ready for Project Execution</h2>
+            </div>
+
+            <!-- Content -->
+            <div class="content">
+                <p>Dear Project Manager,</p>
+
+                <p>
+                    Great news! The Bill of Quantities (BOQ) for <strong>{project_name}</strong> has been
+                    <span style="color: #10b981; font-weight: bold;">APPROVED</span> by the Technical Director.
+                    You can now proceed with project planning and execution.
+                </p>
+
+                <div class="divider"></div>
+
+                <!-- BOQ Information -->
+                <h2>BOQ Information</h2>
+                <div class="info-box">
+                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
+                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
+                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #d1fae5; color: #065f46; border: 1px solid #10b981;">APPROVED</span></p>
+                    <p><span class="label">Prepared By:</span> <span class="value">{created_by}</span></p>
+                </div>
+
+                <!-- Project Information -->
+                <h2>Project Details</h2>
+                <div class="info-box">
+                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
+                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
+                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
+                </div>
+
+                <!-- Cost Summary -->
+                <div class="total-cost" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981;">
+                    <span class="label">Approved Budget:</span>
+                    <span class="amount" style="color: #065f46;">₹ {estimated_selling_price:,.2f}</span>
+                </div>
+
+                <!-- TD Comments -->
+                {f'''
+                <h2>Technical Director's Comments</h2>
+                <div class="alert" style="background-color: #d1fae5; border-left: 4px solid #10b981;">
+                    <p style="color: #065f46; margin: 0;">{comments}</p>
+                </div>
+                ''' if comments else ''}
+
+                <div class="divider"></div>
+
+                <!-- Next Steps -->
+                <div class="alert alert-info">
+                    <strong>Next Steps:</strong>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>Review the approved BOQ in the system</li>
+                        <li>Assign Site Engineers to the project</li>
+                        <li>Begin procurement planning</li>
+                        <li>Set up project timeline and milestones</li>
+                    </ul>
+                </div>
+
+                <!-- Signature -->
+                <div class="signature">
+                    <p><strong>Warm Regards,</strong></p>
+                    <p>Technical Director</p>
+                    <p>MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
+                <p>This is an automated email notification. Please do not reply to this email.</p>
+                <p>© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def generate_boq_rejection_email(self, boq_data, project_data, items_summary, rejection_reason):
+        """
+        Generate BOQ rejection email for Estimator
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            items_summary: Dictionary containing items summary
+            rejection_reason: Reason for rejection from TD
+
+        Returns:
+            str: HTML formatted email content
+        """
+        boq_id = boq_data.get('boq_id', 'N/A')
+        boq_name = boq_data.get('boq_name', 'N/A')
+        created_by = boq_data.get('created_by', 'System')
+
+        project_name = project_data.get('project_name', 'N/A')
+        client = project_data.get('client', 'N/A')
+        location = project_data.get('location', 'N/A')
+
+        total_cost = items_summary.get('total_cost', 0)
+
+        email_body = f"""
+        <div class="email-container">
+            <!-- Header -->
+            <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                <h1>BOQ REVISION REQUIRED</h1>
+                <h2>Review & Resubmit</h2>
+            </div>
+
+            <!-- Content -->
+            <div class="content">
+                <p>Dear Estimator,</p>
+
+                <p>
+                    The Bill of Quantities (BOQ) for <strong>{project_name}</strong> requires revision.
+                    The Technical Director has reviewed the BOQ and has requested changes before approval.
+                </p>
+
+                <div class="divider"></div>
+
+                <!-- BOQ Information -->
+                <h2>BOQ Information</h2>
+                <div class="info-box">
+                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
+                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
+                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #fee2e2; color: #991b1b; border: 1px solid #ef4444;">REJECTED</span></p>
+                    <p><span class="label">Prepared By:</span> <span class="value">{created_by}</span></p>
+                </div>
+
+                <!-- Project Information -->
+                <h2>Project Details</h2>
+                <div class="info-box">
+                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
+                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
+                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
+                </div>
+
+                <!-- Rejection Reason -->
+                <h2>Reason for Revision</h2>
+                <div class="alert" style="background-color: #fee2e2; border-left: 4px solid #ef4444;">
+                    <p style="color: #991b1b; margin: 0; font-weight: 500;">{rejection_reason if rejection_reason else 'Please review and revise the BOQ as per Technical Director feedback.'}</p>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Action Required -->
+                <div class="alert alert-info">
+                    <strong>Action Required:</strong>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>Review the feedback provided above</li>
+                        <li>Make necessary revisions to the BOQ</li>
+                        <li>Update cost estimates and calculations</li>
+                        <li>Resubmit the BOQ for approval</li>
+                    </ul>
+                </div>
+
+                <!-- Signature -->
+                <div class="signature">
+                    <p><strong>Warm Regards,</strong></p>
+                    <p>Technical Director</p>
+                    <p>MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
+                <p>This is an automated email notification. Please do not reply to this email.</p>
+                <p>© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def send_boq_approval_to_pm(self, boq_data, project_data, items_summary, pm_email, comments=None):
+        """
+        Send BOQ approval email to Project Manager
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            items_summary: Dictionary containing items summary
+            pm_email: Project Manager's email address
+            comments: Optional approval comments
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            # Generate email content
+            email_html = self.generate_boq_approval_email(boq_data, project_data, items_summary, comments)
+
+            # Create subject
+            boq_name = boq_data.get('boq_name', 'BOQ')
+            project_name = project_data.get('project_name', 'Project')
+            subject = f"✓ BOQ Approved - {boq_name} ({project_name})"
+
+            # Send email
+            return self.send_email(pm_email, subject, email_html)
+
+        except Exception as e:
+            log.error(f"Error sending BOQ approval to PM: {e}")
+            return False
+
+    def send_boq_rejection_to_estimator(self, boq_data, project_data, items_summary, estimator_email, rejection_reason=None):
+        """
+        Send BOQ rejection email to Estimator
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            items_summary: Dictionary containing items summary
+            estimator_email: Estimator's email address
+            rejection_reason: Reason for rejection
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            # Generate email content
+            email_html = self.generate_boq_rejection_email(boq_data, project_data, items_summary, rejection_reason)
+
+            # Create subject
+            boq_name = boq_data.get('boq_name', 'BOQ')
+            project_name = project_data.get('project_name', 'Project')
+            subject = f"⚠ BOQ Revision Required - {boq_name} ({project_name})"
+
+            # Send email
+            return self.send_email(estimator_email, subject, email_html)
+
+        except Exception as e:
+            log.error(f"Error sending BOQ rejection to Estimator: {e}")
+            return False

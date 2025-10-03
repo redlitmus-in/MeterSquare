@@ -10,4 +10,8 @@ technical_routes = Blueprint('technical_routes', __name__, url_prefix='/api')
 def get_all_td_boqs_route():
     return get_all_td_boqs()
 
+@technical_routes.route('/td_approval', methods=['POST'])
+@jwt_required
+def td_mail_send_route():
+    return td_mail_send()
 
