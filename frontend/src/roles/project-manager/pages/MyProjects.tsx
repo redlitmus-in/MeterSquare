@@ -19,9 +19,11 @@ import {
   CurrencyRupeeIcon,
   ArrowRightIcon,
   Squares2X2Icon,
-  ListBulletIcon
+  ListBulletIcon,
+  XMarkIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
+import ProcurementTracking from './ProcurementTracking';
 
 interface Project {
   id: number;
@@ -51,6 +53,7 @@ const MyProjects: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'delayed' | 'completed'>('all');
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showProcurementModal, setShowProcurementModal] = useState(false);
 
   const projects: Project[] = [
     {
@@ -422,15 +425,13 @@ const MyProjects: React.FC = () => {
                   </button>
                   <button
                     onClick={() => {
-                      navigate('/projectManager/procurement-tracking', {
-                        state: { projectId: project.id, projectName: project.name }
-                      });
+                      setSelectedProject(project);
+                      setShowProcurementModal(true);
                     }}
                     className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 bg-green-500 text-white text-xs rounded hover:bg-green-600 transition-colors"
                   >
                     <ShoppingCartIcon className="w-3.5 h-3.5" />
                     Procurement
-                    <ArrowRightIcon className="w-3 h-3" />
                   </button>
                 </div>
               </div>
@@ -609,9 +610,8 @@ const MyProjects: React.FC = () => {
                           </button>
                           <button
                             onClick={() => {
-                              navigate('/projectManager/procurement-tracking', {
-                                state: { projectId: project.id }
-                              });
+                              setSelectedProject(project);
+                              setShowProcurementModal(true);
                             }}
                             className="p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
                             title="View Procurement"
@@ -759,13 +759,11 @@ const MyProjects: React.FC = () => {
                   <button
                     onClick={() => {
                       setShowDetailModal(false);
-                      navigate('/projectManager/procurement-tracking', {
-                        state: { projectId: selectedProject.id }
-                      });
+                      setShowProcurementModal(true);
                     }}
                     className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
                   >
-                    Go to Procurement
+                    View Procurement
                   </button>
                   <button
                     onClick={() => {
@@ -785,6 +783,38 @@ const MyProjects: React.FC = () => {
                     Close
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Procurement Modal */}
+        {showProcurementModal && selectedProject && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-7xl max-h-[90vh] overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-green-200 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-green-900">Procurement Management</h2>
+                  <p className="text-sm text-green-700 mt-1">
+                    {selectedProject.name} - {selectedProject.client}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowProcurementModal(false)}
+                  className="p-2 hover:bg-white/50 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6 text-green-900" />
+                </button>
+              </div>
+
+              {/* Procurement Content */}
+              <div className="overflow-y-auto max-h-[calc(90vh-80px)]">
+                <ProcurementTracking projectId={selectedProject.id} embedded={true} />
               </div>
             </motion.div>
           </div>
