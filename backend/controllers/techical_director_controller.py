@@ -89,7 +89,6 @@ def get_all_td_boqs():
     except Exception as e:
         import traceback
         log.error(f"Error fetching BOQs: {str(e)}")
-        log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({
             "error": f"Failed to fetch BOQs: {str(e)}",
             "error_type": type(e).__name__
