@@ -193,32 +193,27 @@ def td_mail_send():
         new_status = None
 
         if technical_director_status.lower() == 'approved':
-            # BOQ approved - Send to Project Manager
-            log.info(f"BOQ {boq_id} approved by TD, finding Project Manager")
+            # BOQ approved - Send to Project Manager assigned to this project
+            log.info(f"BOQ {boq_id} approved by TD, finding Project Manager for project {project.project_id}")
 
-            # Find Project Manager role
-            pm_role = Role.query.filter(
-                Role.role.in_(['projectManager', 'project_manager', 'ProjectManager']),
-                Role.is_deleted == False
-            ).first()
-
-            if not pm_role:
+            # Check if project has an assigned PM
+            if not project.user_id:
                 return jsonify({
-                    "error": "Project Manager role not found",
-                    "message": "Project Manager role not configured in the system"
+                    "error": "No Project Manager assigned",
+                    "message": f"Project '{project.project_name}' does not have a Project Manager assigned"
                 }), 404
 
-            # Find active Project Manager
+            # Get the Project Manager assigned to this project
             project_manager = User.query.filter_by(
-                role_id=pm_role.role_id,
+                user_id=project.user_id,
                 is_active=True,
                 is_deleted=False
             ).first()
 
             if not project_manager:
                 return jsonify({
-                    "error": "No Project Manager found",
-                    "message": "No active Project Manager found in the system"
+                    "error": "Project Manager not found",
+                    "message": f"No active Project Manager found with ID {project.user_id}"
                 }), 404
 
             if not project_manager.email:
