@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import { projectManagerService } from '../services/projectManagerService';
 import {
   BuildingOfficeIcon,
   MapPinIcon,
@@ -54,93 +55,55 @@ const MyProjects: React.FC = () => {
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [boqs, setBOQs] = useState<any[]>([]);
 
-  const projects: Project[] = [
-    {
-      id: 1,
-      name: 'Corporate Office - Tower A',
-      client: 'Tech Solutions Inc.',
-      location: 'Mumbai - Bandra Kurla Complex',
-      floor: '5th Floor',
-      startDate: '2024-01-01',
-      endDate: '2024-03-31',
-      status: 'active',
-      progress: 65,
-      budget: 4500000,
-      spent: 2925000,
-      boqItems: 52,
-      completedItems: 34,
-      siteEngineer: 'John Smith',
-      teamSize: 12,
-      pendingProcurements: 5,
-      approvedBy: 'Technical Director',
-      workingHours: '9:00 AM - 6:00 PM',
-      priority: 'high'
-    },
-    {
-      id: 2,
-      name: 'Retail Store Renovation',
-      client: 'Fashion Retail Ltd.',
-      location: 'Delhi - Connaught Place',
-      floor: 'Ground Floor',
-      startDate: '2024-01-10',
-      endDate: '2024-02-28',
-      status: 'delayed',
-      progress: 42,
-      budget: 2300000,
-      spent: 966000,
-      boqItems: 38,
-      completedItems: 16,
-      siteEngineer: 'Sarah Wilson',
-      teamSize: 8,
-      pendingProcurements: 8,
-      approvedBy: 'Technical Director',
-      workingHours: '10:00 AM - 7:00 PM',
-      priority: 'medium'
-    },
-    {
-      id: 3,
-      name: 'Restaurant Interior Design',
-      client: 'Gourmet Foods Pvt Ltd.',
-      location: 'Bangalore - Indiranagar',
-      floor: '1st Floor',
-      startDate: '2023-12-15',
-      endDate: '2024-01-31',
-      status: 'active',
-      progress: 88,
-      budget: 1800000,
-      spent: 1584000,
-      boqItems: 28,
-      completedItems: 25,
-      siteEngineer: 'Mike Johnson',
-      teamSize: 6,
-      pendingProcurements: 2,
-      approvedBy: 'Technical Director',
-      workingHours: '8:00 AM - 5:00 PM',
-      priority: 'low'
-    },
-    {
-      id: 4,
-      name: 'Medical Clinic Setup',
-      client: 'HealthCare Plus',
-      location: 'Chennai - Anna Nagar',
-      floor: 'Ground Floor',
-      startDate: '2024-01-08',
-      endDate: '2024-04-15',
-      status: 'active',
-      progress: 25,
-      budget: 3200000,
-      spent: 800000,
-      boqItems: 45,
-      completedItems: 11,
-      siteEngineer: 'Emily Davis',
-      teamSize: 10,
-      pendingProcurements: 7,
-      approvedBy: 'Technical Director',
-      workingHours: '9:00 AM - 6:00 PM',
-      priority: 'high'
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [projectsData, boqsData] = await Promise.all([
+        projectManagerService.getAllProjects(),
+        projectManagerService.getMyBOQs()
+      ]);
+
+      // Map backend projects to frontend interface
+      const mappedProjects: Project[] = (projectsData || []).map(p => ({
+        id: p.project_id,
+        name: p.project_name || 'Unnamed Project',
+        client: p.client || 'Unknown Client',
+        location: p.location || 'Unknown Location',
+        floor: 'N/A',
+        startDate: p.created_at?.split('T')[0] || 'N/A',
+        endDate: 'TBD',
+        status: 'active' as const,
+        progress: 50, // Placeholder - replace with actual progress from backend
+        budget: 1000000, // Placeholder - replace with actual budget from backend
+        spent: 500000, // Placeholder - replace with actual spent from backend
+        boqItems: 0,
+        completedItems: 0,
+        siteEngineer: 'Not Assigned',
+        teamSize: 0,
+        pendingProcurements: 0,
+        approvedBy: 'Technical Director',
+        workingHours: '9:00 AM - 6:00 PM',
+        priority: 'medium' as const
+      }));
+
+      setProjects(mappedProjects);
+      setBOQs(boqsData.boqs || []);
+    } catch (error) {
+      console.error('Error loading projects:', error);
+      toast.error('Failed to load projects');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
+
 
   const filteredProjects = projects.filter(project =>
     filterStatus === 'all' || project.status === filterStatus
@@ -171,6 +134,17 @@ const MyProjects: React.FC = () => {
     if (progress >= 50) return 'bg-blue-500';
     return 'bg-yellow-500';
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading projects...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">

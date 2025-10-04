@@ -434,6 +434,62 @@ class EstimatorService {
     }
   }
 
+  // Bulk BOQ Upload from Excel
+  async bulkUploadBOQ(
+    file: File,
+    projectId: number,
+    boqName: string
+  ): Promise<{ success: boolean; message: string; boq_id?: number; warnings?: string[] }> {
+    try {
+      console.log('Starting bulk BOQ upload:', { fileName: file.name, projectId, boqName });
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('project_id', projectId.toString());
+      formData.append('boq_name', boqName);
+
+      // Don't set Content-Type - let browser set it with multipart boundary
+      const response = await apiClient.post('/boq/bulk_upload', formData);
+
+      console.log('Bulk upload response:', response.data);
+
+      if (response.data.success) {
+        return {
+          success: true,
+          message: response.data.message || 'BOQ created successfully from bulk upload',
+          boq_id: response.data.boq_id,
+          warnings: response.data.warnings || []
+        };
+      }
+
+      return {
+        success: false,
+        message: response.data.error || 'Failed to process bulk upload'
+      };
+    } catch (error: any) {
+      console.error('Bulk BOQ upload error:', error.response?.data || error.message);
+
+      // Check for validation errors
+      if (error.response?.status === 400 && error.response?.data?.errors) {
+        const errors = error.response.data.errors;
+        return {
+          success: false,
+          message: `Validation errors:\n${errors.join('\n')}`
+        };
+      }
+
+      // Handle general errors
+      const errorMessage = error.response?.data?.error ||
+                          error.response?.data?.message ||
+                          'Failed to upload BOQ from Excel';
+
+      return {
+        success: false,
+        message: errorMessage
+      };
+    }
+  }
+
   // Confirm extracted BOQ data
   async confirmExtractedBOQ(boqData: any): Promise<{ success: boolean; message: string; boq_id?: number }> {
     try {

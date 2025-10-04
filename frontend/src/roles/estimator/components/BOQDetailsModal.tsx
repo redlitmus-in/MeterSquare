@@ -80,7 +80,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
   };
 
   const formatCurrency = (value: number) => {
-    return `₹${value.toLocaleString('en-IN')}`;
+    return `AED ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const getStatusColor = (status: string) => {
@@ -295,31 +295,49 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                             {/* Item Details (Expandable) */}
                             {expandedItems.includes(`item-${index}`) && (
                               <div className="p-4 space-y-4">
-                                {/* Materials - Blue Theme */}
+                                {/* Materials - Blue Theme - Table Format */}
                                 {item.materials?.length > 0 && (
                                   <div className="bg-gradient-to-r from-blue-50 to-blue-100/30 rounded-lg p-4 border border-blue-200">
                                     <h4 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
                                       <div className="p-1.5 bg-white rounded shadow-sm">
                                         <Package className="w-4 h-4 text-blue-600" />
                                       </div>
-                                      Raw Materials Breakdown
+                                      Sub Items (Materials)
                                     </h4>
-                                    <div className="space-y-2">
-                                      {item.materials.map((material, mIndex) => (
-                                        <div key={mIndex} className="flex justify-between text-sm">
-                                          <span className="text-gray-600">
-                                            {material.material_name} ({material.quantity} {material.unit})
-                                          </span>
-                                          <span className="font-medium">
-                                            {formatCurrency(material.total_price)}
-                                          </span>
-                                        </div>
-                                      ))}
+                                    <div className="bg-white rounded-lg border border-blue-200 overflow-hidden">
+                                      <table className="w-full text-sm">
+                                        <thead className="bg-blue-100 border-b border-blue-200">
+                                          <tr>
+                                            <th className="text-left py-2 px-3 font-semibold text-blue-900">Sub Item Name</th>
+                                            <th className="text-center py-2 px-3 font-semibold text-blue-900">Quantity</th>
+                                            <th className="text-center py-2 px-3 font-semibold text-blue-900">Unit</th>
+                                            <th className="text-right py-2 px-3 font-semibold text-blue-900">Rate</th>
+                                            <th className="text-right py-2 px-3 font-semibold text-blue-900">Amount</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {item.materials.map((material, mIndex) => (
+                                            <tr key={mIndex} className={`border-b border-blue-100 ${mIndex % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
+                                              <td className="py-2.5 px-3 text-gray-900">{material.material_name}</td>
+                                              <td className="py-2.5 px-3 text-center text-gray-700">{material.quantity}</td>
+                                              <td className="py-2.5 px-3 text-center text-gray-700 uppercase">{material.unit}</td>
+                                              <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(material.unit_price)}</td>
+                                              <td className="py-2.5 px-3 text-right font-semibold text-blue-700">{formatCurrency(material.total_price)}</td>
+                                            </tr>
+                                          ))}
+                                          <tr className="bg-blue-200 border-t-2 border-blue-400">
+                                            <td colSpan={4} className="py-2.5 px-3 font-bold text-blue-900 text-right">Total Materials:</td>
+                                            <td className="py-2.5 px-3 font-bold text-blue-900 text-right">
+                                              {formatCurrency(item.materials.reduce((sum, m) => sum + (m.total_price || 0), 0))}
+                                            </td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
                                     </div>
                                   </div>
                                 )}
 
-                                {/* Labour - Orange Theme */}
+                                {/* Labour - Orange Theme - Table Format */}
                                 {item.labour?.length > 0 && (
                                   <div className="bg-gradient-to-r from-orange-50 to-orange-100/30 rounded-lg p-4 border border-orange-200">
                                     <h4 className="text-sm font-bold text-orange-900 mb-3 flex items-center gap-2">
@@ -328,17 +346,33 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                       </div>
                                       Labour Breakdown
                                     </h4>
-                                    <div className="space-y-2">
-                                      {item.labour.map((labour, lIndex) => (
-                                        <div key={lIndex} className="flex justify-between text-sm">
-                                          <span className="text-gray-600">
-                                            {labour.labour_role} ({labour.hours} hrs @ ₹{labour.rate_per_hour}/hr)
-                                          </span>
-                                          <span className="font-medium">
-                                            {formatCurrency(labour.total_cost)}
-                                          </span>
-                                        </div>
-                                      ))}
+                                    <div className="bg-white rounded-lg border border-orange-200 overflow-hidden">
+                                      <table className="w-full text-sm">
+                                        <thead className="bg-orange-100 border-b border-orange-200">
+                                          <tr>
+                                            <th className="text-left py-2 px-3 font-semibold text-orange-900">Labour Role</th>
+                                            <th className="text-center py-2 px-3 font-semibold text-orange-900">Working Hours</th>
+                                            <th className="text-right py-2 px-3 font-semibold text-orange-900">Rate/Hour</th>
+                                            <th className="text-right py-2 px-3 font-semibold text-orange-900">Amount</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {item.labour.map((labour, lIndex) => (
+                                            <tr key={lIndex} className={`border-b border-orange-100 ${lIndex % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
+                                              <td className="py-2.5 px-3 text-gray-900">{labour.labour_role}</td>
+                                              <td className="py-2.5 px-3 text-center text-gray-700">{labour.hours} hrs</td>
+                                              <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(labour.rate_per_hour)}</td>
+                                              <td className="py-2.5 px-3 text-right font-semibold text-orange-700">{formatCurrency(labour.total_cost)}</td>
+                                            </tr>
+                                          ))}
+                                          <tr className="bg-orange-200 border-t-2 border-orange-400">
+                                            <td colSpan={3} className="py-2.5 px-3 font-bold text-orange-900 text-right">Total Labour:</td>
+                                            <td className="py-2.5 px-3 font-bold text-orange-900 text-right">
+                                              {formatCurrency(item.labour.reduce((sum, l) => sum + (l.total_cost || 0), 0))}
+                                            </td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
                                     </div>
                                   </div>
                                 )}
@@ -390,6 +424,118 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                           </div>
                         ))}
                       </div>
+
+                      {/* Overall Cost Summary */}
+                      {boqData.items && boqData.items.length > 0 && (
+                        <div className="mt-8 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-6 border-2 border-indigo-200 shadow-lg">
+                          <h3 className="text-lg font-bold text-indigo-900 mb-5 flex items-center gap-2">
+                            <div className="p-2 bg-white rounded-lg shadow-sm">
+                              <Calculator className="w-5 h-5 text-indigo-600" />
+                            </div>
+                            Overall Cost Summary
+                          </h3>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* Materials Summary */}
+                            <div className="bg-white rounded-lg p-4 border border-blue-200 shadow-sm">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Package className="w-5 h-5 text-blue-600" />
+                                <h4 className="font-semibold text-blue-900">Total Materials</h4>
+                              </div>
+                              <div className="space-y-2 text-sm">
+                                {(() => {
+                                  const totalMaterialCost = boqData.items.reduce((sum, item) =>
+                                    sum + (item.materials?.reduce((mSum, m) => mSum + (m.total_price || 0), 0) || 0), 0
+                                  );
+                                  const totalMaterialCount = boqData.items.reduce((sum, item) =>
+                                    sum + (item.materials?.length || 0), 0
+                                  );
+                                  return (
+                                    <>
+                                      <div className="flex justify-between text-gray-600">
+                                        <span>Total Items:</span>
+                                        <span className="font-medium">{totalMaterialCount}</span>
+                                      </div>
+                                      <div className="flex justify-between pt-2 border-t border-blue-100 font-bold text-blue-700">
+                                        <span>Total Cost:</span>
+                                        <span>{formatCurrency(totalMaterialCost)}</span>
+                                      </div>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+
+                            {/* Labour Summary */}
+                            <div className="bg-white rounded-lg p-4 border border-orange-200 shadow-sm">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Users className="w-5 h-5 text-orange-600" />
+                                <h4 className="font-semibold text-orange-900">Total Labour</h4>
+                              </div>
+                              <div className="space-y-2 text-sm">
+                                {(() => {
+                                  const totalLabourCost = boqData.items.reduce((sum, item) =>
+                                    sum + (item.labour?.reduce((lSum, l) => lSum + (l.total_cost || 0), 0) || 0), 0
+                                  );
+                                  const totalLabourCount = boqData.items.reduce((sum, item) =>
+                                    sum + (item.labour?.length || 0), 0
+                                  );
+                                  return (
+                                    <>
+                                      <div className="flex justify-between text-gray-600">
+                                        <span>Total Resources:</span>
+                                        <span className="font-medium">{totalLabourCount}</span>
+                                      </div>
+                                      <div className="flex justify-between pt-2 border-t border-orange-100 font-bold text-orange-700">
+                                        <span>Total Cost:</span>
+                                        <span>{formatCurrency(totalLabourCost)}</span>
+                                      </div>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Grand Total */}
+                          <div className="mt-6 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-5 border-2 border-green-300">
+                            <div className="space-y-3">
+                              <div className="flex justify-between text-sm">
+                                <span className="text-gray-700">Subtotal (Materials + Labour):</span>
+                                <span className="font-semibold">
+                                  {formatCurrency(
+                                    boqData.items.reduce((sum, item) => sum + (item.base_cost || 0), 0)
+                                  )}
+                                </span>
+                              </div>
+                              <div className="flex justify-between text-sm">
+                                <span className="text-gray-700">Total Overheads:</span>
+                                <span className="font-semibold">
+                                  {formatCurrency(
+                                    boqData.items.reduce((sum, item) => sum + (item.overhead_amount || 0), 0)
+                                  )}
+                                </span>
+                              </div>
+                              <div className="flex justify-between text-sm">
+                                <span className="text-gray-700">Total Profit Margin:</span>
+                                <span className="font-semibold">
+                                  {formatCurrency(
+                                    boqData.items.reduce((sum, item) => sum + (item.profit_margin_amount || 0), 0)
+                                  )}
+                                </span>
+                              </div>
+                              <div className="flex justify-between pt-3 border-t-2 border-green-400 text-lg font-bold">
+                                <span className="text-green-900">Grand Total:</span>
+                                <span className="text-green-700">
+                                  {formatCurrency(
+                                    boqData.items.reduce((sum, item) => sum + (item.selling_price || item.total_cost || 0), 0)
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </>
                 ) : (

@@ -432,7 +432,7 @@ const EstimatorHub: React.FC = () => {
         toast.success('BOQ created successfully');
         setShowPreviewDialog(false);
         setExtractedBOQ(null);
-        setActiveTab('pending');
+        setActiveTab('projects'); // Show pending projects tab
         await loadBOQs();
       } else {
         toast.error(response.message);
@@ -481,7 +481,7 @@ const EstimatorHub: React.FC = () => {
     toast.success('BOQ created successfully!');
     setShowBOQCreationDialog(false);
     setSelectedProjectForBOQ(null);
-    setActiveTab('pending');
+    setActiveTab('projects'); // Show pending projects tab
     loadBOQs(); // Refresh the BOQ list
   };
 

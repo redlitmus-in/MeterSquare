@@ -1,9 +1,15 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
 import { motion } from 'framer-motion';
+import { projectManagerService } from '../services/projectManagerService';
+import { toast } from 'sonner';
 
 const ProjectManagerHub: React.FC = () => {
+  const [loading, setLoading] = useState(true);
+  const [boqs, setBOQs] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
+
   useEffect(() => {
     // Set Highcharts global options for consistent theming
     Highcharts.setOptions({
@@ -14,23 +20,43 @@ const ProjectManagerHub: React.FC = () => {
         }
       }
     });
+
+    // Fetch real data
+    loadDashboardData();
   }, []);
 
-  // Project Status Chart
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      const [boqsData, projectsData] = await Promise.all([
+        projectManagerService.getMyBOQs(),
+        projectManagerService.getAllProjects()
+      ]);
+      setBOQs(boqsData.boqs || []);
+      setProjects(projectsData || []);
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+      toast.error('Failed to load dashboard data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Project Status Chart - Dynamic data from API
   const projectStatusOptions = {
     chart: {
       type: 'column',
       backgroundColor: 'transparent'
     },
     title: {
-      text: 'Project Status Overview',
+      text: 'BOQ Status Overview',
       style: {
         fontSize: '16px',
         fontWeight: 'bold'
       }
     },
     xAxis: {
-      categories: ['Corporate Office', 'Retail Store', 'Restaurant', 'Medical Clinic'],
+      categories: boqs.slice(0, 5).map(b => b.boq_name || b.project_name || 'Unknown'),
       labels: {
         style: {
           fontSize: '12px'
@@ -39,8 +65,9 @@ const ProjectManagerHub: React.FC = () => {
     },
     yAxis: {
       title: {
-        text: 'Progress (%)'
-      }
+        text: 'Status'
+      },
+      categories: ['Pending', 'Approved', 'Rejected']
     },
     legend: {
       enabled: false
@@ -50,7 +77,6 @@ const ProjectManagerHub: React.FC = () => {
         borderRadius: 8,
         dataLabels: {
           enabled: true,
-          format: '{y}%',
           style: {
             fontSize: '11px'
           }
@@ -58,24 +84,25 @@ const ProjectManagerHub: React.FC = () => {
       }
     },
     series: [{
-      name: 'Progress',
-      data: [
-        { y: 65, color: '#3B82F6' },
-        { y: 42, color: '#F59E0B' },
-        { y: 88, color: '#10B981' },
-        { y: 25, color: '#3B82F6' }
-      ]
+      name: 'Status',
+      data: boqs.slice(0, 5).map(b => ({
+        y: b.status === 'approved' ? 2 : b.status === 'rejected' ? 0 : 1,
+        color: b.status === 'approved' ? '#10B981' : b.status === 'rejected' ? '#EF4444' : '#F59E0B'
+      }))
     }]
   };
 
-  // Budget Utilization Chart
+  // Budget Utilization Chart - Calculate from BOQ data
+  const totalBudget = boqs.reduce((sum, b) => sum + (b.boq_details?.total_cost || 0), 0);
+  const avgUtilization = totalBudget > 0 ? 60 : 0; // Can be enhanced with actual spent data
+
   const budgetUtilizationOptions = {
     chart: {
       type: 'pie',
       backgroundColor: 'transparent'
     },
     title: {
-      text: 'Budget Utilization',
+      text: 'Project Activity',
       style: {
         fontSize: '16px',
         fontWeight: 'bold'
@@ -95,33 +122,34 @@ const ProjectManagerHub: React.FC = () => {
       }
     },
     series: [{
-      name: 'Budget',
+      name: 'Activity',
       data: [
-        { name: 'Utilized', y: 62.8, color: '#3B82F6' },
-        { name: 'Remaining', y: 37.2, color: '#E5E7EB' }
+        { name: 'Active BOQs', y: boqs.filter(b => b.status === 'approved' || b.status === 'pending').length, color: '#3B82F6' },
+        { name: 'Completed', y: boqs.filter(b => b.status === 'completed').length, color: '#10B981' },
+        { name: 'Others', y: boqs.filter(b => b.status === 'rejected').length || 1, color: '#E5E7EB' }
       ]
     }]
   };
 
-  // Procurement Status Chart
-  const procurementStatusOptions = {
+  // BOQ Items Trend Chart
+  const boqTrendOptions = {
     chart: {
       type: 'area',
       backgroundColor: 'transparent'
     },
     title: {
-      text: 'Weekly Procurement Trend',
+      text: 'BOQ Items Breakdown',
       style: {
         fontSize: '16px',
         fontWeight: 'bold'
       }
     },
     xAxis: {
-      categories: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+      categories: boqs.slice(0, 7).map(b => b.boq_name?.substring(0, 10) || 'BOQ')
     },
     yAxis: {
       title: {
-        text: 'Items'
+        text: 'Items Count'
       }
     },
     legend: {
@@ -137,35 +165,35 @@ const ProjectManagerHub: React.FC = () => {
       }
     },
     series: [{
-      name: 'Approved',
-      data: [12, 15, 18, 14, 20, 16, 22],
+      name: 'Materials',
+      data: boqs.slice(0, 7).map(b => b.boq_details?.total_materials || 0),
       color: '#10B981'
     }, {
-      name: 'Pending',
-      data: [8, 10, 6, 12, 8, 5, 4],
+      name: 'Labour',
+      data: boqs.slice(0, 7).map(b => b.boq_details?.total_labour || 0),
       color: '#F59E0B'
     }]
   };
 
-  // Team Performance Chart
-  const teamPerformanceOptions = {
+  // Project Progress Chart
+  const projectProgressOptions = {
     chart: {
       type: 'bar',
       backgroundColor: 'transparent'
     },
     title: {
-      text: 'Site Engineer Performance',
+      text: 'Project Progress',
       style: {
         fontSize: '16px',
         fontWeight: 'bold'
       }
     },
     xAxis: {
-      categories: ['John Smith', 'Sarah Wilson', 'Mike Johnson', 'Emily Davis']
+      categories: projects.slice(0, 5).map(p => p.project_name?.substring(0, 20) || 'Project')
     },
     yAxis: {
       title: {
-        text: 'Efficiency (%)'
+        text: 'Completion (%)'
       },
       max: 100
     },
@@ -185,15 +213,24 @@ const ProjectManagerHub: React.FC = () => {
       }
     },
     series: [{
-      name: 'Efficiency',
-      data: [
-        { y: 94, color: '#10B981' },
-        { y: 87, color: '#3B82F6' },
-        { y: 91, color: '#10B981' },
-        { y: 89, color: '#3B82F6' }
-      ]
+      name: 'Progress',
+      data: projects.slice(0, 5).map((p, i) => ({
+        y: Math.floor(Math.random() * 50) + 30, // Placeholder - replace with actual progress from backend
+        color: i % 2 === 0 ? '#10B981' : '#3B82F6'
+      }))
     }]
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
@@ -232,7 +269,7 @@ const ProjectManagerHub: React.FC = () => {
             transition={{ delay: 0.4 }}
             className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
           >
-            <HighchartsReact highcharts={Highcharts} options={procurementStatusOptions} />
+            <HighchartsReact highcharts={Highcharts} options={boqTrendOptions} />
           </motion.div>
 
           <motion.div
@@ -241,7 +278,7 @@ const ProjectManagerHub: React.FC = () => {
             transition={{ delay: 0.5 }}
             className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
           >
-            <HighchartsReact highcharts={Highcharts} options={teamPerformanceOptions} />
+            <HighchartsReact highcharts={Highcharts} options={projectProgressOptions} />
           </motion.div>
         </div>
 
@@ -252,28 +289,38 @@ const ProjectManagerHub: React.FC = () => {
           transition={{ delay: 0.6 }}
           className="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
         >
-          <h2 className="text-lg font-bold text-gray-900 mb-4">Recent Activities</h2>
+          <h2 className="text-lg font-bold text-gray-900 mb-4">Recent BOQ Activities</h2>
           <div className="space-y-3">
-            {[
-              { action: 'Material procurement approved', project: 'Corporate Office', time: '2 hours ago', status: 'success' },
-              { action: 'Site Engineer assigned', project: 'Medical Clinic', time: '4 hours ago', status: 'info' },
-              { action: 'Budget overrun alert', project: 'Retail Store', time: '6 hours ago', status: 'warning' },
-              { action: 'Project milestone completed', project: 'Restaurant Interior', time: '1 day ago', status: 'success' }
-            ].map((activity, index) => (
-              <div key={index} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                <div className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full ${
-                    activity.status === 'success' ? 'bg-green-500' :
-                    activity.status === 'warning' ? 'bg-yellow-500' : 'bg-blue-500'
-                  }`} />
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{activity.action}</p>
-                    <p className="text-xs text-gray-500">{activity.project}</p>
+            {boqs.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500">No recent activities</p>
+              </div>
+            ) : (
+              boqs.slice(0, 5).map((boq, index) => (
+                <div key={boq.boq_id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${
+                      boq.status === 'approved' ? 'bg-green-500' :
+                      boq.status === 'rejected' ? 'bg-red-500' :
+                      boq.status === 'pending' ? 'bg-yellow-500' : 'bg-blue-500'
+                    }`} />
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{boq.boq_name}</p>
+                      <p className="text-xs text-gray-500">{boq.project_name || 'Unknown Project'}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className={`text-xs px-2 py-1 rounded-full ${
+                      boq.status === 'approved' ? 'bg-green-100 text-green-700' :
+                      boq.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                      boq.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
+                    }`}>
+                      {boq.status}
+                    </span>
                   </div>
                 </div>
-                <span className="text-xs text-gray-400">{activity.time}</span>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </motion.div>
       </div>

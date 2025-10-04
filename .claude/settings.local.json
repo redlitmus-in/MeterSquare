@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run type-check:*)"
+      "Bash(npm run type-check:*)",
+      "Bash(/c/Users/admin/AppData/Local/Programs/Python/Python312/python backend/utils/create_boq_template.py)"
     ],
     "deny": [],
     "ask": []

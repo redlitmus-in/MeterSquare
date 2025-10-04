@@ -38,10 +38,16 @@ apiClient.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    
+
     // Add request ID for tracing
     config.headers['X-Request-ID'] = crypto.randomUUID();
-    
+
+    // IMPORTANT: Remove Content-Type for FormData requests
+    // Let browser set it with proper boundary for multipart/form-data
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
+
     return config;
   },
   (error) => {

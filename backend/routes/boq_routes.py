@@ -5,6 +5,7 @@ from flask import Blueprint
 from utils.authentication import jwt_required
 from controllers.boq_controller import *
 from controllers.boq_upload_controller import *
+from controllers.boq_bulk_controller import bulk_upload_boq
 
 boq_routes = Blueprint('boq_routes', __name__, url_prefix='/api')
 
@@ -70,4 +71,10 @@ def get_boq_history_route(boq_id):
 @jwt_required
 def get_estimator_dashboard_route():
     return get_estimator_dashboard()
-    
+
+# BOQ Bulk Upload
+@boq_routes.route('/boq/bulk_upload', methods=['POST'])
+@jwt_required
+def bulk_upload_boq_route():
+    return bulk_upload_boq()
+

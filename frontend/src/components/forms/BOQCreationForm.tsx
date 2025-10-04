@@ -89,6 +89,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
   const [overallProfit, setOverallProfit] = useState(15);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+  const [isUploadingBulk, setIsUploadingBulk] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Master data states
   const [masterItems, setMasterItems] = useState<MasterItem[]>([]);
@@ -483,6 +485,134 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
 
   const calculateTotalCost = () => {
     return items.reduce((sum, item) => sum + calculateItemCost(item).sellingPrice, 0);
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      // Download the Excel template
+      const templateUrl = '/templates/BOQ_Template.xlsx';
+
+      // Fetch the file as blob to ensure proper download
+      const response = await fetch(templateUrl);
+
+      if (!response.ok) {
+        throw new Error('Template file not found');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'BOQ_Template.xlsx';
+      document.body.appendChild(link);
+      link.click();
+
+      // Cleanup
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast.success('Template downloaded successfully');
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error('Failed to download template. Please contact support.');
+    }
+  };
+
+  const handleImportTemplate = () => {
+    // Trigger file input click
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    console.log('File selected:', { name: file.name, size: file.size, type: file.type });
+
+    // Validate file type
+    const allowedExtensions = ['xlsx', 'xls'];
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+    if (!fileExtension || !allowedExtensions.includes(fileExtension)) {
+      toast.error('Please upload an Excel file (.xlsx or .xls)');
+      return;
+    }
+
+    // Validate file size (10MB)
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error('File size exceeds 10MB limit');
+      return;
+    }
+
+    // Validate project and BOQ name
+    if (!selectedProjectId) {
+      toast.error('Please select a project first');
+      return;
+    }
+
+    if (!boqName.trim()) {
+      toast.error('Please enter BOQ name first');
+      return;
+    }
+
+    console.log('Uploading BOQ:', { projectId: selectedProjectId, boqName, fileName: file.name });
+    setIsUploadingBulk(true);
+
+    try {
+      const result = await estimatorService.bulkUploadBOQ(
+        file,
+        selectedProjectId,
+        boqName
+      );
+
+      console.log('Upload result:', result);
+
+      if (result.success && result.boq_id) {
+        toast.success(result.message);
+
+        // Show warnings if any
+        if (result.warnings && result.warnings.length > 0) {
+          setTimeout(() => {
+            result.warnings.forEach((warning, index) => {
+              setTimeout(() => toast.warning(warning, { duration: 5000 }), index * 100);
+            });
+          }, 500);
+        }
+
+        if (onSubmit) {
+          onSubmit(result.boq_id);
+        }
+        onClose();
+      } else {
+        // Display error with proper formatting
+        const errorMessage = result.message.split('\n').filter(msg => msg.trim());
+        if (errorMessage.length > 1) {
+          // Multiple errors - show them sequentially
+          errorMessage.forEach((msg, index) => {
+            setTimeout(() => {
+              if (msg.includes('❌') || msg.includes('⚠️')) {
+                toast.error(msg, { duration: 8000 });
+              } else if (msg.trim()) {
+                toast.error(msg, { duration: 6000 });
+              }
+            }, index * 200);
+          });
+        } else {
+          // Single error
+          toast.error(result.message, { duration: 8000 });
+        }
+      }
+    } catch (error) {
+      console.error('Upload exception:', error);
+      toast.error('Failed to upload BOQ from Excel. Please check your file and try again.');
+    } finally {
+      setIsUploadingBulk(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   const handleSubmit = async () => {
@@ -1410,29 +1540,59 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
 
           {/* Footer - Match TD Style */}
           <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
+            {/* Hidden file input for Excel upload */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept=".xlsx,.xls"
+              style={{ display: 'none' }}
+            />
+
             <button
               type="button"
               onClick={onClose}
               className="px-6 py-2.5 text-gray-700 bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition-all font-semibold shadow-sm"
-              disabled={isSubmitting}
+              disabled={isSubmitting || isUploadingBulk}
             >
               Cancel
             </button>
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                className="flex items-center gap-2 px-5 py-2.5 bg-white border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all font-semibold shadow-sm"
-                disabled={isSubmitting}
+                onClick={handleDownloadTemplate}
+                className="flex items-center gap-2 px-5 py-2.5 bg-white border-2 border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-all font-semibold shadow-sm"
+                disabled={isSubmitting || isUploadingBulk}
+                title="Download Excel template for bulk import"
               >
-                <Upload className="w-5 h-5" />
-                Import Template
+                <FileText className="w-5 h-5" />
+                Download Template
+              </button>
+              <button
+                type="button"
+                onClick={handleImportTemplate}
+                className="flex items-center gap-2 px-5 py-2.5 bg-white border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all font-semibold shadow-sm"
+                disabled={isSubmitting || isUploadingBulk || !selectedProjectId || !boqName}
+                title={!selectedProjectId || !boqName ? "Please fill BOQ name and select project first" : "Import BOQ from Excel template"}
+              >
+                {isUploadingBulk ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-5 h-5" />
+                    Import Template
+                  </>
+                )}
               </button>
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={isSubmitting || !boqName || !selectedProjectId || items.length === 0}
+                disabled={isSubmitting || isUploadingBulk || !boqName || !selectedProjectId || items.length === 0}
                 className="flex items-center gap-2 px-6 py-2.5 text-white rounded-lg hover:opacity-90 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed font-bold shadow-lg"
-                style={{ backgroundColor: isSubmitting || !boqName || !selectedProjectId || items.length === 0 ? '' : 'rgb(36, 61, 138)' }}
+                style={{ backgroundColor: isSubmitting || isUploadingBulk || !boqName || !selectedProjectId || items.length === 0 ? '' : 'rgb(36, 61, 138)' }}
               >
                 {isSubmitting ? (
                   <>
