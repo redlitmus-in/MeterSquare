@@ -333,7 +333,7 @@ const ProjectsOverview: React.FC = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500">Total Budget</p>
-                <p className="text-2xl font-bold text-gray-900">₹{(projects.reduce((sum, p) => sum + p.budget, 0) / 10000000).toFixed(1)}Cr</p>
+                <p className="text-2xl font-bold text-gray-900">AED{(projects.reduce((sum, p) => sum + p.budget, 0) / 10000000).toFixed(1)}Cr</p>
               </div>
               <CurrencyDollarIcon className="w-8 h-8 text-blue-500" />
             </div>
@@ -452,7 +452,7 @@ const ProjectsOverview: React.FC = () => {
                       <div>
                         <p className="text-gray-500 text-xs">Budget Used</p>
                         <p className="font-bold text-gray-900">
-                          ₹{(project.spent / 100000).toFixed(1)}L / ₹{(project.budget / 100000).toFixed(1)}L
+                          AED{(project.spent / 100000).toFixed(1)}L / AED{(project.budget / 100000).toFixed(1)}L
                         </p>
                       </div>
                       <button className="p-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
@@ -513,8 +513,8 @@ const ProjectsOverview: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="text-sm">
-                        <p className="text-gray-900">₹{(project.budget / 100000).toFixed(1)}L</p>
-                        <p className="text-xs text-gray-500">Spent: ₹{(project.spent / 100000).toFixed(1)}L</p>
+                        <p className="text-gray-900">AED{(project.budget / 100000).toFixed(1)}L</p>
+                        <p className="text-xs text-gray-500">Spent: AED{(project.spent / 100000).toFixed(1)}L</p>
                       </div>
                     </td>
                     <td className="px-4 py-3">

@@ -287,7 +287,7 @@ const TeamAssignment: React.FC = () => {
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="font-medium">₹{(project.value / 100000).toFixed(1)}L</span>
+                        <span className="font-medium">AED{(project.value / 100000).toFixed(1)}L</span>
                         {project.status === 'unassigned' ? (
                           <span className="text-orange-600 font-medium">Needs Assignment</span>
                         ) : (
@@ -315,7 +315,7 @@ const TeamAssignment: React.FC = () => {
                       Selected Project: {selectedProject.name}
                     </p>
                     <p className="text-xs text-blue-700 mt-1">
-                      Client: {selectedProject.client} | Value: ₹
+                      Client: {selectedProject.client} | Value: AED
                       {(selectedProject.value / 100000).toFixed(1)}L
                     </p>
                   </div>

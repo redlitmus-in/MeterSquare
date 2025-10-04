@@ -411,7 +411,7 @@ const TechnicalDirectorDashboard: React.FC = () => {
                       </div>
                       <div>
                         <p className="text-xs text-gray-500 mb-1">Project Value</p>
-                        <p className="font-semibold text-gray-900">₹{(project.value / 100000).toFixed(1)}L</p>
+                        <p className="font-semibold text-gray-900">AED{(project.value / 100000).toFixed(1)}L</p>
                       </div>
                       <div>
                         <p className="text-xs text-gray-500 mb-1">Profit Margin</p>
@@ -508,7 +508,7 @@ const TechnicalDirectorDashboard: React.FC = () => {
                   <div className="flex justify-between pt-2 border-t border-gray-100">
                     <div>
                       <p className="text-xs text-gray-500">Budget Used</p>
-                      <p className="font-medium text-gray-900">₹{(project.spent / 100000).toFixed(1)}L</p>
+                      <p className="font-medium text-gray-900">AED{(project.spent / 100000).toFixed(1)}L</p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs text-gray-500">Due Date</p>

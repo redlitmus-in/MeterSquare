@@ -5,6 +5,8 @@ import smtplib
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from email.header import Header
 from email.utils import formataddr
 from config.logging import get_logger
@@ -31,7 +33,7 @@ class BOQEmailService:
         self.email_port = EMAIL_PORT
         self.use_tls = EMAIL_USE_TLS
 
-    def send_email(self, recipient_email, subject, html_content):
+    def send_email(self, recipient_email, subject, html_content, attachments=None):
         """
         Send email using SMTP
 
@@ -39,6 +41,7 @@ class BOQEmailService:
             recipient_email: Email address of recipient
             subject: Email subject
             html_content: HTML formatted email content
+            attachments: List of tuples (filename, file_data, mime_type)
 
         Returns:
             bool: True if email sent successfully, False otherwise
@@ -49,14 +52,24 @@ class BOQEmailService:
                 error_msg = "Email configuration missing: SENDER_EMAIL or SENDER_EMAIL_PASSWORD not set in environment"
                 raise ValueError(error_msg)
             # Create message
-            message = MIMEMultipart('alternative')
+            message = MIMEMultipart('mixed')
             sender_name = "MeterSquare ERP"
             message["From"] = formataddr((str(Header(sender_name, 'utf-8')), self.sender_email))
             message["To"] = recipient_email
             message["Subject"] = subject
+
             # Attach HTML body
             html_part = MIMEText(html_content, "html", "utf-8")
             message.attach(html_part)
+
+            # Attach files if provided
+            if attachments:
+                for filename, file_data, mime_type in attachments:
+                    part = MIMEBase(*mime_type.split('/'))
+                    part.set_payload(file_data)
+                    encoders.encode_base64(part)
+                    part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    message.attach(part)
             # Send email
             try:
                 if self.use_tls:
@@ -537,4 +550,143 @@ class BOQEmailService:
 
         except Exception as e:
             log.error(f"Error sending BOQ rejection to Estimator: {e}")
+            return False
+
+    def generate_boq_client_email(self, boq_data, project_data, message, total_value, item_count):
+        """
+        Generate professional BOQ email for Client
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            message: Custom message from TD
+            total_value: Total project value
+            item_count: Number of items
+
+        Returns:
+            str: HTML formatted email content
+        """
+        boq_name = boq_data.get('boq_name', 'BOQ')
+        project_name = project_data.get('project_name', 'Your Project')
+        client = project_data.get('client', 'Valued Client')
+        location = project_data.get('location', 'N/A')
+
+        email_body = f"""
+        <div class="email-container">
+            <!-- Header with Logo -->
+            <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); text-align: center;">
+                <img src="https://i.postimg.cc/50f23gnF/logo.png" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
+                <h1>Bill of Quantities</h1>
+                <h2>{project_name}</h2>
+            </div>
+
+            <!-- Content -->
+            <div class="content">
+                <p>Dear {client},</p>
+
+                <p>{message}</p>
+
+                <div class="divider"></div>
+
+                <!-- Project Information -->
+                <h2>Project Details</h2>
+                <div class="info-box">
+                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
+                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
+                    <p><span class="label">Total Items:</span> <span class="value">{item_count}</span></p>
+                </div>
+
+                <!-- Cost Summary -->
+                <div class="total-cost" style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-left: 4px solid #3b82f6;">
+                    <span class="label">Total Project Value:</span>
+                    <span class="amount" style="color: #1e40af;">AED {total_value:,.2f}</span>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Attachments Info -->
+                <div class="alert" style="background-color: #dbeafe; border-left: 4px solid #3b82f6;">
+                    <strong>Attached Documents:</strong>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>BOQ Excel File (Detailed Breakdown with all materials and labor costs)</li>
+                    </ul>
+                    <p style="margin: 10px 0 0 0; color: #1e40af; font-size: 14px;">
+                        Please review the attached Excel document for complete project details including materials, labor, and pricing breakdown.
+                    </p>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Action Required -->
+                <div class="alert alert-info">
+                    <strong>Next Steps:</strong>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>Review the attached BOQ documents carefully</li>
+                        <li>Verify all items and quantities match your requirements</li>
+                        <li>Contact us if you have any questions or need clarifications</li>
+                        <li>Provide your approval to proceed with the project</li>
+                    </ul>
+                </div>
+
+                <!-- Signature -->
+                <div class="signature">
+                    <p><strong>Best Regards,</strong></p>
+                    <p>Technical Director</p>
+                    <p>MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
+                <p>For any queries, please contact our team.</p>
+                <p>© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def send_boq_to_client(self, boq_data, project_data, client_email, message, total_value, item_count, excel_file=None, pdf_file=None):
+        """
+        Send BOQ to Client with Excel and PDF attachments
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            client_email: Client's email address
+            message: Custom message from TD
+            total_value: Total project value
+            item_count: Number of items
+            excel_file: Tuple (filename, file_data) for Excel
+            pdf_file: Tuple (filename, file_data) for PDF
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            # Generate email content
+            email_html = self.generate_boq_client_email(boq_data, project_data, message, total_value, item_count)
+
+            # Create subject
+            project_name = project_data.get('project_name', 'Project')
+            subject = f"BOQ for {project_name} - Review & Approval"
+
+            # Prepare attachments
+            attachments = []
+            if excel_file:
+                filename, file_data = excel_file
+                attachments.append((filename, file_data, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'))
+
+            if pdf_file:
+                filename, file_data = pdf_file
+                attachments.append((filename, file_data, 'application/pdf'))
+
+            # Send email with attachments
+            return self.send_email(client_email, subject, email_html, attachments if attachments else None)
+
+        except Exception as e:
+            log.error(f"Error sending BOQ to Client: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
             return False
