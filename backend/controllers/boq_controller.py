@@ -390,13 +390,54 @@ def get_all_boq():
                 "created_by": boq.created_by
             }
 
-            # Add summary from JSON if available
+            # Add items from JSON
+            items_list = []
+            total_material_cost = 0
+            total_labour_cost = 0
+            overhead_percentage = 0
+            profit_margin = 0
+
+            if boq_detail.boq_details and "items" in boq_detail.boq_details:
+                items = boq_detail.boq_details["items"]
+                items_list = items
+
+                # Calculate totals from items
+                for item in items:
+                    # Calculate material cost
+                    materials = item.get("materials", [])
+                    for mat in materials:
+                        total_material_cost += mat.get("total_price", 0)
+
+                    # Calculate labour cost
+                    labour = item.get("labour", [])
+                    for lab in labour:
+                        total_labour_cost += lab.get("total_cost", 0)
+
+                    # Get overhead and profit from first item
+                    if overhead_percentage == 0:
+                        overhead_percentage = item.get("overhead_percentage", 0)
+                    if profit_margin == 0:
+                        profit_margin = item.get("profit_margin", 0)
+
+            # Add summary from JSON if available (this will override calculated values if present)
             if boq_detail.boq_details and "summary" in boq_detail.boq_details:
                 summary = boq_detail.boq_details["summary"]
-                boq_summary.update({
-                    "total_material_cost": summary.get("total_material_cost", 0),
-                    "total_labour_cost": summary.get("total_labour_cost", 0)
-                })
+                if summary.get("total_material_cost", 0) > 0:
+                    total_material_cost = summary.get("total_material_cost", 0)
+                if summary.get("total_labour_cost", 0) > 0:
+                    total_labour_cost = summary.get("total_labour_cost", 0)
+                if summary.get("overhead_percentage", 0) > 0:
+                    overhead_percentage = summary.get("overhead_percentage", 0)
+                if summary.get("profit_margin", 0) > 0:
+                    profit_margin = summary.get("profit_margin", 0)
+
+            boq_summary.update({
+                "items": items_list,
+                "total_material_cost": total_material_cost,
+                "total_labour_cost": total_labour_cost,
+                "overhead_percentage": overhead_percentage,
+                "profit_margin": profit_margin
+            })
 
             complete_boqs.append(boq_summary)
 

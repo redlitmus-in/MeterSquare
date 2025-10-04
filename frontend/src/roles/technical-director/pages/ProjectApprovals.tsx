@@ -960,35 +960,50 @@ const ProjectApprovals: React.FC = () => {
                 <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl border border-blue-200">
                   <h4 className="font-bold text-gray-900 mb-3">Cost Summary</h4>
                   <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Total Material Cost:</span>
-                      <span className="font-semibold">AED{(selectedEstimation.materialCost).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Total Labor Cost:</span>
-                      <span className="font-semibold">AED{(selectedEstimation.laborCost).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Overhead ({selectedEstimation.overheadPercentage}%):</span>
-                      <span className="font-semibold">AED{((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.overheadPercentage / 100).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Profit ({selectedEstimation.profitMargin}%):</span>
-                      <span className="font-semibold">AED{((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.profitMargin / 100).toLocaleString()}</span>
-                    </div>
-                    <div className="border-t border-blue-300 pt-2 mt-2">
-                      <div className="flex justify-between">
-                        <span className="font-bold text-gray-900">Grand Total:</span>
-                        <span className="font-bold text-lg text-green-600">
-                          AED{(
-                            selectedEstimation.materialCost +
-                            selectedEstimation.laborCost +
-                            ((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.overheadPercentage / 100) +
-                            ((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.profitMargin / 100)
-                          ).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
+                    {(() => {
+                      // Calculate totals from items if available
+                      const totalMaterialCost = selectedEstimation.boqItems?.reduce((sum, item) =>
+                        sum + item.materials.reduce((matSum, m) => matSum + m.amount, 0), 0
+                      ) || selectedEstimation.materialCost || 0;
+
+                      const totalLaborCost = selectedEstimation.boqItems?.reduce((sum, item) =>
+                        sum + item.laborCost, 0
+                      ) || selectedEstimation.laborCost || 0;
+
+                      const baseCost = totalMaterialCost + totalLaborCost;
+                      const overheadAmount = baseCost * selectedEstimation.overheadPercentage / 100;
+                      const profitAmount = baseCost * selectedEstimation.profitMargin / 100;
+                      const grandTotal = baseCost + overheadAmount + profitAmount;
+
+                      return (
+                        <>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Total Material Cost:</span>
+                            <span className="font-semibold">AED{totalMaterialCost.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Total Labor Cost:</span>
+                            <span className="font-semibold">AED{totalLaborCost.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Overhead ({selectedEstimation.overheadPercentage}%):</span>
+                            <span className="font-semibold">AED{overheadAmount.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Profit ({selectedEstimation.profitMargin}%):</span>
+                            <span className="font-semibold">AED{profitAmount.toLocaleString()}</span>
+                          </div>
+                          <div className="border-t border-blue-300 pt-2 mt-2">
+                            <div className="flex justify-between">
+                              <span className="font-bold text-gray-900">Grand Total:</span>
+                              <span className="font-bold text-lg text-green-600">
+                                AED{grandTotal.toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
 
