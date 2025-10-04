@@ -110,6 +110,11 @@ def send_boq_to_client():
         )
 
         if email_sent:
+            # Update BOQ flags: email_sent = TRUE, status = Sent_for_Confirmation
+            boq.email_sent = True
+            boq.status = "Sent_for_Confirmation"  # Waiting for client confirmation
+            db.session.commit()
+
             return jsonify({
                 "success": True,
                 "message": "BOQ sent to client successfully",

@@ -334,6 +334,7 @@ def get_boq(boq_id):
             "email_sent": boq.email_sent,
             "created_at": boq.created_at.isoformat() if boq.created_at else None,
             "created_by": boq.created_by,
+            "user_id": project.user_id if project else None,  # PM assignment indicator
             "project_details": {
                 "project_name": project.project_name if project else None,
                 "location": project.location if project else None,
@@ -380,6 +381,7 @@ def get_all_boq():
                 "location": project.location if project else None,
                 "status": boq.status,
                 "email_sent" : boq.email_sent,
+                "user_id": project.user_id if project else None,  # PM assignment indicator
                 "items_count": boq_detail.total_items,
                 "material_count": boq_detail.total_materials,
                 "labour_count": boq_detail.total_labour,
@@ -807,8 +809,8 @@ def send_boq_email(boq_id):
             )
 
             if email_sent:
-                # Update BOQ email_sent flag and status
-                boq.email_sent = True
+                # Update BOQ status to Pending (email_sent remains False - only set True when sent to CLIENT)
+                boq.email_sent = False  # False = not sent to client yet
                 boq.status = "Pending"
 
                 # Check if history entry already exists for this BOQ
@@ -934,8 +936,8 @@ def send_boq_email(boq_id):
             )
 
             if email_sent:
-                # Update BOQ email_sent flag and status
-                boq.email_sent = True
+                # Update BOQ status to Pending (email_sent remains False - only set True when sent to CLIENT)
+                boq.email_sent = False  # False = not sent to client yet
                 boq.status = "Pending"
 
                 # Check if history entry already exists for this BOQ

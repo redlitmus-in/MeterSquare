@@ -16,10 +16,9 @@ def get_all_td_boqs():
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 10, type=int), 100)
 
-        # Build query - get all BOQs
+        # Build query - get ALL BOQs for TD (pending, sent, assigned, rejected)
         query = db.session.query(BOQ).filter(
-            BOQ.is_deleted == False,
-            BOQ.email_sent == True,
+            BOQ.is_deleted == False
         ).order_by(BOQ.created_at.desc())
 
         # Paginate
@@ -58,17 +57,49 @@ def get_all_td_boqs():
                     "created_by": boq_details.created_by
                 }
 
+            # Calculate costs from BOQ details
+            total_material_cost = 0
+            total_labour_cost = 0
+            overhead_percentage = 0
+            profit_margin = 0
+
+            if boq_details and boq_details.boq_details and "items" in boq_details.boq_details:
+                items = boq_details.boq_details["items"]
+                for item in items:
+                    materials = item.get("materials", [])
+                    for mat in materials:
+                        total_material_cost += mat.get("total_price", 0)
+                    labour = item.get("labour", [])
+                    for lab in labour:
+                        total_labour_cost += lab.get("total_cost", 0)
+                    if overhead_percentage == 0:
+                        overhead_percentage = item.get("overhead_percentage", 0)
+                    if profit_margin == 0:
+                        profit_margin = item.get("profit_margin", 0)
+
             boq_data = {
                 "boq_id": boq.boq_id,
                 "project_id": boq.project_id,
                 "boq_name": boq.boq_name,
+                "project_name": boq.project.project_name if boq.project else None,
+                "client": boq.project.client if boq.project else None,
+                "location": boq.project.location if boq.project else None,
                 "status": boq.status,
+                "email_sent": boq.email_sent,
+                "user_id": boq.project.user_id if boq.project else None,  # PM assignment indicator
+                "items_count": boq_details.total_items if boq_details else 0,
+                "material_count": boq_details.total_materials if boq_details else 0,
+                "labour_count": boq_details.total_labour if boq_details else 0,
+                "total_cost": float(boq_details.total_cost) if boq_details and boq_details.total_cost else 0.0,
+                "selling_price": float(boq_details.total_cost) if boq_details and boq_details.total_cost else 0.0,
+                "total_material_cost": total_material_cost,
+                "total_labour_cost": total_labour_cost,
+                "overhead_percentage": overhead_percentage,
+                "profit_margin": profit_margin,
                 "created_at": boq.created_at.isoformat() if boq.created_at else None,
                 "created_by": boq.created_by,
                 "last_modified_at": boq.last_modified_at.isoformat() if boq.last_modified_at else None,
                 "last_modified_by": boq.last_modified_by,
-                "email_sent": boq.email_sent,
-                "project_name": boq.project.project_name if boq.project else None,
                 "history": history_list,  # Will be [] if no history exists
                 "boq_details": boq_details_dict  # Now properly serialized
             }
@@ -193,44 +224,15 @@ def td_mail_send():
         new_status = None
 
         if technical_director_status.lower() == 'approved':
-            # BOQ approved - Send to Project Manager assigned to this project
-            log.info(f"BOQ {boq_id} approved by TD, finding Project Manager for project {project.project_id}")
+            # BOQ approved - Internal approval only (no email sent yet)
+            # Workflow: TD approves → Estimator sends to client → TD assigns PM
+            log.info(f"BOQ {boq_id} approved by TD internally")
 
-            # Check if project has an assigned PM
-            if not project.user_id:
-                return jsonify({
-                    "error": "No Project Manager assigned",
-                    "message": f"Project '{project.project_name}' does not have a Project Manager assigned"
-                }), 404
-
-            # Get the Project Manager assigned to this project
-            project_manager = User.query.filter_by(
-                user_id=project.user_id,
-                is_active=True,
-                is_deleted=False
-            ).first()
-
-            if not project_manager:
-                return jsonify({
-                    "error": "Project Manager not found",
-                    "message": f"No active Project Manager found with ID {project.user_id}"
-                }), 404
-
-            if not project_manager.email:
-                return jsonify({
-                    "error": "Project Manager has no email",
-                    "message": f"Project Manager {project_manager.full_name} does not have an email address"
-                }), 400
-
-            recipient_email = project_manager.email
-            recipient_name = project_manager.full_name or "Project Manager"
-            recipient_role = "projectManager"
+            recipient_email = boq.created_by  # Estimator email (for history)
+            recipient_name = "Estimator"
+            recipient_role = "estimator"
             new_status = "Approved"
-
-            # Send approval email to PM
-            email_sent = boq_email_service.send_boq_approval_to_pm(
-                boq_data, project_data, items_summary, recipient_email, comments
-            )
+            email_sent = True  # No email needed for internal approval (just status change)
 
         else:  # rejected
             # BOQ REJECTED - Send to Estimator (original creator)

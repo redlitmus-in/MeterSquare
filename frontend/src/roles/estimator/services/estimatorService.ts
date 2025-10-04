@@ -693,6 +693,48 @@ class EstimatorService {
     }
   }
 
+  // Send BOQ to Client (after TD approval)
+  async sendBOQToClient(
+    boqId: number,
+    params: { client_email?: string; message?: string; formats?: string[] }
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await apiClient.post('/send_boq_to_client', {
+        boq_id: boqId,
+        client_email: params.client_email,
+        message: params.message,
+        formats: params.formats || ['excel', 'pdf']
+      });
+      return {
+        success: response.data.success !== false,
+        message: response.data.message || 'BOQ sent successfully to client'
+      };
+    } catch (error: any) {
+      console.error('Error sending BOQ to client:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Failed to send BOQ to client'
+      };
+    }
+  }
+
+  // Confirm Client Approval (after client approves the BOQ)
+  async confirmClientApproval(boqId: number): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await apiClient.put(`/confirm_client_approval/${boqId}`);
+      return {
+        success: response.data.success !== false,
+        message: response.data.message || 'Client approval confirmed successfully'
+      };
+    } catch (error: any) {
+      console.error('Error confirming client approval:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Failed to confirm client approval'
+      };
+    }
+  }
+
   // Get BOQ History
   async getBOQHistory(boqId: number): Promise<{
     success: boolean;

@@ -15,7 +15,7 @@ import {
   DocumentTextIcon,
   XMarkIcon,
   ArrowDownTrayIcon,
-  EnvelopeIcon
+  UserPlusIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
@@ -66,7 +66,7 @@ interface EstimationItem {
   profitMargin: number;
   overheadPercentage: number;
   submittedDate: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed';
   priority: 'high' | 'medium' | 'low';
   location: string;
   floor: string;
@@ -74,11 +74,14 @@ interface EstimationItem {
   boqItems?: BOQItem[];
   approvalNotes?: string;
   rejectionReason?: string;
+  emailSent?: boolean;
+  projectId?: number;
+  pmAssigned?: boolean;
 }
 
 const ProjectApprovals: React.FC = () => {
   const [selectedEstimation, setSelectedEstimation] = useState<EstimationItem | null>(null);
-  const [filterStatus, setFilterStatus] = useState<'pending' | 'approved' | 'rejected' | 'completed'>('pending');
+  const [filterStatus, setFilterStatus] = useState<'pending' | 'approved' | 'sent' | 'assigned' | 'rejected'>('pending');
   const [showBOQModal, setShowBOQModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
@@ -90,11 +93,14 @@ const ProjectApprovals: React.FC = () => {
   const [boqHistory, setBOQHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [showSendEmailModal, setShowSendEmailModal] = useState(false);
-  const [clientEmail, setClientEmail] = useState('');
-  const [emailMessage, setEmailMessage] = useState('');
   const [showFormatModal, setShowFormatModal] = useState(false);
   const [downloadType, setDownloadType] = useState<'internal' | 'client'>('internal');
+  const [showAssignPMModal, setShowAssignPMModal] = useState(false);
+  const [assignMode, setAssignMode] = useState<'create' | 'existing'>('existing');
+  const [allPMs, setAllPMs] = useState<any[]>([]);
+  const [selectedPMId, setSelectedPMId] = useState<number | null>(null);
+  const [newPMData, setNewPMData] = useState({ full_name: '', email: '', phone: '' });
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
 
   // Format currency for display
   const formatCurrency = (amount: number): string => {
@@ -114,9 +120,12 @@ const ProjectApprovals: React.FC = () => {
   const loadBOQs = async () => {
     setLoading(true);
     try {
-      const response = await estimatorService.getAllBOQs();
+      const response = await tdService.getAllTDBOQs();
       if (response.success && response.data) {
         setBOQs(response.data);
+      } else {
+        console.error('Failed to load BOQs:', response.message);
+        toast.error(response.message || 'Failed to load BOQs');
       }
     } catch (error) {
       console.error('Error loading BOQs:', error);
@@ -220,6 +229,9 @@ const ProjectApprovals: React.FC = () => {
       location: boq.location || boq.project_details?.location || 'N/A',
       floor: boq.floor_name || boq.project_details?.floor || 'N/A',
       workingHours: boq.working_hours || boq.project_details?.hours || 'N/A',
+      emailSent: boq.email_sent || false,
+      projectId: boq.project_id,
+      pmAssigned: !!(boq.pm_assigned || boq.user_id), // Convert to boolean - PM assigned if user_id exists
       boqItems: boq.items?.map((item: any) => {
         const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
         const sellingPrice = item.selling_price || 0;
@@ -255,7 +267,7 @@ const ProjectApprovals: React.FC = () => {
   };
 
   // Map BOQ status to estimation status
-  const mapBOQStatus = (status: string): 'pending' | 'approved' | 'rejected' => {
+  const mapBOQStatus = (status: string): 'pending' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' => {
     if (!status) return 'pending';
 
     const normalizedStatus = status.toLowerCase().trim();
@@ -270,7 +282,17 @@ const ProjectApprovals: React.FC = () => {
       return 'rejected';
     }
 
-    // All other statuses (sent_for_confirmation, draft, in_review, pending) -> pending
+    // Check for client confirmed (ready for PM assignment)
+    if (normalizedStatus === 'client_confirmed') {
+      return 'client_confirmed';
+    }
+
+    // Check for sent to client (waiting for client confirmation)
+    if (normalizedStatus === 'sent_for_confirmation' || normalizedStatus === 'sent_to_client') {
+      return 'sent_for_confirmation';
+    }
+
+    // All other statuses (draft, in_review, pending) -> pending
     return 'pending';
   };
 
@@ -279,16 +301,22 @@ const ProjectApprovals: React.FC = () => {
 
   const filteredEstimations = estimations.filter(est => {
     if (filterStatus === 'pending') {
-      // Pending includes: sent_for_confirmation, draft, in_review
-      const boq = boqs.find(b => b.boq_id === est.id);
-      const status = boq?.status?.toLowerCase().replace(/_/g, '');
-      return status === 'sentforconfirmation' || status === 'draft' || status === 'inreview' || status === 'pending';
-    } else if (filterStatus === 'completed') {
-      const boq = boqs.find(b => b.boq_id === est.id);
-      const status = boq?.status?.toLowerCase();
-      return status === 'completed';
+      // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
+      return est.status === 'pending' && !est.pmAssigned;
+    } else if (filterStatus === 'approved') {
+      // Approved: TD approved internally, waiting for Estimator to send to client (status = approved ONLY)
+      return est.status === 'approved' && !est.pmAssigned;
+    } else if (filterStatus === 'sent') {
+      // Client Approved: Estimator confirmed client approved (status = client_confirmed ONLY), ready for PM assignment
+      return est.status === 'client_confirmed' && !est.pmAssigned;
+    } else if (filterStatus === 'assigned') {
+      // Assigned: PM has been assigned (can be after client confirms)
+      return est.pmAssigned === true && est.status !== 'rejected';
+    } else if (filterStatus === 'rejected') {
+      // Rejected: TD rejected the BOQ
+      return est.status === 'rejected';
     }
-    return est.status === filterStatus;
+    return false;
   });
 
   const handleApproval = async (id: number, approved: boolean, notes?: string) => {
@@ -297,8 +325,11 @@ const ProjectApprovals: React.FC = () => {
         const response = await tdService.approveBOQ(id, notes);
         if (response.success) {
           toast.success('BOQ approved successfully');
-          setShowBOQModal(false); // Close BOQ details modal
+          setShowApprovalModal(false); // Close approval modal first
           await loadBOQs(); // Reload data
+
+          // Show comparison modal automatically after approval
+          setShowComparisonModal(true);
         } else {
           toast.error(response.message || 'Failed to approve BOQ');
         }
@@ -319,7 +350,6 @@ const ProjectApprovals: React.FC = () => {
     } catch (error) {
       toast.error('An error occurred while processing the request');
     }
-    setShowApprovalModal(false);
     setShowRejectionModal(false);
     setApprovalNotes('');
     setRejectionReason('');
@@ -359,44 +389,87 @@ const ProjectApprovals: React.FC = () => {
     }
   };
 
-  const handleSendToClient = async () => {
-    if (!selectedEstimation) return;
 
-    if (!clientEmail.trim()) {
-      toast.error('Please enter client email address');
-      return;
+  // Load PMs when assign modal opens
+  useEffect(() => {
+    if (showAssignPMModal) {
+      loadPMs();
     }
+  }, [showAssignPMModal]);
 
-    // Email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(clientEmail)) {
-      toast.error('Please enter a valid email address');
+  const loadPMs = async () => {
+    try {
+      const response = await tdService.getAllPMs();
+      if (response.success && response.data) {
+        setAllPMs(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading PMs:', error);
+      toast.error('Failed to load Project Managers');
+    }
+  };
+
+  const handleAssignPM = async () => {
+    if (!selectedEstimation || !selectedEstimation.projectId) {
+      toast.error('No project selected');
       return;
     }
 
     try {
-      toast.loading('Sending BOQ to client (Excel)...');
-      const response = await tdService.sendBOQToClient(
-        selectedEstimation.id,
-        clientEmail,
-        emailMessage,
-        ['excel'] // Send only Excel format
-      );
+      if (assignMode === 'create') {
+        // Validate new PM data
+        if (!newPMData.full_name || !newPMData.email || !newPMData.phone) {
+          toast.error('Please fill all PM details');
+          return;
+        }
 
-      toast.dismiss();
-      if (response.success) {
-        toast.success('BOQ sent to client successfully');
-        setShowSendEmailModal(false);
-        setClientEmail('');
-        setEmailMessage('');
-        await loadBOQs(); // Reload to update status
+        toast.loading('Creating Project Manager...');
+        const response = await tdService.createPM({
+          ...newPMData,
+          project_ids: [selectedEstimation.projectId]
+        });
+
+        toast.dismiss();
+        if (response.success) {
+          toast.success('Project Manager created and assigned successfully');
+          setShowAssignPMModal(false);
+          setNewPMData({ full_name: '', email: '', phone: '' });
+          await loadBOQs();
+          // Reload the selected BOQ details to update the UI
+          if (selectedEstimation) {
+            await loadBOQDetails(selectedEstimation.id);
+          }
+        } else {
+          toast.error(response.message);
+        }
       } else {
-        toast.error(response.message || 'Failed to send BOQ to client');
+        // Assign to existing PM
+        if (!selectedPMId) {
+          toast.error('Please select a Project Manager');
+          return;
+        }
+
+        toast.loading('Assigning Project Manager...');
+        const response = await tdService.assignProjectsToPM(selectedPMId, [selectedEstimation.projectId]);
+
+        toast.dismiss();
+        if (response.success) {
+          toast.success('Project assigned to PM successfully');
+          setShowAssignPMModal(false);
+          setSelectedPMId(null);
+          await loadBOQs();
+          // Reload the selected BOQ details to update the UI
+          if (selectedEstimation) {
+            await loadBOQDetails(selectedEstimation.id);
+          }
+        } else {
+          toast.error(response.message);
+        }
       }
     } catch (error) {
       toast.dismiss();
-      toast.error('Failed to send BOQ to client');
-      console.error('Send email error:', error);
+      console.error('Assign PM error:', error);
+      toast.error('Failed to assign Project Manager');
     }
   };
 
@@ -441,18 +514,24 @@ const ProjectApprovals: React.FC = () => {
 
       <div className="max-w-7xl mx-auto px-6 py-6">
         {/* Filter Tabs */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 mb-6 inline-flex">
-          {['pending', 'approved', 'rejected', 'completed'].map((status) => (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 mb-6 inline-flex gap-1">
+          {[
+            { key: 'pending', label: 'Pending' },
+            { key: 'approved', label: 'Approved' },
+            { key: 'sent', label: 'Client Approved' },
+            { key: 'assigned', label: 'Assigned' },
+            { key: 'rejected', label: 'Rejected' }
+          ].map((tab) => (
             <button
-              key={status}
-              onClick={() => setFilterStatus(status as any)}
+              key={tab.key}
+              onClick={() => setFilterStatus(tab.key as any)}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                filterStatus === status
-                  ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 shadow-md'
-                  : 'text-gray-600 hover:text-gray-900'
+                filterStatus === tab.key
+                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
               }`}
             >
-              {status.charAt(0).toUpperCase() + status.slice(1)}
+              {tab.label}
             </button>
           ))}
         </div>
@@ -541,29 +620,19 @@ const ProjectApprovals: React.FC = () => {
                     >
                       <EyeIcon className="w-5 h-5 text-blue-600 group-hover:text-blue-700" />
                     </button>
-                    {estimation.status === 'pending' && (
-                      <>
-                        <button
-                          onClick={() => {
-                            setSelectedEstimation(estimation);
-                            setShowApprovalModal(true);
-                          }}
-                          className="p-2.5 bg-green-50 hover:bg-green-100 rounded-lg transition-colors group"
-                          title="Approve"
-                        >
-                          <CheckCircleIcon className="w-5 h-5 text-green-600 group-hover:text-green-700" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSelectedEstimation(estimation);
-                            setShowRejectionModal(true);
-                          }}
-                          className="p-2.5 bg-red-50 hover:bg-red-100 rounded-lg transition-colors group"
-                          title="Reject"
-                        >
-                          <XCircleIcon className="w-5 h-5 text-red-600 group-hover:text-red-700" />
-                        </button>
-                      </>
+                    {/* Assign PM button - Only show when client has confirmed */}
+                    {estimation.status === 'client_confirmed' && !estimation.pmAssigned && (
+                      <button
+                        onClick={() => {
+                          setSelectedEstimation(estimation);
+                          setShowAssignPMModal(true);
+                        }}
+                        className="px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-[#243d8a] text-sm font-medium flex items-center gap-1.5 group"
+                        title="Assign Project Manager"
+                      >
+                        <UserPlusIcon className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                        Assign PM
+                      </button>
                     )}
                   </div>
                 </div>
@@ -594,8 +663,8 @@ const ProjectApprovals: React.FC = () => {
               className="bg-white rounded-2xl shadow-md max-w-lg w-full"
             >
               <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-green-200">
-                <h2 className="text-xl font-bold text-green-900">Approve Project</h2>
-                <p className="text-sm text-green-700 mt-1">{selectedEstimation.projectName}</p>
+                <h2 className="text-xl font-bold text-green-900">Approve BOQ - {selectedEstimation.projectName}</h2>
+                <p className="text-sm text-green-700 mt-1">Confirm approval for estimator to send to client</p>
               </div>
 
               <div className="p-6">
@@ -607,7 +676,7 @@ const ProjectApprovals: React.FC = () => {
                     value={approvalNotes}
                     onChange={(e) => setApprovalNotes(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                    rows={4}
+                    rows={3}
                     placeholder="Add any conditions, notes, or requirements for this approval..."
                   />
                 </div>
@@ -732,6 +801,7 @@ const ProjectApprovals: React.FC = () => {
                     <p className="text-xs text-blue-600 mt-1">Working Hours: {selectedEstimation.workingHours}</p>
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* Download - Always available for TD review */}
                     <button
                       onClick={() => setShowFormatModal(true)}
                       className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-1"
@@ -740,16 +810,20 @@ const ProjectApprovals: React.FC = () => {
                       <ArrowDownTrayIcon className="w-4 h-4" />
                       Download
                     </button>
-                    <button
-                      onClick={() => {
-                        setShowSendEmailModal(true);
-                      }}
-                      className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-1"
-                      title="Send to Client via Email"
-                    >
-                      <EnvelopeIcon className="w-4 h-4" />
-                      Send
-                    </button>
+
+                    {/* Assign PM - Only after client confirmed and PM not yet assigned */}
+                    {selectedEstimation.status === 'client_confirmed' && !selectedEstimation.pmAssigned && (
+                      <button
+                        onClick={() => {
+                          setShowAssignPMModal(true);
+                        }}
+                        className="px-3 py-1.5 bg-gradient-to-r from-[#243d8a] to-blue-600 hover:from-[#1a2d66] hover:to-blue-700 text-white rounded-lg transition-all text-sm font-medium flex items-center gap-1 shadow-md"
+                        title="Assign Project Manager to this project"
+                      >
+                        <UserPlusIcon className="w-4 h-4" />
+                        Assign PM
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         setShowHistory(!showHistory);
@@ -1034,35 +1108,71 @@ const ProjectApprovals: React.FC = () => {
 
               </div>
 
-              {/* Sticky Action Buttons & Footer */}
+              {/* Footer with Approve/Reject Buttons */}
               <div className="bg-gradient-to-r from-gray-50 to-white border-t border-gray-200">
+                {/* Approve/Reject Buttons - Only for pending BOQs */}
                 {selectedEstimation.status === 'pending' && (
-                  <div className="px-6 py-4 flex items-center gap-3 justify-end">
+                  <div className="px-6 py-4 border-b border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium text-gray-700">Internal Approval:</span>
+                        <button
+                          onClick={() => setShowComparisonModal(true)}
+                          className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg font-medium transition-colors flex items-center gap-2 text-sm"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                          </svg>
+                          Compare Internal vs Client BOQ
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setShowRejectionModal(true)}
+                          className="px-5 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2 shadow-md"
+                        >
+                          <XCircleIcon className="w-5 h-5" />
+                          Reject
+                        </button>
+                        <button
+                          onClick={() => setShowApprovalModal(true)}
+                          className="px-5 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2 shadow-md"
+                        >
+                          <CheckCircleIcon className="w-5 h-5" />
+                          Approve
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Reject Button - Only for approved BOQs (before sent to client) */}
+                {selectedEstimation.status === 'approved' && (
+                  <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                    <div className="text-sm text-gray-600">
+                      <span className="font-semibold text-green-600">✓ Internally Approved</span>
+                      <p className="text-xs text-gray-500 mt-0.5">Waiting for Estimator to send to client</p>
+                    </div>
                     <button
-                      onClick={() => {
-                        setShowRejectionModal(true);
-                      }}
+                      onClick={() => setShowRejectionModal(true)}
                       className="px-6 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2 shadow-md"
                     >
                       <XCircleIcon className="w-5 h-5" />
-                      Reject BOQ
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowApprovalModal(true);
-                      }}
-                      className="px-6 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2 shadow-md"
-                    >
-                      <CheckCircleIcon className="w-5 h-5" />
-                      Approve BOQ
+                      Revoke Approval
                     </button>
                   </div>
                 )}
 
                 {/* Footer Info */}
-                <div className="px-6 py-3 border-t border-gray-200">
+                <div className="px-6 py-3">
                   <div className="text-sm text-gray-600">
                     Submitted by: <span className="font-semibold">{selectedEstimation.estimator}</span> on {selectedEstimation.submittedDate}
+                    {selectedEstimation.emailSent && (
+                      <span className="ml-4 text-green-600">
+                        <CheckCircleIcon className="w-4 h-4 inline mr-1" />
+                        Sent to Client
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1084,6 +1194,25 @@ const ProjectApprovals: React.FC = () => {
               </div>
 
               <div className="p-6">
+                {/* Comparison Tip */}
+                {selectedEstimation.status === 'pending' && (
+                  <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-shrink-0 mt-0.5">
+                        <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-xs text-blue-800 font-medium">Comparison Tip</p>
+                        <p className="text-xs text-blue-700 mt-1">
+                          Download both versions to compare what's visible internally vs what the client will see after estimator sends it.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Version Selection */}
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-3">
@@ -1171,80 +1300,295 @@ const ProjectApprovals: React.FC = () => {
           </div>
         )}
 
-        {/* Send to Client Email Modal */}
-        {showSendEmailModal && selectedEstimation && (
+        {/* PM Assignment Modal - Modern Design */}
+        {showAssignPMModal && selectedEstimation && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] p-4">
             <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-2xl shadow-md max-w-lg w-full"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden"
             >
-              <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-4 border-b border-blue-200">
-                <h2 className="text-xl font-bold text-blue-900">Send BOQ to Client</h2>
-                <p className="text-sm text-blue-700 mt-1">{selectedEstimation.projectName}</p>
-              </div>
-
-              <div className="p-6">
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Client Email Address <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={clientEmail}
-                    onChange={(e) => setClientEmail(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="client@example.com"
-                    required
-                  />
-                </div>
-
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Message to Client (Optional)
-                  </label>
-                  <textarea
-                    value={emailMessage}
-                    onChange={(e) => setEmailMessage(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    rows={4}
-                    placeholder="Add a personal message for the client..."
-                  />
-                </div>
-
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                  <h3 className="text-sm font-semibold text-blue-900 mb-2">What will be sent:</h3>
-                  <ul className="text-sm text-blue-800 space-y-1">
-                    <li>• BOQ Excel file (Client version - WITHOUT overhead & profit details)</li>
-                    <li>• Project: {selectedEstimation.projectName}</li>
-                    <li>• Total Value: AED {formatCurrency(selectedEstimation.totalValue)}</li>
-                    <li>• {selectedEstimation.itemCount} items included</li>
-                  </ul>
-                </div>
-
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-                  <p className="text-sm text-yellow-800">
-                    <strong>Note:</strong> The client version hides internal cost breakdowns, overhead percentages, and profit margins.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-3 justify-end">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-[#243d8a] to-blue-700 px-8 py-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+                      <UserPlusIcon className="w-7 h-7" />
+                      Assign Project Manager
+                    </h2>
+                    <p className="text-blue-100 mt-1 text-sm">{selectedEstimation.projectName}</p>
+                  </div>
                   <button
                     onClick={() => {
-                      setShowSendEmailModal(false);
-                      setClientEmail('');
-                      setEmailMessage('');
+                      setShowAssignPMModal(false);
+                      setSelectedPMId(null);
+                      setNewPMData({ full_name: '', email: '', phone: '' });
+                      setAssignMode('existing');
                     }}
-                    className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
+                    className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition-colors"
+                  >
+                    <XMarkIcon className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-8">
+                {/* Mode Selection - Modern Tab Style */}
+                <div className="bg-gray-100 rounded-xl p-1.5 mb-8 inline-flex w-full">
+                  <button
+                    onClick={() => setAssignMode('existing')}
+                    className={`flex-1 py-3 px-6 rounded-lg font-semibold text-sm transition-all duration-200 ${
+                      assignMode === 'existing'
+                        ? 'bg-white text-[#243d8a] shadow-md'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <UserIcon className="w-5 h-5 inline mr-2" />
+                    Select Existing PM
+                  </button>
+                  <button
+                    onClick={() => setAssignMode('create')}
+                    className={`flex-1 py-3 px-6 rounded-lg font-semibold text-sm transition-all duration-200 ${
+                      assignMode === 'create'
+                        ? 'bg-white text-[#243d8a] shadow-md'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <UserPlusIcon className="w-5 h-5 inline mr-2" />
+                    Create New PM
+                  </button>
+                </div>
+
+                {/* Existing PM Selection */}
+                {assignMode === 'existing' && (
+                  <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                  >
+                    <label className="block text-sm font-semibold text-gray-700 mb-3">
+                      Select Project Manager <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={selectedPMId || ''}
+                      onChange={(e) => setSelectedPMId(Number(e.target.value))}
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-[#243d8a] focus:ring-4 focus:ring-blue-100 transition-all text-gray-700"
+                    >
+                      <option value="">Choose a Project Manager...</option>
+                      {allPMs.map((pm: any) => (
+                        <option key={pm.user_id || pm.pm_id} value={pm.user_id || pm.pm_id}>
+                          {pm.pm_name || pm.full_name} - {pm.email}
+                        </option>
+                      ))}
+                    </select>
+                    {allPMs.length === 0 && (
+                      <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                        <p className="text-sm text-amber-800 flex items-center gap-2">
+                          <DocumentTextIcon className="w-5 h-5" />
+                          No unassigned Project Managers available. Create a new one.
+                        </p>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+
+                {/* Create New PM Form */}
+                {assignMode === 'create' && (
+                  <motion.div
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="space-y-5"
+                  >
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Full Name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={newPMData.full_name}
+                        onChange={(e) => setNewPMData({ ...newPMData, full_name: e.target.value })}
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-[#243d8a] focus:ring-4 focus:ring-blue-100 transition-all"
+                        placeholder="Enter full name"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Email Address <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="email"
+                        value={newPMData.email}
+                        onChange={(e) => setNewPMData({ ...newPMData, email: e.target.value })}
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-[#243d8a] focus:ring-4 focus:ring-blue-100 transition-all"
+                        placeholder="john.doe@company.com"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Phone Number <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="tel"
+                        value={newPMData.phone}
+                        onChange={(e) => setNewPMData({ ...newPMData, phone: e.target.value })}
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-[#243d8a] focus:ring-4 focus:ring-blue-100 transition-all"
+                        placeholder="+971 50 123 4567"
+                      />
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Info Note */}
+                <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-l-4 border-[#243d8a] rounded-lg p-5 mt-8">
+                  <div className="flex gap-3">
+                    <BuildingOfficeIcon className="w-6 h-6 text-[#243d8a] flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-[#243d8a] mb-1">Project Assignment</p>
+                      <p className="text-sm text-gray-700">
+                        The assigned Project Manager will gain full access to manage this project, including site engineers and procurement.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center gap-4 mt-8 pt-6 border-t border-gray-200">
+                  <button
+                    onClick={() => {
+                      setShowAssignPMModal(false);
+                      setSelectedPMId(null);
+                      setNewPMData({ full_name: '', email: '', phone: '' });
+                      setAssignMode('existing');
+                    }}
+                    className="flex-1 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold transition-colors"
                   >
                     Cancel
                   </button>
                   <button
-                    onClick={handleSendToClient}
-                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                    onClick={handleAssignPM}
+                    className="flex-1 px-6 py-3 bg-gradient-to-r from-[#243d8a] to-blue-600 hover:from-[#1a2d66] hover:to-blue-700 text-white rounded-xl font-semibold transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
                   >
-                    <EnvelopeIcon className="w-5 h-5" />
-                    Send to Client
+                    <UserPlusIcon className="w-5 h-5" />
+                    {assignMode === 'create' ? 'Create & Assign' : 'Assign to Project'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* BOQ Comparison Modal - Internal vs Client */}
+        {showComparisonModal && selectedEstimation && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-7xl w-full max-h-[90vh] overflow-hidden"
+            >
+              <div className="bg-gradient-to-r from-purple-50 to-blue-50 px-6 py-4 border-b border-gray-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-900">BOQ Comparison - {selectedEstimation.projectName}</h2>
+                    <p className="text-sm text-gray-600 mt-1">Compare what TD sees vs what Client will receive</p>
+                  </div>
+                  <button
+                    onClick={() => setShowComparisonModal(false)}
+                    className="p-2 hover:bg-white/50 rounded-lg transition-colors"
+                  >
+                    <XMarkIcon className="w-6 h-6 text-gray-700" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-0 overflow-y-auto max-h-[calc(90vh-200px)]">
+                {/* Internal Version (Left) */}
+                <div className="p-6 bg-orange-50/30 border-r-2 border-orange-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="px-3 py-1 bg-orange-100 border border-orange-300 rounded-lg">
+                      <span className="text-sm font-bold text-orange-800">INTERNAL VERSION</span>
+                    </div>
+                    <span className="text-xs text-gray-600">(What TD sees)</span>
+                  </div>
+
+                  {/* Cost Summary - Internal */}
+                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+                    <h3 className="font-bold text-gray-900 mb-3">Cost Breakdown</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Material Cost:</span>
+                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.materialCost)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Labour Cost:</span>
+                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.laborCost)}</span>
+                      </div>
+                      <div className="flex justify-between pt-2 border-t">
+                        <span className="text-gray-600">Base Cost:</span>
+                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.materialCost + selectedEstimation.laborCost)}</span>
+                      </div>
+                      <div className="flex justify-between bg-orange-50 p-2 rounded">
+                        <span className="text-orange-800 font-medium">Overhead ({selectedEstimation.overheadPercentage}%):</span>
+                        <span className="font-bold text-orange-800">AED{formatCurrency((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.overheadPercentage / 100)}</span>
+                      </div>
+                      <div className="flex justify-between bg-orange-50 p-2 rounded">
+                        <span className="text-orange-800 font-medium">Profit ({selectedEstimation.profitMargin}%):</span>
+                        <span className="font-bold text-orange-800">AED{formatCurrency((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.profitMargin / 100)}</span>
+                      </div>
+                      <div className="flex justify-between pt-3 border-t-2 border-orange-300 mt-2">
+                        <span className="text-lg font-bold text-gray-900">Total:</span>
+                        <span className="text-lg font-bold text-green-600">AED{formatCurrency(selectedEstimation.totalValue)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Client Version (Right) */}
+                <div className="p-6 bg-blue-50/30">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="px-3 py-1 bg-blue-100 border border-blue-300 rounded-lg">
+                      <span className="text-sm font-bold text-blue-800">CLIENT VERSION</span>
+                    </div>
+                    <span className="text-xs text-gray-600">(What Client sees)</span>
+                  </div>
+
+                  {/* Cost Summary - Client */}
+                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+                    <h3 className="font-bold text-gray-900 mb-3">Cost Breakdown</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Material Cost:</span>
+                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.materialCost)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Labour Cost:</span>
+                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.laborCost)}</span>
+                      </div>
+                      <div className="flex justify-between pt-2 border-t">
+                        <span className="text-gray-600">Base Cost:</span>
+                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.materialCost + selectedEstimation.laborCost)}</span>
+                      </div>
+                      <div className="flex justify-between bg-gray-100 p-2 rounded opacity-40">
+                        <span className="text-gray-500 line-through">Overhead & Profit:</span>
+                        <span className="text-gray-500 line-through">Hidden from client</span>
+                      </div>
+                      <div className="flex justify-between pt-3 border-t-2 border-blue-300 mt-2">
+                        <span className="text-lg font-bold text-gray-900">Total:</span>
+                        <span className="text-lg font-bold text-green-600">AED{formatCurrency(selectedEstimation.totalValue)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gradient-to-r from-gray-50 to-white border-t border-gray-200 px-6 py-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-gray-600">
+                    <strong>Key Difference:</strong> Internal version shows overhead & profit breakdown, Client version shows final price only
+                  </div>
+                  <button
+                    onClick={() => setShowComparisonModal(false)}
+                    className="px-6 py-2.5 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-medium transition-colors"
+                  >
+                    Close
                   </button>
                 </div>
               </div>

@@ -467,7 +467,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             isCollapsed ? "hidden" : "block"
           )}>
             <img 
-              src="https://i.postimg.cc/50f23gnF/logo.png" 
+              src="https://i.postimg.cc/q7x6zrYt/logo.png" 
               alt="MeterSquare" 
               className="h-10 w-auto"
               onError={(e) => {

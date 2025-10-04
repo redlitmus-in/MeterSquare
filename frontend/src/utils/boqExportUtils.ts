@@ -327,7 +327,7 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
 
   // Add company logo
   try {
-    doc.addImage('https://i.postimg.cc/50f23gnF/logo.png', 'PNG', 14, yPos, 40, 12);
+    doc.addImage('https://i.postimg.cc/q7x6zrYt/logo.png', 'PNG', 14, yPos, 40, 12);
   } catch (error) {
     console.log('Logo loading skipped');
   }
@@ -579,7 +579,7 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
 
   // Add company logo
   try {
-    doc.addImage('https://i.postimg.cc/50f23gnF/logo.png', 'PNG', 14, yPos, 40, 12);
+    doc.addImage('https://i.postimg.cc/q7x6zrYt/logo.png', 'PNG', 14, yPos, 40, 12);
   } catch (error) {
     console.log('Logo loading skipped');
   }
