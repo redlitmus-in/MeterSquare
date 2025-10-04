@@ -10,6 +10,7 @@ class Project(db.Model):
     project_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     project_name = db.Column(db.String(255), nullable=False)  # Required
     user_id = db.Column(db.Integer, nullable=True)
+    site_supervisor_id = db.Column(db.Integer, nullable=True)
     location = db.Column(db.String(255), nullable=True) 
     area = db.Column(db.String(100), nullable=True)
     floor_name = db.Column(db.String(255), nullable=True)  # Optional
@@ -35,6 +36,7 @@ class Project(db.Model):
             'project_id': self.project_id,
             'project_name': self.project_name,
             'user_id': self.user_id,
+            'site_supervisor_id': self.site_supervisor_id,
             'area': self.area,
             'location': self.location,
             'floor_name': self.floor_name,

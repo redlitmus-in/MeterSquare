@@ -24,3 +24,5 @@ python-dateutil==2.8.2
 # Development
 pytest==7.4.2
 pytest-flask==1.2.0
+
+reportlab==4.4.4
