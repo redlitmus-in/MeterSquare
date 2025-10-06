@@ -861,9 +861,11 @@ def send_boq_email(boq_id):
             )
 
             if email_sent:
-                # Update BOQ status to Pending (email_sent remains False - only set True when sent to CLIENT)
-                boq.email_sent = False  # False = not sent to client yet
+                # Update BOQ status and mark email as sent to TD
+                boq.email_sent = True
                 boq.status = "Pending"
+                boq.last_modified_by = boq.created_by
+                boq.last_modified_at = datetime.utcnow()
 
                 # Check if history entry already exists for this BOQ
                 existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -888,7 +890,15 @@ def send_boq_email(boq_id):
 
                 if existing_history:
                     # Append to existing action array (avoid duplicates)
-                    current_actions = existing_history.action if isinstance(existing_history.action, list) else [existing_history.action] if existing_history.action else []
+                    # Handle existing actions - ensure it's always a list
+                    if existing_history.action is None:
+                        current_actions = []
+                    elif isinstance(existing_history.action, list):
+                        current_actions = existing_history.action
+                    elif isinstance(existing_history.action, dict):
+                        current_actions = [existing_history.action]
+                    else:
+                        current_actions = []
 
                     # Check if similar action already exists (same type, sender, receiver, timestamp within 1 minute)
                     action_exists = False
@@ -912,6 +922,10 @@ def send_boq_email(boq_id):
                     if not action_exists:
                         current_actions.append(new_action)
                         existing_history.action = current_actions
+                        # Mark JSONB field as modified for SQLAlchemy
+                        from sqlalchemy.orm.attributes import flag_modified
+                        flag_modified(existing_history, "action")
+
                     existing_history.action_by = boq.created_by
                     existing_history.boq_status = "Pending"
                     existing_history.sender = boq.created_by
@@ -988,9 +1002,11 @@ def send_boq_email(boq_id):
             )
 
             if email_sent:
-                # Update BOQ status to Pending (email_sent remains False - only set True when sent to CLIENT)
-                boq.email_sent = False  # False = not sent to client yet
+                # Update BOQ status and mark email as sent to TD
+                boq.email_sent = True
                 boq.status = "Pending"
+                boq.last_modified_by = boq.created_by
+                boq.last_modified_at = datetime.utcnow()
 
                 # Check if history entry already exists for this BOQ
                 existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -1015,7 +1031,15 @@ def send_boq_email(boq_id):
 
                 if existing_history:
                     # Append to existing action array (avoid duplicates)
-                    current_actions = existing_history.action if isinstance(existing_history.action, list) else [existing_history.action] if existing_history.action else []
+                    # Handle existing actions - ensure it's always a list
+                    if existing_history.action is None:
+                        current_actions = []
+                    elif isinstance(existing_history.action, list):
+                        current_actions = existing_history.action
+                    elif isinstance(existing_history.action, dict):
+                        current_actions = [existing_history.action]
+                    else:
+                        current_actions = []
 
                     # Check if similar action already exists (same type, sender, receiver, timestamp within 1 minute)
                     action_exists = False
@@ -1039,6 +1063,10 @@ def send_boq_email(boq_id):
                     if not action_exists:
                         current_actions.append(new_action)
                         existing_history.action = current_actions
+                        # Mark JSONB field as modified for SQLAlchemy
+                        from sqlalchemy.orm.attributes import flag_modified
+                        flag_modified(existing_history, "action")
+
                     existing_history.action_by = boq.created_by
                     existing_history.boq_status = "Pending"
                     existing_history.sender = boq.created_by

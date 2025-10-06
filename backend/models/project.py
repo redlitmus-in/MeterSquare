@@ -9,6 +9,7 @@ class Project(db.Model):
 
     project_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     project_name = db.Column(db.String(255), nullable=False)  # Required
+    # user_id is a project manager id in a user table
     user_id = db.Column(db.Integer, nullable=True)
     site_supervisor_id = db.Column(db.Integer, nullable=True)
     location = db.Column(db.String(255), nullable=True) 
