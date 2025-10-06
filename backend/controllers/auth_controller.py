@@ -308,3 +308,30 @@ def logout():
     response = make_response(jsonify(response_data), 200)
     response.delete_cookie('access_token')
     return response
+
+def user_status():
+    try:
+        data = request.get_json(silent=True)
+
+        user_id = data.get("user_id")
+        status = data.get("status")  # list of project IDs
+        # Validate user
+        user = User.query.filter_by(user_id=user_id).first()
+        if user:
+            user.user_status = status
+            db.session.commit()
+        else:   
+            return jsonify({"error": "User not found"}), 404
+
+        return jsonify({
+            "success": True,
+            "message": "User status updated"
+            }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error user status update: {str(e)}")
+        return jsonify({
+            "error": f"Failed to user status update: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500

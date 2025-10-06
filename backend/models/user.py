@@ -10,6 +10,7 @@ class User(db.Model):
     email = db.Column(db.String(255), nullable=False, unique=True)
     full_name = db.Column(db.String(255), nullable=True)
     phone = db.Column(db.String(255), nullable=True)
+    user_status = db.Column(db.String(255), nullable=True) 
     role_id = db.Column(db.Integer, nullable=False)
     department = db.Column(db.String(100), nullable=True)  # Added department field
     is_active = db.Column(db.Boolean, default=True, nullable=True)
@@ -22,7 +23,7 @@ class User(db.Model):
     role = db.relationship('Role', foreign_keys=[role_id], primaryjoin='User.role_id == Role.role_id', lazy=True)
 
     def __init__(self, user_id=None, email=None, full_name=None, phone=None, role_id=None, 
-                 department=None, is_active=True, is_deleted=False, last_login=None, 
+                 department=None, is_active=True, is_deleted=False, last_login=None, user_status=None,
                  created_at=None, last_modified_at=None):
         if user_id is not None:
             self.user_id = user_id
@@ -34,6 +35,8 @@ class User(db.Model):
             self.phone = phone
         if role_id is not None:
             self.role_id = role_id
+        if user_status is not None:
+            self.user_status = user_status
         if department is not None:
             self.department = department
         if is_active is not None:
@@ -53,6 +56,7 @@ class User(db.Model):
             "email": self.email,
             "full_name": self.full_name,
             "role_id": self.role_id,
+            'user_status': self.user_status,
             "phone": self.phone,
             "department": self.department,
             "is_active": self.is_active,

@@ -96,9 +96,6 @@ def get_all_pm_boqs():
                 (BOQHistory.sender_role != 'estimator') | (BOQHistory.receiver_role != 'estimator')
             ).order_by(BOQHistory.action_date.desc()).all()
 
-            # Get BOQ details
-            boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
-
             # Determine the correct status to display for Project Manager
             display_status = boq.status
             for h in history:
@@ -111,36 +108,23 @@ def get_all_pm_boqs():
                     display_status = h.boq_status
                     break
 
-            # Serialize history data
-            history_list = []
-            for h in history:
-                history_list.append({
-                    "boq_history_id": h.boq_history_id,
-                    "boq_status": h.boq_status
-                   })
-
-            # Serialize boq_details to dictionary
-            boq_details_dict = None
-            if boq_details:
-                boq_details_dict = {
-                    "boq_detail_id": boq_details.boq_detail_id,
-                    "boq_id": boq_details.boq_id,
-                    "total_cost": float(boq_details.total_cost) if boq_details.total_cost else 0.0,
-                    "total_items": int(boq_details.total_items) if boq_details.total_items else 0,
-                    "total_materials": int(boq_details.total_materials) if boq_details.total_materials else 0,
-                    "total_labour": int(boq_details.total_labour) if boq_details.total_labour else 0,
-                    "file_name": boq_details.file_name,
-                    "boq_details": boq_details.boq_details,  # This is already a JSONB/dict
-                    "created_at": boq_details.created_at.isoformat() if boq_details.created_at else None,
-                    "created_by": boq_details.created_by
-                }
+            # Get PM status from the project's assigned user
+            pm_status = None
+            pm_name = current_user.get('full_name')
+            if boq.project and boq.project.user_id:
+                pm_user = User.query.filter_by(user_id=boq.project.user_id).first()
+                if pm_user:
+                    # Get user_status from database, fallback to is_active if user_status is null
+                    pm_status = pm_user.user_status if pm_user.user_status else ("Active" if pm_user.is_active else "Inactive")
+                    pm_name = pm_user.full_name
 
             boq_data = {
                 "boq_id": boq.boq_id,
                 "project_id": boq.project_id,
                 "user_id" : boq.project.user_id,
-                "user_name" : current_user['full_name'],
+                "user_name" : pm_name,
                 "boq_name": boq.boq_name,
+                "project_manager_status": pm_status,
                 "status": display_status,  # Use the determined status based on role
                 "created_at": boq.created_at.isoformat() if boq.created_at else None,
                 "created_by": boq.created_by,
@@ -148,8 +132,6 @@ def get_all_pm_boqs():
                 "last_modified_by": boq.last_modified_by,
                 "email_sent": boq.email_sent,
                 "project_name": boq.project.project_name if boq.project else None,
-                "history": history_list,  # Will be [] if no history exists
-                "boq_details": boq_details_dict  # Now properly serialized
             }
             boqs_list.append(boq_data)
 
@@ -166,9 +148,7 @@ def get_all_pm_boqs():
         }), 200
 
     except Exception as e:
-        import traceback
         log.error(f"Error fetching BOQs: {str(e)}")
-        log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({
             "error": f"Failed to fetch BOQs: {str(e)}",
             "error_type": type(e).__name__

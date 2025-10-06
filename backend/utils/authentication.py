@@ -494,7 +494,8 @@ def jwt_required(f):
                 'role': role_name,
                 'department': current_user.department,
                 'phone': current_user.phone,
-                'is_active': current_user.is_active
+                'is_active': current_user.is_active,
+                'user_status': getattr(current_user, 'user_status', None)
             }
             
         except jwt.ExpiredSignatureError:

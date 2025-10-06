@@ -45,4 +45,10 @@ def update_profile_route():
     """Update user profile"""
     return update_user_profile()
 
+#User status changes
+@auth_routes.route('/user_status', methods=['POST'])
+@jwt_required
+def user_status_route():
+    return user_status()
+
 # Note: Password-related endpoints removed - using OTP-only authentication
