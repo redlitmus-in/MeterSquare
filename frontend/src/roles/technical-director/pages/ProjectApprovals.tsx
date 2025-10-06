@@ -100,7 +100,12 @@ const ProjectApprovals: React.FC = () => {
   const [allPMs, setAllPMs] = useState<any[]>([]);
   const [selectedPMId, setSelectedPMId] = useState<number | null>(null);
   const [newPMData, setNewPMData] = useState({ full_name: '', email: '', phone: '' });
+  const [pmSearchQuery, setPmSearchQuery] = useState('');
+  const [expandedPMId, setExpandedPMId] = useState<number | null>(null);
   const [showComparisonModal, setShowComparisonModal] = useState(false);
+  const [showPMWorkloadView, setShowPMWorkloadView] = useState(false);
+  const [showPMDetailsModal, setShowPMDetailsModal] = useState(false);
+  const [selectedProjectPM, setSelectedProjectPM] = useState<any>(null);
 
   // Format currency for display
   const formatCurrency = (amount: number): string => {
@@ -115,10 +120,12 @@ const ProjectApprovals: React.FC = () => {
   // Load BOQs on mount and set up auto-refresh polling
   useEffect(() => {
     loadBOQs(); // Initial load with spinner
+    loadPMs(); // Load PMs for assigned tab
 
     // Poll for new BOQs every 5 seconds (background refresh, no spinner)
     const intervalId = setInterval(() => {
       loadBOQs(false); // Auto-refresh without showing loading spinner
+      loadPMs(); // Also refresh PM data
     }, 5000); // 5 seconds for faster updates
 
     // Cleanup interval on unmount
@@ -249,7 +256,7 @@ const ProjectApprovals: React.FC = () => {
       workingHours: boq.hours || boq.working_hours || boq.project_details?.hours || boq.project?.working_hours || 'N/A',
       emailSent: boq.email_sent || false,
       projectId: boq.project_id,
-      pmAssigned: !!boq.pm_assigned, // Convert to boolean - Only use pm_assigned field, not user_id
+      pmAssigned: !!boq.user_id, // Convert to boolean - user_id indicates PM is assigned to project
       boqItems: boq.items?.map((item: any) => {
         const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
         const sellingPrice = item.selling_price || 0;
@@ -329,7 +336,10 @@ const ProjectApprovals: React.FC = () => {
       return est.status === 'client_confirmed' && !est.pmAssigned;
     } else if (filterStatus === 'assigned') {
       // Assigned: PM has been assigned (can be after client confirms)
-      return est.pmAssigned === true && est.status !== 'rejected';
+      return est.pmAssigned === true && est.status !== 'rejected' && est.status !== 'completed';
+    } else if (filterStatus === 'completed') {
+      // Completed: Project is completed
+      return est.status === 'completed';
     } else if (filterStatus === 'rejected') {
       // Rejected: TD rejected the BOQ
       return est.status === 'rejected';
@@ -431,7 +441,7 @@ const ProjectApprovals: React.FC = () => {
 
   const loadPMs = async () => {
     try {
-      const response = await tdService.getAllPMs();
+      const response = await tdService.getPMsWithWorkload();
       if (response.success && response.data) {
         setAllPMs(response.data);
       }
@@ -552,6 +562,7 @@ const ProjectApprovals: React.FC = () => {
             { key: 'approved', label: 'Approved' },
             { key: 'sent', label: 'Client Approved' },
             { key: 'assigned', label: 'Assigned' },
+            { key: 'completed', label: 'Completed' },
             { key: 'rejected', label: 'Rejected' }
           ].map((tab) => (
             <button
@@ -559,7 +570,7 @@ const ProjectApprovals: React.FC = () => {
               onClick={() => setFilterStatus(tab.key as any)}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
                 filterStatus === tab.key
-                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md'
+                  ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 border border-red-200 shadow-md'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
               }`}
             >
@@ -568,9 +579,136 @@ const ProjectApprovals: React.FC = () => {
           ))}
         </div>
 
-        {/* Estimations List */}
-        <div className="space-y-4">
-          {filteredEstimations.map((estimation, index) => (
+        {/* Estimations List - Always show */}
+        {false ? (
+          <div className="space-y-4">
+            {allPMs.map((pm: any, index: number) => {
+              const projectCount = pm.projectCount || 0;
+              const isAvailable = projectCount === 0;
+              const isBusy = projectCount >= 1 && projectCount <= 3;
+              const isOverloaded = projectCount > 3;
+
+              let statusColor = '';
+              let statusText = '';
+              let statusBg = '';
+              let borderColor = '';
+
+              if (isAvailable) {
+                statusColor = 'text-green-700';
+                statusText = 'Available';
+                statusBg = 'bg-green-50';
+                borderColor = 'border-green-200';
+              } else if (isBusy) {
+                statusColor = 'text-yellow-700';
+                statusText = 'Busy';
+                statusBg = 'bg-yellow-50';
+                borderColor = 'border-yellow-200';
+              } else {
+                statusColor = 'text-red-700';
+                statusText = 'Overloaded';
+                statusBg = 'bg-red-50';
+                borderColor = 'border-red-200';
+              }
+
+              return (
+                <motion.div
+                  key={pm.user_id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 * index }}
+                  className={`bg-white rounded-xl shadow-md border-2 ${borderColor} hover:shadow-xl transition-all`}
+                >
+                  <div className="p-6">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <UserIcon className="w-8 h-8 text-[#243d8a] p-1.5 bg-blue-100 rounded-lg" />
+                          <div>
+                            <h3 className="text-xl font-bold text-gray-900">{pm.pm_name || pm.full_name}</h3>
+                            <p className="text-sm text-gray-600">{pm.email}</p>
+                          </div>
+                          <span className={`ml-auto px-4 py-1.5 rounded-full text-sm font-semibold ${statusColor} ${statusBg} border-2 ${borderColor}`}>
+                            {statusText}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-6 text-sm text-gray-600 mb-4">
+                          <div className="flex items-center gap-1">
+                            <span className="font-medium text-gray-700">Phone:</span>
+                            <span>{pm.phone}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <BuildingOfficeIcon className="w-5 h-5 text-gray-500" />
+                            <span className="font-bold text-lg text-[#243d8a]">{projectCount}</span>
+                            <span className="text-gray-600">{projectCount === 1 ? 'project' : 'projects'} assigned</span>
+                          </div>
+                        </div>
+
+                        {/* Progress Bar */}
+                        <div className="mb-4">
+                          <div className="flex items-center justify-between text-xs mb-1">
+                            <span className="text-gray-500">Workload</span>
+                            <span className={`font-semibold ${statusColor}`}>
+                              {projectCount === 0 ? '0%' : projectCount <= 3 ? `${Math.min(projectCount * 25, 75)}%` : '100%'}
+                            </span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div
+                              className={`h-2 rounded-full transition-all ${
+                                isAvailable ? 'bg-green-500' : isBusy ? 'bg-yellow-500' : 'bg-red-500'
+                              }`}
+                              style={{ width: projectCount === 0 ? '0%' : `${Math.min(projectCount * 20, 100)}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Assigned Projects List */}
+                        {pm.projects && pm.projects.length > 0 && (
+                          <div className={`mt-4 p-4 rounded-lg ${statusBg} border ${borderColor}`}>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                              <DocumentTextIcon className="w-4 h-4" />
+                              Assigned Projects ({pm.projects.length})
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                              {pm.projects.map((project: any, idx: number) => (
+                                <div
+                                  key={idx}
+                                  className="bg-white rounded-lg p-3 border border-gray-200 hover:border-[#243d8a] transition-colors"
+                                >
+                                  <div className="flex items-start gap-2">
+                                    <BuildingOfficeIcon className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium text-gray-900 truncate">
+                                        {project.project_name}
+                                      </p>
+                                      <p className="text-xs text-gray-500">ID: {project.project_id}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {projectCount === 0 && (
+                          <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                            <p className="text-sm text-green-700 flex items-center gap-2">
+                              <CheckCircleIcon className="w-5 h-5" />
+                              This PM is available and ready to take on new projects
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        ) : (
+          /* Estimations List */
+          <div className="space-y-4">
+            {filteredEstimations.map((estimation, index) => (
             <motion.div
               key={estimation.id}
               initial={{ opacity: 0, x: -20 }}
@@ -644,6 +782,45 @@ const ProjectApprovals: React.FC = () => {
                     >
                       <EyeIcon className="w-5 h-5 text-blue-600 group-hover:text-blue-700" />
                     </button>
+
+                    {/* Show PM Details button - Only show when PM is assigned */}
+                    {estimation.pmAssigned && (
+                      <button
+                        onClick={async () => {
+                          // Load PM data if not already loaded
+                          if (allPMs.length === 0) {
+                            await loadPMs();
+                          }
+
+                          // Find PM details for this project
+                          const pmForProject = allPMs.find(pm =>
+                            pm.projects?.some((p: any) => p.project_id === estimation.projectId)
+                          );
+
+                          if (pmForProject) {
+                            setSelectedProjectPM(pmForProject);
+                            setShowPMDetailsModal(true);
+                          } else {
+                            // Try loading PMs again and retry
+                            await loadPMs();
+                            const retryPM = allPMs.find(pm =>
+                              pm.projects?.some((p: any) => p.project_id === estimation.projectId)
+                            );
+                            if (retryPM) {
+                              setSelectedProjectPM(retryPM);
+                              setShowPMDetailsModal(true);
+                            } else {
+                              toast.error('PM details not found. Please refresh the page.');
+                            }
+                          }
+                        }}
+                        className="p-2.5 bg-green-50 hover:bg-green-100 rounded-lg transition-colors group"
+                        title="View Assigned PM Details"
+                      >
+                        <UserIcon className="w-5 h-5 text-green-600 group-hover:text-green-700" />
+                      </button>
+                    )}
+
                     {/* Assign PM button - Only show when client has confirmed */}
                     {estimation.status === 'client_confirmed' && !estimation.pmAssigned && (
                       <button
@@ -663,9 +840,10 @@ const ProjectApprovals: React.FC = () => {
               </div>
             </motion.div>
           ))}
-        </div>
+          </div>
+        )}
 
-        {filteredEstimations.length === 0 && (
+        {!showPMWorkloadView && filteredEstimations.length === 0 && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
             <DocumentTextIcon className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-500">No estimations found for the selected filter</p>
@@ -840,7 +1018,7 @@ const ProjectApprovals: React.FC = () => {
                         onClick={() => {
                           setShowAssignPMModal(true);
                         }}
-                        className="px-3 py-1.5 bg-gradient-to-r from-[#243d8a] to-blue-600 hover:from-[#1a2d66] hover:to-blue-700 text-white rounded-lg transition-all text-sm font-medium flex items-center gap-1 shadow-md"
+                        className="px-4 py-2 bg-gradient-to-r from-red-50 to-red-100 text-red-900 border border-red-200 rounded-lg font-medium text-sm transition-all shadow-md hover:shadow-lg flex items-center gap-2"
                         title="Assign Project Manager to this project"
                       >
                         <UserPlusIcon className="w-4 h-4" />
@@ -1362,26 +1540,120 @@ const ProjectApprovals: React.FC = () => {
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                   >
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      Select Project Manager <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={selectedPMId || ''}
-                      onChange={(e) => setSelectedPMId(Number(e.target.value))}
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-[#243d8a] focus:ring-4 focus:ring-blue-100 transition-all text-gray-700"
-                    >
-                      <option value="">Choose a Project Manager...</option>
-                      {allPMs.map((pm: any) => (
-                        <option key={pm.user_id || pm.pm_id} value={pm.user_id || pm.pm_id}>
-                          {pm.pm_name || pm.full_name} - {pm.email}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex items-center justify-between mb-4">
+                      <label className="block text-sm font-semibold text-gray-700">
+                        Select Project Manager <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Search PM..."
+                        value={pmSearchQuery}
+                        onChange={(e) => setPmSearchQuery(e.target.value)}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-[#243d8a] focus:ring-2 focus:ring-blue-100"
+                      />
+                    </div>
+
+                    <div className="max-h-96 overflow-y-auto space-y-3">
+                      {allPMs
+                        .filter(pm =>
+                          pmSearchQuery === '' ||
+                          (pm.pm_name || pm.full_name)?.toLowerCase().includes(pmSearchQuery.toLowerCase()) ||
+                          pm.email?.toLowerCase().includes(pmSearchQuery.toLowerCase())
+                        )
+                        .map((pm: any) => {
+                          const isSelected = selectedPMId === pm.user_id;
+                          const projectCount = pm.projectCount || 0;
+                          const isAvailable = projectCount === 0;
+                          const isBusy = projectCount >= 1 && projectCount <= 3;
+                          const isOverloaded = projectCount > 3;
+
+                          let statusColor = '';
+                          let statusText = '';
+                          let statusBg = '';
+
+                          if (isAvailable) {
+                            statusColor = 'text-green-700';
+                            statusText = 'Available';
+                            statusBg = 'bg-green-50 border-green-200';
+                          } else if (isBusy) {
+                            statusColor = 'text-yellow-700';
+                            statusText = 'Busy';
+                            statusBg = 'bg-yellow-50 border-yellow-200';
+                          } else {
+                            statusColor = 'text-red-700';
+                            statusText = 'Overloaded';
+                            statusBg = 'bg-red-50 border-red-200';
+                          }
+
+                          return (
+                            <div
+                              key={pm.user_id}
+                              onClick={() => setSelectedPMId(pm.user_id)}
+                              className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'border-[#243d8a] bg-blue-50 shadow-md'
+                                  : `border-gray-200 hover:border-gray-300 hover:shadow-sm ${statusBg}`
+                              }`}
+                            >
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h4 className="font-semibold text-gray-900">{pm.pm_name || pm.full_name}</h4>
+                                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColor} ${statusBg} border`}>
+                                      {statusText}
+                                    </span>
+                                  </div>
+                                  <p className="text-sm text-gray-600">{pm.email}</p>
+                                  <p className="text-sm text-gray-500">{pm.phone}</p>
+
+                                  <div className="mt-2 flex items-center gap-4">
+                                    <div className="flex items-center gap-1 text-sm">
+                                      <BuildingOfficeIcon className="w-4 h-4 text-gray-400" />
+                                      <span className="font-medium text-gray-700">{projectCount}</span>
+                                      <span className="text-gray-500">{projectCount === 1 ? 'project' : 'projects'}</span>
+                                    </div>
+                                    {projectCount > 0 && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setExpandedPMId(expandedPMId === pm.user_id ? null : pm.user_id);
+                                        }}
+                                        className="text-xs text-[#243d8a] hover:underline font-medium"
+                                      >
+                                        {expandedPMId === pm.user_id ? 'Hide projects' : 'View projects'}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {expandedPMId === pm.user_id && pm.projects && pm.projects.length > 0 && (
+                                    <div className="mt-3 pt-3 border-t border-gray-200">
+                                      <p className="text-xs font-semibold text-gray-600 mb-2">Assigned Projects:</p>
+                                      <ul className="space-y-1">
+                                        {pm.projects.map((project: any, idx: number) => (
+                                          <li key={idx} className="text-xs text-gray-700 flex items-start gap-1">
+                                            <span className="text-gray-400 mt-0.5">•</span>
+                                            <span>{project.project_name}</span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {isSelected && (
+                                  <CheckCircleIcon className="w-6 h-6 text-[#243d8a] flex-shrink-0" />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+
                     {allPMs.length === 0 && (
                       <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
                         <p className="text-sm text-amber-800 flex items-center gap-2">
                           <DocumentTextIcon className="w-5 h-5" />
-                          No unassigned Project Managers available. Create a new one.
+                          No Project Managers available. Create a new one.
                         </p>
                       </div>
                     )}
@@ -1600,6 +1872,177 @@ const ProjectApprovals: React.FC = () => {
                     </button>
                   </div>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* PM Details Modal - Show assigned PM details for a project */}
+        {showPMDetailsModal && selectedProjectPM && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden"
+            >
+              {/* Header */}
+              <div className="bg-[#243d8a] px-6 py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <UserIcon className="w-8 h-8 text-white p-1.5 bg-white bg-opacity-20 rounded-lg" />
+                    <div>
+                      <h2 className="text-xl font-bold text-white">Assigned Project Manager</h2>
+                      <p className="text-blue-100 text-sm">PM Details and Workload</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowPMDetailsModal(false);
+                      setSelectedProjectPM(null);
+                    }}
+                    className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition-colors"
+                  >
+                    <XMarkIcon className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6">
+                {(() => {
+                  const projectCount = selectedProjectPM.projectCount || 0;
+                  const isAvailable = projectCount === 0;
+                  const isBusy = projectCount >= 1 && projectCount <= 3;
+                  const isOverloaded = projectCount > 3;
+
+                  let statusColor = '';
+                  let statusText = '';
+                  let statusBg = '';
+                  let borderColor = '';
+
+                  if (isAvailable) {
+                    statusColor = 'text-green-700';
+                    statusText = 'Available';
+                    statusBg = 'bg-green-50';
+                    borderColor = 'border-green-200';
+                  } else if (isBusy) {
+                    statusColor = 'text-yellow-700';
+                    statusText = 'Busy';
+                    statusBg = 'bg-yellow-50';
+                    borderColor = 'border-yellow-200';
+                  } else {
+                    statusColor = 'text-red-700';
+                    statusText = 'Overloaded';
+                    statusBg = 'bg-red-50';
+                    borderColor = 'border-red-200';
+                  }
+
+                  return (
+                    <>
+                      {/* PM Info Card */}
+                      <div className={`border-2 rounded-xl p-5 mb-4 ${borderColor} ${statusBg}`}>
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-3">
+                              <h3 className="text-2xl font-bold text-gray-900">
+                                {selectedProjectPM.pm_name || selectedProjectPM.full_name}
+                              </h3>
+                              <span className={`px-3 py-1 rounded-full text-sm font-semibold ${statusColor} ${statusBg} border-2 ${borderColor}`}>
+                                {statusText}
+                              </span>
+                            </div>
+
+                            <div className="space-y-2 mb-4">
+                              <div className="flex items-center gap-2 text-gray-700">
+                                <span className="text-sm font-medium text-gray-500">Email:</span>
+                                <span className="text-sm">{selectedProjectPM.email}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-gray-700">
+                                <span className="text-sm font-medium text-gray-500">Phone:</span>
+                                <span className="text-sm">{selectedProjectPM.phone}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 mb-3">
+                              <BuildingOfficeIcon className="w-5 h-5 text-gray-500" />
+                              <span className="font-bold text-xl text-[#243d8a]">{projectCount}</span>
+                              <span className="text-gray-600 text-sm">
+                                {projectCount === 1 ? 'project' : 'projects'} assigned
+                              </span>
+                            </div>
+
+                            {/* Progress Bar */}
+                            <div>
+                              <div className="flex items-center justify-between text-xs mb-1">
+                                <span className="text-gray-500">Workload Capacity</span>
+                                <span className={`font-semibold ${statusColor}`}>
+                                  {projectCount === 0 ? '0%' : projectCount <= 3 ? `${Math.min(projectCount * 25, 75)}%` : '100%'}
+                                </span>
+                              </div>
+                              <div className="w-full bg-gray-200 rounded-full h-3">
+                                <div
+                                  className={`h-3 rounded-full transition-all ${
+                                    isAvailable ? 'bg-green-500' : isBusy ? 'bg-yellow-500' : 'bg-red-500'
+                                  }`}
+                                  style={{ width: projectCount === 0 ? '0%' : `${Math.min(projectCount * 20, 100)}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Assigned Projects List */}
+                      {selectedProjectPM.projects && selectedProjectPM.projects.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                            <DocumentTextIcon className="w-5 h-5 text-gray-500" />
+                            All Assigned Projects ({selectedProjectPM.projects.length})
+                          </h4>
+                          <div className="max-h-64 overflow-y-auto space-y-2">
+                            {selectedProjectPM.projects.map((project: any, idx: number) => (
+                              <div
+                                key={idx}
+                                className="bg-gray-50 border border-gray-200 rounded-lg p-3 hover:border-[#243d8a] hover:bg-blue-50 transition-colors"
+                              >
+                                <div className="flex items-start gap-3">
+                                  <BuildingOfficeIcon className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                      {project.project_name}
+                                    </p>
+                                    <p className="text-xs text-gray-500">Project ID: {project.project_id}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {projectCount === 0 && (
+                        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                          <p className="text-sm text-green-700 flex items-center gap-2">
+                            <CheckCircleIcon className="w-5 h-5" />
+                            This PM is currently available and has no assigned projects
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Close Button */}
+                      <div className="mt-6 pt-4 border-t border-gray-200">
+                        <button
+                          onClick={() => {
+                            setShowPMDetailsModal(false);
+                            setSelectedProjectPM(null);
+                          }}
+                          className="w-full px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold transition-colors"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </motion.div>
           </div>

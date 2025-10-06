@@ -261,13 +261,6 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-green-600'
       },
       {
-        name: 'PM Assignment',
-        href: buildPath('/team-assignment'),
-        icon: UsersIcon,
-        iconSolid: UsersSolid,
-        color: 'text-blue-600'
-      },
-      {
         name: 'Projects Overview',
         href: buildPath('/projects-overview'),
         icon: BuildingOfficeIcon,

@@ -199,11 +199,9 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
   const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
-  // Calculate total
+  // Calculate total - CLIENT VERSION: NO overhead/profit in grand total
   const baseCost = estimation.materialCost + estimation.laborCost;
-  const overheadAmount = baseCost * estimation.overheadPercentage / 100;
-  const profitAmount = baseCost * estimation.profitMargin / 100;
-  const grandTotal = baseCost + overheadAmount + profitAmount;
+  const grandTotal = baseCost; // Client sees ONLY base cost (no overhead/profit)
 
   // ============================================
   // SINGLE SHEET WITH EVERYTHING (NO O&P)
@@ -227,6 +225,7 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
   // Add each BOQ item with full breakdown (NO OVERHEAD/PROFIT)
   (estimation.boqItems || []).forEach((item, itemIndex) => {
     const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
+    const itemBasePrice = materialTotal + item.laborCost; // Client sees ONLY material + labor
 
     // Item Header
     allData.push([`${itemIndex + 1}. ${item.description}`, '', '', '']);
@@ -274,8 +273,8 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
       allData.push([]);
     }
 
-    // Item Total (NO OVERHEAD/PROFIT SHOWN)
-    allData.push(['TOTAL PRICE:', '', '', '', formatCurrency(item.estimatedSellingPrice)]);
+    // Item Total (NO OVERHEAD/PROFIT - only material + labor)
+    allData.push(['TOTAL PRICE:', '', '', '', formatCurrency(itemBasePrice)]);
     allData.push([]);
     allData.push([]);
   });
@@ -571,11 +570,9 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   const doc = new jsPDF();
   let yPos = 15;
 
-  // Calculate total
+  // Calculate total - CLIENT VERSION: NO overhead/profit in grand total
   const baseCost = estimation.materialCost + estimation.laborCost;
-  const overheadAmount = baseCost * estimation.overheadPercentage / 100;
-  const profitAmount = baseCost * estimation.profitMargin / 100;
-  const grandTotal = baseCost + overheadAmount + profitAmount;
+  const grandTotal = baseCost; // Client sees ONLY base cost (no overhead/profit)
 
   // Add company logo
   try {
@@ -632,6 +629,7 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
     }
 
     const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
+    const itemBasePrice = materialTotal + item.laborCost; // Client sees ONLY material + labor
 
     // Item Header
     doc.setFillColor(230, 240, 255);
@@ -713,7 +711,7 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
       yPos += 7;
     }
 
-    // Item Total (NO OVERHEAD/PROFIT BREAKDOWN - JUST FINAL PRICE)
+    // Item Total (NO OVERHEAD/PROFIT - only material + labor)
     if (yPos > 265) {
       doc.addPage();
       yPos = 20;
@@ -725,7 +723,7 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
     doc.setFontSize(10);
     doc.setTextColor(22, 163, 74);
     doc.text('Total Price:', 18, yPos + 3);
-    doc.text(`AED ${formatCurrency(item.estimatedSellingPrice)}`, 170, yPos + 3, { align: 'right' });
+    doc.text(`AED ${formatCurrency(itemBasePrice)}`, 170, yPos + 3, { align: 'right' });
     doc.setTextColor(0);
     yPos += 12;
   });

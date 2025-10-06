@@ -133,6 +133,69 @@ class TDService {
     }
   }
 
+  async getPMsWithWorkload(): Promise<{ success: boolean; data?: any[]; message?: string }> {
+    try {
+      const response = await apiClient.get('/all_pm');
+      const assignedPMs = response.data.assigned_project_managers || [];
+      const unassignedPMs = response.data.unassigned_project_managers || [];
+
+      // Group assigned PMs by user_id to get their workload
+      const pmWorkloadMap = new Map();
+
+      assignedPMs.forEach((pm: any) => {
+        if (!pmWorkloadMap.has(pm.user_id)) {
+          pmWorkloadMap.set(pm.user_id, {
+            user_id: pm.user_id,
+            pm_name: pm.pm_name,
+            full_name: pm.pm_name,
+            email: pm.email,
+            phone: pm.phone,
+            projects: [],
+            projectCount: 0
+          });
+        }
+        const pmData = pmWorkloadMap.get(pm.user_id);
+        pmData.projects.push({
+          project_id: pm.project_id,
+          project_name: pm.project_name
+        });
+        pmData.projectCount = pmData.projects.length;
+      });
+
+      // Add unassigned PMs with 0 projects
+      unassignedPMs.forEach((pm: any) => {
+        pmWorkloadMap.set(pm.user_id, {
+          user_id: pm.user_id,
+          pm_name: pm.pm_name || pm.full_name,
+          full_name: pm.full_name,
+          email: pm.email,
+          phone: pm.phone,
+          projects: [],
+          projectCount: 0
+        });
+      });
+
+      // Convert map to array and sort: unassigned first, then by project count
+      const pmsWithWorkload = Array.from(pmWorkloadMap.values()).sort((a, b) => {
+        if (a.projectCount === 0 && b.projectCount > 0) return -1;
+        if (a.projectCount > 0 && b.projectCount === 0) return 1;
+        return a.projectCount - b.projectCount;
+      });
+
+      return {
+        success: true,
+        data: pmsWithWorkload
+      };
+    } catch (error: any) {
+      console.error('Get PMs with workload error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load Project Managers with workload'
+      };
+    }
+  }
+
   async createPM(pmData: { full_name: string; email: string; phone: string; project_ids: number[] }): Promise<{ success: boolean; data?: any; message: string }> {
     try {
       const response = await apiClient.post('/craete_pm', pmData);
