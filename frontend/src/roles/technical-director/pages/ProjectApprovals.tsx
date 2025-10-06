@@ -112,26 +112,44 @@ const ProjectApprovals: React.FC = () => {
     return amount.toLocaleString();
   };
 
-  // Load BOQs on mount
+  // Load BOQs on mount and set up auto-refresh polling
   useEffect(() => {
-    loadBOQs();
+    loadBOQs(); // Initial load with spinner
+
+    // Poll for new BOQs every 5 seconds (background refresh, no spinner)
+    const intervalId = setInterval(() => {
+      loadBOQs(false); // Auto-refresh without showing loading spinner
+    }, 5000); // 5 seconds for faster updates
+
+    // Cleanup interval on unmount
+    return () => clearInterval(intervalId);
   }, []);
 
-  const loadBOQs = async () => {
-    setLoading(true);
+  const loadBOQs = async (showLoadingSpinner = true) => {
+    if (showLoadingSpinner) {
+      setLoading(true);
+    }
     try {
       const response = await tdService.getAllTDBOQs();
       if (response.success && response.data) {
         setBOQs(response.data);
       } else {
         console.error('Failed to load BOQs:', response.message);
-        toast.error(response.message || 'Failed to load BOQs');
+        // Only show error toast on initial load, not during auto-refresh
+        if (showLoadingSpinner) {
+          toast.error(response.message || 'Failed to load BOQs');
+        }
       }
     } catch (error) {
       console.error('Error loading BOQs:', error);
-      toast.error('Failed to load BOQs');
+      // Only show error toast on initial load, not during auto-refresh
+      if (showLoadingSpinner) {
+        toast.error('Failed to load BOQs');
+      }
     } finally {
-      setLoading(false);
+      if (showLoadingSpinner) {
+        setLoading(false);
+      }
     }
   };
 
@@ -201,7 +219,7 @@ const ProjectApprovals: React.FC = () => {
   const transformBOQToEstimation = (boq: any): EstimationItem => {
     // Handle both list response (project_name, client) and detail response (project_details.project_name)
     const projectName = boq.project_name || boq.project_details?.project_name || boq.boq_name || 'Unnamed Project';
-    const clientName = boq.client || 'Unknown Client';
+    const clientName = boq.client || boq.project_details?.client || boq.project?.client || 'Unknown Client';
     const status = mapBOQStatus(boq.status);
 
     // Use API-provided totals directly (these come from backend calculations)
@@ -219,19 +237,19 @@ const ProjectApprovals: React.FC = () => {
       itemCount: itemCount,
       laborCost: laborCost,
       materialCost: materialCost,
-      profitMargin: boq.profit_margin || 12,
-      overheadPercentage: boq.overhead_percentage || 8,
+      profitMargin: boq.profit_margin || boq.profit_margin_percentage || 0,
+      overheadPercentage: boq.overhead_percentage || boq.overhead || 0,
       submittedDate: boq.created_at ? new Date(boq.created_at).toISOString().split('T')[0] : '',
       status: status,
       priority: 'medium',
       approvalNotes: status === 'approved' ? boq.notes : undefined,
       rejectionReason: status === 'rejected' ? boq.notes : undefined,
-      location: boq.location || boq.project_details?.location || 'N/A',
-      floor: boq.floor_name || boq.project_details?.floor || 'N/A',
-      workingHours: boq.working_hours || boq.project_details?.hours || 'N/A',
+      location: boq.location || boq.project_details?.location || boq.project?.location || 'N/A',
+      floor: boq.floor || boq.floor_name || boq.project_details?.floor || boq.project?.floor_name || 'N/A',
+      workingHours: boq.hours || boq.working_hours || boq.project_details?.hours || boq.project?.working_hours || 'N/A',
       emailSent: boq.email_sent || false,
       projectId: boq.project_id,
-      pmAssigned: !!(boq.pm_assigned || boq.user_id), // Convert to boolean - PM assigned if user_id exists
+      pmAssigned: !!boq.pm_assigned, // Convert to boolean - Only use pm_assigned field, not user_id
       boqItems: boq.items?.map((item: any) => {
         const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
         const sellingPrice = item.selling_price || 0;
@@ -322,17 +340,9 @@ const ProjectApprovals: React.FC = () => {
   const handleApproval = async (id: number, approved: boolean, notes?: string) => {
     try {
       if (approved) {
-        const response = await tdService.approveBOQ(id, notes);
-        if (response.success) {
-          toast.success('BOQ approved successfully');
-          setShowApprovalModal(false); // Close approval modal first
-          await loadBOQs(); // Reload data
-
-          // Show comparison modal automatically after approval
-          setShowComparisonModal(true);
-        } else {
-          toast.error(response.message || 'Failed to approve BOQ');
-        }
+        // Close approval notes modal and show comparison modal for TD to review
+        setShowApprovalModal(false);
+        setShowComparisonModal(true);
       } else {
         if (!notes || !notes.trim()) {
           toast.error('Please provide a rejection reason');
@@ -353,6 +363,28 @@ const ProjectApprovals: React.FC = () => {
     setShowRejectionModal(false);
     setApprovalNotes('');
     setRejectionReason('');
+  };
+
+  // Final approval after TD reviews comparison
+  const handleFinalApproval = async () => {
+    if (!selectedEstimation) return;
+
+    try {
+      const response = await tdService.approveBOQ(selectedEstimation.id, approvalNotes);
+      if (response.success) {
+        toast.success('BOQ approved successfully');
+        setShowComparisonModal(false); // Close comparison modal
+        setShowBOQModal(false); // Close BOQ details modal
+        setSelectedEstimation(null); // Clear selection
+        setApprovalNotes(''); // Clear notes
+        await loadBOQs(); // Reload data
+      } else {
+        toast.error(response.message || 'Failed to approve BOQ');
+      }
+    } catch (error) {
+      console.error('Approval error:', error);
+      toast.error('Failed to approve BOQ');
+    }
   };
 
   const handleDownload = async (format: 'excel' | 'pdf') => {
@@ -568,16 +600,8 @@ const ProjectApprovals: React.FC = () => {
                         <span>{estimation.clientName}</span>
                       </div>
                       <div className="flex items-center gap-1">
-                        <UserIcon className="w-4 h-4" />
-                        <span>{estimation.estimator}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
                         <CalendarIcon className="w-4 h-4" />
                         <span>{estimation.submittedDate}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <ClockIcon className="w-4 h-4" />
-                        <span>{estimation.workingHours}</span>
                       </div>
                     </div>
 
@@ -635,12 +659,6 @@ const ProjectApprovals: React.FC = () => {
                       </button>
                     )}
                   </div>
-                </div>
-
-                <div className="flex items-center gap-4 text-xs text-gray-500">
-                  <span>Location: {estimation.location}</span>
-                  <span>•</span>
-                  <span>Floor: {estimation.floor}</span>
                 </div>
               </div>
             </motion.div>
@@ -801,15 +819,20 @@ const ProjectApprovals: React.FC = () => {
                     <p className="text-xs text-blue-600 mt-1">Working Hours: {selectedEstimation.workingHours}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {/* Download - Always available for TD review */}
-                    <button
-                      onClick={() => setShowFormatModal(true)}
-                      className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-1"
-                      title="Download BOQ"
-                    >
-                      <ArrowDownTrayIcon className="w-4 h-4" />
-                      Download
-                    </button>
+                    {/* Download - Only show after TD approves (status approved or later) */}
+                    {(selectedEstimation.status === 'approved' ||
+                      selectedEstimation.status === 'sent_for_confirmation' ||
+                      selectedEstimation.status === 'client_confirmed' ||
+                      selectedEstimation.pmAssigned) && (
+                      <button
+                        onClick={() => setShowFormatModal(true)}
+                        className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-1"
+                        title="Download BOQ"
+                      >
+                        <ArrowDownTrayIcon className="w-4 h-4" />
+                        Download
+                      </button>
+                    )}
 
                     {/* Assign PM - Only after client confirmed and PM not yet assigned */}
                     {selectedEstimation.status === 'client_confirmed' && !selectedEstimation.pmAssigned && (
@@ -847,27 +870,6 @@ const ProjectApprovals: React.FC = () => {
               </div>
 
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
-                {/* Project Summary */}
-                <div className="grid grid-cols-4 gap-4 mb-6">
-                  <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3">
-                    <p className="text-xs text-gray-500">Total Value</p>
-                    <p className="text-lg font-bold text-gray-900">AED{(selectedEstimation.totalValue / 100000).toFixed(1)}L</p>
-                  </div>
-                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3">
-                    <p className="text-xs text-gray-500">Material Cost</p>
-                    <p className="text-lg font-bold text-blue-900">AED{(selectedEstimation.materialCost / 100000).toFixed(1)}L</p>
-                  </div>
-                  <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-3">
-                    <p className="text-xs text-gray-500">Labor Cost</p>
-                    <p className="text-lg font-bold text-green-900">AED{(selectedEstimation.laborCost / 100000).toFixed(1)}L</p>
-                  </div>
-                  <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-3">
-                    <p className="text-xs text-gray-500">O&P Margin</p>
-                    <p className="text-lg font-bold text-purple-900">{selectedEstimation.overheadPercentage + selectedEstimation.profitMargin}%</p>
-                    <p className="text-[10px] text-purple-700">OH: {selectedEstimation.overheadPercentage}% | P: {selectedEstimation.profitMargin}%</p>
-                  </div>
-                </div>
-
                 {/* BOQ History */}
                 {showHistory && (
                   <div className="mb-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-4 border border-gray-200">
@@ -1044,10 +1046,14 @@ const ProjectApprovals: React.FC = () => {
                         sum + item.laborCost, 0
                       ) || selectedEstimation.laborCost || 0;
 
+                      // Use the actual grand total from API, or sum of all item selling prices
+                      // This is correct because items may have varying overhead/profit percentages
+                      const grandTotal = selectedEstimation.totalValue ||
+                        selectedEstimation.boqItems?.reduce((sum, item) => sum + (item.estimatedSellingPrice || 0), 0) || 0;
+
                       const baseCost = totalMaterialCost + totalLaborCost;
                       const overheadAmount = baseCost * selectedEstimation.overheadPercentage / 100;
                       const profitAmount = baseCost * selectedEstimation.profitMargin / 100;
-                      const grandTotal = baseCost + overheadAmount + profitAmount;
 
                       return (
                         <>
@@ -1116,15 +1122,6 @@ const ProjectApprovals: React.FC = () => {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <span className="text-sm font-medium text-gray-700">Internal Approval:</span>
-                        <button
-                          onClick={() => setShowComparisonModal(true)}
-                          className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg font-medium transition-colors flex items-center gap-2 text-sm"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                          </svg>
-                          Compare Internal vs Client BOQ
-                        </button>
                       </div>
                       <div className="flex items-center gap-3">
                         <button
@@ -1309,7 +1306,7 @@ const ProjectApprovals: React.FC = () => {
               className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden"
             >
               {/* Header */}
-              <div className="bg-gradient-to-r from-[#243d8a] to-blue-700 px-8 py-6">
+              <div className="bg-[#243d8a] px-8 py-6">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-2xl font-bold text-white flex items-center gap-3">
@@ -1465,7 +1462,7 @@ const ProjectApprovals: React.FC = () => {
                   </button>
                   <button
                     onClick={handleAssignPM}
-                    className="flex-1 px-6 py-3 bg-gradient-to-r from-[#243d8a] to-blue-600 hover:from-[#1a2d66] hover:to-blue-700 text-white rounded-xl font-semibold transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+                    className="flex-1 px-6 py-3 bg-[#243d8a] hover:bg-[#1a2d66] text-white rounded-xl font-semibold transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
                   >
                     <UserPlusIcon className="w-5 h-5" />
                     {assignMode === 'create' ? 'Create & Assign' : 'Assign to Project'}
@@ -1584,12 +1581,24 @@ const ProjectApprovals: React.FC = () => {
                   <div className="text-sm text-gray-600">
                     <strong>Key Difference:</strong> Internal version shows overhead & profit breakdown, Client version shows final price only
                   </div>
-                  <button
-                    onClick={() => setShowComparisonModal(false)}
-                    className="px-6 py-2.5 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-medium transition-colors"
-                  >
-                    Close
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => {
+                        setShowComparisonModal(false);
+                        setApprovalNotes('');
+                      }}
+                      className="px-6 py-2.5 bg-gray-500 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleFinalApproval}
+                      className="px-6 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                    >
+                      <CheckCircleIcon className="w-5 h-5" />
+                      Approve
+                    </button>
+                  </div>
                 </div>
               </div>
             </motion.div>

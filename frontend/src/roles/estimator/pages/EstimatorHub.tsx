@@ -53,11 +53,18 @@ import {
   List,
   ShoppingCart,
   Mail,
+  Download,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Label } from '@/components/ui/label';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import {
+  exportBOQToExcelInternal,
+  exportBOQToExcelClient,
+  exportBOQToPDFInternal,
+  exportBOQToPDFClient
+} from '@/utils/boqExportUtils';
 
 // Project Creation Form Component
 const ProjectCreationForm: React.FC<{
@@ -240,6 +247,9 @@ const EstimatorHub: React.FC = () => {
   const [showSendEmailModal, setShowSendEmailModal] = useState(false);
   const [boqToEmail, setBoqToEmail] = useState<BOQ | null>(null);
   const [emailMode, setEmailMode] = useState<'td' | 'client'>('td'); // Track whether sending to TD or client
+  const [showFormatModal, setShowFormatModal] = useState(false);
+  const [downloadType, setDownloadType] = useState<'internal' | 'client'>('internal');
+  const [boqToDownload, setBoqToDownload] = useState<any>(null);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -257,8 +267,14 @@ const EstimatorHub: React.FC = () => {
 
     fetchData();
 
+    // Set up auto-refresh polling every 30 seconds for BOQs
+    const intervalId = setInterval(() => {
+      loadBOQs(); // Auto-refresh BOQs in background
+    }, 30000); // 30 seconds
+
     return () => {
       abortController.abort();
+      clearInterval(intervalId);
     };
   }, [currentPage]);
 
@@ -544,7 +560,108 @@ const EstimatorHub: React.FC = () => {
     return `AED ${value.toLocaleString('en-AE', { minimumFractionDigits: 0 })}`;
   };
 
+  const handleDownload = async (format: 'excel' | 'pdf') => {
+    if (!boqToDownload) return;
+
+    try {
+      const isInternal = downloadType === 'internal';
+      const formatName = format === 'excel' ? 'Excel' : 'PDF';
+      const typeName = isInternal ? 'Internal' : 'Client';
+
+      toast.loading(`Generating ${typeName} ${formatName} file...`);
+
+      if (format === 'excel') {
+        if (isInternal) {
+          await exportBOQToExcelInternal(boqToDownload);
+        } else {
+          await exportBOQToExcelClient(boqToDownload);
+        }
+      } else {
+        if (isInternal) {
+          await exportBOQToPDFInternal(boqToDownload);
+        } else {
+          await exportBOQToPDFClient(boqToDownload);
+        }
+      }
+
+      toast.dismiss();
+      toast.success(`${typeName} BOQ downloaded successfully as ${formatName}`);
+      setShowFormatModal(false);
+    } catch (error) {
+      toast.dismiss();
+      toast.error('Failed to download BOQ');
+      console.error('Download error:', error);
+    }
+  };
+
   const handleDownloadBOQ = async (boq: any) => {
+    try {
+      // Fetch full BOQ details first
+      const result = await estimatorService.getBOQById(boq.boq_id);
+      if (!result.success || !result.data) {
+        toast.error('Failed to fetch BOQ details');
+        return;
+      }
+
+      const boqData = result.data;
+
+      // Transform BOQ data to match export function expectations (same as TD does)
+      const transformedData = {
+        id: boqData.boq_id || boq.boq_id,
+        projectName: boqData.project_name || boqData.project_details?.project_name || boq.project?.name || 'Unknown Project',
+        clientName: boqData.client || boqData.project_details?.client || 'Unknown Client',
+        estimator: boqData.created_by || boqData.created_by_name || 'Unknown',
+        totalValue: boqData.total_cost || boqData.selling_price || 0,
+        itemCount: boqData.items?.length || 0,
+        laborCost: boqData.total_labour_cost || 0,
+        materialCost: boqData.total_material_cost || 0,
+        profitMargin: boqData.profit_margin || boqData.profit_margin_percentage || 0,
+        overheadPercentage: boqData.overhead_percentage || boqData.overhead || 0,
+        submittedDate: boqData.created_at || new Date().toISOString(),
+        location: boqData.location || boqData.project_details?.location || 'N/A',
+        floor: boqData.floor_name || boqData.project_details?.floor || 'N/A',
+        workingHours: boqData.working_hours || boqData.project_details?.hours || 'N/A',
+        boqItems: boqData.items?.map((item: any) => {
+          const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
+          const sellingPrice = item.selling_price || 0;
+
+          return {
+            id: item.item_id,
+            description: item.item_name,
+            briefDescription: item.description || '',
+            unit: item.materials?.[0]?.unit || 'nos',
+            quantity: totalQuantity,
+            rate: totalQuantity > 0 ? sellingPrice / totalQuantity : sellingPrice,
+            amount: sellingPrice,
+            materials: item.materials?.map((mat: any) => ({
+              name: mat.material_name,
+              quantity: mat.quantity,
+              unit: mat.unit,
+              rate: mat.unit_price,
+              amount: mat.total_price
+            })) || [],
+            labour: item.labour?.map((lab: any) => ({
+              type: lab.labour_role,
+              quantity: lab.hours,
+              unit: 'hrs',
+              rate: lab.rate_per_hour,
+              amount: lab.total_cost
+            })) || [],
+            laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+            estimatedSellingPrice: item.selling_price || 0
+          };
+        }) || []
+      };
+
+      setBoqToDownload(transformedData);
+      setShowFormatModal(true);
+    } catch (error) {
+      toast.error('Failed to load BOQ for download');
+      console.error('Download error:', error);
+    }
+  };
+
+  const handleDownloadBOQOld = async (boq: any) => {
     try {
       // Fetch full BOQ details
       const result = await estimatorService.getBOQById(boq.boq_id);
@@ -980,45 +1097,51 @@ const EstimatorHub: React.FC = () => {
                     >
                       <Eye className="h-4 w-4" />
                     </Button>
-                    {!(boq.email_sent || boq.status?.toLowerCase() === 'pending' || boq.status?.toLowerCase() === 'sent_for_confirmation') && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setEditingBoq(boq);
-                            setShowBoqEdit(true);
-                          }}
-                          className="h-8 w-8 p-0"
-                          title="Edit BOQ"
-                        >
-                          <Edit className="h-4 w-4 text-green-600" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setBoqToEmail(boq);
-                            setShowSendEmailModal(true);
-                          }}
-                          className="h-8 w-8 p-0"
-                          title="Send to Technical Director"
-                        >
-                          <Mail className="h-4 w-4 text-purple-600" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setDeletingBoq(boq);
-                          }}
-                          className="h-8 w-8 p-0"
-                          title="Delete BOQ"
-                        >
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
-                      </>
-                    )}
+                    {(() => {
+                      const status = boq.status?.toLowerCase() || '';
+                      const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed');
+                      const isApprovedByTD = status === 'approved';
+                      const isSentToClient = status === 'sent_for_confirmation';
+                      const isClientConfirmed = status === 'client_confirmed';
+
+                      if (isDraft) {
+                        return (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setShowBoqEdit(true); }} className="h-8 w-8 p-0" title="Edit BOQ">
+                              <Edit className="h-4 w-4 text-green-600" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('td'); setShowSendEmailModal(true); }} className="h-8 w-8 p-0" title="Send to TD">
+                              <Mail className="h-4 w-4 text-purple-600" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setDeletingBoq(boq)} className="h-8 w-8 p-0" title="Delete BOQ">
+                              <Trash2 className="h-4 w-4 text-red-600" />
+                            </Button>
+                          </>
+                        );
+                      } else if (isApprovedByTD) {
+                        return (
+                          <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('client'); setShowSendEmailModal(true); }} className="h-8 px-3" title="Send to Client">
+                            <Send className="h-4 w-4 mr-1" />
+                            <span className="text-xs">Send to Client</span>
+                          </Button>
+                        );
+                      } else if (isSentToClient) {
+                        return (
+                          <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { toast.success(result.message); loadBOQs(); } else { toast.error(result.message); } }} className="h-8 px-3 text-yellow-600 hover:text-yellow-700" title="Confirm Client Approval">
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            <span className="text-xs">Confirm Client</span>
+                          </Button>
+                        );
+                      } else if (isClientConfirmed) {
+                        return (
+                          <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                            <CheckCircle className="h-4 w-4" />
+                            Client Approved
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                 </TableCell>
               </TableRow>
@@ -1120,11 +1243,11 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Pending</span>
                 <span className="ml-1 sm:ml-2 text-gray-400">({projects.filter(p => {
                   const projectBoqs = boqs.filter(boq => boq.project?.project_id == p.project_id);
-                  return !projectBoqs.some(boq =>
-                    boq.email_sent === true ||
-                    boq.status?.toLowerCase() === 'pending' ||
-                    boq.status?.toLowerCase() === 'sent_for_confirmation'
-                  );
+                  // Only show projects that have NO BOQs or only have draft BOQs
+                  return projectBoqs.length === 0 || projectBoqs.every(boq => {
+                    const status = boq.status?.toLowerCase() || '';
+                    return !status || status === 'draft';
+                  });
                 }).length})</span>
               </TabsTrigger>
               <TabsTrigger
@@ -1139,19 +1262,7 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Sent</span>
                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
                   const status = b.status?.toLowerCase();
-                  return (
-                    b.email_sent === true &&
-                    status !== 'approved' &&
-                    status !== 'rejected' &&
-                    status !== 'completed' &&
-                    status !== 'draft'
-                  ) || (
-                    status === 'in_review' ||
-                    status === 'inreview' ||
-                    status === 'pending' ||
-                    status === 'sent_for_confirmation' ||
-                    status === 'sentforconfirmation'
-                  );
+                  return status === 'pending';
                 }).length})</span>
               </TabsTrigger>
               <TabsTrigger
@@ -1198,14 +1309,12 @@ const EstimatorHub: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
                   {filteredProjects
                     .filter(project => {
-                      // Filter out projects with sent BOQs from All Projects tab
+                      // Only show projects that have NO BOQs or only have draft BOQs
                       const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
-                      const hasSentBoq = projectBoqs.some(boq =>
-                        boq.email_sent === true ||
-                        boq.status?.toLowerCase() === 'pending' ||
-                        boq.status?.toLowerCase() === 'sent_for_confirmation'
-                      );
-                      return !hasSentBoq; // Only show projects that haven't been sent
+                      return projectBoqs.length === 0 || projectBoqs.every(boq => {
+                        const status = boq.status?.toLowerCase() || '';
+                        return !status || status === 'draft';
+                      });
                     })
                     .map((project, index) => {
                     // Count BOQs for this project
@@ -2064,6 +2173,93 @@ const EstimatorHub: React.FC = () => {
             loadBOQs(); // Refresh to get updated email_sent status
           }}
         />
+      )}
+
+      {/* Download Format Selection Modal */}
+      {showFormatModal && boqToDownload && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-lg w-full"
+          >
+            <div className="bg-gradient-to-r from-green-50 to-green-100 p-6 border-b border-green-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-green-900">Download BOQ</h2>
+                <button
+                  onClick={() => setShowFormatModal(false)}
+                  className="p-2 hover:bg-green-200 rounded-lg transition-colors"
+                >
+                  <svg className="w-5 h-5 text-green-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <p className="text-sm text-green-700 mt-1">
+                Choose BOQ type and format
+              </p>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Type Selection */}
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                <p className="text-sm text-gray-700 mb-3">
+                  <strong>Note:</strong> Download both versions to compare what's visible internally vs what the client will see after estimator sends it.
+                </p>
+
+                <div className="space-y-3">
+                  <label className="flex items-center gap-3 p-3 bg-white border-2 border-gray-200 rounded-lg cursor-pointer hover:border-blue-500 transition-colors">
+                    <input
+                      type="radio"
+                      name="downloadType"
+                      value="internal"
+                      checked={downloadType === 'internal'}
+                      onChange={() => setDownloadType('internal')}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div>
+                      <div className="font-semibold text-gray-900">Internal BOQ</div>
+                      <div className="text-xs text-gray-600">Includes overhead, profit margins, and detailed breakdown</div>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-3 bg-white border-2 border-gray-200 rounded-lg cursor-pointer hover:border-blue-500 transition-colors">
+                    <input
+                      type="radio"
+                      name="downloadType"
+                      value="client"
+                      checked={downloadType === 'client'}
+                      onChange={() => setDownloadType('client')}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div>
+                      <div className="font-semibold text-gray-900">Client BOQ</div>
+                      <div className="text-xs text-gray-600">Simplified version showing only final prices (as client sees)</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Format Buttons */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => handleDownload('excel')}
+                  className="flex-1 py-3 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  <Download className="w-5 h-5" />
+                  Download Excel
+                </button>
+                <button
+                  onClick={() => handleDownload('pdf')}
+                  className="flex-1 py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  <Download className="w-5 h-5" />
+                  Download PDF
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
       )}
     </div>
   );

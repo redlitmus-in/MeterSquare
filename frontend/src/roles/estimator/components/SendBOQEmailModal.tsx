@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Send, Mail, User, MessageSquare, AlertCircle, CheckCircle } from 'lucide-react';
+import { X, Send, Mail, User, MessageSquare, AlertCircle, CheckCircle, Download, FileText, FileSpreadsheet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 import { estimatorService } from '../services/estimatorService';
+import { exportBOQToExcelClient, exportBOQToPDFClient } from '@/utils/boqExportUtils';
 
 interface SendBOQEmailModalProps {
   isOpen: boolean;
@@ -33,8 +34,81 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
   const [comments, setComments] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
+  const [boqData, setBoqData] = useState<any>(null);
+  const [loadingBOQ, setLoadingBOQ] = useState(false);
 
   const isClientMode = mode === 'client';
+
+  // Fetch BOQ data when modal opens in client mode
+  React.useEffect(() => {
+    const fetchBOQData = async () => {
+      if (isClientMode && isOpen && boqId) {
+        setLoadingBOQ(true);
+        try {
+          const response = await estimatorService.getBOQById(boqId);
+          if (response.success && response.data) {
+            const boq = response.data;
+
+            // Transform BOQ data to match export function expectations (same as TD does)
+            const transformedData = {
+              id: boq.boq_id || boqId,
+              projectName: boq.project_name || boq.project_details?.project_name || projectName,
+              clientName: boq.client || boq.project_details?.client || 'Unknown Client',
+              estimator: boq.created_by || boq.created_by_name || 'Unknown',
+              totalValue: boq.total_cost || boq.selling_price || 0,
+              itemCount: boq.items?.length || 0,
+              laborCost: boq.total_labour_cost || 0,
+              materialCost: boq.total_material_cost || 0,
+              profitMargin: boq.profit_margin || boq.profit_margin_percentage || 0,
+              overheadPercentage: boq.overhead_percentage || boq.overhead || 0,
+              submittedDate: boq.created_at || new Date().toISOString(),
+              location: boq.location || boq.project_details?.location || 'N/A',
+              floor: boq.floor_name || boq.project_details?.floor || 'N/A',
+              workingHours: boq.working_hours || boq.project_details?.hours || 'N/A',
+              boqItems: boq.items?.map((item: any) => {
+                const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
+                const sellingPrice = item.selling_price || 0;
+
+                return {
+                  id: item.item_id,
+                  description: item.item_name,
+                  briefDescription: item.description || '',
+                  unit: item.materials?.[0]?.unit || 'nos',
+                  quantity: totalQuantity,
+                  rate: totalQuantity > 0 ? sellingPrice / totalQuantity : sellingPrice,
+                  amount: sellingPrice,
+                  materials: item.materials?.map((mat: any) => ({
+                    name: mat.material_name,
+                    quantity: mat.quantity,
+                    unit: mat.unit,
+                    rate: mat.unit_price,
+                    amount: mat.total_price
+                  })) || [],
+                  labour: item.labour?.map((lab: any) => ({
+                    type: lab.labour_role,
+                    quantity: lab.hours,
+                    unit: 'hrs',
+                    rate: lab.rate_per_hour,
+                    amount: lab.total_cost
+                  })) || [],
+                  laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+                  estimatedSellingPrice: item.selling_price || 0
+                };
+              }) || []
+            };
+
+            setBoqData(transformedData);
+          }
+        } catch (error) {
+          console.error('Error fetching BOQ data:', error);
+        } finally {
+          setLoadingBOQ(false);
+        }
+      }
+    };
+
+    fetchBOQData();
+  }, [isClientMode, isOpen, boqId, projectName, boqName]);
 
   const handleSendEmail = async () => {
     setIsSending(true);
@@ -94,7 +168,9 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
-  const canSend = !recipientEmail || (recipientEmail && isValidEmail(recipientEmail));
+  const canSend = isClientMode
+    ? (recipientEmail && isValidEmail(recipientEmail)) // Client mode: email required and must be valid
+    : (!recipientEmail || isValidEmail(recipientEmail)); // TD mode: email optional but must be valid if provided
 
   if (!isOpen) return null;
 
@@ -196,19 +272,23 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                     <div className="space-y-2">
                       <Label htmlFor="recipient_email" className="flex items-center gap-2">
                         <Mail className="w-4 h-4 text-gray-500" />
-                        {isClientMode ? 'Client Email (Optional)' : 'Technical Director Email (Optional)'}
+                        {isClientMode ? 'Client Email *' : 'Technical Director Email (Optional)'}
                       </Label>
                       <Input
                         id="recipient_email"
                         type="email"
-                        placeholder={isClientMode ? 'Enter client email or leave blank for project default' : 'Enter TD email or leave blank for default'}
+                        placeholder={isClientMode ? 'Enter client email address' : 'Enter TD email or leave blank for default'}
                         value={recipientEmail}
                         onChange={(e) => setRecipientEmail(e.target.value)}
                         disabled={isSending}
+                        required={isClientMode}
                         className={`${recipientEmail && !isValidEmail(recipientEmail) ? 'border-red-300 focus:border-red-500' : ''}`}
                       />
                       {recipientEmail && !isValidEmail(recipientEmail) && (
                         <p className="text-sm text-red-600">Please enter a valid email address</p>
+                      )}
+                      {isClientMode && !recipientEmail && (
+                        <p className="text-sm text-gray-500">Client email is required to send BOQ</p>
                       )}
                     </div>
 
@@ -246,6 +326,73 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                         className="resize-none"
                       />
                     </div>
+
+                    {/* Preview BOQ - Only for Client Mode */}
+                    {isClientMode && (
+                      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Download className="w-5 h-5 text-blue-600" />
+                          <h3 className="font-semibold text-gray-900">Preview Client BOQ</h3>
+                        </div>
+                        <p className="text-sm text-gray-600 mb-3">
+                          Download and review the BOQ before sending to client
+                        </p>
+                        {loadingBOQ ? (
+                          <div className="flex items-center justify-center py-4">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                          </div>
+                        ) : (
+                          <div className="flex gap-3">
+                            <button
+                              onClick={async () => {
+                                if (!boqData) {
+                                  toast.error('BOQ data not loaded');
+                                  return;
+                                }
+                                try {
+                                  toast.loading('Generating Excel file...');
+                                  await exportBOQToExcelClient(boqData);
+                                  toast.dismiss();
+                                  toast.success('Excel file downloaded successfully');
+                                } catch (error) {
+                                  toast.dismiss();
+                                  toast.error('Failed to download Excel file');
+                                  console.error('Excel download error:', error);
+                                }
+                              }}
+                              disabled={isSending || loadingBOQ || !boqData}
+                              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+                            >
+                              <FileSpreadsheet className="w-4 h-4" />
+                              Download Excel
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!boqData) {
+                                  toast.error('BOQ data not loaded');
+                                  return;
+                                }
+                                try {
+                                  toast.loading('Generating PDF file...');
+                                  await exportBOQToPDFClient(boqData);
+                                  toast.dismiss();
+                                  toast.success('PDF file downloaded successfully');
+                                } catch (error) {
+                                  toast.dismiss();
+                                  toast.error('Failed to download PDF file');
+                                  console.error('PDF download error:', error);
+                                }
+                              }}
+                              disabled={isSending || loadingBOQ || !boqData}
+                              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+                            >
+                              <FileText className="w-4 h-4" />
+                              Download PDF
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Actions */}
                     <div className="flex justify-end gap-3 pt-4 border-t">

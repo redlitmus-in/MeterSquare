@@ -347,6 +347,56 @@ def get_boq(boq_id):
         # Add BOQ details from JSON
         response_data.update(boq_details.boq_details)
 
+        # Calculate totals from items (like get_all_boq does)
+        total_material_cost = 0
+        total_labour_cost = 0
+        overhead_percentage = 0
+        profit_margin = 0
+
+        # FIRST: Try to get from summary (most reliable)
+        if boq_details.boq_details and "summary" in boq_details.boq_details:
+            summary = boq_details.boq_details["summary"]
+            total_material_cost = summary.get("total_material_cost", 0)
+            total_labour_cost = summary.get("total_labour_cost", 0)
+            # Try multiple field name variations for overhead and profit
+            overhead_percentage = summary.get("overhead_percentage", 0) or summary.get("overhead", 0)
+            profit_margin = summary.get("profit_margin_percentage", 0) or summary.get("profit_margin", 0)
+
+        # FALLBACK: Calculate from items if summary doesn't have complete values
+        if boq_details.boq_details and "items" in boq_details.boq_details:
+            items = boq_details.boq_details["items"]
+
+            # Calculate costs from items if not in summary
+            if total_material_cost == 0 or total_labour_cost == 0:
+                for item in items:
+                    # Calculate material cost
+                    materials = item.get("materials", [])
+                    for mat in materials:
+                        total_material_cost += mat.get("total_price", 0)
+
+                    # Calculate labour cost
+                    labour = item.get("labour", [])
+                    for lab in labour:
+                        total_labour_cost += lab.get("total_cost", 0)
+
+            # Get overhead and profit from first item if not in summary
+            if overhead_percentage == 0 or profit_margin == 0:
+                for item in items:
+                    if overhead_percentage == 0:
+                        overhead_percentage = item.get("overhead_percentage", 0)
+                    if profit_margin == 0:
+                        profit_margin = item.get("profit_margin_percentage", 0) or item.get("profit_margin", 0)
+                    # Break after first item with values
+                    if overhead_percentage > 0 and profit_margin > 0:
+                        break
+
+        # Add calculated totals to response - Force override with calculated values
+        response_data["total_material_cost"] = total_material_cost
+        response_data["total_labour_cost"] = total_labour_cost
+        response_data["overhead_percentage"] = overhead_percentage
+        response_data["profit_margin"] = profit_margin
+        response_data["profit_margin_percentage"] = profit_margin  # Add both field names for compatibility
+
         return jsonify(response_data), 200
 
     except Exception as e:
@@ -379,6 +429,8 @@ def get_all_boq():
                 "project_name": project.project_name if project else None,
                 "client": project.client if project else None,
                 "location": project.location if project else None,
+                "floor": project.floor_name if project else None,
+                "hours": project.working_hours if project else None,
                 "status": boq.status,
                 "email_sent" : boq.email_sent,
                 "user_id": project.user_id if project else None,  # PM assignment indicator
