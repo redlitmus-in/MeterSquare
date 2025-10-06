@@ -78,7 +78,7 @@ def create_project():
             start_date=start_date,
             end_date=end_date,
             status=data.get('status', 'active'),
-            user_id=current_user.get('user_id'),
+            user_id=None,  # PM will be assigned later by TD, not set on creation
             created_by=current_user.get('email'),
             created_at=datetime.utcnow(),
             is_deleted=False

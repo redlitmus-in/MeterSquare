@@ -575,7 +575,7 @@ class BOQEmailService:
         <div class="email-container">
             <!-- Header with Logo -->
             <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); text-align: center;">
-                <img src="https://i.postimg.cc/50f23gnF/logo.png" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
+                <img src="https://i.postimg.cc/q7x6zrYt/logo.png" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
                 <h1>Bill of Quantities</h1>
                 <h2>{project_name}</h2>
             </div>

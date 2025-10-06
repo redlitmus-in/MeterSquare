@@ -192,6 +192,7 @@ def get_all_pm():
                 # Add each project under assigned list
                 for project in projects:
                     assigned_list.append({
+                        "user_id": pm.user_id,  # Added user_id for assignment functionality
                         "pm_name": pm.full_name,
                         "email": pm.email,
                         "phone": pm.phone,
@@ -201,7 +202,9 @@ def get_all_pm():
             else:
                 # PM without project assignment
                 unassigned_list.append({
+                    "user_id": pm.user_id,
                     "pm_name": pm.full_name,
+                    "full_name": pm.full_name,
                     "email": pm.email,
                     "phone": pm.phone,
                     "project_id": None

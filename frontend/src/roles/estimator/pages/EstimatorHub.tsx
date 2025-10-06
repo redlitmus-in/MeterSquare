@@ -239,6 +239,7 @@ const EstimatorHub: React.FC = () => {
   const itemsPerPage = 10; // Fixed at 10 items per page
   const [showSendEmailModal, setShowSendEmailModal] = useState(false);
   const [boqToEmail, setBoqToEmail] = useState<BOQ | null>(null);
+  const [emailMode, setEmailMode] = useState<'td' | 'client'>('td'); // Track whether sending to TD or client
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -372,36 +373,33 @@ const EstimatorHub: React.FC = () => {
       // Filter BOQs
       let filtered = [...boqs];
 
-      // Filter by tab status - Status takes priority over email_sent
-      if (activeTab === 'approved') {
-        filtered = filtered.filter(boq =>
-          boq.status?.toLowerCase() === 'approved'
-        );
+      // Filter by tab status based on workflow - USE STATUS ONLY
+      if (activeTab === 'projects') {
+        // Pending: Draft BOQs not sent to TD yet (no status or status = draft)
+        filtered = filtered.filter(boq => {
+          const status = boq.status?.toLowerCase() || '';
+          return !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed');
+        });
       } else if (activeTab === 'sent') {
-        // Show BOQs that have been sent but not yet approved/rejected (In_Review, Pending, Sent_for_Confirmation)
+        // Send BOQ: Sent to TD, waiting for approval (status = pending)
+        filtered = filtered.filter(boq =>
+          boq.status?.toLowerCase() === 'pending'
+        );
+      } else if (activeTab === 'approved') {
+        // Approved: TD approved (includes: approved, sent_for_confirmation, client_confirmed)
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
-          return (
-            boq.email_sent === true &&
-            status !== 'approved' &&
-            status !== 'rejected' &&
-            status !== 'completed' &&
-            status !== 'draft'
-          ) || (
-            status === 'in_review' ||
-            status === 'inreview' ||
-            status === 'pending' ||
-            status === 'sent_for_confirmation' ||
-            status === 'sentforconfirmation'
-          );
+          return status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed';
         });
       } else if (activeTab === 'rejected') {
+        // Rejected: TD rejected
         filtered = filtered.filter(boq =>
           boq.status?.toLowerCase() === 'rejected'
         );
       } else if (activeTab === 'completed') {
+        // Completed BOQs (PM assigned)
         filtered = filtered.filter(boq =>
-          boq.status?.toLowerCase() === 'completed'
+          boq.status?.toLowerCase() === 'completed' || boq.pm_assigned === true
         );
       }
 
@@ -727,7 +725,19 @@ const EstimatorHub: React.FC = () => {
   };
 
   const BOQCard = ({ boq }: { boq: BOQ }) => {
-    const isSent = boq.email_sent || boq.status?.toLowerCase() === 'pending' || boq.status?.toLowerCase() === 'sent_for_confirmation';
+    // Check BOQ workflow status - Use status field as PRIMARY indicator
+    const status = boq.status?.toLowerCase() || '';
+
+    // Draft: Not sent to TD yet (can edit/delete/send) - status NOT in workflow states
+    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed');
+    // Sent to TD: Waiting for TD approval
+    const isSentToTD = status === 'pending';
+    // Approved by TD: Ready to send to client
+    const isApprovedByTD = status === 'approved';
+    // Sent to client: Waiting for client confirmation
+    const isSentToClient = status === 'sent_for_confirmation';
+    // Client confirmed: Ready for TD to assign PM
+    const isClientConfirmed = status === 'client_confirmed';
 
     return (
       <motion.div
@@ -750,7 +760,7 @@ const EstimatorHub: React.FC = () => {
               >
                 <Eye className="h-4 w-4" />
               </button>
-              {!isSent && (
+              {isDraft && (
                 <>
                   <button
                     className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-all"
@@ -824,7 +834,9 @@ const EstimatorHub: React.FC = () => {
             <span className="hidden sm:inline">View Details</span>
             <span className="sm:hidden">View</span>
           </button>
-          {!isSent ? (
+
+          {/* Draft BOQs - Can edit and send to TD */}
+          {isDraft ? (
             <>
               <button
                 className="bg-transparent border-2 border-green-500 text-green-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
@@ -851,20 +863,60 @@ const EstimatorHub: React.FC = () => {
                 style={{ backgroundColor: 'rgb(168, 85, 247)' }}
                 onClick={() => {
                   setBoqToEmail(boq);
+                  setEmailMode('td'); // Set mode to TD
                   setShowSendEmailModal(true);
                 }}
               >
                 <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                <span className="hidden sm:inline">Send Email</span>
-                <span className="sm:hidden">Email</span>
+                <span className="hidden sm:inline">Send to TD</span>
+                <span className="sm:hidden">To TD</span>
               </button>
             </>
-          ) : (
+          ) : isSentToTD ? (
+            /* Sent to TD - waiting for approval */
             <div className="col-span-2 flex items-center justify-center text-xs text-gray-500">
               <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
-              Sent to TD
+              Sent to TD (Pending Approval)
             </div>
-          )}
+          ) : isApprovedByTD ? (
+            /* Approved by TD - Can send to client */
+            <button
+              className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
+              style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+              onClick={() => {
+                setBoqToEmail(boq);
+                setEmailMode('client'); // Set mode to client
+                setShowSendEmailModal(true);
+              }}
+            >
+              <Mail className="h-3.5 w-3.5" />
+              <span>Send to Client</span>
+            </button>
+          ) : isSentToClient ? (
+            /* Sent to client - waiting for client confirmation */
+            <button
+              className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
+              style={{ backgroundColor: 'rgb(234, 179, 8)' }}
+              onClick={async () => {
+                const result = await estimatorService.confirmClientApproval(boq.boq_id!);
+                if (result.success) {
+                  toast.success(result.message);
+                  loadBOQs(); // Refresh list
+                } else {
+                  toast.error(result.message);
+                }
+              }}
+            >
+              <CheckCircle className="h-3.5 w-3.5" />
+              <span>Confirm Client Approval</span>
+            </button>
+          ) : isClientConfirmed ? (
+            /* Client confirmed - ready for PM assignment */
+            <div className="col-span-2 flex items-center justify-center text-xs text-green-700 font-medium">
+              <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
+              Client Approved
+            </div>
+          ) : null}
         </div>
       </motion.div>
     );
@@ -1108,7 +1160,10 @@ const EstimatorHub: React.FC = () => {
               >
                 <span className="hidden sm:inline">Approved BOQ</span>
                 <span className="sm:hidden">Approved</span>
-                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'approved').length})</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
+                  const s = b.status?.toLowerCase();
+                  return s === 'approved' || s === 'sent_for_confirmation' || s === 'client_confirmed';
+                }).length})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="rejected"
@@ -1999,10 +2054,12 @@ const EstimatorHub: React.FC = () => {
           onClose={() => {
             setShowSendEmailModal(false);
             setBoqToEmail(null);
+            setEmailMode('td'); // Reset to default
           }}
           boqId={boqToEmail.boq_id!}
           boqName={boqToEmail.boq_name || boqToEmail.title || ''}
           projectName={boqToEmail.project?.name || ''}
+          mode={emailMode}
           onEmailSent={() => {
             loadBOQs(); // Refresh to get updated email_sent status
           }}

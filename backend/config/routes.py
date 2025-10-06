@@ -4,6 +4,7 @@ from routes.boq_routes import boq_routes
 from routes.technical_routes import technical_routes
 from routes.projectmanager_routes import pm_routes
 from routes.sitesupervisor_routes import sitesupervisor_routes
+from routes.estimator_routes import estimator_routes
 
 # Import and register the routes from the route blueprints
 
@@ -14,3 +15,4 @@ def initialize_routes(app):
     app.register_blueprint(technical_routes)
     app.register_blueprint(pm_routes)
     app.register_blueprint(sitesupervisor_routes)
+    app.register_blueprint(estimator_routes)

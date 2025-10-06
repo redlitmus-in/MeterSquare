@@ -16,6 +16,7 @@ interface SendBOQEmailModalProps {
   boqName: string;
   projectName: string;
   onEmailSent: () => void;
+  mode?: 'td' | 'client'; // 'td' = send to TD, 'client' = send to client
 }
 
 const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
@@ -24,28 +25,42 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
   boqId,
   boqName,
   projectName,
-  onEmailSent
+  onEmailSent,
+  mode = 'td' // Default to TD mode for backward compatibility
 }) => {
-  const [tdEmail, setTdEmail] = useState('');
-  const [tdName, setTdName] = useState('');
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [recipientName, setRecipientName] = useState('');
   const [comments, setComments] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
+
+  const isClientMode = mode === 'client';
 
   const handleSendEmail = async () => {
     setIsSending(true);
 
     try {
-      // Prepare params for custom email data
-      const params: { td_email?: string; full_name?: string; comments?: string } = {};
-      if (tdEmail && tdEmail.trim()) params.td_email = tdEmail.trim();
-      if (tdName && tdName.trim()) params.full_name = tdName.trim();
-      if (comments && comments.trim()) params.comments = comments.trim();
+      let response;
 
-      const response = await estimatorService.sendBOQEmail(
-        boqId,
-        Object.keys(params).length > 0 ? params : undefined
-      );
+      if (isClientMode) {
+        // Send to client
+        response = await estimatorService.sendBOQToClient(boqId, {
+          client_email: recipientEmail.trim() || undefined,
+          message: comments.trim() || undefined,
+          formats: ['excel', 'pdf']
+        });
+      } else {
+        // Send to TD
+        const params: { td_email?: string; full_name?: string; comments?: string } = {};
+        if (recipientEmail && recipientEmail.trim()) params.td_email = recipientEmail.trim();
+        if (recipientName && recipientName.trim()) params.full_name = recipientName.trim();
+        if (comments && comments.trim()) params.comments = comments.trim();
+
+        response = await estimatorService.sendBOQEmail(
+          boqId,
+          Object.keys(params).length > 0 ? params : undefined
+        );
+      }
 
       if (response.success) {
         setEmailSent(true);
@@ -68,8 +83,8 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
   };
 
   const handleClose = () => {
-    setTdEmail('');
-    setTdName('');
+    setRecipientEmail('');
+    setRecipientName('');
     setComments('');
     setEmailSent(false);
     onClose();
@@ -79,7 +94,7 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
-  const canSend = !tdEmail || (tdEmail && isValidEmail(tdEmail));
+  const canSend = !recipientEmail || (recipientEmail && isValidEmail(recipientEmail));
 
   if (!isOpen) return null;
 
@@ -111,11 +126,14 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                     </div>
                     <h3 className="text-2xl font-bold text-gray-900 mb-2">Email Sent!</h3>
                     <p className="text-gray-600 mb-6">
-                      BOQ review email has been successfully sent to the Technical Director.
+                      {isClientMode
+                        ? 'BOQ has been successfully sent to the client.'
+                        : 'BOQ review email has been successfully sent to the Technical Director.'
+                      }
                     </p>
                     <div className="w-full bg-gradient-to-r from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
                       <p className="text-sm text-green-800">
-                        <strong>{boqName}</strong> for project <strong>{projectName}</strong> is now pending TD review.
+                        <strong>{boqName}</strong> for project <strong>{projectName}</strong> {isClientMode ? 'sent to client' : 'is now pending TD review'}.
                       </p>
                     </div>
                   </div>
@@ -130,8 +148,12 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                           <Mail className="w-5 h-5 text-blue-600" />
                         </div>
                         <div>
-                          <h2 className="text-xl font-bold text-[#243d8a]">Send BOQ to Technical Director</h2>
-                          <p className="text-sm text-gray-600">Send BOQ for review and approval</p>
+                          <h2 className="text-xl font-bold text-[#243d8a]">
+                            {isClientMode ? 'Send BOQ to Client' : 'Send BOQ to Technical Director'}
+                          </h2>
+                          <p className="text-sm text-gray-600">
+                            {isClientMode ? 'Send BOQ for client review' : 'Send BOQ for review and approval'}
+                          </p>
                         </div>
                       </div>
                       <button
@@ -161,58 +183,62 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                       </div>
                     </div>
 
-                    <Alert>
-                      <AlertCircle className="h-4 w-4" />
-                      <AlertDescription className="text-sm">
-                        Leave email fields blank to automatically send to the default Technical Director in the system.
-                      </AlertDescription>
-                    </Alert>
+                    {!isClientMode && (
+                      <Alert>
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription className="text-sm">
+                          Leave email fields blank to automatically send to the default Technical Director in the system.
+                        </AlertDescription>
+                      </Alert>
+                    )}
 
-                    {/* TD Email (Optional) */}
+                    {/* Recipient Email */}
                     <div className="space-y-2">
-                      <Label htmlFor="td_email" className="flex items-center gap-2">
+                      <Label htmlFor="recipient_email" className="flex items-center gap-2">
                         <Mail className="w-4 h-4 text-gray-500" />
-                        Technical Director Email (Optional)
+                        {isClientMode ? 'Client Email (Optional)' : 'Technical Director Email (Optional)'}
                       </Label>
                       <Input
-                        id="td_email"
+                        id="recipient_email"
                         type="email"
-                        placeholder="Enter TD email or leave blank for default"
-                        value={tdEmail}
-                        onChange={(e) => setTdEmail(e.target.value)}
+                        placeholder={isClientMode ? 'Enter client email or leave blank for project default' : 'Enter TD email or leave blank for default'}
+                        value={recipientEmail}
+                        onChange={(e) => setRecipientEmail(e.target.value)}
                         disabled={isSending}
-                        className={`${tdEmail && !isValidEmail(tdEmail) ? 'border-red-300 focus:border-red-500' : ''}`}
+                        className={`${recipientEmail && !isValidEmail(recipientEmail) ? 'border-red-300 focus:border-red-500' : ''}`}
                       />
-                      {tdEmail && !isValidEmail(tdEmail) && (
+                      {recipientEmail && !isValidEmail(recipientEmail) && (
                         <p className="text-sm text-red-600">Please enter a valid email address</p>
                       )}
                     </div>
 
-                    {/* TD Name (Optional) */}
-                    <div className="space-y-2">
-                      <Label htmlFor="td_name" className="flex items-center gap-2">
-                        <User className="w-4 h-4 text-gray-500" />
-                        Technical Director Name (Optional)
-                      </Label>
-                      <Input
-                        id="td_name"
-                        type="text"
-                        placeholder="Enter TD name"
-                        value={tdName}
-                        onChange={(e) => setTdName(e.target.value)}
-                        disabled={isSending}
-                      />
-                    </div>
+                    {!isClientMode && (
+                      /* TD Name (Optional) - Only for TD mode */
+                      <div className="space-y-2">
+                        <Label htmlFor="recipient_name" className="flex items-center gap-2">
+                          <User className="w-4 h-4 text-gray-500" />
+                          Technical Director Name (Optional)
+                        </Label>
+                        <Input
+                          id="recipient_name"
+                          type="text"
+                          placeholder="Enter TD name"
+                          value={recipientName}
+                          onChange={(e) => setRecipientName(e.target.value)}
+                          disabled={isSending}
+                        />
+                      </div>
+                    )}
 
                     {/* Comments */}
                     <div className="space-y-2">
                       <Label htmlFor="comments" className="flex items-center gap-2">
                         <MessageSquare className="w-4 h-4 text-gray-500" />
-                        Comments / Notes (Optional)
+                        {isClientMode ? 'Message (Optional)' : 'Comments / Notes (Optional)'}
                       </Label>
                       <Textarea
                         id="comments"
-                        placeholder="Add any comments or notes for the Technical Director..."
+                        placeholder={isClientMode ? 'Add a message for the client...' : 'Add any comments or notes for the Technical Director...'}
                         value={comments}
                         onChange={(e) => setComments(e.target.value)}
                         disabled={isSending}
@@ -243,7 +269,7 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                         ) : (
                           <>
                             <Send className="w-4 h-4" />
-                            Send to Technical Director
+                            {isClientMode ? 'Send to Client' : 'Send to Technical Director'}
                           </>
                         )}
                       </button>

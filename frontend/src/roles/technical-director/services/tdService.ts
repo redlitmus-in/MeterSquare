@@ -93,6 +93,104 @@ class TDService {
       };
     }
   }
+
+  async getAllPMs(): Promise<{ success: boolean; data?: any[]; message?: string }> {
+    try {
+      const response = await apiClient.get('/all_pm');
+      // Return ALL PMs (both assigned and unassigned) since a PM can handle multiple projects
+      const assignedPMs = response.data.assigned_project_managers || [];
+      const unassignedPMs = response.data.unassigned_project_managers || [];
+
+      // Get unique PMs from assigned list
+      const uniqueAssignedPMs = assignedPMs.reduce((acc: any[], pm: any) => {
+        const exists = acc.find(p => p.email === pm.email);
+        if (!exists) {
+          acc.push({
+            user_id: pm.user_id,
+            pm_name: pm.pm_name,
+            full_name: pm.pm_name,
+            email: pm.email,
+            phone: pm.phone
+          });
+        }
+        return acc;
+      }, []);
+
+      // Combine both lists
+      const allPMs = [...unassignedPMs, ...uniqueAssignedPMs];
+
+      return {
+        success: true,
+        data: allPMs
+      };
+    } catch (error: any) {
+      console.error('Get all PMs error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load Project Managers'
+      };
+    }
+  }
+
+  async createPM(pmData: { full_name: string; email: string; phone: string; project_ids: number[] }): Promise<{ success: boolean; data?: any; message: string }> {
+    try {
+      const response = await apiClient.post('/craete_pm', pmData);
+      return {
+        success: true,
+        data: response.data,
+        message: response.data.message || 'Project Manager created successfully'
+      };
+    } catch (error: any) {
+      console.error('Create PM error:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to create Project Manager'
+      };
+    }
+  }
+
+  async assignProjectsToPM(userId: number, projectIds: number[]): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await apiClient.post('/assign_projects', {
+        user_id: userId,
+        project_ids: projectIds
+      });
+      return {
+        success: true,
+        message: response.data.message || 'Projects assigned successfully'
+      };
+    } catch (error: any) {
+      console.error('Assign projects error:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to assign projects'
+      };
+    }
+  }
+
+  async getAllTDBOQs(page: number = 1, perPage: number = 100): Promise<{ success: boolean; data?: any[]; count?: number; message?: string }> {
+    try {
+      const response = await apiClient.get('/td_boqs', {
+        params: {
+          page,
+          per_page: perPage
+        }
+      });
+      return {
+        success: true,
+        data: response.data.boqs || [],
+        count: response.data.pagination?.total || 0
+      };
+    } catch (error: any) {
+      console.error('Get TD BOQs error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load BOQs'
+      };
+    }
+  }
 }
 
 export const tdService = new TDService();
