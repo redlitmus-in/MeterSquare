@@ -1,16 +1,4 @@
-import { apiClient, API_ENDPOINTS } from '@/api/config';
-
-// Types
-export interface Project {
-  project_id: number;
-  project_name: string;
-  client?: string;
-  location?: string;
-  status?: string;
-  user_id?: number;
-  created_at?: string;
-  last_modified_at?: string;
-}
+import { apiClient } from '@/api/config';
 
 export interface BOQItem {
   boq_id: number;
@@ -58,17 +46,6 @@ export interface ProjectManager {
   created_at?: string;
 }
 
-export interface Purchase {
-  id: number;
-  project_id?: number;
-  boq_id?: number;
-  status: string;
-  amount?: number;
-  vendor?: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
 // API Functions
 export const projectManagerService = {
   // Get all BOQs for the current PM's assigned projects
@@ -87,7 +64,7 @@ export const projectManagerService = {
   // Get all Project Managers
   async getAllPMs(): Promise<{ assigned_project_managers: any[]; unassigned_project_managers: any[] }> {
     try {
-      const response = await apiClient.get('/api/all_pm');
+      const response = await apiClient.get('/all_pm');
       return response.data;
     } catch (error) {
       console.error('Error fetching all PMs:', error);
@@ -98,7 +75,7 @@ export const projectManagerService = {
   // Get PM by ID with assigned projects
   async getPMById(userId: number): Promise<{ user_list: any[] }> {
     try {
-      const response = await apiClient.get(`/api/get_pm/${userId}`);
+      const response = await apiClient.get(`/get_pm/${userId}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching PM by ID:', error);
@@ -114,7 +91,7 @@ export const projectManagerService = {
     assigned_projects?: number[];
   }): Promise<any> {
     try {
-      const response = await apiClient.put(`/api/update_pm/${userId}`, data);
+      const response = await apiClient.put(`/update_pm/${userId}`, data);
       return response.data;
     } catch (error) {
       console.error('Error updating PM:', error);
@@ -125,7 +102,7 @@ export const projectManagerService = {
   // Delete PM (soft delete)
   async deletePM(userId: number): Promise<any> {
     try {
-      const response = await apiClient.delete(`/api/delete_pm/${userId}`);
+      const response = await apiClient.delete(`/delete_pm/${userId}`);
       return response.data;
     } catch (error) {
       console.error('Error deleting PM:', error);
@@ -136,7 +113,7 @@ export const projectManagerService = {
   // Assign projects to PM
   async assignProjects(userId: number, projectIds: number[]): Promise<any> {
     try {
-      const response = await apiClient.post('/api/assign_projects', {
+      const response = await apiClient.post('/assign_projects', {
         user_id: userId,
         project_ids: projectIds
       });
@@ -147,49 +124,137 @@ export const projectManagerService = {
     }
   },
 
-  // Get all projects
-  async getAllProjects(): Promise<Project[]> {
+  // Create PM
+  async createPM(data: {
+    full_name: string;
+    email: string;
+    phone: string;
+    password?: string;
+  }): Promise<any> {
     try {
-      const response = await apiClient.get('/api/all_project');
-      return response.data.projects || response.data || [];
-    } catch (error) {
-      console.error('Error fetching projects:', error);
-      throw error;
-    }
-  },
-
-  // Get project by ID
-  async getProjectById(projectId: number): Promise<Project> {
-    try {
-      const response = await apiClient.get(`/api/project/${projectId}`);
-      return response.data.project || response.data;
-    } catch (error) {
-      console.error('Error fetching project:', error);
-      throw error;
-    }
-  },
-
-  // Get PM purchases/approvals
-  async getPMPurchases(): Promise<Purchase[]> {
-    try {
-      const response = await apiClient.get(API_ENDPOINTS.PROJECT_MANAGER.GET_PURCHASES);
-      return response.data.purchases || response.data || [];
-    } catch (error) {
-      console.error('Error fetching PM purchases:', error);
-      throw error;
-    }
-  },
-
-  // Approve purchase
-  async approvePurchase(purchaseId: number, data: any): Promise<any> {
-    try {
-      const response = await apiClient.post(API_ENDPOINTS.PROJECT_MANAGER.APPROVE_PURCHASE, {
-        purchase_id: purchaseId,
-        ...data
-      });
+      const response = await apiClient.post('/craete_pm', data);
       return response.data;
     } catch (error) {
-      console.error('Error approving purchase:', error);
+      console.error('Error creating PM:', error);
+      throw error;
+    }
+  },
+
+  // Get current PM's assigned projects by user ID
+  async getMyProjects(userId: number): Promise<{ user_list: any[] }> {
+    try {
+      const response = await apiClient.get(`/get_pm/${userId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching my projects:', error);
+      throw error;
+    }
+  },
+
+  // ===== Site Supervisor (Site Engineer) Management =====
+
+  // Get all site supervisors (assigned and unassigned)
+  async getAllSiteSupervisors(): Promise<{
+    assigned_project_managers: any[];
+    unassigned_project_managers: any[];
+    assigned_count: number;
+    unassigned_count: number;
+  }> {
+    try {
+      const response = await apiClient.get('/all_sitesupervisor');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching site supervisors:', error);
+      throw error;
+    }
+  },
+
+  // Get site supervisor by ID with assigned projects
+  async getSiteSupervisorById(siteSupervisorId: number): Promise<{ user_list: any[] }> {
+    try {
+      const response = await apiClient.get(`/get_sitesupervisor/${siteSupervisorId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching site supervisor by ID:', error);
+      throw error;
+    }
+  },
+
+  // Create a new site supervisor
+  async createSiteSupervisor(data: {
+    full_name: string;
+    email: string;
+    phone: string;
+    project_ids?: number[];
+  }): Promise<any> {
+    try {
+      const response = await apiClient.post('/create_sitesupervisor', data);
+      return response.data;
+    } catch (error) {
+      console.error('Error creating site supervisor:', error);
+      throw error;
+    }
+  },
+
+  // Update site supervisor details and assignments
+  async updateSiteSupervisor(siteSupervisorId: number, data: {
+    full_name?: string;
+    email?: string;
+    phone?: string;
+    assigned_projects?: number[];
+  }): Promise<any> {
+    try {
+      const response = await apiClient.put(`/update_sitesupervisor/${siteSupervisorId}`, data);
+      return response.data;
+    } catch (error) {
+      console.error('Error updating site supervisor:', error);
+      throw error;
+    }
+  },
+
+  // Delete site supervisor (soft delete)
+  async deleteSiteSupervisor(siteSupervisorId: number): Promise<any> {
+    try {
+      const response = await apiClient.delete(`/delete_sitesupervisor/${siteSupervisorId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error deleting site supervisor:', error);
+      throw error;
+    }
+  },
+
+  // Assign projects to site supervisor
+  async assignProjectsToSiteSupervisor(data: {
+    site_supervisor_id: number;
+    project_ids: number[];
+  }): Promise<any> {
+    try {
+      const response = await apiClient.post('/ss_assign', data);
+      return response.data;
+    } catch (error) {
+      console.error('Error assigning projects to site supervisor:', error);
+      throw error;
+    }
+  },
+
+  // Get BOQ details by ID
+  async getBOQById(boqId: number): Promise<any> {
+    try {
+      const response = await apiClient.get(`/boq/${boqId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching BOQ details:', error);
+      throw error;
+    }
+  },
+
+  // Get BOQ history by ID
+  async getBOQHistory(boqId: number): Promise<any> {
+    try {
+      const response = await apiClient.get(`/boq_history/${boqId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching BOQ history:', error);
       throw error;
     }
   }

@@ -192,6 +192,7 @@ def get_all_sitesupervisor():
                 # Add each project under assigned list
                 for project in projects:
                     assigned_list.append({
+                        "user_id": sitesupervisor.user_id,
                         "sitesupervisor_name": sitesupervisor.full_name,
                         "email": sitesupervisor.email,
                         "phone": sitesupervisor.phone,
@@ -201,6 +202,7 @@ def get_all_sitesupervisor():
             else:
                 # sitesupervisor without project assignment
                 unassigned_list.append({
+                    "user_id": sitesupervisor.user_id,
                     "sitesupervisor_name": sitesupervisor.full_name,
                     "email": sitesupervisor.email,
                     "phone": sitesupervisor.phone,

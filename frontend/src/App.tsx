@@ -51,9 +51,6 @@ const ProjectsOverview = lazy(() => import('@/roles/technical-director/pages/Pro
 
 // Project Manager Pages
 const MyProjects = lazy(() => import('@/roles/project-manager/pages/MyProjects'));
-const SEAssignment = lazy(() => import('@/roles/project-manager/pages/SEAssignment'));
-const ProcurementTracking = lazy(() => import('@/roles/project-manager/pages/ProcurementTracking'));
-const ProgressTracking = lazy(() => import('@/roles/project-manager/pages/ProgressTracking'));
 
 // Site Engineer Pages
 const SEDashboard = lazy(() => import('@/roles/site-engineer/pages/SEDashboard'));
@@ -443,9 +440,6 @@ function App() {
 
             {/* Project Manager specific routes */}
             <Route path="my-projects" element={<MyProjects />} />
-            <Route path="se-assignment" element={<SEAssignment />} />
-            <Route path="procurement-tracking" element={<ProcurementTracking />} />
-            <Route path="progress" element={<ProgressTracking />} />
 
             {/* Site Engineer specific routes */}
             <Route path="my-project" element={<MyProject />} />

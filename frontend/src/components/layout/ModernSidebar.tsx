@@ -279,13 +279,6 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-blue-600'
       },
       {
-        name: 'SE Assignment',
-        href: buildPath('/se-assignment'),
-        icon: UsersIcon,
-        iconSolid: UsersSolid,
-        color: 'text-cyan-600'
-      },
-      {
         name: 'Progress Tracking',
         href: buildPath('/progress'),
         icon: ChartBarIcon,

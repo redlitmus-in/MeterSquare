@@ -4,8 +4,10 @@ import HighchartsReact from 'highcharts-react-official';
 import { motion } from 'framer-motion';
 import { projectManagerService } from '../services/projectManagerService';
 import { toast } from 'sonner';
+import { useAuthStore } from '@/store/authStore';
 
 const ProjectManagerHub: React.FC = () => {
+  const { user } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [boqs, setBOQs] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
@@ -27,13 +29,18 @@ const ProjectManagerHub: React.FC = () => {
 
   const loadDashboardData = async () => {
     try {
+      if (!user?.user_id) {
+        toast.error('User not authenticated');
+        return;
+      }
+
       setLoading(true);
-      const [boqsData, projectsData] = await Promise.all([
+      const [boqsData, myProjectsData] = await Promise.all([
         projectManagerService.getMyBOQs(),
-        projectManagerService.getAllProjects()
+        projectManagerService.getMyProjects(user.user_id)
       ]);
       setBOQs(boqsData.boqs || []);
-      setProjects(projectsData || []);
+      setProjects(myProjectsData.user_list || []);
     } catch (error) {
       console.error('Error loading dashboard data:', error);
       toast.error('Failed to load dashboard data');
@@ -215,7 +222,7 @@ const ProjectManagerHub: React.FC = () => {
     series: [{
       name: 'Progress',
       data: projects.slice(0, 5).map((p, i) => ({
-        y: Math.floor(Math.random() * 50) + 30, // Placeholder - replace with actual progress from backend
+        y: p.progress || 0, // Use actual progress from backend
         color: i % 2 === 0 ? '#10B981' : '#3B82F6'
       }))
     }]

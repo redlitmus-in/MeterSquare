@@ -132,6 +132,7 @@ def get_all_pm_boqs():
                     "floor_name": boq.project.floor_name,
                     "working_hours": boq.project.working_hours,
                     "client": boq.project.client,
+                    "site_supervisor_id": boq.project.site_supervisor_id if boq.project else None,
                     "work_type": boq.project.work_type,
                     "start_date": boq.project.start_date.isoformat() if boq.project.start_date else None,
                     "end_date": boq.project.end_date.isoformat() if boq.project.end_date else None,

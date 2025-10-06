@@ -47,4 +47,3 @@ def delete_sitesupervisor_route(site_supervisor_id):
 def assign_projects_sitesupervisor_route():
     return assign_projects_sitesupervisor()
 
-
