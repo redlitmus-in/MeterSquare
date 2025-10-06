@@ -235,45 +235,20 @@ def td_mail_send():
 
         # ==================== APPROVED STATUS ====================
         if technical_director_status.lower() == 'approved':
-            log.info(f"BOQ {boq_id} approved by TD")
+            log.info(f"BOQ {boq_id} approved by TD, sending to Estimator")
             new_status = "Approved"
 
-            # Check if Project Manager is assigned
-            if not project.user_id:
+            if not estimator or not estimator_email:
                 return jsonify({
                     "success": False,
-                    "message": "Please assign a Project Manager to this project before approving the BOQ",
-                    "boq_id": boq_id,
-                    "project_id": project.project_id,
-                    "project_name": project.project_name
+                    "message": "Cannot send approval email - Estimator email not found"
                 }), 400
 
-            # Get Project Manager from project.user_id
-            project_manager = User.query.filter_by(
-                user_id=project.user_id,
-                is_active=True,
-                is_deleted=False
-            ).first()
+            recipient_email = estimator_email
+            recipient_name = estimator_name
+            recipient_role = "estimator"
 
-            if not project_manager:
-                return jsonify({
-                    "success": False,
-                    "message": "Assigned Project Manager not found or inactive",
-                    "boq_id": boq_id
-                }), 404
-
-            if not project_manager.email:
-                return jsonify({
-                    "success": False,
-                    "message": f"Project Manager {project_manager.full_name} does not have an email address",
-                    "boq_id": boq_id
-                }), 400
-
-            recipient_email = project_manager.email
-            recipient_name = project_manager.full_name
-            recipient_role = "projectManager"
-
-            # Send approval email to Project Manager
+            # Send approval email to Estimator
             email_sent = boq_email_service.send_boq_approval_to_pm(
                 boq_data, project_data, items_summary, recipient_email, comments
             )
@@ -281,7 +256,7 @@ def td_mail_send():
             if not email_sent:
                 return jsonify({
                     "success": False,
-                    "message": "Failed to send approval email to Project Manager",
+                    "message": "Failed to send approval email to Estimator",
                     "error": "Email service failed"
                 }), 500
 
@@ -290,10 +265,10 @@ def td_mail_send():
                 "role": "technicalDirector",
                 "type": "status_change",
                 "sender": "technicalDirector",
-                "receiver": "projectManager",
+                "receiver": "estimator",
                 "status": "approved",
                 "boq_name": boq.boq_name,
-                "comments": comments or "BOQ approved and sent to Project Manager",
+                "comments": comments or "BOQ approved by Technical Director",
                 "timestamp": datetime.utcnow().isoformat(),
                 "decided_by": td_name,
                 "decided_by_user_id": td_user_id,

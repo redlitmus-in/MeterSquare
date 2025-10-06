@@ -1,10 +1,10 @@
-from flask import request, jsonify
+from flask import request, jsonify, g
 from config.db import db
-from models.boq import BOQ, BOQDetails
+from models.boq import BOQ, BOQDetails, BOQHistory
 from config.logging import get_logger
 from utils.boq_email_service import BOQEmailService
 from io import BytesIO
-from datetime import date
+from datetime import date, datetime
 import openpyxl
 from openpyxl.styles import Font
 from reportlab.lib import colors
@@ -113,13 +113,103 @@ def send_boq_to_client():
             # Update BOQ flags: email_sent = TRUE, status = Sent_for_Confirmation
             boq.email_sent = True
             boq.status = "Sent_for_Confirmation"  # Waiting for client confirmation
+
+            # Get current user (estimator)
+            current_user = getattr(g, 'user', None)
+            estimator_name = current_user.get('full_name', 'Estimator') if current_user else 'Estimator'
+            estimator_id = current_user.get('user_id') if current_user else None
+            estimator_email = current_user.get('email', '') if current_user else ''
+
+            # Update last_modified fields
+            boq.last_modified_by = estimator_name
+            boq.last_modified_at = datetime.utcnow()
+
+            # Get existing BOQ history
+            existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+            # Handle existing actions - ensure it's always a list
+            if existing_history:
+                if existing_history.action is None:
+                    current_actions = []
+                elif isinstance(existing_history.action, list):
+                    current_actions = existing_history.action
+                elif isinstance(existing_history.action, dict):
+                    current_actions = [existing_history.action]
+                else:
+                    current_actions = []
+            else:
+                current_actions = []
+
+            # Prepare new action for sending BOQ to client
+            new_action = {
+                "role": "estimator",
+                "type": "sent_to_client",
+                "sender": "estimator",
+                "receiver": "client",
+                "status": "Sent_for_Confirmation",
+                "boq_name": boq.boq_name,
+                "comments": message or "BOQ sent to client for confirmation",
+                "timestamp": datetime.utcnow().isoformat(),
+                "sender_name": estimator_name,
+                "sender_user_id": estimator_id,
+                "total_value": grand_total,
+                "item_count": len(items),
+                "project_name": project.project_name,
+                "recipient_email": client_email,
+                "recipient_name": project.client or "Client",
+                "attachments": [f[0] for f in [excel_file, pdf_file] if f]
+            }
+
+            # Append new action
+            current_actions.append(new_action)
+            log.info(f"Appending send-to-client action to BOQ {boq_id} history. Total actions: {len(current_actions)}")
+
+            if existing_history:
+                # Update existing history
+                existing_history.action = current_actions
+                # Mark JSONB field as modified for SQLAlchemy
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(existing_history, "action")
+
+                existing_history.action_by = estimator_name
+                existing_history.boq_status = "approved"
+                existing_history.sender = estimator_name
+                existing_history.receiver = project.client or "Client"
+                existing_history.comments = message or "BOQ sent to client for confirmation"
+                existing_history.sender_role = 'estimator'
+                existing_history.receiver_role = 'client'
+                existing_history.action_date = datetime.utcnow()
+                existing_history.last_modified_by = estimator_name
+                existing_history.last_modified_at = datetime.utcnow()
+
+                log.info(f"Updated existing history for BOQ {boq_id} with {len(current_actions)} actions")
+            else:
+                # Create new history entry
+                boq_history = BOQHistory(
+                    boq_id=boq_id,
+                    action=current_actions,
+                    action_by=estimator_name,
+                    boq_status="Sent_for_Confirmation",
+                    sender=estimator_name,
+                    receiver=project.client or "Client",
+                    comments=message or "BOQ sent to client for confirmation",
+                    sender_role='estimator',
+                    receiver_role='client',
+                    action_date=datetime.utcnow(),
+                    created_by=estimator_name
+                )
+                db.session.add(boq_history)
+                log.info(f"Created new history for BOQ {boq_id} with {len(current_actions)} actions")
+
             db.session.commit()
+            log.info(f"Successfully sent BOQ {boq_id} to client and updated history")
 
             return jsonify({
                 "success": True,
                 "message": "BOQ sent to client successfully",
                 "email_sent_to": client_email,
-                "attachments": [f[0] for f in [excel_file, pdf_file] if f]
+                "attachments": [f[0] for f in [excel_file, pdf_file] if f],
+                "action_appended": True
             }), 200
         else:
             return jsonify({"success": False, "error": "Failed to send email"}), 500

@@ -17,11 +17,6 @@ def get_all_td_boqs_route():
 def td_mail_send_route():
     return td_mail_send()
 
-@technical_routes.route('/send_boq_to_client', methods=['POST'])
-@jwt_required
-def send_boq_to_client_route():
-    return send_boq_to_client()
-
 @technical_routes.route('/craete_pm', methods=['POST'])
 @jwt_required
 def create_pm_route():
