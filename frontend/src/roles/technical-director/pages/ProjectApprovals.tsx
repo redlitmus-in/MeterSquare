@@ -230,7 +230,8 @@ const ProjectApprovals: React.FC = () => {
     const status = mapBOQStatus(boq.status);
 
     // Use API-provided totals directly (these come from backend calculations)
-    const totalValue = boq.total_cost || boq.selling_price || 0;
+    // IMPORTANT: Use selling_price (includes O&P), NOT total_cost (only base + overhead)
+    const totalValue = boq.selling_price || boq.total_cost || 0;
     const laborCost = boq.total_labour_cost || 0;
     const materialCost = boq.total_material_cost || 0;
     const itemCount = boq.items_count || 0;
@@ -329,8 +330,8 @@ const ProjectApprovals: React.FC = () => {
       // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
       return est.status === 'pending' && !est.pmAssigned;
     } else if (filterStatus === 'approved') {
-      // Approved: TD approved internally, waiting for Estimator to send to client (status = approved ONLY)
-      return est.status === 'approved' && !est.pmAssigned;
+      // Approved: TD approved internally, includes both "approved" and "sent_for_confirmation" (waiting for client)
+      return (est.status === 'approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned;
     } else if (filterStatus === 'sent') {
       // Client Approved: Estimator confirmed client approved (status = client_confirmed ONLY), ready for PM assignment
       return est.status === 'client_confirmed' && !est.pmAssigned;
@@ -882,7 +883,12 @@ const ProjectApprovals: React.FC = () => {
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>
                       <span className="text-gray-600">Total Value:</span>
-                      <span className="font-semibold ml-1">AED{(selectedEstimation.totalValue / 100000).toFixed(1)}L</span>
+                      <span className="font-semibold ml-1">AED{formatCurrency(
+                        selectedEstimation.materialCost +
+                        selectedEstimation.laborCost +
+                        ((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.overheadPercentage / 100) +
+                        ((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.profitMargin / 100)
+                      )}</span>
                     </div>
                     <div>
                       <span className="text-gray-600">Profit Margin:</span>
@@ -1062,10 +1068,21 @@ const ProjectApprovals: React.FC = () => {
                     ) : boqHistory.length > 0 ? (
                       <div className="space-y-3 max-h-64 overflow-y-auto">
                         {boqHistory.map((history: any, index: number) => {
-                          // Parse action if it's an object
-                          const actionData = typeof history.action === 'object' ? history.action : { type: history.action };
-                          const actionType = actionData.type || 'ACTION';
-                          const actionStatus = actionData.status || history.boq_status;
+                          // Determine action type based on boq_status (the actual action)
+                          let actionType = 'Update';
+                          if (history.boq_status === 'Approved') {
+                            actionType = 'Approved';
+                          } else if (history.boq_status === 'Rejected') {
+                            actionType = 'Rejected';
+                          } else if (history.boq_status === 'pending') {
+                            actionType = 'Submitted for Review';
+                          } else if (history.boq_status === 'sent_for_confirmation') {
+                            actionType = 'Sent to Client';
+                          } else if (history.boq_status === 'client_confirmed') {
+                            actionType = 'Client Confirmed';
+                          }
+
+                          const actionStatus = history.boq_status || 'Unknown';
 
                           return (
                             <div key={history.boq_history_id} className="bg-white rounded-lg p-3 border border-gray-200">
@@ -1076,25 +1093,33 @@ const ProjectApprovals: React.FC = () => {
                                     <span className={`px-2 py-0.5 text-xs rounded-full ${
                                       actionStatus === 'Approved' || actionStatus === 'approved' ? 'bg-green-100 text-green-700' :
                                       actionStatus === 'Rejected' || actionStatus === 'rejected' ? 'bg-red-100 text-red-700' :
-                                      actionStatus === 'Pending' || actionStatus === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                                      actionStatus === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                                      actionStatus === 'sent_for_confirmation' ? 'bg-blue-100 text-blue-700' :
+                                      actionStatus === 'client_confirmed' ? 'bg-green-100 text-green-700' :
                                       'bg-gray-100 text-gray-700'
                                     }`}>
-                                      {actionStatus}
+                                      {actionStatus === 'sent_for_confirmation' ? 'Sent to Client' :
+                                       actionStatus === 'client_confirmed' ? 'Client Confirmed' :
+                                       actionStatus}
                                     </span>
                                   </div>
                                   <p className="text-xs text-gray-600">
-                                    {history.sender_role && `${history.sender_role}: `}{history.action_by || history.sender}
-                                    {history.receiver && ` → ${history.receiver_role}: ${history.receiver}`}
+                                    {history.sender_role && <span className="capitalize">{history.sender_role.replace(/([A-Z])/g, ' $1').trim()}: </span>}
+                                    <span className="font-medium">{history.action_by || history.sender}</span>
+                                    {history.receiver && history.receiver_role && (
+                                      <>
+                                        {' → '}
+                                        <span className="capitalize">{history.receiver_role.replace(/([A-Z])/g, ' $1').trim()}: </span>
+                                        <span className="font-medium">{history.receiver}</span>
+                                      </>
+                                    )}
                                   </p>
                                   {history.comments && (
-                                    <p className="text-xs text-gray-700 mt-1 bg-gray-50 p-2 rounded">"{history.comments}"</p>
-                                  )}
-                                  {actionData.boq_name && (
-                                    <p className="text-xs text-blue-600 mt-1">BOQ: {actionData.boq_name}</p>
+                                    <p className="text-xs text-gray-700 mt-1 bg-gray-50 p-2 rounded italic">"{history.comments}"</p>
                                   )}
                                 </div>
                                 <span className="text-xs text-gray-500 whitespace-nowrap ml-2">
-                                  {new Date(history.action_date || actionData.timestamp).toLocaleString()}
+                                  {new Date(history.action_date).toLocaleString()}
                                 </span>
                               </div>
                             </div>
@@ -1109,6 +1134,7 @@ const ProjectApprovals: React.FC = () => {
 
                 {/* BOQ Items */}
                 <h3 className="text-lg font-bold text-gray-900 mb-4">Bill of Quantities - Items</h3>
+
                 {loadingBOQDetails ? (
                   <div className="flex items-center justify-center py-12">
                     <ModernLoadingSpinners variant="pulse-wave" />
@@ -1321,20 +1347,13 @@ const ProjectApprovals: React.FC = () => {
                   </div>
                 )}
 
-                {/* Reject Button - Only for approved BOQs (before sent to client) */}
+                {/* Status Info - Only for approved BOQs (before sent to client) */}
                 {selectedEstimation.status === 'approved' && (
-                  <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                  <div className="px-6 py-4 border-b border-gray-200">
                     <div className="text-sm text-gray-600">
                       <span className="font-semibold text-green-600">✓ Internally Approved</span>
                       <p className="text-xs text-gray-500 mt-0.5">Waiting for Estimator to send to client</p>
                     </div>
-                    <button
-                      onClick={() => setShowRejectionModal(true)}
-                      className="px-6 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2 shadow-md"
-                    >
-                      <XCircleIcon className="w-5 h-5" />
-                      Revoke Approval
-                    </button>
                   </div>
                 )}
 
@@ -1481,17 +1500,17 @@ const ProjectApprovals: React.FC = () => {
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden"
+              className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[85vh] overflow-hidden flex flex-col"
             >
               {/* Header */}
-              <div className="bg-[#243d8a] px-8 py-6">
+              <div className="bg-[#243d8a] px-6 py-3 flex-shrink-0">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-                      <UserPlusIcon className="w-7 h-7" />
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                      <UserPlusIcon className="w-6 h-6" />
                       Assign Project Manager
                     </h2>
-                    <p className="text-blue-100 mt-1 text-sm">{selectedEstimation.projectName}</p>
+                    <p className="text-blue-100 text-sm">{selectedEstimation.projectName}</p>
                   </div>
                   <button
                     onClick={() => {
@@ -1500,36 +1519,36 @@ const ProjectApprovals: React.FC = () => {
                       setNewPMData({ full_name: '', email: '', phone: '' });
                       setAssignMode('existing');
                     }}
-                    className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition-colors"
+                    className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-1.5 transition-colors"
                   >
-                    <XMarkIcon className="w-6 h-6" />
+                    <XMarkIcon className="w-5 h-5" />
                   </button>
                 </div>
               </div>
 
-              <div className="p-8">
+              <div className="p-4 overflow-y-auto flex-1">
                 {/* Mode Selection - Modern Tab Style */}
-                <div className="bg-gray-100 rounded-xl p-1.5 mb-8 inline-flex w-full">
+                <div className="bg-gray-100 rounded-lg p-1 mb-3 inline-flex w-full">
                   <button
                     onClick={() => setAssignMode('existing')}
-                    className={`flex-1 py-3 px-6 rounded-lg font-semibold text-sm transition-all duration-200 ${
+                    className={`flex-1 py-2 px-4 rounded-md font-semibold text-sm transition-all duration-200 ${
                       assignMode === 'existing'
-                        ? 'bg-white text-[#243d8a] shadow-md'
+                        ? 'bg-white text-[#243d8a] shadow-sm'
                         : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
-                    <UserIcon className="w-5 h-5 inline mr-2" />
+                    <UserIcon className="w-4 h-4 inline mr-1.5" />
                     Select Existing PM
                   </button>
                   <button
                     onClick={() => setAssignMode('create')}
-                    className={`flex-1 py-3 px-6 rounded-lg font-semibold text-sm transition-all duration-200 ${
+                    className={`flex-1 py-2 px-4 rounded-md font-semibold text-sm transition-all duration-200 ${
                       assignMode === 'create'
-                        ? 'bg-white text-[#243d8a] shadow-md'
+                        ? 'bg-white text-[#243d8a] shadow-sm'
                         : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
-                    <UserPlusIcon className="w-5 h-5 inline mr-2" />
+                    <UserPlusIcon className="w-4 h-4 inline mr-1.5" />
                     Create New PM
                   </button>
                 </div>
@@ -1586,31 +1605,33 @@ const ProjectApprovals: React.FC = () => {
                           }
 
                           return (
-                            <div
-                              key={pm.user_id}
-                              onClick={() => setSelectedPMId(pm.user_id)}
-                              className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
-                                isSelected
-                                  ? 'border-[#243d8a] bg-blue-50 shadow-md'
-                                  : `border-gray-200 hover:border-gray-300 hover:shadow-sm ${statusBg}`
-                              }`}
-                            >
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <h4 className="font-semibold text-gray-900">{pm.pm_name || pm.full_name}</h4>
-                                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColor} ${statusBg} border`}>
-                                      {statusText}
-                                    </span>
+                            <div key={pm.user_id}>
+                              <div
+                                onClick={() => setSelectedPMId(pm.user_id)}
+                                className={`border rounded-md px-3 py-1.5 cursor-pointer transition-all ${
+                                  isSelected
+                                    ? 'border-[#243d8a] bg-blue-50 shadow-sm'
+                                    : `border-gray-200 hover:border-gray-300 hover:shadow-sm ${statusBg}`
+                                }`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <h4 className="font-semibold text-gray-900 text-sm">{pm.pm_name || pm.full_name}</h4>
+                                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColor} ${statusBg} border whitespace-nowrap`}>
+                                        {statusText}
+                                      </span>
+                                    </div>
                                   </div>
-                                  <p className="text-sm text-gray-600">{pm.email}</p>
-                                  <p className="text-sm text-gray-500">{pm.phone}</p>
-
-                                  <div className="mt-2 flex items-center gap-4">
-                                    <div className="flex items-center gap-1 text-sm">
+                                  <div className="flex items-center gap-3 text-xs text-gray-600 flex-shrink-0">
+                                    <span className="max-w-[200px] truncate">{pm.email}</span>
+                                    <span className="whitespace-nowrap">{pm.phone}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-shrink-0">
+                                    <div className="flex items-center gap-1">
                                       <BuildingOfficeIcon className="w-4 h-4 text-gray-400" />
-                                      <span className="font-medium text-gray-700">{projectCount}</span>
-                                      <span className="text-gray-500">{projectCount === 1 ? 'project' : 'projects'}</span>
+                                      <span className="font-medium text-gray-700 text-sm">{projectCount}</span>
+                                      <span className="text-gray-500 text-xs">{projectCount === 1 ? 'project' : 'projects'}</span>
                                     </div>
                                     {projectCount > 0 && (
                                       <button
@@ -1618,32 +1639,31 @@ const ProjectApprovals: React.FC = () => {
                                           e.stopPropagation();
                                           setExpandedPMId(expandedPMId === pm.user_id ? null : pm.user_id);
                                         }}
-                                        className="text-xs text-[#243d8a] hover:underline font-medium"
+                                        className="text-xs text-[#243d8a] hover:underline font-medium whitespace-nowrap"
                                       >
-                                        {expandedPMId === pm.user_id ? 'Hide projects' : 'View projects'}
+                                        {expandedPMId === pm.user_id ? 'Hide' : 'View'}
                                       </button>
                                     )}
+                                    {isSelected && (
+                                      <CheckCircleIcon className="w-5 h-5 text-[#243d8a] flex-shrink-0" />
+                                    )}
                                   </div>
-
-                                  {expandedPMId === pm.user_id && pm.projects && pm.projects.length > 0 && (
-                                    <div className="mt-3 pt-3 border-t border-gray-200">
-                                      <p className="text-xs font-semibold text-gray-600 mb-2">Assigned Projects:</p>
-                                      <ul className="space-y-1">
-                                        {pm.projects.map((project: any, idx: number) => (
-                                          <li key={idx} className="text-xs text-gray-700 flex items-start gap-1">
-                                            <span className="text-gray-400 mt-0.5">•</span>
-                                            <span>{project.project_name}</span>
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  )}
                                 </div>
-
-                                {isSelected && (
-                                  <CheckCircleIcon className="w-6 h-6 text-[#243d8a] flex-shrink-0" />
-                                )}
                               </div>
+
+                              {expandedPMId === pm.user_id && pm.projects && pm.projects.length > 0 && (
+                                <div className="ml-4 mt-1 mb-2 p-2 bg-gray-50 rounded border-l-2 border-gray-300">
+                                  <p className="text-xs font-semibold text-gray-600 mb-1">Assigned Projects:</p>
+                                  <ul className="space-y-0.5">
+                                    {pm.projects.map((project: any, idx: number) => (
+                                      <li key={idx} className="text-xs text-gray-700 flex items-start gap-1">
+                                        <span className="text-gray-400">•</span>
+                                        <span>{project.project_name}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -1804,7 +1824,12 @@ const ProjectApprovals: React.FC = () => {
                       </div>
                       <div className="flex justify-between pt-3 border-t-2 border-orange-300 mt-2">
                         <span className="text-lg font-bold text-gray-900">Total:</span>
-                        <span className="text-lg font-bold text-green-600">AED{formatCurrency(selectedEstimation.totalValue)}</span>
+                        <span className="text-lg font-bold text-green-600">AED{formatCurrency(
+                          selectedEstimation.materialCost +
+                          selectedEstimation.laborCost +
+                          ((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.overheadPercentage / 100) +
+                          ((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.profitMargin / 100)
+                        )}</span>
                       </div>
                     </div>
                   </div>
@@ -1841,7 +1866,7 @@ const ProjectApprovals: React.FC = () => {
                       </div>
                       <div className="flex justify-between pt-3 border-t-2 border-blue-300 mt-2">
                         <span className="text-lg font-bold text-gray-900">Total:</span>
-                        <span className="text-lg font-bold text-green-600">AED{formatCurrency(selectedEstimation.totalValue)}</span>
+                        <span className="text-lg font-bold text-green-600">AED{formatCurrency(selectedEstimation.materialCost + selectedEstimation.laborCost)}</span>
                       </div>
                     </div>
                   </div>

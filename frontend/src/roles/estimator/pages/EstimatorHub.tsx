@@ -299,9 +299,9 @@ const EstimatorHub: React.FC = () => {
             location: boq.location || 'Unknown Location'
           },
           summary: {
-            grandTotal: boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0
+            grandTotal: boq.selling_price || boq.estimatedSellingPrice || boq.total_cost || 0
           },
-          total_cost: boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0,
+          total_cost: boq.selling_price || boq.estimatedSellingPrice || boq.total_cost || 0,
           status: boq.status || 'draft',
           created_at: boq.created_at,
           email_sent: boq.email_sent || false
@@ -609,9 +609,9 @@ const EstimatorHub: React.FC = () => {
       const transformedData = {
         id: boqData.boq_id || boq.boq_id,
         projectName: boqData.project_name || boqData.project_details?.project_name || boq.project?.name || 'Unknown Project',
-        clientName: boqData.client || boqData.project_details?.client || 'Unknown Client',
+        clientName: boqData.client || boqData.project_details?.client || boqData.project?.client || boq.client || boq.project_details?.client || 'Unknown Client',
         estimator: boqData.created_by || boqData.created_by_name || 'Unknown',
-        totalValue: boqData.total_cost || boqData.selling_price || 0,
+        totalValue: boqData.selling_price || boqData.estimatedSellingPrice || boqData.total_cost || 0,
         itemCount: boqData.items?.length || 0,
         laborCost: boqData.total_labour_cost || 0,
         materialCost: boqData.total_material_cost || 0,

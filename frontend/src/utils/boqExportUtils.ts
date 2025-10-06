@@ -331,12 +331,12 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
     console.log('Logo loading skipped');
   }
 
-  // Header
-  doc.setFontSize(18);
+  // Header - positioned to the right of logo to avoid overlap
+  doc.setFontSize(16);
   doc.setTextColor(36, 61, 138);
   doc.setFont('helvetica', 'bold');
-  doc.text('BILL OF QUANTITIES - INTERNAL VERSION', 105, yPos + 6, { align: 'center' });
-  yPos += 20;
+  doc.text('BOQ - INTERNAL', 105, yPos + 8, { align: 'center' });
+  yPos += 25;
 
   // Project Information Box
   doc.setDrawColor(36, 61, 138);
@@ -504,55 +504,55 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
     yPos = 20;
   }
 
-  yPos += 10;
+  yPos += 5;
   doc.setDrawColor(22, 163, 74);
-  doc.setLineWidth(1);
+  doc.setLineWidth(0.5);
   doc.setFillColor(240, 255, 245);
-  doc.roundedRect(14, yPos, 182, 50, 3, 3, 'FD');
+  doc.roundedRect(14, yPos, 182, 32, 2, 2, 'FD');
 
-  yPos += 8;
+  yPos += 6;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
+  doc.setFontSize(11);
   doc.setTextColor(22, 163, 74);
   doc.text('COST SUMMARY', 105, yPos, { align: 'center' });
-  yPos += 10;
+  yPos += 7;
 
-  doc.setFontSize(10);
+  doc.setFontSize(9);
   doc.setTextColor(0);
   doc.setFont('helvetica', 'normal');
 
-  // Summary in two columns
+  // Summary in two columns - more compact
   const leftX = 20;
   const rightX = 110;
 
   doc.text('Total Material Cost:', leftX, yPos);
-  doc.text(`AED ${formatCurrency(estimation.materialCost)}`, leftX + 60, yPos);
+  doc.text(`AED ${formatCurrency(estimation.materialCost)}`, leftX + 50, yPos);
 
   doc.text('Total Labor Cost:', rightX, yPos);
-  doc.text(`AED ${formatCurrency(estimation.laborCost)}`, rightX + 50, yPos);
-  yPos += 7;
+  doc.text(`AED ${formatCurrency(estimation.laborCost)}`, rightX + 40, yPos);
+  yPos += 5;
 
   doc.text('Base Cost:', leftX, yPos);
-  doc.text(`AED ${formatCurrency(baseCost)}`, leftX + 60, yPos);
+  doc.text(`AED ${formatCurrency(baseCost)}`, leftX + 50, yPos);
 
   doc.text(`Overhead (${estimation.overheadPercentage}%):`, rightX, yPos);
-  doc.text(`AED ${formatCurrency(overheadAmount)}`, rightX + 50, yPos);
-  yPos += 7;
+  doc.text(`AED ${formatCurrency(overheadAmount)}`, rightX + 40, yPos);
+  yPos += 5;
 
-  doc.text(`Profit Margin (${estimation.profitMargin}%):`, leftX, yPos);
-  doc.text(`AED ${formatCurrency(profitAmount)}`, leftX + 60, yPos);
-  yPos += 12;
+  doc.text(`Profit (${estimation.profitMargin}%):`, leftX, yPos);
+  doc.text(`AED ${formatCurrency(profitAmount)}`, leftX + 50, yPos);
+  yPos += 8;
 
-  // Grand Total - Big and Bold
+  // Grand Total - Compact
   doc.setDrawColor(22, 163, 74);
   doc.setFillColor(34, 197, 94);
-  doc.roundedRect(14, yPos - 3, 182, 12, 2, 2, 'FD');
+  doc.roundedRect(14, yPos - 2, 182, 10, 2, 2, 'FD');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
+  doc.setFontSize(12);
   doc.setTextColor(255, 255, 255);
-  doc.text('GRAND TOTAL:', 60, yPos + 5);
-  doc.text(`AED ${formatCurrency(grandTotal)}`, 140, yPos + 5);
+  doc.text('GRAND TOTAL:', 60, yPos + 4);
+  doc.text(`AED ${formatCurrency(grandTotal)}`, 140, yPos + 4);
 
   // Save PDF
   const fileName = `BOQ_${estimation.projectName.replace(/\s+/g, '_')}_Internal_${new Date().toISOString().split('T')[0]}.pdf`;
@@ -581,12 +581,12 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
     console.log('Logo loading skipped');
   }
 
-  // Header
-  doc.setFontSize(18);
+  // Header - positioned to the right of logo to avoid overlap
+  doc.setFontSize(16);
   doc.setTextColor(36, 61, 138);
   doc.setFont('helvetica', 'bold');
-  doc.text('BILL OF QUANTITIES', 105, yPos + 6, { align: 'center' });
-  yPos += 20;
+  doc.text('BOQ - CLIENT', 105, yPos + 8, { align: 'center' });
+  yPos += 25;
 
   // Project Information Box
   doc.setDrawColor(36, 61, 138);

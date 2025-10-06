@@ -415,7 +415,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                     </div>
                                     <div className="flex justify-between pt-2 border-t border-gray-300 font-bold">
                                       <span className="text-gray-900">Selling Price:</span>
-                                      <span className="text-green-600">{formatCurrency(item.total_cost)}</span>
+                                      <span className="text-green-600">{formatCurrency(item.selling_price || item.estimatedSellingPrice || item.total_cost)}</span>
                                     </div>
                                   </div>
                                 </div>
