@@ -118,20 +118,43 @@ def get_all_pm_boqs():
                     pm_status = pm_user.user_status if pm_user.user_status else ("Active" if pm_user.is_active else "Inactive")
                     pm_name = pm_user.full_name
 
+            # Build complete project details
+            project_details = None
+            if boq.project:
+                project_details = {
+                    "project_id": boq.project.project_id,
+                    "project_name": boq.project.project_name,
+                    "user_id": boq.project.user_id,
+                    "user_name": pm_name,
+                    "site_supervisor_id": boq.project.site_supervisor_id,
+                    "location": boq.project.location,
+                    "area": boq.project.area,
+                    "floor_name": boq.project.floor_name,
+                    "working_hours": boq.project.working_hours,
+                    "client": boq.project.client,
+                    "work_type": boq.project.work_type,
+                    "start_date": boq.project.start_date.isoformat() if boq.project.start_date else None,
+                    "end_date": boq.project.end_date.isoformat() if boq.project.end_date else None,
+                    "project_status": boq.project.status,
+                    "project_manager_status": pm_status,
+                    "description": boq.project.description,
+                    "created_at": boq.project.created_at.isoformat() if boq.project.created_at else None,
+                    "created_by": boq.project.created_by,
+                    "last_modified_at": boq.project.last_modified_at.isoformat() if boq.project.last_modified_at else None,
+                    "last_modified_by": boq.project.last_modified_by
+                }
+
             boq_data = {
                 "boq_id": boq.boq_id,
-                "project_id": boq.project_id,
-                "user_id" : boq.project.user_id,
-                "user_name" : pm_name,
                 "boq_name": boq.boq_name,
-                "project_manager_status": pm_status,
-                "status": display_status,  # Use the determined status based on role
+                "boq_status": display_status,  # Use the determined status based on role
                 "created_at": boq.created_at.isoformat() if boq.created_at else None,
                 "created_by": boq.created_by,
                 "last_modified_at": boq.last_modified_at.isoformat() if boq.last_modified_at else None,
                 "last_modified_by": boq.last_modified_by,
                 "email_sent": boq.email_sent,
                 "project_name": boq.project.project_name if boq.project else None,
+                "project_details": project_details  # Complete project information
             }
             boqs_list.append(boq_data)
 
