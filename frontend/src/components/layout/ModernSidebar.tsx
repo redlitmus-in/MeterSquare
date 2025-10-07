@@ -8,25 +8,19 @@ import {
   CheckCircleIcon,
   UsersIcon,
   ChartBarIcon,
-  ArrowPathIcon,
   UserIcon,
   UserCircleIcon,
   ArrowRightOnRectangleIcon,
   ShoppingCartIcon,
-  Cog6ToothIcon,
   ChevronRightIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   BuildingOfficeIcon,
-  DocumentTextIcon,
-  CurrencyDollarIcon,
-  TruckIcon,
-  WrenchScrewdriverIcon,
   ClipboardDocumentCheckIcon,
   DocumentCheckIcon,
-  Bars3Icon,
   CubeIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  ClockIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -301,34 +295,14 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     // Site Engineer specific navigation items
     const siteEngineerItems: NavigationItem[] = [
       {
-        name: 'My Project',
-        href: buildPath('/my-project'),
+        name: 'Projects',
+        href: buildPath('/projects'),
         icon: BuildingOfficeIcon,
         iconSolid: BuildingOfficeSolid,
         color: 'text-blue-600'
-      },
-      {
-        name: 'Task Execution',
-        href: buildPath('/task-execution'),
-        icon: ClipboardDocumentCheckIcon,
-        iconSolid: ClipboardDocumentCheckSolid,
-        color: 'text-green-600'
-      },
-      {
-        name: 'Material Usage',
-        href: buildPath('/material-usage'),
-        icon: CubeIcon,
-        iconSolid: CubeSolid,
-        color: 'text-purple-600'
-      },
-      {
-        name: 'Report Issue',
-        href: buildPath('/report-issue'),
-        icon: ExclamationTriangleIcon,
-        iconSolid: ExclamationTriangleSolid,
-        color: 'text-red-600'
       }
     ];
+
 
     // For other roles, keep procurement and vendor management
     const procurementItem: NavigationItem = {
@@ -400,7 +374,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       // Project Manager gets specialized menu items - NO procurement/vendor pages
       navigation.push(...projectManagerItems);
     } else if (isSiteEngineer) {
-      // Site Engineer gets limited access - task execution focused
+      // Site Engineer gets Projects menu with submenu (Assigned, Ongoing, Completed)
       navigation.push(...siteEngineerItems);
     } else {
       // Other roles get procurement
