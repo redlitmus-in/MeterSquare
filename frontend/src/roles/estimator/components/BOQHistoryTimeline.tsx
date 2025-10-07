@@ -21,18 +21,59 @@ interface BOQHistoryTimelineProps {
   boqId: number;
 }
 
+interface BackendHistoryAction {
+  role?: string;
+  type?: string;
+  sender?: string;
+  receiver?: string;
+  status?: string;
+  boq_name?: string;
+  comments?: string;
+  timestamp?: string;
+  sender_name?: string;
+  sender_user_id?: number;
+  total_value?: number;
+  item_count?: number;
+  project_name?: string;
+  recipient_email?: string;
+  recipient_name?: string;
+  attachments?: string[];
+  rejection_reason?: string;
+}
+
+interface BackendHistoryRecord {
+  boq_history_id: number;
+  boq_id: number;
+  action: BackendHistoryAction[];  // Array of actions
+  action_by: string;
+  boq_status?: string;
+  sender?: string;
+  receiver?: string;
+  comments?: string;
+  sender_role?: string;
+  receiver_role?: string;
+  action_date: string;
+  created_at?: string;
+  created_by?: string;
+}
+
 interface HistoryAction {
   action_id: number;
-  action_type: 'EMAIL_SENT' | 'STATUS_CHANGED' | 'CREATED' | 'UPDATED' | 'APPROVED' | 'REJECTED';
+  action_type: string;
   action_by: string;
   action_at: string;
   sender_email?: string;
   receiver_email?: string;
-  full_name?: string;
+  recipient_name?: string;
   comments?: string;
-  status_at_time?: string;
+  status?: string;
   old_status?: string;
   new_status?: string;
+  project_name?: string;
+  total_value?: number;
+  item_count?: number;
+  attachments?: string[];
+  rejection_reason?: string;
 }
 
 const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
@@ -49,7 +90,44 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
     try {
       const result = await estimatorService.getBOQHistory(boqId);
       if (result.success && result.data) {
-        setHistory(result.data);
+        // Transform backend data to frontend format
+        const transformedHistory: HistoryAction[] = [];
+
+        result.data.forEach((record: BackendHistoryRecord) => {
+          // If action is an array, process each action
+          if (Array.isArray(record.action)) {
+            record.action.forEach((actionItem, index) => {
+              transformedHistory.push({
+                action_id: record.boq_history_id * 1000 + index, // Generate unique ID
+                action_type: actionItem.type?.toUpperCase().replace(/_/g, '_') || 'UNKNOWN',
+                action_by: actionItem.sender_name || record.action_by,
+                action_at: actionItem.timestamp || record.action_date,
+                sender_email: record.sender_role === 'estimator' ? record.sender : undefined,
+                receiver_email: actionItem.recipient_email || record.receiver,
+                recipient_name: actionItem.recipient_name || record.receiver,
+                comments: actionItem.comments || actionItem.rejection_reason || record.comments,
+                status: actionItem.status || record.boq_status,
+                project_name: actionItem.project_name,
+                total_value: actionItem.total_value,
+                item_count: actionItem.item_count,
+                attachments: actionItem.attachments,
+                rejection_reason: actionItem.rejection_reason
+              });
+            });
+          } else {
+            // Handle non-array action (legacy format or single action)
+            transformedHistory.push({
+              action_id: record.boq_history_id,
+              action_type: 'ACTION',
+              action_by: record.action_by,
+              action_at: record.action_date,
+              comments: record.comments,
+              status: record.boq_status
+            });
+          }
+        });
+
+        setHistory(transformedHistory);
       } else {
         toast.error(result.message || 'Failed to load BOQ history');
       }
@@ -62,18 +140,28 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
   };
 
   const getActionIcon = (actionType: string) => {
-    switch (actionType) {
+    const normalizedType = actionType?.toUpperCase();
+    switch (normalizedType) {
+      case 'SENT_TO_TD':
       case 'EMAIL_SENT':
         return <Mail className="w-5 h-5 text-purple-600" />;
+      case 'SENT_TO_CLIENT':
+        return <Mail className="w-5 h-5 text-blue-600" />;
       case 'STATUS_CHANGED':
         return <RefreshCw className="w-5 h-5 text-blue-600" />;
       case 'CREATED':
+      case 'BOQ_CREATED':
         return <FileText className="w-5 h-5 text-green-600" />;
       case 'UPDATED':
+      case 'BOQ_UPDATED':
         return <Edit className="w-5 h-5 text-orange-600" />;
       case 'APPROVED':
+      case 'TD_APPROVED':
+      case 'CLIENT_APPROVED':
         return <CheckCircle className="w-5 h-5 text-green-600" />;
       case 'REJECTED':
+      case 'TD_REJECTED':
+      case 'CLIENT_REJECTED':
         return <XCircle className="w-5 h-5 text-red-600" />;
       default:
         return <Clock className="w-5 h-5 text-gray-600" />;
@@ -81,18 +169,28 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
   };
 
   const getActionColor = (actionType: string) => {
-    switch (actionType) {
+    const normalizedType = actionType?.toUpperCase();
+    switch (normalizedType) {
+      case 'SENT_TO_TD':
       case 'EMAIL_SENT':
         return 'from-purple-50 to-purple-100 border-purple-200';
+      case 'SENT_TO_CLIENT':
+        return 'from-blue-50 to-blue-100 border-blue-200';
       case 'STATUS_CHANGED':
         return 'from-blue-50 to-blue-100 border-blue-200';
       case 'CREATED':
+      case 'BOQ_CREATED':
         return 'from-green-50 to-green-100 border-green-200';
       case 'UPDATED':
+      case 'BOQ_UPDATED':
         return 'from-orange-50 to-orange-100 border-orange-200';
       case 'APPROVED':
+      case 'TD_APPROVED':
+      case 'CLIENT_APPROVED':
         return 'from-green-50 to-green-100 border-green-200';
       case 'REJECTED':
+      case 'TD_REJECTED':
+      case 'CLIENT_REJECTED':
         return 'from-red-50 to-red-100 border-red-200';
       default:
         return 'from-gray-50 to-gray-100 border-gray-200';
@@ -100,21 +198,36 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
   };
 
   const getActionTitle = (action: HistoryAction) => {
-    switch (action.action_type) {
+    const normalizedType = action.action_type?.toUpperCase();
+    switch (normalizedType) {
+      case 'SENT_TO_TD':
+        return 'BOQ Sent to Technical Director';
+      case 'SENT_TO_CLIENT':
+        return 'BOQ Sent to Client';
       case 'EMAIL_SENT':
         return 'BOQ Sent via Email';
       case 'STATUS_CHANGED':
         return 'Status Changed';
       case 'CREATED':
+      case 'BOQ_CREATED':
         return 'BOQ Created';
       case 'UPDATED':
+      case 'BOQ_UPDATED':
         return 'BOQ Updated';
       case 'APPROVED':
         return 'BOQ Approved';
+      case 'TD_APPROVED':
+        return 'BOQ Approved by Technical Director';
+      case 'CLIENT_APPROVED':
+        return 'BOQ Approved by Client';
       case 'REJECTED':
         return 'BOQ Rejected';
+      case 'TD_REJECTED':
+        return 'BOQ Rejected by Technical Director';
+      case 'CLIENT_REJECTED':
+        return 'BOQ Rejected by Client';
       default:
-        return 'Action Performed';
+        return action.action_type?.replace(/_/g, ' ') || 'Action Performed';
     }
   };
 
@@ -243,8 +356,10 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
                     </span>
                   </div>
 
-                  {/* Email Details for EMAIL_SENT */}
-                  {action.action_type === 'EMAIL_SENT' && (
+                  {/* Email/Send Details */}
+                  {(action.action_type?.toUpperCase() === 'SENT_TO_TD' ||
+                    action.action_type?.toUpperCase() === 'SENT_TO_CLIENT' ||
+                    action.action_type?.toUpperCase() === 'EMAIL_SENT') && (
                     <div className="bg-white/60 rounded p-2 space-y-1">
                       {action.sender_email && (
                         <div className="flex items-center gap-2 text-xs">
@@ -252,13 +367,31 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
                           <span className="text-gray-600">{action.sender_email}</span>
                         </div>
                       )}
-                      {action.receiver_email && (
+                      {(action.receiver_email || action.recipient_name) && (
                         <div className="flex items-center gap-2 text-xs">
                           <ArrowRight className="w-3 h-3 text-gray-400" />
                           <span className="font-medium text-gray-700">To:</span>
                           <span className="text-gray-600">
-                            {action.full_name || action.receiver_email}
+                            {action.recipient_name || action.receiver_email}
                           </span>
+                        </div>
+                      )}
+                      {action.project_name && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="font-medium text-gray-700">Project:</span>
+                          <span className="text-gray-600">{action.project_name}</span>
+                        </div>
+                      )}
+                      {action.total_value && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="font-medium text-gray-700">Total Value:</span>
+                          <span className="text-gray-600">AED {action.total_value.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {action.attachments && action.attachments.length > 0 && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="font-medium text-gray-700">Attachments:</span>
+                          <span className="text-gray-600">{action.attachments.join(', ')}</span>
                         </div>
                       )}
                     </div>
@@ -282,12 +415,25 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
                   )}
 
                   {/* Status at Time */}
-                  {action.status_at_time && action.action_type !== 'STATUS_CHANGED' && (
+                  {action.status && action.action_type?.toUpperCase() !== 'STATUS_CHANGED' && (
                     <div className="flex items-center gap-2">
                       <span className="text-gray-600">Status:</span>
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusBadgeColor(action.status_at_time)}`}>
-                        {action.status_at_time}
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusBadgeColor(action.status)}`}>
+                        {action.status}
                       </span>
+                    </div>
+                  )}
+
+                  {/* Rejection Reason */}
+                  {action.rejection_reason && (action.action_type?.toUpperCase() === 'CLIENT_REJECTED' || action.action_type?.toUpperCase() === 'TD_REJECTED') && (
+                    <div className="bg-red-50 border border-red-200 rounded p-2 mt-2">
+                      <div className="flex items-start gap-2">
+                        <XCircle className="w-4 h-4 text-red-600 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-medium text-red-700 mb-1">Rejection Reason:</p>
+                          <p className="text-xs text-red-600">{action.rejection_reason}</p>
+                        </div>
+                      </div>
                     </div>
                   )}
 
