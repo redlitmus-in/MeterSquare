@@ -690,3 +690,322 @@ class BOQEmailService:
             import traceback
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
+
+    def generate_pm_assignment_email(self, pm_name, td_name, projects_data):
+        """
+        Generate email for Project Manager assignment notification
+
+        Args:
+            pm_name: Project Manager name
+            td_name: Technical Director name
+            projects_data: List of dictionaries containing project information
+
+        Returns:
+            str: HTML formatted email content
+        """
+        # Build projects table
+        projects_table_rows = ""
+        for idx, project in enumerate(projects_data, 1):
+            project_name = project.get('project_name', 'N/A')
+            client = project.get('client', 'N/A')
+            location = project.get('location', 'N/A')
+            status = project.get('status', 'Active')
+
+            projects_table_rows += f"""
+                <tr>
+                    <td>{idx}</td>
+                    <td><strong>{project_name}</strong></td>
+                    <td>{client}</td>
+                    <td>{location}</td>
+                    <td><span class="status-badge status-approved">{status}</span></td>
+                </tr>
+            """
+
+        email_body = f"""
+        <div class="email-container">
+            <!-- Header -->
+            <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
+                <h1>PROJECT ASSIGNMENT</h1>
+                <h2>You Have Been Assigned as Project Manager</h2>
+            </div>
+
+            <!-- Content -->
+            <div class="content">
+                <p>Dear <strong>{pm_name}</strong>,</p>
+
+                <p>
+                    You have been assigned as the <strong>Project Manager</strong> for the following project(s) by
+                    <strong>{td_name}</strong>. Please review the project details and begin planning for execution.
+                </p>
+
+                <div class="divider"></div>
+
+                <!-- Assignment Details -->
+                <h2>Assignment Details</h2>
+                <div class="info-box">
+                    <p><span class="label">Assigned By:</span> <span class="value">{td_name}</span></p>
+                    <p><span class="label">Role:</span> <span class="value">Technical Director</span></p>
+                    <p><span class="label">Total Projects:</span> <span class="value">{len(projects_data)}</span></p>
+                    <p><span class="label">Assignment Status:</span> <span class="status-badge status-approved">ACTIVE</span></p>
+                </div>
+
+                <!-- Projects Table -->
+                <h2>Assigned Projects</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>S.No</th>
+                                <th>Project Name</th>
+                                <th>Client</th>
+                                <th>Location</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {projects_table_rows}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Next Steps -->
+                <div class="alert alert-success">
+                    <strong>Your Responsibilities:</strong>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>Review the BOQ and project requirements</li>
+                        <li>Assign Site Engineers to the project(s)</li>
+                        <li>Create project timeline and milestones</li>
+                        <li>Coordinate with procurement team for materials</li>
+                        <li>Monitor project progress and update reports</li>
+                        <li>Ensure quality standards and compliance</li>
+                    </ul>
+                </div>
+
+                <!-- Action Required -->
+                <div class="alert alert-info">
+                    <strong>Action Required:</strong> Please log in to the MeterSquare ERP system to access
+                    detailed project information, BOQ documents, and begin your project planning activities.
+                </div>
+
+                <!-- Signature -->
+                <div class="signature">
+                    <p><strong>Best Regards,</strong></p>
+                    <p>{td_name}</p>
+                    <p>Technical Director</p>
+                    <p>MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
+                <p>This is an automated email notification. Please do not reply to this email.</p>
+                <p>© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def send_pm_assignment_notification(self, pm_email, pm_name, td_name, projects_data):
+        """
+        Send Project Manager assignment notification email
+
+        Args:
+            pm_email: Project Manager's email address
+            pm_name: Project Manager's name
+            td_name: Technical Director's name
+            projects_data: List of project dictionaries with details
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            # Generate email content
+            email_html = self.generate_pm_assignment_email(pm_name, td_name, projects_data)
+
+            # Create subject
+            project_count = len(projects_data)
+            project_names = ", ".join([p.get('project_name', 'Project') for p in projects_data[:2]])
+            if project_count > 2:
+                project_names += f" and {project_count - 2} more"
+
+            subject = f"🎯 Project Assignment - You are now PM for {project_names}"
+
+            # Send email
+            success = self.send_email(pm_email, subject, email_html)
+
+            if success:
+                log.info(f"PM assignment email sent successfully to {pm_email}")
+            else:
+                log.error(f"Failed to send PM assignment email to {pm_email}")
+
+            return success
+
+        except Exception as e:
+            log.error(f"Error sending PM assignment email: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def generate_se_assignment_email(self, se_name, pm_name, projects_data):
+        """
+        Generate email for Site Engineer assignment notification
+
+        Args:
+            se_name: Site Engineer name
+            pm_name: Project Manager name
+            projects_data: List of dictionaries containing project information
+
+        Returns:
+            str: HTML formatted email content
+        """
+        # Build projects table
+        projects_table_rows = ""
+        for idx, project in enumerate(projects_data, 1):
+            project_name = project.get('project_name', 'N/A')
+            client = project.get('client', 'N/A')
+            location = project.get('location', 'N/A')
+            status = project.get('status', 'Active')
+
+            projects_table_rows += f"""
+                <tr>
+                    <td>{idx}</td>
+                    <td><strong>{project_name}</strong></td>
+                    <td>{client}</td>
+                    <td>{location}</td>
+                    <td><span class="status-badge status-approved">{status}</span></td>
+                </tr>
+            """
+
+        email_body = f"""
+        <div class="email-container">
+            <!-- Header -->
+            <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                <h1>SITE ASSIGNMENT</h1>
+                <h2>You Have Been Assigned as Site Engineer</h2>
+            </div>
+
+            <!-- Content -->
+            <div class="content">
+                <p>Dear <strong>{se_name}</strong>,</p>
+
+                <p>
+                    You have been assigned as the <strong>Site Engineer</strong> for the following project(s) by
+                    <strong>{pm_name}</strong>. Please review the project details and prepare for on-site execution.
+                </p>
+
+                <div class="divider"></div>
+
+                <!-- Assignment Details -->
+                <h2>Assignment Details</h2>
+                <div class="info-box">
+                    <p><span class="label">Assigned By:</span> <span class="value">{pm_name}</span></p>
+                    <p><span class="label">Role:</span> <span class="value">Project Manager</span></p>
+                    <p><span class="label">Total Projects:</span> <span class="value">{len(projects_data)}</span></p>
+                    <p><span class="label">Assignment Status:</span> <span class="status-badge" style="background-color: #d1fae5; color: #065f46;">ACTIVE</span></p>
+                </div>
+
+                <!-- Projects Table -->
+                <h2>Assigned Projects</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>S.No</th>
+                                <th>Project Name</th>
+                                <th>Client</th>
+                                <th>Location</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {projects_table_rows}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Next Steps -->
+                <div class="alert" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981;">
+                    <strong>Your Responsibilities:</strong>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>Review project BOQ and technical specifications</li>
+                        <li>Coordinate with Project Manager for site requirements</li>
+                        <li>Ensure on-site safety protocols are followed</li>
+                        <li>Monitor daily progress and workforce management</li>
+                        <li>Submit daily progress reports and updates</li>
+                        <li>Manage material inventory and quality checks</li>
+                        <li>Report any issues or delays immediately</li>
+                    </ul>
+                </div>
+
+                <!-- Action Required -->
+                <div class="alert alert-info">
+                    <strong>Action Required:</strong> Please log in to the MeterSquare ERP system to access
+                    detailed project information, BOQ documents, and begin your site preparation activities.
+                </div>
+
+                <!-- Signature -->
+                <div class="signature">
+                    <p><strong>Best Regards,</strong></p>
+                    <p>{pm_name}</p>
+                    <p>Project Manager</p>
+                    <p>MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
+                <p>This is an automated email notification. Please do not reply to this email.</p>
+                <p>© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def send_se_assignment_notification(self, se_email, se_name, pm_name, projects_data):
+        """
+        Send Site Engineer assignment notification email
+
+        Args:
+            se_email: Site Engineer's email address
+            se_name: Site Engineer's name
+            pm_name: Project Manager's name
+            projects_data: List of project dictionaries with details
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            # Generate email content
+            email_html = self.generate_se_assignment_email(se_name, pm_name, projects_data)
+
+            # Create subject
+            project_count = len(projects_data)
+            project_names = ", ".join([p.get('project_name', 'Project') for p in projects_data[:2]])
+            if project_count > 2:
+                project_names += f" and {project_count - 2} more"
+
+            subject = f"🏗️ Site Assignment - You are now Site Engineer for {project_names}"
+
+            # Send email
+            success = self.send_email(se_email, subject, email_html)
+
+            if success:
+                log.info(f"SE assignment email sent successfully to {se_email}")
+            else:
+                log.error(f"Failed to send SE assignment email to {se_email}")
+
+            return success
+
+        except Exception as e:
+            log.error(f"Error sending SE assignment email: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False

@@ -376,17 +376,144 @@ def assign_projects():
         if not user:
             return jsonify({"error": "Project Manager not found"}), 404
 
+        # Get current user (Technical Director)
+        current_user = getattr(g, 'user', None)
+        td_name = current_user.get('full_name', 'Technical Director') if current_user else 'Technical Director'
+        td_id = current_user.get('user_id') if current_user else None
+
         assigned_projects = []
+        projects_data_for_email = []
+        boq_histories_updated = 0
+
         for pid in project_ids:
             project = Project.query.filter_by(project_id=pid).first()
             if project:
                 project.user_id = user_id
+                project.last_modified_at = datetime.utcnow()
+                project.last_modified_by = td_name
+
                 assigned_projects.append({
                     "project_id": project.project_id,
                     "project_name": getattr(project, "project_name", None)
                 })
 
+                # Collect project data for email
+                projects_data_for_email.append({
+                    "project_name": getattr(project, "project_name", "N/A"),
+                    "client": getattr(project, "client", "N/A"),
+                    "location": getattr(project, "location", "N/A"),
+                    "status": getattr(project, "status", "Active")
+                })
+
+                # Find BOQs associated with this project
+                boqs = BOQ.query.filter_by(project_id=pid, is_deleted=False).all()
+
+                for boq in boqs:
+                    # Get existing BOQ history
+                    status = boq.status
+                    boq.status = "approved"
+                    db.session.add(boq)
+                    db.session.commit()
+                    existing_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+                    # Handle existing actions - ensure it's always a list
+                    if existing_history:
+                        if existing_history.action is None:
+                            current_actions = []
+                        elif isinstance(existing_history.action, list):
+                            current_actions = existing_history.action
+                        elif isinstance(existing_history.action, dict):
+                            current_actions = [existing_history.action]
+                        else:
+                            current_actions = []
+                    else:
+                        current_actions = []
+
+                    # Prepare new action for PM assignment
+                    new_action = {
+                        "role": "technical_director",
+                        "type": "assigned_project_manager",
+                        "sender": "technical_director",
+                        "receiver": "project_manager",
+                        "status": "PM_Assigned",
+                        "boq_name": boq.boq_name,
+                        "comments": f"Project Manager {user.full_name} assigned to project",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "sender_name": td_name,
+                        "sender_user_id": td_id,
+                        "project_name": project.project_name,
+                        "project_id": project.project_id,
+                        "assigned_pm_name": user.full_name,
+                        "assigned_pm_user_id": user.user_id,
+                        "assigned_pm_email": user.email
+                    }
+
+                    # Append new action
+                    current_actions.append(new_action)
+                    log.info(f"Appending PM assignment action to BOQ {boq.boq_id} history. Total actions: {len(current_actions)}")
+
+                    if existing_history:
+                        # Update existing history
+                        existing_history.action = current_actions
+                        # Mark JSONB field as modified for SQLAlchemy
+                        from sqlalchemy.orm.attributes import flag_modified
+                        flag_modified(existing_history, "action")
+
+                        existing_history.action_by = td_name
+                        existing_history.sender = td_name
+                        existing_history.receiver = user.full_name
+                        existing_history.comments = f"Project Manager {user.full_name} assigned to project"
+                        existing_history.sender_role = 'technical_director'
+                        existing_history.receiver_role = 'project_manager'
+                        existing_history.action_date = datetime.utcnow()
+                        existing_history.last_modified_by = td_name
+                        existing_history.last_modified_at = datetime.utcnow()
+
+                        log.info(f"Updated existing history for BOQ {boq.boq_id} with {len(current_actions)} actions")
+                    else:
+                        # Create new history entry
+                        boq_history = BOQHistory(
+                            boq_id=boq.boq_id,
+                            action=current_actions,
+                            action_by=td_name,
+                            boq_status="approved",
+                            sender=td_name,
+                            receiver=user.full_name,
+                            comments=f"Project Manager {user.full_name} assigned to project",
+                            sender_role='technical_director',
+                            receiver_role='project_manager',
+                            action_date=datetime.utcnow(),
+                            created_by=td_name
+                        )
+                        db.session.add(boq_history)
+                        log.info(f"Created new history for BOQ {boq.boq_id} with {len(current_actions)} actions")
+
+                    boq_histories_updated += 1
+
         db.session.commit()
+        log.info(f"Successfully assigned PM to {len(assigned_projects)} projects and updated {boq_histories_updated} BOQ histories")
+
+        # Send email notification to Project Manager
+        email_sent = False
+        if user.email and projects_data_for_email:
+            try:
+                email_service = BOQEmailService()
+                email_sent = email_service.send_pm_assignment_notification(
+                    pm_email=user.email,
+                    pm_name=user.full_name,
+                    td_name=td_name,
+                    projects_data=projects_data_for_email
+                )
+
+                if email_sent:
+                    log.info(f"Assignment notification email sent successfully to {user.email}")
+                else:
+                    log.warning(f"Failed to send assignment notification email to {user.email}")
+            except Exception as email_error:
+                log.error(f"Error sending assignment notification email: {email_error}")
+                # Don't fail the entire request if email fails
+                import traceback
+                log.error(f"Email error traceback: {traceback.format_exc()}")
 
         return jsonify({
             "success": True,
@@ -398,7 +525,9 @@ def assign_projects():
                 "phone": user.phone
             },
             "assigned_projects": assigned_projects,
-            "assigned_count": len(assigned_projects)
+            "assigned_count": len(assigned_projects),
+            "boq_histories_updated": boq_histories_updated,
+            "email_sent": email_sent
         }), 200
 
     except Exception as e:
