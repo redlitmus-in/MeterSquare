@@ -67,7 +67,9 @@ def get_all_td_boqs():
                 "location": boq.project.location if boq.project else None,
                 "area": boq.project.area if boq.project else None,
                 "floor_name": boq.project.floor_name if boq.project else None,
+                "status": boq.status,  # Use 'status' to match frontend expectations
                 "boq_status": boq.status,
+                "client_rejection_reason": boq.client_rejection_reason,  # Include rejection/cancellation reason
                 "project_status" : boq.project.status if boq.project else None,
                 "email_sent": boq.email_sent,
                 "user_id": boq.project.user_id if boq.project else None,  # PM assignment indicator

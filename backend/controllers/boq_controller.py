@@ -432,6 +432,7 @@ def get_all_boq():
                 "floor": project.floor_name if project else None,
                 "hours": project.working_hours if project else None,
                 "status": boq.status,
+                "client_rejection_reason": boq.client_rejection_reason,
                 "email_sent" : boq.email_sent,
                 "user_id": project.user_id if project else None,  # PM assignment indicator
                 "items_count": boq_detail.total_items,
@@ -522,8 +523,8 @@ def update_boq(boq_id):
         if "boq_name" in data:
             boq.boq_name = data["boq_name"]
 
-        # Automatically set status to In_Review when BOQ is updated
-        boq.status = "In_Review"
+        # Automatically set status to pending Q is updated
+        boq.status = "pending"
 
         # Get current logged-in user from Flask-Login or session
         current_user = getattr(g, 'user', None)

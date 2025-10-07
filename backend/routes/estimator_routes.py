@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify
+from datetime import datetime
 from controllers.send_boq_client import send_boq_to_client
 from controllers.estimator_controller import confirm_client_approval
 from utils.authentication import jwt_required
@@ -45,7 +46,7 @@ def reject_client_approval(boq_id):
 
         # Update status to Client_Rejected
         boq.status = "Client_Rejected"
-        boq.notes = rejection_reason  # Store rejection reason in notes
+        boq.client_rejection_reason = rejection_reason  # Store rejection reason in client_rejection_reason
         boq.last_modified_at = datetime.utcnow()
 
         current_user = getattr(g, 'user', None)
@@ -93,9 +94,9 @@ def cancel_boq(boq_id):
                 "error": "Cannot cancel a completed BOQ"
             }), 400
 
-        # Update status to Cancelled
-        boq.status = "Cancelled"
-        boq.notes = cancellation_reason  # Store cancellation reason
+        # Update status to Client_Cancelled
+        boq.status = "Client_Cancelled"
+        boq.client_rejection_reason = cancellation_reason  # Store cancellation reason
         boq.last_modified_at = datetime.utcnow()
 
         current_user = getattr(g, 'user', None)

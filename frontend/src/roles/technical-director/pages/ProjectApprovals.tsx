@@ -319,7 +319,7 @@ const ProjectApprovals: React.FC = () => {
     }
 
     // Check for cancelled (client doesn't want to proceed)
-    if (normalizedStatus === 'cancelled') {
+    if (normalizedStatus === 'client_cancelled') {
       return 'cancelled';
     }
 
@@ -347,7 +347,7 @@ const ProjectApprovals: React.FC = () => {
       return (est.status === 'client_confirmed' || est.status === 'client_rejected') && !est.pmAssigned;
     } else if (filterStatus === 'assigned') {
       // Assigned: PM has been assigned (can be after client confirms)
-      return est.pmAssigned === true && est.status !== 'rejected' && est.status !== 'completed';
+      return est.pmAssigned === true && est.status !== 'rejected' && est.status !== 'completed' && est.status !== 'cancelled';
     } else if (filterStatus === 'completed') {
       // Completed: Project is completed
       return est.status === 'completed';
@@ -542,6 +542,10 @@ const ProjectApprovals: React.FC = () => {
     switch (status) {
       case 'approved': return <CheckCircleIcon className="w-5 h-5 text-green-600" />;
       case 'rejected': return <XCircleIcon className="w-5 h-5 text-red-600" />;
+      case 'cancelled': return <XCircleIcon className="w-5 h-5 text-red-600" />;
+      case 'client_confirmed': return <CheckCircleIcon className="w-5 h-5 text-green-600" />;
+      case 'client_rejected': return <XCircleIcon className="w-5 h-5 text-orange-600" />;
+      case 'sent_for_confirmation': return <ClockIcon className="w-5 h-5 text-blue-600" />;
       default: return <ClockIcon className="w-5 h-5 text-yellow-600" />;
     }
   };
@@ -741,8 +745,19 @@ const ProjectApprovals: React.FC = () => {
                       </span>
                       <div className="flex items-center gap-1">
                         {getStatusIcon(estimation.status)}
-                        <span className="text-sm font-medium text-gray-600">
-                          {estimation.status}
+                        <span className={`text-sm font-medium ${
+                          estimation.status === 'cancelled' ? 'text-red-600' :
+                          estimation.status === 'rejected' ? 'text-red-600' :
+                          estimation.status === 'approved' ? 'text-green-600' :
+                          estimation.status === 'client_confirmed' ? 'text-green-600' :
+                          estimation.status === 'client_rejected' ? 'text-orange-600' :
+                          'text-gray-600'
+                        }`}>
+                          {estimation.status === 'cancelled' ? 'CLIENT CANCELLED' :
+                           estimation.status === 'client_confirmed' ? 'CLIENT CONFIRMED' :
+                           estimation.status === 'client_rejected' ? 'CLIENT REJECTED' :
+                           estimation.status === 'sent_for_confirmation' ? 'SENT TO CLIENT' :
+                           estimation.status.toUpperCase()}
                         </span>
                       </div>
                     </div>

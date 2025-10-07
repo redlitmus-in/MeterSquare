@@ -311,6 +311,7 @@ const EstimatorHub: React.FC = () => {
           },
           total_cost: boq.selling_price || boq.estimatedSellingPrice || boq.total_cost || 0,
           status: boq.status || 'draft',
+          client_rejection_reason: boq.client_rejection_reason,
           created_at: boq.created_at,
           email_sent: boq.email_sent || false
         }));
@@ -402,7 +403,7 @@ const EstimatorHub: React.FC = () => {
         // Pending: Draft BOQs not sent to TD yet (no status or status = draft) OR client_rejected (needs revision)
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase() || '';
-          return !status || status === 'draft' || status === 'client_rejected' || (status !== 'pending' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed');
+          return !status || status === 'draft' || status === 'client_rejected' || (status !== 'pending' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled');
         });
       } else if (activeTab === 'sent') {
         // Send BOQ: Sent to TD, waiting for approval (status = pending)
@@ -429,7 +430,7 @@ const EstimatorHub: React.FC = () => {
       } else if (activeTab === 'cancelled') {
         // Cancelled BOQs (client doesn't want to proceed)
         filtered = filtered.filter(boq =>
-          boq.status?.toLowerCase() === 'cancelled'
+          boq.status?.toLowerCase() === 'client_cancelled'
         );
       }
 
@@ -882,9 +883,9 @@ const EstimatorHub: React.FC = () => {
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string, clientRejectionReason?: string) => {
     const normalizedStatus = status?.toLowerCase().replace('_', '') || 'draft';
-    const config: Record<string, { className: string; icon: any }> = {
+    const config: Record<string, { className: string; icon: any; label?: string }> = {
       draft: { className: 'bg-gray-50 text-gray-600 border-gray-200', icon: FileText },
       inreview: { className: 'bg-yellow-50 text-yellow-700 border-yellow-200', icon: Clock },
       approved: { className: 'bg-green-50 text-green-700 border-green-200', icon: CheckCircle },
@@ -892,15 +893,19 @@ const EstimatorHub: React.FC = () => {
       pending: { className: 'bg-orange-50 text-orange-700 border-orange-200', icon: Clock },
       rejected: { className: 'bg-red-50 text-red-700 border-red-200', icon: AlertCircle },
       clientrejected: { className: 'bg-red-50 text-red-700 border-red-200', icon: AlertCircle },
-      cancelled: { className: 'bg-gray-100 text-gray-700 border-gray-300', icon: XCircleIcon }
+      clientcancelled: {
+        className: 'bg-gray-100 text-gray-700 border-gray-300',
+        icon: XCircleIcon,
+        label: 'CLIENT CANCELLED'
+      }
     };
 
-    const { className, icon: Icon } = config[normalizedStatus] || config.draft;
+    const { className, icon: Icon, label } = config[normalizedStatus] || config.draft;
 
     return (
       <Badge variant="outline" className={`${className} flex items-center gap-1 border`}>
         <Icon className="h-3 w-3" />
-        {status.replace('_', ' ').toUpperCase()}
+        {label || status.replace('_', ' ').toUpperCase()}
       </Badge>
     );
   };
@@ -910,7 +915,7 @@ const EstimatorHub: React.FC = () => {
     const status = boq.status?.toLowerCase() || '';
 
     // Draft: Not sent to TD yet (can edit/delete/send) - status NOT in workflow states
-    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed' && status !== 'client_rejected');
+    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled');
     // Sent to TD: Waiting for TD approval
     const isSentToTD = status === 'pending';
     // Approved by TD: Ready to send to client
@@ -921,6 +926,8 @@ const EstimatorHub: React.FC = () => {
     const isClientConfirmed = status === 'client_confirmed';
     // Client rejected: Can be edited and resent OR cancelled
     const isClientRejected = status === 'client_rejected';
+    // Client cancelled: Permanently cancelled, no actions allowed
+    const isClientCancelled = status === 'client_cancelled';
 
     return (
       <motion.div
@@ -993,7 +1000,7 @@ const EstimatorHub: React.FC = () => {
         <div className="px-4 pb-3 space-y-1.5 text-xs">
           <div className="flex justify-between">
             <span className="text-gray-500">Status:</span>
-            {getStatusBadge(boq.status)}
+            {getStatusBadge(boq.status, boq.client_rejection_reason)}
           </div>
           {boq.created_at && (
             <div className="flex justify-between">
@@ -1142,6 +1149,12 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Cancel</span>
               </button>
             </>
+          ) : isClientCancelled ? (
+            /* Client cancelled - No actions allowed, permanently cancelled */
+            <div className="col-span-2 flex items-center justify-center text-xs text-gray-500">
+              <XCircleIcon className="h-4 w-4 text-gray-600 mr-1" />
+              Project Permanently Cancelled
+            </div>
           ) : null}
         </div>
       </motion.div>
@@ -1188,7 +1201,7 @@ const EstimatorHub: React.FC = () => {
                 <TableCell className="text-right font-medium">
                   {formatCurrency(boq.summary.grandTotal)}
                 </TableCell>
-                <TableCell>{getStatusBadge(boq.status)}</TableCell>
+                <TableCell>{getStatusBadge(boq.status, boq.client_rejection_reason)}</TableCell>
                 <TableCell className="text-gray-600">
                   {boq.created_at ? format(new Date(boq.created_at), 'dd MMM yyyy') : 'N/A'}
                 </TableCell>
@@ -1208,12 +1221,32 @@ const EstimatorHub: React.FC = () => {
                     </Button>
                     {(() => {
                       const status = boq.status?.toLowerCase() || '';
-                      const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed');
+                      const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled' && status !== 'client_rejected');
                       const isApprovedByTD = status === 'approved';
                       const isSentToClient = status === 'sent_for_confirmation';
                       const isClientConfirmed = status === 'client_confirmed';
+                      const isClientRejected = status === 'client_rejected';
+                      const isClientCancelled = status === 'client_cancelled';
 
-                      if (isDraft) {
+                      if (isClientCancelled) {
+                        return (
+                          <span className="text-xs text-gray-600 font-medium flex items-center gap-1">
+                            <XCircleIcon className="h-4 w-4" />
+                            Cancelled
+                          </span>
+                        );
+                      } else if (isClientRejected) {
+                        return (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setShowBoqEdit(true); }} className="h-8 w-8 p-0" title="Revise BOQ">
+                              <Edit className="h-4 w-4 text-green-600" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => { setBoqToCancel(boq); setShowCancelModal(true); }} className="h-8 w-8 p-0" title="Cancel Project">
+                              <XCircleIcon className="h-4 w-4 text-red-600" />
+                            </Button>
+                          </>
+                        );
+                      } else if (isDraft) {
                         return (
                           <>
                             <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setShowBoqEdit(true); }} className="h-8 w-8 p-0" title="Edit BOQ">
@@ -1391,7 +1424,10 @@ const EstimatorHub: React.FC = () => {
               >
                 <span className="hidden sm:inline">Rejected BOQ</span>
                 <span className="sm:hidden">Rejected</span>
-                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'rejected').length})</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
+                  const s = b.status?.toLowerCase();
+                  return s === 'rejected' || s === 'client_rejected';
+                }).length})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="completed"
@@ -1407,7 +1443,7 @@ const EstimatorHub: React.FC = () => {
               >
                 <span className="hidden sm:inline">Cancelled BOQ</span>
                 <span className="sm:hidden">Cancelled</span>
-                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'cancelled').length})</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'client_cancelled').length})</span>
               </TabsTrigger>
             </TabsList>
 
@@ -1917,6 +1953,26 @@ const EstimatorHub: React.FC = () => {
                 )}
               </div>
             </TabsContent>
+
+            <TabsContent value="cancelled" className="mt-0 p-0">
+              <div className="space-y-4 sm:space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Cancelled BOQs</h2>
+                  <div className="text-xs sm:text-sm text-gray-600">
+                    {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} cancelled
+                  </div>
+                </div>
+                {viewMode === 'cards' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                    {filteredBOQs.map((boq) => (
+                      <BOQCard key={boq.boq_id} boq={boq} />
+                    ))}
+                  </div>
+                ) : (
+                  <BOQTable boqList={filteredBOQs} />
+                )}
+              </div>
+            </TabsContent>
           </Tabs>
         </div>
       </div>
@@ -2105,7 +2161,7 @@ const EstimatorHub: React.FC = () => {
                               <div className="flex items-center gap-6 ml-11">
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs text-gray-500">Status:</span>
-                                  {getStatusBadge(boq.status)}
+                                  {getStatusBadge(boq.status, boq.client_rejection_reason)}
                                 </div>
                                 {boq.total_cost && (
                                   <div className="flex items-center gap-2">
