@@ -150,6 +150,7 @@ export interface BOQ {
   pdf_url?: string;
   notes?: string;
   email_sent?: boolean; // Track if BOQ has been emailed to TD
+  client_rejection_reason?: string; // Client rejection reason
 
   // Backend response fields
   items?: BOQItemDetailed[];

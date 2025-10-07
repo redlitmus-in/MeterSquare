@@ -228,7 +228,7 @@ const LoginPageOTP: React.FC = () => {
                 transition={{ duration: 3, repeat: Infinity }}
               />
               <img
-                src="https://i.postimg.cc/q7x6zrYt/logo.png"
+                src="/assets/logo.png"
                 alt="MeterSquare"
                 className="h-16 w-auto object-contain relative z-10"
               />
