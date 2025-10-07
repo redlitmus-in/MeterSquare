@@ -411,10 +411,10 @@ const EstimatorHub: React.FC = () => {
           boq.status?.toLowerCase() === 'pending'
         );
       } else if (activeTab === 'approved') {
-        // Approved: TD approved (includes: approved, sent_for_confirmation, client_confirmed)
+        // Approved: TD approved (includes: approved, sent_for_confirmation, client_confirmed, client_rejected)
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
-          return status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed';
+          return status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed' || status === 'client_rejected';
         });
       } else if (activeTab === 'rejected') {
         // Rejected: TD rejected OR client rejected
@@ -901,9 +901,14 @@ const EstimatorHub: React.FC = () => {
     };
 
     const { className, icon: Icon, label } = config[normalizedStatus] || config.draft;
+    const tooltipText = clientRejectionReason ? `Client Rejection Reason: ${clientRejectionReason}` : undefined;
 
     return (
-      <Badge variant="outline" className={`${className} flex items-center gap-1 border`}>
+      <Badge
+        variant="outline"
+        className={`${className} flex items-center gap-1 border cursor-help`}
+        title={tooltipText}
+      >
         <Icon className="h-3 w-3" />
         {label || status.replace('_', ' ').toUpperCase()}
       </Badge>
@@ -1269,10 +1274,16 @@ const EstimatorHub: React.FC = () => {
                         );
                       } else if (isSentToClient) {
                         return (
-                          <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { toast.success(result.message); loadBOQs(); } else { toast.error(result.message); } }} className="h-8 px-3 text-yellow-600 hover:text-yellow-700" title="Confirm Client Approval">
-                            <CheckCircle className="h-4 w-4 mr-1" />
-                            <span className="text-xs">Confirm Client</span>
-                          </Button>
+                          <>
+                            <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { toast.success(result.message); loadBOQs(); } else { toast.error(result.message); } }} className="h-8 px-3 text-green-600 hover:text-green-700 hover:bg-green-50" title="Client Approved">
+                              <CheckCircle className="h-4 w-4 mr-1" />
+                              <span className="text-xs">Client Approved</span>
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => { setBoqToReject(boq); setShowClientRejectionModal(true); }} className="h-8 px-3 text-red-600 hover:text-red-700 hover:bg-red-50" title="Client Rejected">
+                              <XCircleIcon className="h-4 w-4 mr-1" />
+                              <span className="text-xs">Client Rejected</span>
+                            </Button>
+                          </>
                         );
                       } else if (isClientConfirmed) {
                         return (
@@ -1415,7 +1426,7 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Approved</span>
                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
                   const s = b.status?.toLowerCase();
-                  return s === 'approved' || s === 'sent_for_confirmation' || s === 'client_confirmed';
+                  return s === 'approved' || s === 'sent_for_confirmation' || s === 'client_confirmed' || s === 'client_rejected';
                 }).length})</span>
               </TabsTrigger>
               <TabsTrigger

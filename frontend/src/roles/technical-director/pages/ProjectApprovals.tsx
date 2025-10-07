@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { tdService } from '@/roles/technical-director/services/tdService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import BOQHistoryTimeline from '@/roles/estimator/components/BOQHistoryTimeline';
 import {
   exportBOQToExcelInternal,
   exportBOQToExcelClient,
@@ -90,8 +91,6 @@ const ProjectApprovals: React.FC = () => {
   const [boqs, setBOQs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingBOQDetails, setLoadingBOQDetails] = useState(false);
-  const [boqHistory, setBOQHistory] = useState<any[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showFormatModal, setShowFormatModal] = useState(false);
   const [downloadType, setDownloadType] = useState<'internal' | 'client'>('internal');
@@ -205,22 +204,6 @@ const ProjectApprovals: React.FC = () => {
     }
   };
 
-  const loadBOQHistory = async (boqId: number) => {
-    setLoadingHistory(true);
-    try {
-      const response = await tdService.getBOQHistory(boqId);
-      if (response.success && response.data) {
-        setBOQHistory(response.data);
-      } else {
-        toast.error('Failed to load BOQ history');
-      }
-    } catch (error) {
-      console.error('Error loading BOQ history:', error);
-      toast.error('Failed to load BOQ history');
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
 
   // Transform BOQ data to match EstimationItem structure
   const transformBOQToEstimation = (boq: any): EstimationItem => {
@@ -1061,12 +1044,7 @@ const ProjectApprovals: React.FC = () => {
                       </button>
                     )}
                     <button
-                      onClick={() => {
-                        setShowHistory(!showHistory);
-                        if (!showHistory) {
-                          loadBOQHistory(selectedEstimation.id);
-                        }
-                      }}
+                      onClick={() => setShowHistory(!showHistory)}
                       className="px-3 py-1.5 bg-white/70 hover:bg-white text-blue-700 rounded-lg transition-colors text-sm font-medium flex items-center gap-1"
                     >
                       <ClockIcon className="w-4 h-4" />
@@ -1085,79 +1063,12 @@ const ProjectApprovals: React.FC = () => {
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
                 {/* BOQ History */}
                 {showHistory && (
-                  <div className="mb-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-4 border border-gray-200">
-                    <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <div className="mb-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-6 border border-gray-200">
+                    <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
                       <ClockIcon className="w-5 h-5 text-blue-600" />
                       BOQ History
                     </h3>
-                    {loadingHistory ? (
-                      <div className="flex items-center justify-center py-8">
-                        <ModernLoadingSpinners variant="pulse-wave" />
-                      </div>
-                    ) : boqHistory.length > 0 ? (
-                      <div className="space-y-3 max-h-64 overflow-y-auto">
-                        {boqHistory.map((history: any, index: number) => {
-                          // Determine action type based on boq_status (the actual action)
-                          let actionType = 'Update';
-                          if (history.boq_status === 'Approved') {
-                            actionType = 'Approved';
-                          } else if (history.boq_status === 'Rejected') {
-                            actionType = 'Rejected';
-                          } else if (history.boq_status === 'pending') {
-                            actionType = 'Submitted for Review';
-                          } else if (history.boq_status === 'sent_for_confirmation') {
-                            actionType = 'Sent to Client';
-                          } else if (history.boq_status === 'client_confirmed') {
-                            actionType = 'Client Confirmed';
-                          }
-
-                          const actionStatus = history.boq_status || 'Unknown';
-
-                          return (
-                            <div key={history.boq_history_id} className="bg-white rounded-lg p-3 border border-gray-200">
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-sm font-semibold text-gray-900">{actionType}</span>
-                                    <span className={`px-2 py-0.5 text-xs rounded-full ${
-                                      actionStatus === 'Approved' || actionStatus === 'approved' ? 'bg-green-100 text-green-700' :
-                                      actionStatus === 'Rejected' || actionStatus === 'rejected' ? 'bg-red-100 text-red-700' :
-                                      actionStatus === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                                      actionStatus === 'sent_for_confirmation' ? 'bg-blue-100 text-blue-700' :
-                                      actionStatus === 'client_confirmed' ? 'bg-green-100 text-green-700' :
-                                      'bg-gray-100 text-gray-700'
-                                    }`}>
-                                      {actionStatus === 'sent_for_confirmation' ? 'Sent to Client' :
-                                       actionStatus === 'client_confirmed' ? 'Client Confirmed' :
-                                       actionStatus}
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-gray-600">
-                                    {history.sender_role && <span className="capitalize">{history.sender_role.replace(/([A-Z])/g, ' $1').trim()}: </span>}
-                                    <span className="font-medium">{history.action_by || history.sender}</span>
-                                    {history.receiver && history.receiver_role && (
-                                      <>
-                                        {' → '}
-                                        <span className="capitalize">{history.receiver_role.replace(/([A-Z])/g, ' $1').trim()}: </span>
-                                        <span className="font-medium">{history.receiver}</span>
-                                      </>
-                                    )}
-                                  </p>
-                                  {history.comments && (
-                                    <p className="text-xs text-gray-700 mt-1 bg-gray-50 p-2 rounded italic">"{history.comments}"</p>
-                                  )}
-                                </div>
-                                <span className="text-xs text-gray-500 whitespace-nowrap ml-2">
-                                  {new Date(history.action_date).toLocaleString()}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500 text-center py-4">No history available</p>
-                    )}
+                    <BOQHistoryTimeline boqId={selectedEstimation.id} />
                   </div>
                 )}
 

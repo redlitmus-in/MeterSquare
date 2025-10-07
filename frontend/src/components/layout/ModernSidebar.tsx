@@ -452,9 +452,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             "relative transition-all duration-300",
             isCollapsed ? "hidden" : "block"
           )}>
-            <img 
-              src="https://i.postimg.cc/q7x6zrYt/logo.png" 
-              alt="MeterSquare" 
+            <img
+              src="/assets/logo.png"
+              alt="MeterSquare"
               className="h-10 w-auto"
               onError={(e) => {
                 // Fallback if logo doesn't load

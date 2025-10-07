@@ -782,10 +782,10 @@ class EstimatorService {
     try {
       const response = await apiClient.get(`/boq_history/${boqId}`);
 
-      if (response.data && response.data.history) {
+      if (response.data && response.data.boq_history) {
         return {
           success: true,
-          data: response.data.history
+          data: response.data.boq_history
         };
       }
 

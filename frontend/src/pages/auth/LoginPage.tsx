@@ -546,7 +546,7 @@ const LoginPage: React.FC = () => {
             <div className="flex justify-center mb-3">
               <div className="relative">
                 <img
-                  src="https://i.postimg.cc/q7x6zrYt/logo.png"
+                  src="/assets/logo.png"
                   alt="MeterSquare Interiors LLC"
                   className="h-10 w-auto object-contain"
                 />
