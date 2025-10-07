@@ -293,7 +293,7 @@ const ProjectApprovals: React.FC = () => {
   };
 
   // Map BOQ status to estimation status
-  const mapBOQStatus = (status: string): 'pending' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' => {
+  const mapBOQStatus = (status: string): 'pending' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' | 'client_rejected' | 'cancelled' => {
     if (!status) return 'pending';
 
     const normalizedStatus = status.toLowerCase().trim();
@@ -311,6 +311,16 @@ const ProjectApprovals: React.FC = () => {
     // Check for client confirmed (ready for PM assignment)
     if (normalizedStatus === 'client_confirmed') {
       return 'client_confirmed';
+    }
+
+    // Check for client rejected (wants changes)
+    if (normalizedStatus === 'client_rejected') {
+      return 'client_rejected';
+    }
+
+    // Check for cancelled (client doesn't want to proceed)
+    if (normalizedStatus === 'cancelled') {
+      return 'cancelled';
     }
 
     // Check for sent to client (waiting for client confirmation)
@@ -333,8 +343,8 @@ const ProjectApprovals: React.FC = () => {
       // Approved: TD approved internally, includes both "approved" and "sent_for_confirmation" (waiting for client)
       return (est.status === 'approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned;
     } else if (filterStatus === 'sent') {
-      // Client Approved: Estimator confirmed client approved (status = client_confirmed ONLY), ready for PM assignment
-      return est.status === 'client_confirmed' && !est.pmAssigned;
+      // Client Response: Shows both approved (client_confirmed) and rejected (client_rejected) by client
+      return (est.status === 'client_confirmed' || est.status === 'client_rejected') && !est.pmAssigned;
     } else if (filterStatus === 'assigned') {
       // Assigned: PM has been assigned (can be after client confirms)
       return est.pmAssigned === true && est.status !== 'rejected' && est.status !== 'completed';
@@ -344,6 +354,9 @@ const ProjectApprovals: React.FC = () => {
     } else if (filterStatus === 'rejected') {
       // Rejected: TD rejected the BOQ
       return est.status === 'rejected';
+    } else if (filterStatus === 'cancelled') {
+      // Cancelled: Client doesn't want to proceed with business
+      return est.status === 'cancelled';
     }
     return false;
   });
@@ -561,10 +574,11 @@ const ProjectApprovals: React.FC = () => {
           {[
             { key: 'pending', label: 'Pending' },
             { key: 'approved', label: 'Approved' },
-            { key: 'sent', label: 'Client Approved' },
+            { key: 'sent', label: 'Client Response' },
             { key: 'assigned', label: 'Assigned' },
             { key: 'completed', label: 'Completed' },
-            { key: 'rejected', label: 'Rejected' }
+            { key: 'rejected', label: 'Rejected by TD' },
+            { key: 'cancelled', label: 'Cancelled' }
           ].map((tab) => (
             <button
               key={tab.key}

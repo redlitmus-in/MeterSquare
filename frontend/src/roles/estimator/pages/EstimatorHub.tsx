@@ -54,6 +54,7 @@ import {
   ShoppingCart,
   Mail,
   Download,
+  XCircle as XCircleIcon,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Label } from '@/components/ui/label';
@@ -221,6 +222,7 @@ const EstimatorHub: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('projects');
   const [loading, setLoading] = useState(false);
+  const [sendingToTD, setSendingToTD] = useState(false);
   const [boqs, setBOQs] = useState<BOQ[]>([]);
   const [filteredBOQs, setFilteredBOQs] = useState<BOQ[]>([]);
   const [filteredProjects, setFilteredProjects] = useState<any[]>([]);
@@ -250,6 +252,12 @@ const EstimatorHub: React.FC = () => {
   const [showFormatModal, setShowFormatModal] = useState(false);
   const [downloadType, setDownloadType] = useState<'internal' | 'client'>('internal');
   const [boqToDownload, setBoqToDownload] = useState<any>(null);
+  const [showClientRejectionModal, setShowClientRejectionModal] = useState(false);
+  const [boqToReject, setBoqToReject] = useState<BOQ | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [boqToCancel, setBoqToCancel] = useState<BOQ | null>(null);
+  const [cancellationReason, setCancellationReason] = useState('');
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -391,10 +399,10 @@ const EstimatorHub: React.FC = () => {
 
       // Filter by tab status based on workflow - USE STATUS ONLY
       if (activeTab === 'projects') {
-        // Pending: Draft BOQs not sent to TD yet (no status or status = draft)
+        // Pending: Draft BOQs not sent to TD yet (no status or status = draft) OR client_rejected (needs revision)
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase() || '';
-          return !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed');
+          return !status || status === 'draft' || status === 'client_rejected' || (status !== 'pending' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed');
         });
       } else if (activeTab === 'sent') {
         // Send BOQ: Sent to TD, waiting for approval (status = pending)
@@ -408,14 +416,20 @@ const EstimatorHub: React.FC = () => {
           return status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed';
         });
       } else if (activeTab === 'rejected') {
-        // Rejected: TD rejected
-        filtered = filtered.filter(boq =>
-          boq.status?.toLowerCase() === 'rejected'
-        );
+        // Rejected: TD rejected OR client rejected
+        filtered = filtered.filter(boq => {
+          const status = boq.status?.toLowerCase();
+          return status === 'rejected' || status === 'client_rejected';
+        });
       } else if (activeTab === 'completed') {
         // Completed BOQs (PM assigned)
         filtered = filtered.filter(boq =>
           boq.status?.toLowerCase() === 'completed' || boq.pm_assigned === true
+        );
+      } else if (activeTab === 'cancelled') {
+        // Cancelled BOQs (client doesn't want to proceed)
+        filtered = filtered.filter(boq =>
+          boq.status?.toLowerCase() === 'cancelled'
         );
       }
 
@@ -500,12 +514,14 @@ const EstimatorHub: React.FC = () => {
   };
 
   const handleSendToTD = async (project: any) => {
+    setSendingToTD(true);
     try {
       // Find BOQs for this project
       const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
 
       if (projectBoqs.length === 0) {
         toast.error('No BOQ found for this project. Please create a BOQ first.');
+        setSendingToTD(false);
         return;
       }
 
@@ -536,6 +552,8 @@ const EstimatorHub: React.FC = () => {
     } catch (error) {
       console.error('Error sending BOQ to TD:', error);
       toast.error('Failed to send BOQ to Technical Director');
+    } finally {
+      setSendingToTD(false);
     }
   };
 
@@ -553,6 +571,50 @@ const EstimatorHub: React.FC = () => {
       }
     } catch (error) {
       toast.error('Failed to delete BOQ');
+    }
+  };
+
+  const handleClientRejection = async () => {
+    if (!boqToReject || !rejectionReason.trim()) {
+      toast.error('Please provide a rejection reason');
+      return;
+    }
+
+    try {
+      const result = await estimatorService.rejectClientApproval(boqToReject.boq_id!, rejectionReason);
+      if (result.success) {
+        toast.success(result.message);
+        setShowClientRejectionModal(false);
+        setBoqToReject(null);
+        setRejectionReason('');
+        await loadBOQs(); // Refresh list
+      } else {
+        toast.error(result.message);
+      }
+    } catch (error) {
+      toast.error('Failed to record client rejection');
+    }
+  };
+
+  const handleCancelBOQ = async () => {
+    if (!boqToCancel || !cancellationReason.trim()) {
+      toast.error('Please provide a cancellation reason');
+      return;
+    }
+
+    try {
+      const result = await estimatorService.cancelBOQ(boqToCancel.boq_id!, cancellationReason);
+      if (result.success) {
+        toast.success(result.message);
+        setShowCancelModal(false);
+        setBoqToCancel(null);
+        setCancellationReason('');
+        await loadBOQs(); // Refresh list
+      } else {
+        toast.error(result.message);
+      }
+    } catch (error) {
+      toast.error('Failed to cancel BOQ');
     }
   };
 
@@ -828,7 +890,9 @@ const EstimatorHub: React.FC = () => {
       approved: { className: 'bg-green-50 text-green-700 border-green-200', icon: CheckCircle },
       sentforconfirmation: { className: 'bg-blue-50 text-blue-700 border-blue-200', icon: Send },
       pending: { className: 'bg-orange-50 text-orange-700 border-orange-200', icon: Clock },
-      rejected: { className: 'bg-red-50 text-red-700 border-red-200', icon: AlertCircle }
+      rejected: { className: 'bg-red-50 text-red-700 border-red-200', icon: AlertCircle },
+      clientrejected: { className: 'bg-red-50 text-red-700 border-red-200', icon: AlertCircle },
+      cancelled: { className: 'bg-gray-100 text-gray-700 border-gray-300', icon: XCircleIcon }
     };
 
     const { className, icon: Icon } = config[normalizedStatus] || config.draft;
@@ -846,7 +910,7 @@ const EstimatorHub: React.FC = () => {
     const status = boq.status?.toLowerCase() || '';
 
     // Draft: Not sent to TD yet (can edit/delete/send) - status NOT in workflow states
-    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed');
+    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed' && status !== 'client_rejected');
     // Sent to TD: Waiting for TD approval
     const isSentToTD = status === 'pending';
     // Approved by TD: Ready to send to client
@@ -855,6 +919,8 @@ const EstimatorHub: React.FC = () => {
     const isSentToClient = status === 'sent_for_confirmation';
     // Client confirmed: Ready for TD to assign PM
     const isClientConfirmed = status === 'client_confirmed';
+    // Client rejected: Can be edited and resent OR cancelled
+    const isClientRejected = status === 'client_rejected';
 
     return (
       <motion.div
@@ -1011,28 +1077,71 @@ const EstimatorHub: React.FC = () => {
             </button>
           ) : isSentToClient ? (
             /* Sent to client - waiting for client confirmation */
-            <button
-              className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
-              style={{ backgroundColor: 'rgb(234, 179, 8)' }}
-              onClick={async () => {
-                const result = await estimatorService.confirmClientApproval(boq.boq_id!);
-                if (result.success) {
-                  toast.success(result.message);
-                  loadBOQs(); // Refresh list
-                } else {
-                  toast.error(result.message);
-                }
-              }}
-            >
-              <CheckCircle className="h-3.5 w-3.5" />
-              <span>Confirm Client Approval</span>
-            </button>
+            <>
+              <button
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
+                style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+                onClick={async () => {
+                  const result = await estimatorService.confirmClientApproval(boq.boq_id!);
+                  if (result.success) {
+                    toast.success(result.message);
+                    loadBOQs(); // Refresh list
+                  } else {
+                    toast.error(result.message);
+                  }
+                }}
+              >
+                <CheckCircle className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Client Approved</span>
+                <span className="sm:hidden">Approved</span>
+              </button>
+              <button
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
+                style={{ backgroundColor: 'rgb(239, 68, 68)' }}
+                onClick={() => {
+                  setBoqToReject(boq);
+                  setShowClientRejectionModal(true);
+                }}
+              >
+                <XCircleIcon className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Client Rejected</span>
+                <span className="sm:hidden">Rejected</span>
+              </button>
+            </>
           ) : isClientConfirmed ? (
             /* Client confirmed - ready for PM assignment */
             <div className="col-span-2 flex items-center justify-center text-xs text-green-700 font-medium">
               <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
               Client Approved
             </div>
+          ) : isClientRejected ? (
+            /* Client rejected - can revise and resend OR cancel project */
+            <>
+              <button
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+                style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+                onClick={() => {
+                  setEditingBoq(boq);
+                  setShowBoqEdit(true);
+                }}
+              >
+                <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Revise BOQ</span>
+                <span className="sm:hidden">Edit</span>
+              </button>
+              <button
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+                style={{ backgroundColor: 'rgb(239, 68, 68)' }}
+                onClick={() => {
+                  setBoqToCancel(boq);
+                  setShowCancelModal(true);
+                }}
+              >
+                <XCircleIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Cancel Project</span>
+                <span className="sm:hidden">Cancel</span>
+              </button>
+            </>
           ) : null}
         </div>
       </motion.div>
@@ -1292,6 +1401,14 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Completed</span>
                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'completed').length})</span>
               </TabsTrigger>
+              <TabsTrigger
+                value="cancelled"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-gray-600 data-[state=active]:text-gray-700 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+              >
+                <span className="hidden sm:inline">Cancelled BOQ</span>
+                <span className="sm:hidden">Cancelled</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => b.status?.toLowerCase() === 'cancelled').length})</span>
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="projects" className="mt-0 p-0">
@@ -1449,14 +1566,27 @@ const EstimatorHub: React.FC = () => {
                         )}
                         {!hasSentBoq && boqCount > 0 ? (
                           <button
-                            className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+                            className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             style={{ backgroundColor: 'rgb(22, 163, 74)' }}
                             onClick={() => handleSendToTD(project)}
+                            disabled={sendingToTD}
                             title="Send to Technical Director"
                           >
-                            <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                            <span className="hidden sm:inline">Send to TD</span>
-                            <span className="sm:hidden">Send</span>
+                            {sendingToTD ? (
+                              <>
+                                <div className="scale-50">
+                                  <ModernLoadingSpinners variant="dots" size="sm" color="white" />
+                                </div>
+                                <span className="hidden sm:inline">Sending...</span>
+                                <span className="sm:hidden">...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                                <span className="hidden sm:inline">Send to TD</span>
+                                <span className="sm:hidden">Send</span>
+                              </>
+                            )}
                           </button>
                         ) : (
                           <div className="text-xs h-8 flex items-center justify-center"></div>
@@ -1617,10 +1747,17 @@ const EstimatorHub: React.FC = () => {
                                         variant="ghost"
                                         size="sm"
                                         onClick={() => handleSendToTD(project)}
-                                        className="h-7 w-7 p-0 hover:bg-green-50"
+                                        disabled={sendingToTD}
+                                        className="h-7 w-7 p-0 hover:bg-green-50 disabled:opacity-50"
                                         title="Send to TD"
                                       >
-                                        <Send className="h-3.5 w-3.5 text-green-600" />
+                                        {sendingToTD ? (
+                                          <div className="scale-[0.4]">
+                                            <ModernLoadingSpinners variant="dots" size="sm" color="green" />
+                                          </div>
+                                        ) : (
+                                          <Send className="h-3.5 w-3.5 text-green-600" />
+                                        )}
                                       </Button>
                                     )}
                                     <Button
@@ -2104,6 +2241,116 @@ const EstimatorHub: React.FC = () => {
             >
               Delete BOQ
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Client Rejection Modal */}
+      <Dialog open={showClientRejectionModal} onOpenChange={(open) => {
+        if (!open) {
+          setShowClientRejectionModal(false);
+          setBoqToReject(null);
+          setRejectionReason('');
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <XCircleIcon className="h-5 w-5" />
+              Client Rejected BOQ
+            </DialogTitle>
+            <DialogDescription>
+              Record that the client has rejected "{boqToReject?.title || boqToReject?.boq_name}".
+              Please provide the reason for rejection so it can be revised.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div>
+              <Label htmlFor="rejectionReason" className="text-sm font-medium">
+                Rejection Reason <span className="text-red-500">*</span>
+              </Label>
+              <textarea
+                id="rejectionReason"
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="Enter reason why client rejected this BOQ..."
+                className="w-full mt-2 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[100px]"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowClientRejectionModal(false);
+                  setBoqToReject(null);
+                  setRejectionReason('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleClientRejection}
+                disabled={!rejectionReason.trim()}
+              >
+                Confirm Rejection
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel BOQ Modal */}
+      <Dialog open={showCancelModal} onOpenChange={(open) => {
+        if (!open) {
+          setShowCancelModal(false);
+          setBoqToCancel(null);
+          setCancellationReason('');
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-600">
+              <XCircleIcon className="h-5 w-5" />
+              Cancel Project / Close BOQ
+            </DialogTitle>
+            <DialogDescription>
+              Cancel "{boqToCancel?.title || boqToCancel?.boq_name}" because client doesn't want to proceed with the business.
+              This will mark the BOQ as cancelled for record keeping.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div>
+              <Label htmlFor="cancellationReason" className="text-sm font-medium">
+                Cancellation Reason <span className="text-red-500">*</span>
+              </Label>
+              <textarea
+                id="cancellationReason"
+                value={cancellationReason}
+                onChange={(e) => setCancellationReason(e.target.value)}
+                placeholder="Enter reason why client cancelled/closed this project..."
+                className="w-full mt-2 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[100px]"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowCancelModal(false);
+                  setBoqToCancel(null);
+                  setCancellationReason('');
+                }}
+              >
+                Go Back
+              </Button>
+              <Button
+                className="bg-orange-600 hover:bg-orange-700"
+                onClick={handleCancelBOQ}
+                disabled={!cancellationReason.trim()}
+              >
+                Confirm Cancellation
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

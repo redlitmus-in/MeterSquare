@@ -735,6 +735,44 @@ class EstimatorService {
     }
   }
 
+  // Reject Client Approval (after client rejects the BOQ)
+  async rejectClientApproval(boqId: number, rejectionReason: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await apiClient.put(`/reject_client_approval/${boqId}`, {
+        rejection_reason: rejectionReason
+      });
+      return {
+        success: response.data.success !== false,
+        message: response.data.message || 'Client rejection recorded successfully'
+      };
+    } catch (error: any) {
+      console.error('Error rejecting client approval:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Failed to record client rejection'
+      };
+    }
+  }
+
+  // Cancel BOQ (client doesn't want to proceed with business)
+  async cancelBOQ(boqId: number, cancellationReason: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await apiClient.put(`/cancel_boq/${boqId}`, {
+        cancellation_reason: cancellationReason
+      });
+      return {
+        success: response.data.success !== false,
+        message: response.data.message || 'BOQ cancelled successfully'
+      };
+    } catch (error: any) {
+      console.error('Error cancelling BOQ:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Failed to cancel BOQ'
+      };
+    }
+  }
+
   // Get BOQ History
   async getBOQHistory(boqId: number): Promise<{
     success: boolean;
