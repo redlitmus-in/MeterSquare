@@ -311,7 +311,7 @@ def create_boq():
 
 
 def get_boq(boq_id):
-    """Get BOQ details from JSON storage"""
+    """Get BOQ details from JSON storage with existing and new purchases separated"""
     try:
         boq = BOQ.query.filter_by(boq_id=boq_id).first()
         if not boq:
@@ -325,6 +325,151 @@ def get_boq(boq_id):
         # Fetch project details
         project = Project.query.filter_by(project_id=boq.project_id).first()
 
+        # Get BOQ history to track which items were added via new_purchase
+        boq_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.asc()).all()
+
+        # Track newly added items using master_item_id and item_name from history
+        new_purchase_item_ids = set()  # Track by master_item_id
+        new_purchase_item_names = set()  # Track by item_name as fallback
+        original_item_count = 0
+
+        for history in boq_history:
+            if history.action:
+                actions = history.action if isinstance(history.action, list) else [history.action]
+                for action in actions:
+                    if isinstance(action, dict):
+                        action_type = action.get("type")
+                        if action_type == "add_new_purchase":
+                            # Get item identifiers from history (new minimal format)
+                            item_identifiers = action.get("item_identifiers", [])
+
+                            # If item_identifiers exists (new minimal format), use it
+                            if item_identifiers:
+                                for identifier in item_identifiers:
+                                    master_item_id = identifier.get("master_item_id")
+                                    item_name = identifier.get("item_name")
+
+                                    if master_item_id:
+                                        new_purchase_item_ids.add(master_item_id)
+                                    if item_name:
+                                        new_purchase_item_names.add(item_name)
+                            else:
+                                # Fallback to old formats for backward compatibility
+                                # Try items_details first (medium format)
+                                items_details = action.get("items_details", [])
+                                if items_details:
+                                    for item_detail in items_details:
+                                        master_item_id = item_detail.get("master_item_id")
+                                        item_name = item_detail.get("item_name")
+
+                                        if master_item_id:
+                                            new_purchase_item_ids.add(master_item_id)
+                                        if item_name:
+                                            new_purchase_item_names.add(item_name)
+                                else:
+                                    # Fallback to items_added (old format)
+                                    items_added = action.get("items_added", [])
+                                    for item_info in items_added:
+                                        item_name = item_info.get("item_name")
+                                        if item_name:
+                                            new_purchase_item_names.add(item_name)
+
+        # Get all items from BOQ details
+        all_items = []
+        if boq_details.boq_details and "items" in boq_details.boq_details:
+            all_items = boq_details.boq_details["items"]
+
+        # If no history of new purchases, determine original items count from first creation
+        if not new_purchase_item_ids and not new_purchase_item_names and boq_history:
+            # Find the creation action to determine original item count
+            for history in boq_history:
+                if history.action:
+                    actions = history.action if isinstance(history.action, list) else [history.action]
+                    for action in actions:
+                        if isinstance(action, dict) and action.get("type") in ["boq_created", "created"]:
+                            original_item_count = action.get("items_count", len(all_items))
+                            break
+                if original_item_count > 0:
+                    break
+
+        # Separate existing and new purchases
+        existing_purchase_items = []
+        new_add_purchase_items = []
+
+        for idx, item in enumerate(all_items):
+            master_item_id = item.get("master_item_id")
+            item_name = item.get("item_name")
+            is_new_purchase = False
+
+            # Check if item is a new purchase
+            # Priority 1: Match by master_item_id (most reliable)
+            if master_item_id and master_item_id in new_purchase_item_ids:
+                is_new_purchase = True
+            # Priority 2: Match by item_name (fallback)
+            elif item_name and item_name in new_purchase_item_names:
+                is_new_purchase = True
+            # Priority 3: Use original item count position
+            elif not new_purchase_item_ids and not new_purchase_item_names and original_item_count > 0:
+                if idx >= original_item_count:
+                    is_new_purchase = True
+
+            # Add to appropriate list
+            if is_new_purchase:
+                new_add_purchase_items.append(item)
+            else:
+                existing_purchase_items.append(item)
+
+        # Calculate summary for existing purchases
+        existing_material_cost = 0
+        existing_labour_cost = 0
+        existing_materials_count = 0
+        existing_labour_count = 0
+        existing_total_cost = 0
+
+        for item in existing_purchase_items:
+            existing_total_cost += item.get("selling_price", 0)
+            existing_material_cost += item.get("totalMaterialCost", 0)
+            existing_labour_cost += item.get("totalLabourCost", 0)
+            existing_materials_count += len(item.get("materials", []))
+            existing_labour_count += len(item.get("labour", []))
+
+        # Calculate summary for new purchases
+        new_material_cost = 0
+        new_labour_cost = 0
+        new_materials_count = 0
+        new_labour_count = 0
+        new_total_cost = 0
+
+        for item in new_add_purchase_items:
+            new_total_cost += item.get("selling_price", 0)
+            new_material_cost += item.get("totalMaterialCost", 0)
+            new_labour_cost += item.get("totalLabourCost", 0)
+            new_materials_count += len(item.get("materials", []))
+            new_labour_count += len(item.get("labour", []))
+
+        # Calculate combined totals
+        total_material_cost = existing_material_cost + new_material_cost
+        total_labour_cost = existing_labour_cost + new_labour_cost
+        total_cost = existing_total_cost + new_total_cost
+        overhead_percentage = 0
+        profit_margin = 0
+
+        # Get overhead and profit from summary or first item
+        if boq_details.boq_details and "summary" in boq_details.boq_details:
+            summary = boq_details.boq_details["summary"]
+            overhead_percentage = summary.get("overhead_percentage", 0) or summary.get("overhead", 0)
+            profit_margin = summary.get("profit_margin_percentage", 0) or summary.get("profit_margin", 0)
+
+        # Fallback: Get from first item if not in summary
+        if (overhead_percentage == 0 or profit_margin == 0) and all_items:
+            for item in all_items:
+                if overhead_percentage == 0:
+                    overhead_percentage = item.get("overhead_percentage", 0)
+                if profit_margin == 0:
+                    profit_margin = item.get("profit_margin_percentage", 0) or item.get("profit_margin", 0)
+                if overhead_percentage > 0 and profit_margin > 0:
+                    break
+
         # Build response with project details
         response_data = {
             "boq_id": boq.boq_id,
@@ -334,75 +479,62 @@ def get_boq(boq_id):
             "email_sent": boq.email_sent,
             "created_at": boq.created_at.isoformat() if boq.created_at else None,
             "created_by": boq.created_by,
-            "user_id": project.user_id if project else None,  # PM assignment indicator
+            "user_id": project.user_id if project else None,
             "project_details": {
                 "project_name": project.project_name if project else None,
                 "location": project.location if project else None,
                 "floor": project.floor_name if project else None,
                 "hours": project.working_hours if project else None,
                 "status": project.status if project else None
-            }
+            },
+            "existing_purchase": {
+                "items": existing_purchase_items,
+                "summary": {
+                    "total_items": len(existing_purchase_items),
+                    "total_materials": existing_materials_count,
+                    "total_labour": existing_labour_count,
+                    "total_material_cost": existing_material_cost,
+                    "total_labour_cost": existing_labour_cost,
+                    "total_cost": existing_total_cost,
+                    "selling_price": existing_total_cost,
+                    "estimatedSellingPrice": existing_total_cost
+                }
+            },
+            "new_purchase": {
+                "items": new_add_purchase_items,
+                "summary": {
+                    "total_items": len(new_add_purchase_items),
+                    "total_materials": new_materials_count,
+                    "total_labour": new_labour_count,
+                    "total_material_cost": new_material_cost,
+                    "total_labour_cost": new_labour_cost,
+                    "total_cost": new_total_cost,
+                    "selling_price": new_total_cost,
+                    "estimatedSellingPrice": new_total_cost
+                }
+            },
+            "combined_summary": {
+                "total_items": len(all_items),
+                "total_materials": existing_materials_count + new_materials_count,
+                "total_labour": existing_labour_count + new_labour_count,
+                "total_material_cost": total_material_cost,
+                "total_labour_cost": total_labour_cost,
+                "total_cost": total_cost,
+                "selling_price": total_cost,
+                "estimatedSellingPrice": total_cost
+            },
+            "total_material_cost": total_material_cost,
+            "total_labour_cost": total_labour_cost,
+            "overhead_percentage": overhead_percentage,
+            "profit_margin": profit_margin,
+            "profit_margin_percentage": profit_margin
         }
-
-        # Add BOQ details from JSON
-        response_data.update(boq_details.boq_details)
-
-        # Calculate totals from items (like get_all_boq does)
-        total_material_cost = 0
-        total_labour_cost = 0
-        overhead_percentage = 0
-        profit_margin = 0
-
-        # FIRST: Try to get from summary (most reliable)
-        if boq_details.boq_details and "summary" in boq_details.boq_details:
-            summary = boq_details.boq_details["summary"]
-            total_material_cost = summary.get("total_material_cost", 0)
-            total_labour_cost = summary.get("total_labour_cost", 0)
-            # Try multiple field name variations for overhead and profit
-            overhead_percentage = summary.get("overhead_percentage", 0) or summary.get("overhead", 0)
-            profit_margin = summary.get("profit_margin_percentage", 0) or summary.get("profit_margin", 0)
-
-        # FALLBACK: Calculate from items if summary doesn't have complete values
-        if boq_details.boq_details and "items" in boq_details.boq_details:
-            items = boq_details.boq_details["items"]
-
-            # Calculate costs from items if not in summary
-            if total_material_cost == 0 or total_labour_cost == 0:
-                for item in items:
-                    # Calculate material cost
-                    materials = item.get("materials", [])
-                    for mat in materials:
-                        total_material_cost += mat.get("total_price", 0)
-
-                    # Calculate labour cost
-                    labour = item.get("labour", [])
-                    for lab in labour:
-                        total_labour_cost += lab.get("total_cost", 0)
-
-            # Get overhead and profit from first item if not in summary
-            if overhead_percentage == 0 or profit_margin == 0:
-                for item in items:
-                    if overhead_percentage == 0:
-                        overhead_percentage = item.get("overhead_percentage", 0)
-                    if profit_margin == 0:
-                        profit_margin = item.get("profit_margin_percentage", 0) or item.get("profit_margin", 0)
-                    # Break after first item with values
-                    if overhead_percentage > 0 and profit_margin > 0:
-                        break
-
-        # Add calculated totals to response - Force override with calculated values
-        response_data["total_material_cost"] = total_material_cost
-        response_data["total_labour_cost"] = total_labour_cost
-        response_data["overhead_percentage"] = overhead_percentage
-        response_data["profit_margin"] = profit_margin
-        response_data["profit_margin_percentage"] = profit_margin  # Add both field names for compatibility
 
         return jsonify(response_data), 200
 
     except Exception as e:
         log.error(f"Error fetching BOQ: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
 
 def get_all_boq():
     """Get all BOQs with their details from JSON storage"""

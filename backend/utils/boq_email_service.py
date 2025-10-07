@@ -1009,3 +1009,189 @@ class BOQEmailService:
             import traceback
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
+
+    def generate_new_purchase_notification_email(self, estimator_name, pm_name, boq_data, project_data, new_items_data):
+        """
+        Generate email for new purchase notification to Estimator
+
+        Args:
+            estimator_name: Estimator name
+            pm_name: Project Manager name
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            new_items_data: List of newly added items with details
+
+        Returns:
+            str: HTML formatted email content
+        """
+        boq_id = boq_data.get('boq_id', 'N/A')
+        boq_name = boq_data.get('boq_name', 'N/A')
+        project_name = project_data.get('project_name', 'N/A')
+        client = project_data.get('client', 'N/A')
+        location = project_data.get('location', 'N/A')
+
+        # Build items table
+        items_table_rows = ""
+        total_value_added = 0
+
+        for idx, item in enumerate(new_items_data, 1):
+            item_name = item.get('item_name', 'N/A')
+            selling_price = item.get('selling_price', 0)
+            materials_count = len(item.get('materials', []))
+            labour_count = len(item.get('labour', []))
+            total_value_added += selling_price
+
+            items_table_rows += f"""
+                <tr>
+                    <td>{idx}</td>
+                    <td><strong>{item_name}</strong></td>
+                    <td>{materials_count}</td>
+                    <td>{labour_count}</td>
+                    <td><strong>₹ {selling_price:,.2f}</strong></td>
+                </tr>
+            """
+
+        email_body = f"""
+        <div class="email-container">
+            <!-- Header -->
+            <div class="header" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                <h1>NEW PURCHASE ADDED</h1>
+                <h2>Additional Items Required for Project</h2>
+            </div>
+
+            <!-- Content -->
+            <div class="content">
+                <p>Dear <strong>{estimator_name}</strong>,</p>
+
+                <p>
+                    The Project Manager <strong>{pm_name}</strong> has added new purchase items to the BOQ.
+                    These additional items are required for the project execution. Please review the details below.
+                </p>
+
+                <div class="divider"></div>
+
+                <!-- BOQ Information -->
+                <h2>BOQ Details</h2>
+                <div class="info-box">
+                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
+                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
+                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
+                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
+                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
+                </div>
+
+                <!-- Purchase Details -->
+                <h2>New Purchase Details</h2>
+                <div class="info-box">
+                    <p><span class="label">Added By:</span> <span class="value">{pm_name}</span></p>
+                    <p><span class="label">Role:</span> <span class="value">Project Manager</span></p>
+                    <p><span class="label">Total New Items:</span> <span class="value">{len(new_items_data)}</span></p>
+                </div>
+
+                <!-- Items Table -->
+                <h2>New Items Added</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>S.No</th>
+                                <th>Item Name</th>
+                                <th>Materials</th>
+                                <th>Labour</th>
+                                <th>Selling Price</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {items_table_rows}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Total Value -->
+                <div class="total-cost">
+                    <span class="label">Total Value Added:</span>
+                    <span class="amount">₹ {total_value_added:,.2f}</span>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Action Required -->
+                <div class="alert" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-left: 4px solid #f59e0b;">
+                    <strong>Action Required:</strong>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>Review the newly added items and their costs</li>
+                        <li>Verify material specifications and quantities</li>
+                        <li>Confirm labour requirements are accurate</li>
+                        <li>Update project budget calculations if needed</li>
+                        <li>Coordinate with procurement for material availability</li>
+                    </ul>
+                </div>
+
+                <!-- Info Note -->
+                <div class="alert alert-info">
+                    <strong>Note:</strong> These items have been added to meet additional project requirements
+                    identified during execution. Please log in to the MeterSquare ERP system to view complete
+                    details including material specifications and labour breakdowns.
+                </div>
+
+                <!-- Signature -->
+                <div class="signature">
+                    <p><strong>Best Regards,</strong></p>
+                    <p>{pm_name}</p>
+                    <p>Project Manager</p>
+                    <p>MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
+                <p>This is an automated email notification. Please do not reply to this email.</p>
+                <p>© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def send_new_purchase_notification(self, estimator_email, estimator_name, pm_name, boq_data, project_data, new_items_data):
+        """
+        Send new purchase notification email to Estimator
+
+        Args:
+            estimator_email: Estimator's email address
+            estimator_name: Estimator's name
+            pm_name: Project Manager's name
+            boq_data: Dictionary with BOQ information
+            project_data: Dictionary with project information
+            new_items_data: List of newly added items
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            # Generate email content
+            email_html = self.generate_new_purchase_notification_email(
+                estimator_name, pm_name, boq_data, project_data, new_items_data
+            )
+
+            # Create subject
+            project_name = project_data.get('project_name', 'Project')
+            items_count = len(new_items_data)
+            subject = f"🛒 New Purchase Added - {items_count} item(s) added to {project_name}"
+
+            # Send email
+            success = self.send_email(estimator_email, subject, email_html)
+
+            if success:
+                log.info(f"New purchase notification email sent successfully to {estimator_email}")
+            else:
+                log.error(f"Failed to send new purchase notification email to {estimator_email}")
+
+            return success
+
+        except Exception as e:
+            log.error(f"Error sending new purchase notification email: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
