@@ -58,6 +58,9 @@ const RoleDashboard: React.FC = () => {
 
     case 'estimator':
     case 'Estimator':
+    case 'estimation':
+    case 'Estimation':
+    case UserRole.ESTIMATION:
       DashboardComponent = EstimatorDashboard;
       break;
 

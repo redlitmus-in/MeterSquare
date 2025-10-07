@@ -91,7 +91,7 @@ const ProjectApprovals: React.FC = () => {
   const [boqs, setBOQs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingBOQDetails, setLoadingBOQDetails] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showFormatModal, setShowFormatModal] = useState(false);
   const [downloadType, setDownloadType] = useState<'internal' | 'client'>('internal');
   const [showAssignPMModal, setShowAssignPMModal] = useState(false);
@@ -1044,7 +1044,7 @@ const ProjectApprovals: React.FC = () => {
                       </button>
                     )}
                     <button
-                      onClick={() => setShowHistory(!showHistory)}
+                      onClick={() => setShowHistoryModal(true)}
                       className="px-3 py-1.5 bg-white/70 hover:bg-white text-blue-700 rounded-lg transition-colors text-sm font-medium flex items-center gap-1"
                     >
                       <ClockIcon className="w-4 h-4" />
@@ -1061,17 +1061,6 @@ const ProjectApprovals: React.FC = () => {
               </div>
 
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
-                {/* BOQ History */}
-                {showHistory && (
-                  <div className="mb-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-6 border border-gray-200">
-                    <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                      <ClockIcon className="w-5 h-5 text-blue-600" />
-                      BOQ History
-                    </h3>
-                    <BOQHistoryTimeline boqId={selectedEstimation.id} />
-                  </div>
-                )}
-
                 {/* BOQ Items */}
                 <h3 className="text-lg font-bold text-gray-900 mb-4">Bill of Quantities - Items</h3>
 
@@ -2008,6 +1997,43 @@ const ProjectApprovals: React.FC = () => {
                     </>
                   );
                 })()}
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* History Modal - BOQ History Timeline */}
+        {showHistoryModal && selectedEstimation && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full overflow-hidden max-h-[90vh] flex flex-col"
+            >
+              {/* Compact Header with soft red gradient */}
+              <div className="bg-gradient-to-r from-red-50 to-orange-50 px-6 py-3 border-b border-red-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white rounded-lg shadow-sm">
+                      <ClockIcon className="w-5 h-5 text-red-500" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-gray-900">BOQ History</h2>
+                      <p className="text-gray-600 text-xs">{selectedEstimation.projectName}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowHistoryModal(false)}
+                    className="text-gray-500 hover:text-gray-700 hover:bg-white rounded-lg p-1.5 transition-colors"
+                  >
+                    <XMarkIcon className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Content with light background */}
+              <div className="p-6 overflow-y-auto flex-1 bg-gray-50">
+                <BOQHistoryTimeline boqId={selectedEstimation.id} />
               </div>
             </motion.div>
           </div>

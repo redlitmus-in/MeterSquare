@@ -8,7 +8,6 @@ import { setupCacheValidator } from '@/utils/clearCache';
 import { queryClient } from '@/lib/queryClient';
 import { setupRealtimeSubscriptions } from '@/lib/realtimeSubscriptions';
 import { initializeNotificationService } from '@/store/notificationStore';
-import { requestNotificationPermission } from '@/middleware/notificationMiddleware';
 import { backgroundNotificationService } from '@/services/backgroundNotificationService';
 import { realtimeNotificationHub } from '@/services/realtimeNotificationHub';
 import { Security } from '@/utils/security'; // Initialize security system
@@ -37,7 +36,7 @@ const CreativeErrorPage = lazy(() => import('@/components/ui/CreativeErrorPage')
 // Lazy load role hubs - Direct import for better code splitting
 const ProjectManagerHub = lazy(() => import('@/roles/project-manager/pages/ProjectManagerHub'));
 const PurchaseApprovalsPage = lazy(() => import('@/roles/project-manager/pages/PurchaseApprovalsPage'));
-// const EstimationHub = lazy(() => import('@/roles/estimation/pages/EstimationHub'));
+const EstimationHub = lazy(() => import('@/roles/estimation/pages/EstimationHub'));
 const EstimatorHub = lazy(() => import('@/roles/estimator/pages/EstimatorHub'));
 const TechnicalDirectorHub = lazy(() => import('@/roles/technical-director/pages/TechnicalDirectorHub'));
 // const MEPSupervisorHub = lazy(() => import('@/roles/mep-supervisor/pages/MEPSupervisorHub'));
@@ -113,6 +112,26 @@ const RoleSpecificProcurementHub: React.FC = () => {
       </div>
     </div>
   );
+};
+
+// Role-specific Projects Component
+const RoleSpecificProjects: React.FC = () => {
+  const { user } = useAuthStore();
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = userRole.toLowerCase();
+
+  // Estimator role shows EstimatorHub (Projects & BOQ Management)
+  if (userRoleLower === 'estimator' || userRoleLower === 'estimation') {
+    return <EstimatorHub />;
+  }
+
+  // Site Engineer shows SiteEngineerProjects
+  if (userRoleLower === 'siteengineer' || userRoleLower === 'site engineer' || userRoleLower === 'site_engineer') {
+    return <SiteEngineerProjects />;
+  }
+
+  // Default fallback
+  return <SiteEngineerProjects />;
 };
 
 // Role-specific Vendor Management Hub Component
@@ -213,9 +232,6 @@ function App() {
       const userRole = (user as any)?.role || '';
       const unsubscribe = setupRealtimeSubscriptions(userRole);
 
-      // Request notification permission if needed
-      requestNotificationPermission();
-
       // Update background service with credentials
       const token = localStorage.getItem('access_token');
       const userId = (user as any)?.id || (user as any)?.userId;
@@ -243,11 +259,6 @@ function App() {
 
     // Initialize background notification service
     console.log('Initializing background notification service...');
-
-    // Request notification permission after initial load
-    setTimeout(() => {
-      requestNotificationPermission();
-    }, 3000);
 
     // Quick initialization - don't block on environment validation
     const initialize = async () => {
@@ -372,8 +383,8 @@ function App() {
               <RoleSpecificProcurementHub />
             } />
 
-            {/* Site Engineer specific routes - MUST come first to avoid conflicts */}
-            <Route path="projects" element={<SiteEngineerProjects />} />
+            {/* Role-based Projects Route - Shows different UI based on role */}
+            <Route path="projects" element={<RoleSpecificProjects />} />
 
             {/* Estimator Routes */}
             <Route path="boq-management" element={<EstimatorHub />} />

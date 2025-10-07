@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
 // Get auth token from localStorage
 const getAuthHeaders = () => {
@@ -12,17 +12,25 @@ const getAuthHeaders = () => {
 };
 
 export const siteEngineerService = {
-  // Get assigned projects
+  // Get all BOQs (changed from sitesupervisor_boq to all_boq)
   getMyProjects: async () => {
-    const response = await axios.get(`${API_URL}/sitesupervisor_boq`, {
+    const response = await axios.get(`${API_URL}/all_boq`, {
       headers: getAuthHeaders()
     });
     return response.data;
   },
 
-  // Get project details
-  getProjectDetails: async (projectId: number) => {
-    const response = await axios.get(`${API_URL}/sitesupervisor_boq/${projectId}`, {
+  // Get BOQ details by ID (changed from sitesupervisor_boq/{id} to boq/{id})
+  getProjectDetails: async (boqId: number) => {
+    const response = await axios.get(`${API_URL}/boq/${boqId}`, {
+      headers: getAuthHeaders()
+    });
+    return response.data;
+  },
+
+  // Get all projects
+  getAllProjects: async () => {
+    const response = await axios.get(`${API_URL}/all_project`, {
       headers: getAuthHeaders()
     });
     return response.data;

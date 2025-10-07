@@ -24,10 +24,10 @@ export const ROLE_ID_TO_NAME: Record<number, string> = {
   4: UserRole.PROCUREMENT,
   5: UserRole.PROJECT_MANAGER,
   6: UserRole.DESIGN,
-  7: UserRole.ESTIMATION,
+  7: 'estimator', // Map ESTIMATION role ID to estimator
   8: UserRole.ACCOUNTS,
   9: UserRole.TECHNICAL_DIRECTOR,
-  10: 'estimator'
+  10: 'estimator' // Map ESTIMATOR role ID to estimator
 };
 
 /**
@@ -41,12 +41,13 @@ export const ROLE_URL_SLUGS: Record<string, string> = {
   [UserRole.PROCUREMENT]: 'procurement',
   [UserRole.PROJECT_MANAGER]: 'project-manager',
   [UserRole.DESIGN]: 'design',
-  [UserRole.ESTIMATION]: 'estimation',
+  [UserRole.ESTIMATION]: 'estimator', // Map estimation to estimator URL
   [UserRole.ACCOUNTS]: 'accounts',
   [UserRole.TECHNICAL_DIRECTOR]: 'technical-director',
   'technicalDirector': 'technical-director',
   'projectManager': 'project-manager',
-  'estimator': 'estimator'
+  'estimator': 'estimator',
+  'estimation': 'estimator' // Map estimation to estimator URL
 };
 
 /**
@@ -65,12 +66,13 @@ export const ROLE_DASHBOARD_PATHS: Record<string, string> = {
   [UserRole.PROCUREMENT]: '/procurement/dashboard',
   [UserRole.PROJECT_MANAGER]: '/project-manager/dashboard',
   [UserRole.DESIGN]: '/design/dashboard',
-  [UserRole.ESTIMATION]: '/estimation/dashboard',
+  [UserRole.ESTIMATION]: '/estimator/dashboard', // Map estimation to estimator dashboard
   [UserRole.ACCOUNTS]: '/accounts/dashboard',
   [UserRole.TECHNICAL_DIRECTOR]: '/technical-director/dashboard',
   'technicalDirector': '/technical-director/dashboard',
   'projectManager': '/project-manager/dashboard',
-  'estimator': '/estimator/dashboard'
+  'estimator': '/estimator/dashboard',
+  'estimation': '/estimator/dashboard' // Map estimation to estimator dashboard
 };
 
 /**
@@ -139,12 +141,13 @@ export const getRoleDisplayName = (role: string | number | UserRole): string => 
     [UserRole.PROCUREMENT]: 'Procurement',
     [UserRole.PROJECT_MANAGER]: 'Project Manager',
     [UserRole.DESIGN]: 'Design',
-    [UserRole.ESTIMATION]: 'Estimation',
+    [UserRole.ESTIMATION]: 'Estimator', // Map to Estimator display name
     [UserRole.ACCOUNTS]: 'Accounts',
     [UserRole.TECHNICAL_DIRECTOR]: 'Technical Director',
     'technicalDirector': 'Technical Director',
     'projectManager': 'Project Manager',
-    'estimator': 'Estimator'
+    'estimator': 'Estimator',
+    'estimation': 'Estimator' // Map to Estimator display name
   };
 
   return roleNames[roleName as UserRole] || roleNames[roleName] || 'User';
@@ -164,12 +167,13 @@ export const getRoleThemeColor = (role: string | UserRole): string => {
     [UserRole.PROCUREMENT]: 'red',
     [UserRole.PROJECT_MANAGER]: 'green',
     [UserRole.DESIGN]: 'purple',
-    [UserRole.ESTIMATION]: 'amber',
+    [UserRole.ESTIMATION]: 'indigo', // Map to indigo (same as estimator)
     [UserRole.ACCOUNTS]: 'emerald',
     [UserRole.TECHNICAL_DIRECTOR]: 'blue',
     'technicalDirector': 'blue',
     'projectManager': 'green',
-    'estimator': 'indigo'
+    'estimator': 'indigo',
+    'estimation': 'indigo' // Map to indigo (same as estimator)
   };
 
   return roleColors[role as UserRole] || roleColors[role] || 'gray';
@@ -234,10 +238,11 @@ export const hasRouteAccess = (userRole: string | UserRole, routePath: string): 
     [UserRole.PROJECT_MANAGER]: ['/procurement', '/workflows', '/projects', '/team'],
     'projectManager': ['/procurement', '/workflows', '/projects', '/team'],
     [UserRole.DESIGN]: ['/projects', '/workflows'],
-    [UserRole.ESTIMATION]: ['/procurement/quotations'],
+    [UserRole.ESTIMATION]: ['/boq', '/estimation', '/projects', '/cost-analysis'], // Map to estimator access
     [UserRole.ACCOUNTS]: ['/procurement/approvals'],
     'technicalDirector': ['/'], // Technical Director has access to all routes
-    'estimator': ['/boq', '/estimation', '/projects', '/cost-analysis']
+    'estimator': ['/boq', '/estimation', '/projects', '/cost-analysis'],
+    'estimation': ['/boq', '/estimation', '/projects', '/cost-analysis'] // Map to estimator access
   };
   
   const allowedRoutes = roleAccess[userRole as UserRole] || [];
