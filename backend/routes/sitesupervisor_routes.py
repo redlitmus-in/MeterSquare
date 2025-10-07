@@ -9,3 +9,9 @@ sitesupervisor_routes = Blueprint("sitesupervisor_routes", __name__, url_prefix=
 @jwt_required
 def get_all_sitesupervisor_boqs_route():
     return get_all_sitesupervisor_boqs()
+
+#Dashboard statistics for site engineer
+@sitesupervisor_routes.route('/sitesupervisor_boq/dashboard', methods=['GET'])
+@jwt_required
+def get_sitesupervisor_dashboard_route():
+    return get_sitesupervisor_dashboard()

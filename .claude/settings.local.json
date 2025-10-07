@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npm run type-check:*)",
       "Bash(/c/Users/admin/AppData/Local/Programs/Python/Python312/python backend/utils/create_boq_template.py)",
-      "Bash(npm run dev:*)"
+      "Bash(npm run dev:*)",
+      "Bash(timeout 5 bash -c 'until curl -s http://localhost:8000/api/sitesupervisor_boq > /dev/null 2>&1; do sleep 1; done; echo \"\"Server is ready\"\"')"
     ],
     "deny": [],
     "ask": []

@@ -28,21 +28,20 @@ const AnalyticsPage = lazy(() => import('@/pages/common/AnalyticsPage'));
 const WorkflowStatusPage = lazy(() => import('@/pages/common/WorkflowStatusPage'));
 const CreativeErrorPage = lazy(() => import('@/components/ui/CreativeErrorPage'));
 
-// Lazy load procurement pages - Direct imports for proper code splitting
-const ProcurementHub = lazy(() => import('@/roles/procurement/pages/ProcurementHub'));
-const DeliveriesPage = lazy(() => import('@/roles/procurement/pages/DeliveriesPage'));
+// Lazy load procurement pages - Temporarily commented out
+// const ProcurementHub = lazy(() => import('@/roles/procurement/pages/ProcurementHub'));
+// const DeliveriesPage = lazy(() => import('@/roles/procurement/pages/DeliveriesPage'));
 
 // Vendor management pages removed - now handled by role-specific pages
 
 // Lazy load role hubs - Direct import for better code splitting
 const ProjectManagerHub = lazy(() => import('@/roles/project-manager/pages/ProjectManagerHub'));
 const PurchaseApprovalsPage = lazy(() => import('@/roles/project-manager/pages/PurchaseApprovalsPage'));
-const EstimationHub = lazy(() => import('@/roles/estimation/pages/EstimationHub'));
+// const EstimationHub = lazy(() => import('@/roles/estimation/pages/EstimationHub'));
 const EstimatorHub = lazy(() => import('@/roles/estimator/pages/EstimatorHub'));
 const TechnicalDirectorHub = lazy(() => import('@/roles/technical-director/pages/TechnicalDirectorHub'));
-const SiteSupervisorHub = lazy(() => import('@/roles/site-supervisor/pages/SiteSupervisorHub'));
-const MEPSupervisorHub = lazy(() => import('@/roles/mep-supervisor/pages/MEPSupervisorHub'));
-const AccountsHub = lazy(() => import('@/roles/accounts/pages/AccountsHub'));
+// const MEPSupervisorHub = lazy(() => import('@/roles/mep-supervisor/pages/MEPSupervisorHub'));
+// const AccountsHub = lazy(() => import('@/roles/accounts/pages/AccountsHub'));
 
 // Technical Director Pages
 const ProjectApprovals = lazy(() => import('@/roles/technical-director/pages/ProjectApprovals'));
@@ -53,25 +52,21 @@ const ProjectsOverview = lazy(() => import('@/roles/technical-director/pages/Pro
 const MyProjects = lazy(() => import('@/roles/project-manager/pages/MyProjects'));
 
 // Site Engineer Pages
-const SEDashboard = lazy(() => import('@/roles/site-engineer/pages/SEDashboard'));
-const MyProject = lazy(() => import('@/roles/site-engineer/pages/MyProject'));
-const TaskExecution = lazy(() => import('@/roles/site-engineer/pages/TaskExecution'));
-const MaterialUsage = lazy(() => import('@/roles/site-engineer/pages/MaterialUsage'));
-const ReportIssue = lazy(() => import('@/roles/site-engineer/pages/ReportIssue'));
+const SiteEngineerProjects = lazy(() => import('@/roles/site-engineer/pages/MyProjects'));
 
 // Lazy load workflow pages
 const MaterialDispatchProductionPage = lazy(() => import('@/pages/workflows/MaterialDispatchProductionPage'));
 const MaterialDispatchSitePage = lazy(() => import('@/pages/workflows/MaterialDispatchSitePage'));
 
-// Lazy load role-specific vendor management pages
-const PMVendorManagement = lazy(() => import('@/roles/project-manager/pages/PMVendorManagement'));
-const ProcurementVendorReview = lazy(() => import('@/roles/procurement/pages/ProcurementVendorReview'));
-const EstimationVendorCheck = lazy(() => import('@/roles/estimation/pages/EstimationVendorCheck'));
-const TDVendorApproval = lazy(() => import('@/roles/technical-director/pages/TDVendorApproval'));
-const AccountsVendorPayment = lazy(() => import('@/roles/accounts/pages/AccountsVendorPayment'));
+// Lazy load role-specific vendor management pages - Temporarily commented out
+// const PMVendorManagement = lazy(() => import('@/roles/project-manager/pages/PMVendorManagement'));
+// const ProcurementVendorReview = lazy(() => import('@/roles/procurement/pages/ProcurementVendorReview'));
+// const EstimationVendorCheck = lazy(() => import('@/roles/estimation/pages/EstimationVendorCheck'));
+// const TDVendorApproval = lazy(() => import('@/roles/technical-director/pages/TDVendorApproval'));
+// const AccountsVendorPayment = lazy(() => import('@/roles/accounts/pages/AccountsVendorPayment'));
 
-// Vendor forms
-const VendorScopeOfWorkForm = lazy(() => import('@/components/forms/VendorScopeOfWorkForm'));
+// Vendor forms - Temporarily commented out
+// const VendorScopeOfWorkForm = lazy(() => import('@/components/forms/VendorScopeOfWorkForm'));
 
 // Other components
 const RoleRouteWrapper = lazy(() => import('@/components/routing/RoleRouteWrapper'));
@@ -83,46 +78,41 @@ import PageLoader from '@/components/ui/PageLoader';
 // Role-specific Procurement Hub Component
 const RoleSpecificProcurementHub: React.FC = () => {
   const { user } = useAuthStore();
-  
+
   // Get user role (backend sends camelCase: technicalDirector)
   const userRole = (user as any)?.role || '';
   const userRoleLower = userRole.toLowerCase();
-  
+
   console.log('User role from backend:', userRole, 'Lowercase:', userRoleLower);
   // Check if user is Project Manager
   if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' || userRoleLower === 'projectmanager') {
     return <ProjectManagerHub />;
   }
-  
-  if (userRoleLower === 'estimation') {
-    return <EstimationHub />;
-  }
 
   if (userRoleLower === 'estimator') {
     return <EstimatorHub />;
   }
-  
+
   if (userRole === 'technicalDirector' || userRoleLower === 'technical director' || userRoleLower === 'technical_director' || userRoleLower === 'technicaldirector') {
     return <TechnicalDirectorHub />;
   }
-  
-  // Check if user is Site Supervisor
-  if (userRole === 'siteSupervisor' || userRoleLower === 'site supervisor' || userRoleLower === 'site_supervisor' || userRoleLower === 'sitesupervisor') {
-    return <SiteSupervisorHub />;
-  }
 
-  // Check if user is MEP Supervisor
-  if (userRole === 'mepSupervisor' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor' || userRoleLower === 'mepsupervisor') {
-    return <MEPSupervisorHub />;
-  }
-
-  // Check if user is Accounts
-  if (userRoleLower === 'accounts' || userRoleLower === 'account') {
-    return <AccountsHub />;
-  }
-  
-  // Default to ProcurementHub for all other roles
-  return <ProcurementHub />;
+  // Default: Role doesn't have procurement access
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gray-50">
+      <div className="text-center p-8 bg-white rounded-lg shadow-md max-w-md">
+        <div className="mb-4">
+          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Procurement Module</h3>
+        <p className="text-gray-600">
+          Your role does not have access to procurement features.
+        </p>
+      </div>
+    </div>
+  );
 };
 
 // Role-specific Vendor Management Hub Component
@@ -132,31 +122,6 @@ const RoleSpecificVendorHub: React.FC = () => {
   // Get user role (backend sends camelCase: technicalDirector)
   const userRole = (user as any)?.role || '';
   const userRoleLower = userRole.toLowerCase();
-
-  // Check if user is Project Manager - they initiate vendor SOWs
-  if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' || userRoleLower === 'projectmanager') {
-    return <PMVendorManagement />;
-  }
-
-  // Check if user is Procurement - they review vendor SOWs
-  if (userRoleLower === 'procurement') {
-    return <ProcurementVendorReview />;
-  }
-
-  // Check if user is Estimation - they verify vendor list and costs
-  if (userRoleLower === 'estimation') {
-    return <EstimationVendorCheck />;
-  }
-
-  // Check if user is Technical Director - they provide final approval
-  if (userRole === 'technicalDirector' || userRoleLower === 'technical director' || userRoleLower === 'technical_director' || userRoleLower === 'technicaldirector') {
-    return <TDVendorApproval />;
-  }
-
-  // Check if user is Accounts - they process payments
-  if (userRoleLower === 'accounts' || userRoleLower === 'account') {
-    return <AccountsVendorPayment />;
-  }
 
   // Site and MEP Supervisors don't have vendor access - they only handle material purchases
   if (userRole === 'siteSupervisor' || userRoleLower === 'site supervisor' || userRoleLower === 'site_supervisor' || userRoleLower === 'sitesupervisor' ||
@@ -407,24 +372,25 @@ function App() {
               <RoleSpecificProcurementHub />
             } />
 
+            {/* Site Engineer specific routes - MUST come first to avoid conflicts */}
+            <Route path="projects" element={<SiteEngineerProjects />} />
+
             {/* Estimator Routes */}
-            <Route path="projects" element={<EstimatorHub />} />
             <Route path="boq-management" element={<EstimatorHub />} />
 
             {/* Vendor Management Routes - Role-specific vendor hub */}
             <Route path="vendors" element={<RoleSpecificVendorHub />} />
             <Route path="vendor-management" element={<RoleSpecificVendorHub />} />
 
-            {/* Vendor Form Routes */}
-            <Route path="vendors/scope-of-work" element={<VendorScopeOfWorkForm />} />
+            {/* Vendor Form Routes - Temporarily commented out */}
+            {/* <Route path="vendors/scope-of-work" element={<VendorScopeOfWorkForm />} /> */}
 
-            {/* Procurement-specific vendor routes */}
-            <Route path="vendor-sow-review" element={<ProcurementVendorReview />} />
-            <Route path="vendor-quotations" element={<ProcurementVendorReview />} />
+            {/* Procurement-specific vendor routes - Temporarily commented out */}
+            {/* <Route path="vendor-sow-review" element={<ProcurementVendorReview />} /> */}
+            {/* <Route path="vendor-quotations" element={<ProcurementVendorReview />} /> */}
 
             <Route path="purchase/:purchaseId" element={<PurchaseApprovalsPage />} />
-            <Route path="site-supervisor" element={<SiteSupervisorHub />} />
-            <Route path="mep-supervisor" element={<MEPSupervisorHub />} />
+            {/* <Route path="mep-supervisor" element={<MEPSupervisorHub />} /> */}
             <Route path="tasks" element={<TasksPage />} />
             <Route path="process-flow" element={<ProcessFlowPage />} />
             <Route path="workflow-status" element={<WorkflowStatusPage />} />
@@ -441,11 +407,11 @@ function App() {
             {/* Project Manager specific routes */}
             <Route path="my-projects" element={<MyProjects />} />
 
-            {/* Site Engineer specific routes */}
-            <Route path="my-project" element={<MyProject />} />
-            <Route path="task-execution" element={<TaskExecution />} />
-            <Route path="material-usage" element={<MaterialUsage />} />
-            <Route path="report-issue" element={<ReportIssue />} />
+            {/* Site Engineer specific routes - Temporarily commented out */}
+            {/* <Route path="my-project" element={<MyProject />} /> */}
+            {/* <Route path="task-execution" element={<TaskExecution />} /> */}
+            {/* <Route path="material-usage" element={<MaterialUsage />} /> */}
+            {/* <Route path="report-issue" element={<ReportIssue />} /> */}
           </Route>
         </Route>
 

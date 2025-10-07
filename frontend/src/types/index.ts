@@ -7,7 +7,7 @@ export interface BaseEntity {
 
 // User Types - matching database exactly (camelCase)
 export enum UserRole {
-  SITE_SUPERVISOR = 'siteSupervisor',
+  SITE_ENGINEER = 'siteEngineer',
   MEP_SUPERVISOR = 'mepSupervisor',
   PROCUREMENT = 'procurement',
   PROJECT_MANAGER = 'projectManager',

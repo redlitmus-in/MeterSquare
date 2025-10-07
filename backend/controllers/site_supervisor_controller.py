@@ -65,113 +65,118 @@ def create_sitesupervisor():
         }), 500
 
 def get_all_sitesupervisor_boqs():
+    """Get all projects with their BOQ IDs for the Site Engineer"""
     try:
         current_user = g.user
         user_id = current_user['user_id']
 
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 10, type=int), 100)
-
-        # Get all projects assigned to this project manager
-        assigned_projects = db.session.query(Project.project_id).filter(
+        # Get all projects assigned to this site engineer
+        projects = Project.query.filter(
             Project.site_supervisor_id == user_id,
             Project.is_deleted == False
         ).all()
-        # Extract project IDs
-        project_ids = [p.project_id for p in assigned_projects]
-        # Build query - get all BOQs for assigned projects
-        query = db.session.query(BOQ).filter(
-            BOQ.is_deleted == False,
-            BOQ.email_sent == True,
-            BOQ.project_id.in_(project_ids)
-        ).order_by(BOQ.created_at.desc())
-        # Paginate
-        paginated = query.paginate(page=page, per_page=per_page, error_out=False)
-        # Build response with BOQ details and history
-        boqs_list = []
-        for boq in paginated.items:
-            # Get BOQ history (will be empty array if no history)
-            history = BOQHistory.query.filter(
-                BOQHistory.boq_id == boq.boq_id,
-                (BOQHistory.sender_role != 'projectManager') | (BOQHistory.receiver_role != 'siteEngineer')
-            ).order_by(BOQHistory.action_date.desc()).all()
 
-            # Get BOQ details
-            boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+        projects_list = []
+        for project in projects:
+            # Get all BOQs for this project
+            boqs = BOQ.query.filter(
+                BOQ.project_id == project.project_id,
+                BOQ.is_deleted == False,
+                BOQ.email_sent == True
+            ).all()
 
-            # Determine the correct status to display for Project Manager
-            display_status = boq.status
-            for h in history:
-                if h.receiver_role == 'siteEngineer':
-                    # If sitesupervisor is receiver, show as pending
-                    display_status = 'pending'
-                    break
-                elif h.sender_role == 'projectManager':
-                    # If sitesupervisor is sender, show the original status
-                    display_status = h.boq_status
-                    break
+            # Collect BOQ IDs for this project
+            boq_ids = [boq.boq_id for boq in boqs]
 
-            # Serialize history data
-            history_list = []
-            for h in history:
-                history_list.append({
-                    "boq_history_id": h.boq_history_id,
-                    "boq_status": h.boq_status
-                   })
+            # Determine project status from BOQ history
+            project_status = project.status or 'assigned'
 
-            # Serialize boq_details to dictionary
-            boq_details_dict = None
-            if boq_details:
-                boq_details_dict = {
-                    "boq_detail_id": boq_details.boq_detail_id,
-                    "boq_id": boq_details.boq_id,
-                    "total_cost": float(boq_details.total_cost) if boq_details.total_cost else 0.0,
-                    "total_items": int(boq_details.total_items) if boq_details.total_items else 0,
-                    "total_materials": int(boq_details.total_materials) if boq_details.total_materials else 0,
-                    "total_labour": int(boq_details.total_labour) if boq_details.total_labour else 0,
-                    "file_name": boq_details.file_name,
-                    "boq_details": boq_details.boq_details,  # This is already a JSONB/dict
-                    "created_at": boq_details.created_at.isoformat() if boq_details.created_at else None,
-                    "created_by": boq_details.created_by
-                }
+            # Check if any BOQs exist and have history
+            if boqs:
+                for boq in boqs:
+                    history = BOQHistory.query.filter_by(
+                        boq_id=boq.boq_id
+                    ).order_by(BOQHistory.action_date.desc()).first()
 
-            boq_data = {
-                "boq_id": boq.boq_id,
-                "project_id": boq.project_id,
-                "user_id" : boq.project.user_id,
-                "user_name" : current_user['full_name'],
-                "boq_name": boq.boq_name,
-                "status": display_status,  # Use the determined status based on role
-                "created_at": boq.created_at.isoformat() if boq.created_at else None,
-                "created_by": boq.created_by,
-                "last_modified_at": boq.last_modified_at.isoformat() if boq.last_modified_at else None,
-                "last_modified_by": boq.last_modified_by,
-                "email_sent": boq.email_sent,
-                "project_name": boq.project.project_name if boq.project else None,
-                "history": history_list,  # Will be [] if no history exists
-                "boq_details": boq_details_dict  # Now properly serialized
-            }
-            boqs_list.append(boq_data)
+                    if history and history.receiver_role == 'site_engineer':
+                        # Site engineer is the receiver - show as assigned/pending
+                        project_status = 'assigned'
+                        break
+
+            projects_list.append({
+                "project_id": project.project_id,
+                "project_name": project.project_name,
+                "client": project.client,
+                "location": project.location,
+                "start_date": project.start_date.isoformat() if project.start_date else None,
+                "end_date": project.end_date.isoformat() if project.end_date else None,
+                "status": project_status,
+                "description": project.description,
+                "created_at": project.created_at.isoformat() if project.created_at else None,
+                "priority": getattr(project, 'priority', 'medium'),
+                "boq_ids": boq_ids  # List of BOQ IDs for reference
+            })
 
         return jsonify({
-            "boqs": boqs_list,
-            "pagination": {
-                "page": page,
-                "per_page": per_page,
-                "total": paginated.total,
-                "pages": paginated.pages,
-                "has_prev": paginated.has_prev,
-                "has_next": paginated.has_next
-            }
+            "success": True,
+            "projects": projects_list,
+            "total": len(projects_list)
         }), 200
 
     except Exception as e:
         import traceback
-        log.error(f"Error fetching BOQs: {str(e)}")
+        log.error(f"Error fetching site engineer projects: {str(e)}")
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({
-            "error": f"Failed to fetch BOQs: {str(e)}",
+            "error": f"Failed to fetch projects: {str(e)}",
             "error_type": type(e).__name__
+        }), 500
+
+def get_sitesupervisor_dashboard():
+    """Get dashboard statistics for Site Engineer"""
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+
+        # Get all projects assigned to this site engineer
+        projects = Project.query.filter(
+            Project.site_supervisor_id == user_id,
+            Project.is_deleted == False
+        ).all()
+
+        # Count projects by status
+        total_projects = len(projects)
+        assigned_projects = 0
+        ongoing_projects = 0
+        completed_projects = 0
+
+        for project in projects:
+            status = (project.status or '').lower()
+            if status in ['assigned', 'pending']:
+                assigned_projects += 1
+            elif status in ['in_progress', 'active']:
+                ongoing_projects += 1
+            elif status == 'completed':
+                completed_projects += 1
+            else:
+                assigned_projects += 1  # Default to assigned
+
+        return jsonify({
+            "success": True,
+            "stats": {
+                "total_projects": total_projects,
+                "assigned_projects": assigned_projects,
+                "ongoing_projects": ongoing_projects,
+                "completed_projects": completed_projects
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching dashboard stats: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to fetch dashboard stats: {str(e)}"
         }), 500
 
 def get_all_sitesupervisor():

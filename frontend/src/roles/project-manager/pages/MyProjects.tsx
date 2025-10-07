@@ -139,11 +139,11 @@ const MyProjects: React.FC = () => {
         const effectiveStatus = hasSiteSupervisor ? 'assigned' : (boq.boq_status || 'pending');
 
         // Fetch BOQ summary without items (lightweight)
-        let boqDetails = null;
+        let boqDetails: BOQDetails | undefined = undefined;
         try {
           const detailsResponse = await estimatorService.getBOQById(boq.boq_id);
           if (detailsResponse.success && detailsResponse.data) {
-            const data = detailsResponse.data;
+            const data: any = detailsResponse.data;
             boqDetails = {
               boq_detail_id: boq.boq_id,
               total_cost: data.summary?.total_cost || data.total_cost || 0,
@@ -241,14 +241,15 @@ const MyProjects: React.FC = () => {
           estimatedSellingPrice: item.selling_price || item.estimatedSellingPrice || item.estimated_selling_price || item.amount
         })) || [];
 
+        const boqDataAny: any = boqData;
         const boqDetails: BOQDetails = {
           boq_detail_id: boqId,
-          total_cost: boqData.summary?.total_cost || boqData.total_cost || 0,
-          total_items: boqData.summary?.total_items || boqData.items?.length || 0,
-          total_materials: boqData.summary?.total_material_cost || boqData.total_material_cost || 0,
-          total_labour: boqData.summary?.total_labour_cost || boqData.total_labour_cost || 0,
-          overhead_percentage: boqData.overhead_percentage || 10,
-          profit_margin_percentage: boqData.profit_margin_percentage || 15
+          total_cost: boqDataAny.summary?.total_cost || boqDataAny.total_cost || 0,
+          total_items: boqDataAny.summary?.total_items || boqDataAny.items?.length || 0,
+          total_materials: boqDataAny.summary?.total_material_cost || boqDataAny.total_material_cost || 0,
+          total_labour: boqDataAny.summary?.total_labour_cost || boqDataAny.total_labour_cost || 0,
+          overhead_percentage: boqDataAny.overhead_percentage || 10,
+          profit_margin_percentage: boqDataAny.profit_margin_percentage || 15
         };
 
         // Update selected project
