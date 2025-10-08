@@ -17,7 +17,8 @@ import {
   ArrowDownTrayIcon,
   UserPlusIcon,
   TableCellsIcon,
-  Squares2X2Icon
+  Squares2X2Icon,
+  TrashIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
@@ -637,6 +638,30 @@ const ProjectApprovals: React.FC = () => {
       toast.dismiss();
       console.error('Assign PM error:', error);
       toast.error('Failed to assign Project Manager');
+    }
+  };
+
+  const handleDeletePM = async (userId: number, pmName: string) => {
+    // Confirm deletion
+    const confirmed = window.confirm(`Are you sure you want to delete Project Manager "${pmName}"? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      toast.loading('Deleting Project Manager...');
+      const response = await tdService.deletePM(userId);
+
+      toast.dismiss();
+      if (response.success) {
+        toast.success('Project Manager deleted successfully');
+        // Reload PMs list
+        await loadPMs();
+      } else {
+        toast.error(response.message);
+      }
+    } catch (error) {
+      toast.dismiss();
+      console.error('Delete PM error:', error);
+      toast.error('Failed to delete Project Manager');
     }
   };
 
@@ -1982,6 +2007,19 @@ const ProjectApprovals: React.FC = () => {
                                         className="text-xs text-[#243d8a] hover:underline font-medium whitespace-nowrap"
                                       >
                                         {expandedPMId === pm.user_id ? 'Hide' : 'View'}
+                                      </button>
+                                    )}
+                                    {/* Only show delete button for PMs with no assigned projects */}
+                                    {projectCount === 0 && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDeletePM(pm.user_id, pm.pm_name || pm.full_name);
+                                        }}
+                                        className="p-1.5 rounded-lg hover:bg-red-100 text-red-600 transition-colors"
+                                        title="Delete PM"
+                                      >
+                                        <TrashIcon className="w-4 h-4" />
                                       </button>
                                     )}
                                     {isSelected && (
