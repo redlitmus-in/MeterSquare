@@ -91,6 +91,7 @@ const ProjectApprovals: React.FC = () => {
   const [boqs, setBOQs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingBOQDetails, setLoadingBOQDetails] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showFormatModal, setShowFormatModal] = useState(false);
   const [downloadType, setDownloadType] = useState<'internal' | 'client'>('internal');
@@ -241,13 +242,14 @@ const ProjectApprovals: React.FC = () => {
       emailSent: boq.email_sent || false,
       projectId: boq.project_id,
       pmAssigned: !!boq.user_id, // Convert to boolean - user_id indicates PM is assigned to project
-      boqItems: boq.items?.map((item: any) => {
+      // Support both old format (items) and new format (existing_purchase/new_purchase)
+      existingItems: (boq.existing_purchase?.items || boq.items)?.map((item: any) => {
         const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
         const sellingPrice = item.selling_price || 0;
         const calculatedRate = totalQuantity > 0 ? sellingPrice / totalQuantity : sellingPrice;
 
         return {
-          id: item.item_id,
+          id: item.master_item_id || item.item_id,
           description: item.item_name,
           briefDescription: item.description || '',
           unit: item.materials?.[0]?.unit || 'nos',
@@ -269,9 +271,109 @@ const ProjectApprovals: React.FC = () => {
             amount: lab.total_cost
           })) || [],
           laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
-          estimatedSellingPrice: item.selling_price || 0
+          estimatedSellingPrice: item.selling_price || 0,
+          isNew: false // Mark as existing item
         };
-      }) || []
+      }) || [],
+      newItems: boq.new_purchase?.items?.map((item: any) => {
+        const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
+        const sellingPrice = item.selling_price || 0;
+        const calculatedRate = totalQuantity > 0 ? sellingPrice / totalQuantity : sellingPrice;
+
+        return {
+          id: item.master_item_id || item.item_id,
+          description: item.item_name,
+          briefDescription: item.description || '',
+          unit: item.materials?.[0]?.unit || 'nos',
+          quantity: totalQuantity,
+          rate: calculatedRate,
+          amount: sellingPrice,
+          materials: item.materials?.map((mat: any) => ({
+            name: mat.material_name,
+            quantity: mat.quantity,
+            unit: mat.unit,
+            rate: mat.unit_price,
+            amount: mat.total_price
+          })) || [],
+          labour: item.labour?.map((lab: any) => ({
+            type: lab.labour_role,
+            quantity: lab.hours,
+            unit: 'hrs',
+            rate: lab.rate_per_hour,
+            amount: lab.total_cost
+          })) || [],
+          laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+          estimatedSellingPrice: item.selling_price || 0,
+          isNew: true // Mark as new item
+        };
+      }) || [],
+      // Keep boqItems for backward compatibility (combine existing + new)
+      boqItems: [
+        ...((boq.existing_purchase?.items || boq.items)?.map((item: any) => {
+          const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
+          const sellingPrice = item.selling_price || 0;
+          const calculatedRate = totalQuantity > 0 ? sellingPrice / totalQuantity : sellingPrice;
+
+          return {
+            id: item.item_id,
+            description: item.item_name,
+            briefDescription: item.description || '',
+            unit: item.materials?.[0]?.unit || 'nos',
+            quantity: totalQuantity,
+            rate: calculatedRate,
+            amount: sellingPrice,
+            materials: item.materials?.map((mat: any) => ({
+              name: mat.material_name,
+              quantity: mat.quantity,
+              unit: mat.unit,
+              rate: mat.unit_price,
+              amount: mat.total_price
+            })) || [],
+            labour: item.labour?.map((lab: any) => ({
+              type: lab.labour_role,
+              quantity: lab.hours,
+              unit: 'hrs',
+              rate: lab.rate_per_hour,
+              amount: lab.total_cost
+            })) || [],
+            laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+            estimatedSellingPrice: item.selling_price || 0,
+            isNew: false
+          };
+        }) || []),
+        ...(boq.new_purchase?.items?.map((item: any) => {
+          const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
+          const sellingPrice = item.selling_price || 0;
+          const calculatedRate = totalQuantity > 0 ? sellingPrice / totalQuantity : sellingPrice;
+
+          return {
+            id: item.item_id,
+            description: item.item_name,
+            briefDescription: item.description || '',
+            unit: item.materials?.[0]?.unit || 'nos',
+            quantity: totalQuantity,
+            rate: calculatedRate,
+            amount: sellingPrice,
+            materials: item.materials?.map((mat: any) => ({
+              name: mat.material_name,
+              quantity: mat.quantity,
+              unit: mat.unit,
+              rate: mat.unit_price,
+              amount: mat.total_price
+            })) || [],
+            labour: item.labour?.map((lab: any) => ({
+              type: lab.labour_role,
+              quantity: lab.hours,
+              unit: 'hrs',
+              rate: lab.rate_per_hour,
+              amount: lab.total_cost
+            })) || [],
+            laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+            estimatedSellingPrice: item.selling_price || 0,
+            isNew: true
+          };
+        }) || [])
+      ]
     };
   };
 
@@ -318,7 +420,14 @@ const ProjectApprovals: React.FC = () => {
   // Transform BOQs to estimations
   const estimations = boqs.map(transformBOQToEstimation);
 
-  const filteredEstimations = estimations.filter(est => {
+  // Sort by submittedDate - most recent first
+  const sortedEstimations = estimations.sort((a, b) => {
+    const dateA = new Date(a.submittedDate || 0).getTime();
+    const dateB = new Date(b.submittedDate || 0).getTime();
+    return dateB - dateA; // Descending order (newest first)
+  });
+
+  const filteredEstimations = sortedEstimations.filter(est => {
     if (filterStatus === 'pending') {
       // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
       return est.status === 'pending' && !est.pmAssigned;
@@ -374,8 +483,9 @@ const ProjectApprovals: React.FC = () => {
 
   // Final approval after TD reviews comparison
   const handleFinalApproval = async () => {
-    if (!selectedEstimation) return;
+    if (!selectedEstimation || isApproving) return;
 
+    setIsApproving(true);
     try {
       const response = await tdService.approveBOQ(selectedEstimation.id, approvalNotes);
       if (response.success) {
@@ -391,6 +501,8 @@ const ProjectApprovals: React.FC = () => {
     } catch (error) {
       console.error('Approval error:', error);
       toast.error('Failed to approve BOQ');
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -1061,17 +1173,24 @@ const ProjectApprovals: React.FC = () => {
               </div>
 
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
-                {/* BOQ Items */}
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Bill of Quantities - Items</h3>
-
                 {loadingBOQDetails ? (
                   <div className="flex items-center justify-center py-12">
                     <ModernLoadingSpinners variant="pulse-wave" />
                   </div>
-                ) : selectedEstimation.boqItems && selectedEstimation.boqItems.length > 0 ? (
-                  <div className="space-y-4">
-                    {selectedEstimation.boqItems.map((item, index) => (
-                      <div key={item.id} className="border border-gray-200 rounded-xl p-4 hover:shadow-md transition-all">
+                ) : (
+                  <>
+                    {/* Existing BOQ Items */}
+                    {selectedEstimation.existingItems && selectedEstimation.existingItems.length > 0 && (
+                      <div className="mb-8">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-lg font-bold text-gray-900">Existing BOQ Items</h3>
+                          <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+                            {selectedEstimation.existingItems.length} Items
+                          </span>
+                        </div>
+                        <div className="space-y-4">
+                          {selectedEstimation.existingItems.map((item, index) => (
+                            <div key={item.id} className="border border-blue-200 rounded-xl p-4 bg-blue-50/30 hover:shadow-md transition-all">
                         <div className="flex items-start justify-between mb-3">
                           <div className="flex-1">
                             <h4 className="font-bold text-gray-900">
@@ -1156,13 +1275,124 @@ const ProjectApprovals: React.FC = () => {
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 bg-gray-50 rounded-lg">
-                    <DocumentTextIcon className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                    <p className="text-gray-500">No BOQ items available</p>
-                  </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {/* New Purchase Items */}
+                    {selectedEstimation.newItems && selectedEstimation.newItems.length > 0 && (
+                      <div className="mb-8">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-lg font-bold text-gray-900">New Purchase Items</h3>
+                          <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
+                            {selectedEstimation.newItems.length} Items
+                          </span>
+                        </div>
+                        <div className="space-y-4">
+                          {selectedEstimation.newItems.map((item, index) => (
+                            <div key={item.id} className="border border-purple-200 rounded-xl p-4 bg-purple-50/30 hover:shadow-md transition-all">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="font-bold text-gray-900">
+                                      {item.description}
+                                    </h4>
+                                    <span className="px-2 py-0.5 text-xs bg-purple-200 text-purple-800 rounded font-semibold">NEW</span>
+                                  </div>
+                                  {item.briefDescription && (
+                                    <p className="text-sm text-gray-600 mt-1">{item.briefDescription}</p>
+                                  )}
+                                  <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
+                                    <span>Qty: {item.quantity} {item.unit}</span>
+                                    <span>Rate: AED{item.rate}/{item.unit}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Materials Breakdown - Purple Theme */}
+                              <div className="bg-purple-50 rounded-lg p-3 mb-3 border border-purple-200">
+                                <p className="text-sm font-semibold text-purple-900 mb-2">+ Raw Materials</p>
+                                <div className="space-y-1">
+                                  {item.materials.map((material, mIndex) => (
+                                    <div key={mIndex} className="flex items-center justify-between text-sm">
+                                      <span className="text-gray-700">
+                                        {material.name} ({material.quantity} {material.unit})
+                                      </span>
+                                      <span className="font-medium text-gray-900">
+                                        Est. Cost: AED{material.amount.toLocaleString()}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="border-t border-purple-200 mt-2 pt-2">
+                                  <div className="flex justify-between text-sm font-semibold">
+                                    <span className="text-purple-900">Total Materials:</span>
+                                    <span className="text-purple-900">AED{item.materials.reduce((sum, m) => sum + m.amount, 0).toLocaleString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Labour Breakdown */}
+                              <div className="bg-green-50 rounded-lg p-3 mb-3">
+                                <p className="text-sm font-semibold text-green-900 mb-2">+ Labour</p>
+                                <div className="space-y-1">
+                                  {item.labour && item.labour.map((labor, lIndex) => (
+                                    <div key={lIndex} className="flex items-center justify-between text-sm">
+                                      <span className="text-gray-700">
+                                        {labor.type} ({labor.quantity} {labor.unit})
+                                      </span>
+                                      <span className="font-medium text-gray-900">
+                                        Est. Cost: AED{labor.amount.toLocaleString()}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="border-t border-green-200 mt-2 pt-2">
+                                  <div className="flex justify-between text-sm font-semibold">
+                                    <span className="text-green-900">Total Labour:</span>
+                                    <span className="text-green-900">AED{item.laborCost.toLocaleString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Overheads & Profit */}
+                              <div className="bg-yellow-50 rounded-lg p-3 mb-3">
+                                <p className="text-sm font-semibold text-gray-900 mb-2">+ Overheads & Profit</p>
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Overhead ({selectedEstimation.overheadPercentage}%)</span>
+                                    <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * selectedEstimation.overheadPercentage / 100).toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Profit Margin ({selectedEstimation.profitMargin}%)</span>
+                                    <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * selectedEstimation.profitMargin / 100).toLocaleString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Estimated Selling Price */}
+                              <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg p-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-bold text-gray-900">Estimated Selling Price:</span>
+                                  <span className="text-xl font-bold text-green-900">AED{item.estimatedSellingPrice.toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Fallback: No items message */}
+                    {(!selectedEstimation.existingItems || selectedEstimation.existingItems.length === 0) &&
+                     (!selectedEstimation.newItems || selectedEstimation.newItems.length === 0) && (
+                      <div className="text-center py-8 bg-gray-50 rounded-lg">
+                        <DocumentTextIcon className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                        <p className="text-gray-500">No BOQ items available</p>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Cost Summary */}
@@ -1777,26 +2007,46 @@ const ProjectApprovals: React.FC = () => {
                   <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
                     <h3 className="font-bold text-gray-900 mb-3">Cost Breakdown</h3>
                     <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Material Cost:</span>
-                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.materialCost)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Labour Cost:</span>
-                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.laborCost)}</span>
-                      </div>
-                      <div className="flex justify-between pt-2 border-t">
-                        <span className="text-gray-600">Base Cost:</span>
-                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.materialCost + selectedEstimation.laborCost)}</span>
-                      </div>
-                      <div className="flex justify-between bg-gray-100 p-2 rounded opacity-40">
-                        <span className="text-gray-500 line-through">Overhead & Profit:</span>
-                        <span className="text-gray-500 line-through">Hidden from client</span>
-                      </div>
-                      <div className="flex justify-between pt-3 border-t-2 border-blue-300 mt-2">
-                        <span className="text-lg font-bold text-gray-900">Total:</span>
-                        <span className="text-lg font-bold text-green-600">AED{formatCurrency(selectedEstimation.materialCost + selectedEstimation.laborCost)}</span>
-                      </div>
+                      {(() => {
+                        const baseCost = selectedEstimation.materialCost + selectedEstimation.laborCost;
+                        const overheadAmount = baseCost * selectedEstimation.overheadPercentage / 100;
+                        const profitAmount = baseCost * selectedEstimation.profitMargin / 100;
+                        const totalMarkup = overheadAmount + profitAmount;
+                        const sellingPrice = baseCost + totalMarkup;
+
+                        // Distribute markup proportionally to materials and labor
+                        const materialRatio = selectedEstimation.materialCost / baseCost;
+                        const laborRatio = selectedEstimation.laborCost / baseCost;
+                        const materialMarkupShare = totalMarkup * materialRatio;
+                        const laborMarkupShare = totalMarkup * laborRatio;
+                        const adjustedMaterialCost = selectedEstimation.materialCost + materialMarkupShare;
+                        const adjustedLaborCost = selectedEstimation.laborCost + laborMarkupShare;
+
+                        return (
+                          <>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Material Cost:</span>
+                              <span className="font-semibold">AED{formatCurrency(adjustedMaterialCost)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Labour Cost:</span>
+                              <span className="font-semibold">AED{formatCurrency(adjustedLaborCost)}</span>
+                            </div>
+                            <div className="flex justify-between pt-2 border-t">
+                              <span className="text-gray-600">Base Cost:</span>
+                              <span className="font-semibold">AED{formatCurrency(sellingPrice)}</span>
+                            </div>
+                            <div className="flex justify-between bg-gray-100 p-2 rounded opacity-40">
+                              <span className="text-gray-500 line-through">Overhead & Profit:</span>
+                              <span className="text-gray-500 line-through">Hidden from client</span>
+                            </div>
+                            <div className="flex justify-between pt-3 border-t-2 border-blue-300 mt-2">
+                              <span className="text-lg font-bold text-gray-900">Total:</span>
+                              <span className="text-lg font-bold text-green-600">AED{formatCurrency(sellingPrice)}</span>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -1813,16 +2063,30 @@ const ProjectApprovals: React.FC = () => {
                         setShowComparisonModal(false);
                         setApprovalNotes('');
                       }}
-                      className="px-6 py-2.5 bg-gray-500 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors"
+                      disabled={isApproving}
+                      className={`px-6 py-2.5 ${isApproving ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-500 hover:bg-gray-600'} text-white rounded-lg font-medium transition-colors`}
                     >
                       Cancel
                     </button>
                     <button
                       onClick={handleFinalApproval}
-                      className="px-6 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                      disabled={isApproving}
+                      className={`px-6 py-2.5 ${isApproving ? 'bg-green-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600'} text-white rounded-lg font-medium transition-colors flex items-center gap-2`}
                     >
-                      <CheckCircleIcon className="w-5 h-5" />
-                      Approve
+                      {isApproving ? (
+                        <>
+                          <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Approving...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircleIcon className="w-5 h-5" />
+                          Approve
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>

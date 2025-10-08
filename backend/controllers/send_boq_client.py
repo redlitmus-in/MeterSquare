@@ -65,8 +65,8 @@ def send_boq_to_client():
         if grand_total == 0:
             grand_total = boq_details.total_cost or (total_material_cost + total_labour_cost)
 
-        # Calculate CLIENT VERSION - Base cost only (material + labor, NO overhead/profit)
-        client_base_cost = total_material_cost + total_labour_cost
+        # Calculate CLIENT VERSION - Selling price (includes overhead/profit distributed)
+        client_total_value = grand_total  # Client sees same total as internal, just distributed differently
 
         # Get project data from relationship
         project = boq.project
@@ -92,22 +92,22 @@ def send_boq_to_client():
 
         if 'excel' in formats:
             excel_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.xlsx"
-            excel_data = generate_client_excel(project, items, total_material_cost, total_labour_cost, client_base_cost)
+            excel_data = generate_client_excel(project, items, total_material_cost, total_labour_cost, grand_total)
             excel_file = (excel_filename, excel_data)
 
         if 'pdf' in formats:
             pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
-            pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, client_base_cost)
+            pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total)
             pdf_file = (pdf_filename, pdf_data)
 
-        # Send email - Pass CLIENT BASE COST (not selling price)
+        # Send email - Pass selling price (overhead/profit distributed)
         email_service = BOQEmailService()
         email_sent = email_service.send_boq_to_client(
             boq_data=boq_data,
             project_data=project_data,
             client_email=client_email,
             message=message,
-            total_value=client_base_cost,  # CLIENT VERSION: Base cost only
+            total_value=client_total_value,  # CLIENT VERSION: Same total, distributed markup
             item_count=len(items),
             excel_file=excel_file,
             pdf_file=pdf_file
@@ -226,7 +226,7 @@ def send_boq_to_client():
 
 
 def generate_client_excel(project, items, total_material_cost, total_labour_cost, client_base_cost):
-    """Generate Client Excel file from JSON data"""
+    """Generate Client Excel file from JSON data - Overhead & Profit distributed into materials and labor"""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Complete BOQ Client"
@@ -261,6 +261,10 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     ws[f'A{row}'].font = sub_header_font
     row += 2
 
+    # Calculate adjusted totals for summary
+    adjusted_total_material_cost = 0
+    adjusted_total_labour_cost = 0
+
     for idx, item in enumerate(items, 1):
         # Item header
         ws[f'A{row}'] = f"{idx}. {item.get('item_name', 'N/A')}"
@@ -272,8 +276,31 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
             row += 1
         row += 1
 
-        # Materials
+        # Calculate item costs
+        item_material_cost = sum([m.get('total_price', 0) for m in item.get('materials', [])])
+        item_labour_cost = sum([l.get('total_cost', 0) for l in item.get('labour', [])])
+        item_base_cost = item_material_cost + item_labour_cost
+
+        # Get overhead and profit for this item
+        item_overhead = item.get('overhead_amount', 0)
+        item_profit = item.get('profit_margin_amount', 0)
+        item_total_markup = item_overhead + item_profit
+
+        # Calculate distribution ratio (50% to materials, 50% to labor if both exist)
         materials = item.get('materials', [])
+        labour = item.get('labour', [])
+
+        if item_base_cost > 0:
+            material_ratio = item_material_cost / item_base_cost if item_base_cost > 0 else 0
+            labour_ratio = item_labour_cost / item_base_cost if item_base_cost > 0 else 0
+
+            material_markup_share = item_total_markup * material_ratio
+            labour_markup_share = item_total_markup * labour_ratio
+        else:
+            material_markup_share = 0
+            labour_markup_share = 0
+
+        # Materials with distributed markup
         if materials:
             ws[f'A{row}'] = "+ RAW MATERIALS"
             ws[f'A{row}'].font = Font(bold=True)
@@ -288,21 +315,28 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
 
             material_total = 0
             for mat in materials:
+                original_price = mat.get('total_price', 0)
+                # Distribute markup proportionally to each material
+                mat_share = (original_price / item_material_cost * material_markup_share) if item_material_cost > 0 else 0
+                adjusted_price = original_price + mat_share
+                adjusted_rate = mat.get('unit_price', 0) + (mat_share / mat.get('quantity', 1) if mat.get('quantity', 0) > 0 else 0)
+
                 ws[f'A{row}'] = mat.get('material_name', 'N/A')
                 ws[f'B{row}'] = mat.get('quantity', 0)
                 ws[f'C{row}'] = mat.get('unit', '')
-                ws[f'D{row}'] = mat.get('rate_per_unit', 0)
-                ws[f'E{row}'] = mat.get('total_price', 0)
-                material_total += mat.get('total_price', 0)
+                ws[f'D{row}'] = round(adjusted_rate, 2)
+                ws[f'E{row}'] = round(adjusted_price, 2)
+                material_total += adjusted_price
                 row += 1
 
             ws[f'A{row}'] = "Total Materials:"
-            ws[f'E{row}'] = material_total
+            ws[f'E{row}'] = round(material_total, 2)
             ws[f'A{row}'].font = Font(bold=True)
             row += 2
 
-        # Labour
-        labour = item.get('labour', [])
+            adjusted_total_material_cost += material_total
+
+        # Labour with distributed markup
         if labour:
             ws[f'A{row}'] = "+ LABOUR"
             ws[f'A{row}'].font = Font(bold=True)
@@ -317,27 +351,31 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
 
             labour_total = 0
             for lab in labour:
+                original_cost = lab.get('total_cost', 0)
+                # Distribute markup proportionally to each labor
+                lab_share = (original_cost / item_labour_cost * labour_markup_share) if item_labour_cost > 0 else 0
+                adjusted_cost = original_cost + lab_share
+                adjusted_rate = lab.get('rate_per_hour', 0) + (lab_share / lab.get('hours', 1) if lab.get('hours', 0) > 0 else 0)
+
                 ws[f'A{row}'] = lab.get('labour_role', 'N/A')
-                ws[f'B{row}'] = lab.get('no_of_hours', 0)
+                ws[f'B{row}'] = lab.get('hours', 0)
                 ws[f'C{row}'] = "hours"
-                ws[f'D{row}'] = lab.get('rate_per_hour', 0)
-                ws[f'E{row}'] = lab.get('total_cost', 0)
-                labour_total += lab.get('total_cost', 0)
+                ws[f'D{row}'] = round(adjusted_rate, 2)
+                ws[f'E{row}'] = round(adjusted_cost, 2)
+                labour_total += adjusted_cost
                 row += 1
 
             ws[f'A{row}'] = "Total Labour:"
-            ws[f'E{row}'] = labour_total
+            ws[f'E{row}'] = round(labour_total, 2)
             ws[f'A{row}'].font = Font(bold=True)
             row += 2
 
-        # Calculate base cost for this item (material + labor only, NO profit/overhead)
-        item_material_cost = sum([m.get('total_price', 0) for m in item.get('materials', [])])
-        item_labour_cost = sum([l.get('total_cost', 0) for l in item.get('labour', [])])
-        item_base_cost = item_material_cost + item_labour_cost
+            adjusted_total_labour_cost += labour_total
 
-        # Total Price (Client Version - Base Cost Only)
+        # Total Price (Client Version - with markup distributed)
+        item_total_with_markup = item.get('selling_price', item_base_cost + item_total_markup)
         ws[f'A{row}'] = "TOTAL PRICE:"
-        ws[f'E{row}'] = item_base_cost
+        ws[f'E{row}'] = round(item_total_with_markup, 2)
         ws[f'A{row}'].font = Font(bold=True, color="10B981")
         row += 3
 
@@ -347,16 +385,16 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     ws[f'A{row}'].font = Font(bold=True, size=12)
     row += 2
     ws[f'A{row}'] = "Total Material Cost:"
-    ws[f'B{row}'] = total_material_cost
+    ws[f'B{row}'] = round(adjusted_total_material_cost, 2)
     row += 1
     ws[f'A{row}'] = "Total Labor Cost:"
-    ws[f'B{row}'] = total_labour_cost
+    ws[f'B{row}'] = round(adjusted_total_labour_cost, 2)
     row += 1
-    ws[f'A{row}'] = "Base Cost (Material + Labor):"
-    ws[f'B{row}'] = total_material_cost + total_labour_cost
+    ws[f'A{row}'] = "Total Project Cost:"
+    ws[f'B{row}'] = round(adjusted_total_material_cost + adjusted_total_labour_cost, 2)
     row += 2
     ws[f'A{row}'] = "TOTAL PROJECT VALUE:"
-    ws[f'B{row}'] = client_base_cost  # Client version: Base cost only
+    ws[f'B{row}'] = round(adjusted_total_material_cost + adjusted_total_labour_cost, 2)
     ws[f'A{row}'].font = Font(bold=True, size=12, color="10B981")
 
     # Column widths
@@ -373,8 +411,8 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     return excel_buffer.read()
 
 
-def generate_client_pdf(project, items, total_material_cost, total_labour_cost, client_base_cost):
-    """Generate Client PDF file from JSON data - Detailed version matching download format"""
+def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total):
+    """Generate Client PDF file from JSON data - Overhead & Profit distributed into materials and labor"""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=30, bottomMargin=30)
     elements = []
@@ -439,6 +477,10 @@ def generate_client_pdf(project, items, total_material_cost, total_labour_cost, 
     elements.append(Paragraph("<b>DETAILED BOQ ITEMS</b>", item_header_style))
     elements.append(Spacer(1, 10))
 
+    # Calculate adjusted totals for summary
+    adjusted_total_material_cost = 0
+    adjusted_total_labour_cost = 0
+
     # Process each item
     for idx, item in enumerate(items, 1):
         # Item Header
@@ -463,21 +505,50 @@ def generate_client_pdf(project, items, total_material_cost, total_labour_cost, 
             elements.append(Paragraph(item['description'], desc_style))
             elements.append(Spacer(1, 6))
 
-        # Materials Table
+        # Calculate item costs
         materials = item.get('materials', [])
+        labour = item.get('labour', [])
+
+        item_material_cost = sum([m.get('total_price', 0) for m in materials])
+        item_labour_cost = sum([l.get('total_cost', 0) for l in labour])
+        item_base_cost = item_material_cost + item_labour_cost
+
+        # Get overhead and profit for this item
+        item_overhead = item.get('overhead_amount', 0)
+        item_profit = item.get('profit_margin_amount', 0)
+        item_total_markup = item_overhead + item_profit
+
+        # Calculate distribution ratio
+        if item_base_cost > 0:
+            material_ratio = item_material_cost / item_base_cost
+            labour_ratio = item_labour_cost / item_base_cost
+            material_markup_share = item_total_markup * material_ratio
+            labour_markup_share = item_total_markup * labour_ratio
+        else:
+            material_markup_share = 0
+            labour_markup_share = 0
+
+        # Materials Table with distributed markup
         if materials:
             elements.append(Paragraph("<b>Materials:</b>", styles['Normal']))
             elements.append(Spacer(1, 4))
 
             material_data = [['Material Name', 'Quantity', 'Unit', 'Rate (AED)', 'Amount (AED)']]
+            material_total = 0
             for mat in materials:
+                original_price = mat.get('total_price', 0)
+                mat_share = (original_price / item_material_cost * material_markup_share) if item_material_cost > 0 else 0
+                adjusted_price = original_price + mat_share
+                adjusted_rate = mat.get('unit_price', 0) + (mat_share / mat.get('quantity', 1) if mat.get('quantity', 0) > 0 else 0)
+
                 material_data.append([
                     mat.get('material_name', 'N/A'),
                     f"{mat.get('quantity', 0):.2f}",
                     mat.get('unit', ''),
-                    f"{mat.get('unit_price', 0):.2f}",
-                    f"{mat.get('total_price', 0):.2f}"
+                    f"{adjusted_rate:.2f}",
+                    f"{adjusted_price:.2f}"
                 ])
+                material_total += adjusted_price
 
             material_table = Table(material_data, colWidths=[2.5*inch, 0.8*inch, 0.6*inch, 0.9*inch, 1*inch])
             material_table.setStyle(TableStyle([
@@ -493,21 +564,28 @@ def generate_client_pdf(project, items, total_material_cost, total_labour_cost, 
             ]))
             elements.append(material_table)
             elements.append(Spacer(1, 8))
+            adjusted_total_material_cost += material_total
 
-        # Labour Table
-        labour = item.get('labour', [])
+        # Labour Table with distributed markup
         if labour:
             elements.append(Paragraph("<b>Labour:</b>", styles['Normal']))
             elements.append(Spacer(1, 4))
 
             labour_data = [['Labour Role', 'Hours', 'Rate/Hour (AED)', 'Total (AED)']]
+            labour_total = 0
             for lab in labour:
+                original_cost = lab.get('total_cost', 0)
+                lab_share = (original_cost / item_labour_cost * labour_markup_share) if item_labour_cost > 0 else 0
+                adjusted_cost = original_cost + lab_share
+                adjusted_rate = lab.get('rate_per_hour', 0) + (lab_share / lab.get('hours', 1) if lab.get('hours', 0) > 0 else 0)
+
                 labour_data.append([
                     lab.get('labour_role', 'N/A'),
                     f"{lab.get('hours', 0):.2f}",
-                    f"{lab.get('rate_per_hour', 0):.2f}",
-                    f"{lab.get('total_cost', 0):.2f}"
+                    f"{adjusted_rate:.2f}",
+                    f"{adjusted_cost:.2f}"
                 ])
+                labour_total += adjusted_cost
 
             labour_table = Table(labour_data, colWidths=[2.5*inch, 1*inch, 1.2*inch, 1.1*inch])
             labour_table.setStyle(TableStyle([
@@ -523,11 +601,10 @@ def generate_client_pdf(project, items, total_material_cost, total_labour_cost, 
             ]))
             elements.append(labour_table)
             elements.append(Spacer(1, 8))
+            adjusted_total_labour_cost += labour_total
 
-        # Item Cost Summary (CLIENT VERSION - Base cost only, no overhead/profit shown)
-        item_material_cost = sum([m.get('total_price', 0) for m in materials])
-        item_labour_cost = sum([l.get('total_cost', 0) for l in labour])
-        item_base_cost = item_material_cost + item_labour_cost
+        # Item Cost Summary (CLIENT VERSION - with markup distributed)
+        item_total_with_markup = item.get('selling_price', item_base_cost + item_total_markup)
 
         cost_summary_style = ParagraphStyle(
             'CostSummary',
@@ -535,7 +612,7 @@ def generate_client_pdf(project, items, total_material_cost, total_labour_cost, 
             fontSize=10,
             leftIndent=20
         )
-        elements.append(Paragraph(f"<b>Total Item Cost: AED {item_base_cost:,.2f}</b>", cost_summary_style))
+        elements.append(Paragraph(f"<b>Total Item Cost: AED {item_total_with_markup:,.2f}</b>", cost_summary_style))
         elements.append(Spacer(1, 15))
 
     # Final Summary Section
@@ -551,10 +628,10 @@ def generate_client_pdf(project, items, total_material_cost, total_labour_cost, 
     elements.append(Spacer(1, 8))
 
     summary_data = [
-        ['Total Material Cost:', f'AED {total_material_cost:,.2f}'],
-        ['Total Labour Cost:', f'AED {total_labour_cost:,.2f}'],
+        ['Total Material Cost:', f'AED {adjusted_total_material_cost:,.2f}'],
+        ['Total Labour Cost:', f'AED {adjusted_total_labour_cost:,.2f}'],
         ['', ''],
-        ['TOTAL PROJECT VALUE:', f'AED {client_base_cost:,.2f}']
+        ['TOTAL PROJECT VALUE:', f'AED {(adjusted_total_material_cost + adjusted_total_labour_cost):,.2f}']
     ]
     summary_table = Table(summary_data, colWidths=[3.5*inch, 2.5*inch])
     summary_table.setStyle(TableStyle([

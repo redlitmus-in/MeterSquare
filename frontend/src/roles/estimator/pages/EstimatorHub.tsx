@@ -221,7 +221,8 @@ const ProjectCreationForm: React.FC<{
 const EstimatorHub: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('projects');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [sendingToTD, setSendingToTD] = useState(false);
   const [boqs, setBOQs] = useState<BOQ[]>([]);
   const [filteredBOQs, setFilteredBOQs] = useState<BOQ[]>([]);
@@ -246,6 +247,7 @@ const EstimatorHub: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalProjects, setTotalProjects] = useState(0);
   const itemsPerPage = 10; // Fixed at 10 items per page
+  const [boqCurrentPage, setBoqCurrentPage] = useState(1); // Pagination for BOQ tabs
   const [showSendEmailModal, setShowSendEmailModal] = useState(false);
   const [boqToEmail, setBoqToEmail] = useState<BOQ | null>(null);
   const [emailMode, setEmailMode] = useState<'td' | 'client'>('td'); // Track whether sending to TD or client
@@ -270,6 +272,8 @@ const EstimatorHub: React.FC = () => {
         if (error.name !== 'AbortError') {
           console.error('Error fetching data:', error);
         }
+      } finally {
+        setInitialLoadComplete(true);
       }
     };
 
@@ -289,6 +293,11 @@ const EstimatorHub: React.FC = () => {
   useEffect(() => {
     applyFilters();
   }, [boqs, projects, searchTerm, activeTab]);
+
+  // Reset BOQ pagination when tab changes
+  useEffect(() => {
+    setBoqCurrentPage(1);
+  }, [activeTab]);
 
   const loadBOQs = async () => {
     try {
@@ -315,7 +324,15 @@ const EstimatorHub: React.FC = () => {
           created_at: boq.created_at,
           email_sent: boq.email_sent || false
         }));
-        setBOQs(mappedBOQs);
+
+        // Sort by created_at - most recent first
+        const sortedBOQs = mappedBOQs.sort((a: any, b: any) => {
+          const dateA = new Date(a.created_at || 0).getTime();
+          const dateB = new Date(b.created_at || 0).getTime();
+          return dateB - dateA; // Descending order (newest first)
+        });
+
+        setBOQs(sortedBOQs);
       } else {
         setBOQs([]);
       }
@@ -1305,7 +1322,7 @@ const EstimatorHub: React.FC = () => {
     </div>
   );
 
-  if (loading && boqs.length === 0 && projects.length === 0) {
+  if (!initialLoadComplete) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <ModernLoadingSpinners variant="pulse" color="blue" />
@@ -1887,101 +1904,361 @@ const EstimatorHub: React.FC = () => {
 
             <TabsContent value="sent" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">BOQs Sent for Review</h2>
-                  <div className="text-xs sm:text-sm text-gray-600">
-                    {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} pending Technical Director review
-                  </div>
-                </div>
-                {viewMode === 'cards' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredBOQs.map((boq) => (
-                      <BOQCard key={boq.boq_id} boq={boq} />
-                    ))}
-                  </div>
-                ) : (
-                  <BOQTable boqList={filteredBOQs} />
-                )}
+                {(() => {
+                  const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+                  const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+                  const endIndex = startIndex + itemsPerPage;
+                  const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+
+                  return (
+                    <>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <h2 className="text-lg sm:text-xl font-bold text-gray-900">BOQs Sent for Review</h2>
+                        <div className="text-xs sm:text-sm text-gray-600">
+                          {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} pending Technical Director review
+                        </div>
+                      </div>
+                      {viewMode === 'cards' ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                          {paginatedBOQs.map((boq) => (
+                            <BOQCard key={boq.boq_id} boq={boq} />
+                          ))}
+                        </div>
+                      ) : (
+                        <BOQTable boqList={paginatedBOQs} />
+                      )}
+
+                      {/* Pagination Controls */}
+                      {totalBoqPages > 1 && (
+                        <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+                          <div className="text-sm text-gray-600">
+                            Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={boqCurrentPage === 1}
+                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              style={{ color: 'rgb(36, 61, 138)' }}
+                            >
+                              Previous
+                            </button>
+                            {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+                              <button
+                                key={page}
+                                onClick={() => setBoqCurrentPage(page)}
+                                className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                                  boqCurrentPage === page
+                                    ? 'border-[rgb(36,61,138)] bg-blue-50'
+                                    : 'border-gray-300 hover:bg-gray-50'
+                                }`}
+                                style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                              >
+                                {page}
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+                              disabled={boqCurrentPage === totalBoqPages}
+                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              style={{ color: 'rgb(36, 61, 138)' }}
+                            >
+                              Next
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </TabsContent>
 
             <TabsContent value="approved" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Approved BOQs</h2>
-                  <div className="text-xs sm:text-sm text-gray-600">
-                    {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} approved by Technical Director
-                  </div>
-                </div>
-                {viewMode === 'cards' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredBOQs.map((boq) => (
-                      <BOQCard key={boq.boq_id} boq={boq} />
-                    ))}
-                  </div>
-                ) : (
-                  <BOQTable boqList={filteredBOQs} />
-                )}
+                {(() => {
+                  const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+                  const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+                  const endIndex = startIndex + itemsPerPage;
+                  const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+
+                  return (
+                    <>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <h2 className="text-lg sm:text-xl font-bold text-gray-900">Approved BOQs</h2>
+                        <div className="text-xs sm:text-sm text-gray-600">
+                          {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} approved by Technical Director
+                        </div>
+                      </div>
+                      {viewMode === 'cards' ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                          {paginatedBOQs.map((boq) => (
+                            <BOQCard key={boq.boq_id} boq={boq} />
+                          ))}
+                        </div>
+                      ) : (
+                        <BOQTable boqList={paginatedBOQs} />
+                      )}
+
+                      {/* Pagination Controls */}
+                      {totalBoqPages > 1 && (
+                        <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+                          <div className="text-sm text-gray-600">
+                            Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={boqCurrentPage === 1}
+                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              style={{ color: 'rgb(36, 61, 138)' }}
+                            >
+                              Previous
+                            </button>
+                            {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+                              <button
+                                key={page}
+                                onClick={() => setBoqCurrentPage(page)}
+                                className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                                  boqCurrentPage === page
+                                    ? 'border-[rgb(36,61,138)] bg-blue-50'
+                                    : 'border-gray-300 hover:bg-gray-50'
+                                }`}
+                                style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                              >
+                                {page}
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+                              disabled={boqCurrentPage === totalBoqPages}
+                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              style={{ color: 'rgb(36, 61, 138)' }}
+                            >
+                              Next
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </TabsContent>
 
             <TabsContent value="rejected" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Rejected BOQs</h2>
-                  <div className="text-xs sm:text-sm text-gray-600">
-                    {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} rejected by Technical Director
-                  </div>
-                </div>
-                {viewMode === 'cards' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredBOQs.map((boq) => (
-                      <BOQCard key={boq.boq_id} boq={boq} />
-                    ))}
-                  </div>
-                ) : (
-                  <BOQTable boqList={filteredBOQs} />
-                )}
+                {(() => {
+                  const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+                  const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+                  const endIndex = startIndex + itemsPerPage;
+                  const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+
+                  return (
+                    <>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <h2 className="text-lg sm:text-xl font-bold text-gray-900">Rejected BOQs</h2>
+                        <div className="text-xs sm:text-sm text-gray-600">
+                          {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} rejected by Technical Director
+                        </div>
+                      </div>
+                      {viewMode === 'cards' ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                          {paginatedBOQs.map((boq) => (
+                            <BOQCard key={boq.boq_id} boq={boq} />
+                          ))}
+                        </div>
+                      ) : (
+                        <BOQTable boqList={paginatedBOQs} />
+                      )}
+
+                      {/* Pagination Controls */}
+                      {totalBoqPages > 1 && (
+                        <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+                          <div className="text-sm text-gray-600">
+                            Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={boqCurrentPage === 1}
+                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              style={{ color: 'rgb(36, 61, 138)' }}
+                            >
+                              Previous
+                            </button>
+                            {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+                              <button
+                                key={page}
+                                onClick={() => setBoqCurrentPage(page)}
+                                className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                                  boqCurrentPage === page
+                                    ? 'border-[rgb(36,61,138)] bg-blue-50'
+                                    : 'border-gray-300 hover:bg-gray-50'
+                                }`}
+                                style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                              >
+                                {page}
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+                              disabled={boqCurrentPage === totalBoqPages}
+                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              style={{ color: 'rgb(36, 61, 138)' }}
+                            >
+                              Next
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </TabsContent>
 
             <TabsContent value="completed" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Completed BOQs</h2>
-                  <div className="text-xs sm:text-sm text-gray-600">
-                    {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} marked as completed
-                  </div>
-                </div>
-                {viewMode === 'cards' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredBOQs.map((boq) => (
-                      <BOQCard key={boq.boq_id} boq={boq} />
-                    ))}
-                  </div>
-                ) : (
-                  <BOQTable boqList={filteredBOQs} />
-                )}
+                {(() => {
+                  const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+                  const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+                  const endIndex = startIndex + itemsPerPage;
+                  const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+
+                  return (
+                    <>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <h2 className="text-lg sm:text-xl font-bold text-gray-900">Completed BOQs</h2>
+                        <div className="text-xs sm:text-sm text-gray-600">
+                          {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} marked as completed
+                        </div>
+                      </div>
+                      {viewMode === 'cards' ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                          {paginatedBOQs.map((boq) => (
+                            <BOQCard key={boq.boq_id} boq={boq} />
+                          ))}
+                        </div>
+                      ) : (
+                        <BOQTable boqList={paginatedBOQs} />
+                      )}
+
+                      {/* Pagination Controls */}
+                      {totalBoqPages > 1 && (
+                        <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+                          <div className="text-sm text-gray-600">
+                            Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={boqCurrentPage === 1}
+                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              style={{ color: 'rgb(36, 61, 138)' }}
+                            >
+                              Previous
+                            </button>
+                            {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+                              <button
+                                key={page}
+                                onClick={() => setBoqCurrentPage(page)}
+                                className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                                  boqCurrentPage === page
+                                    ? 'border-[rgb(36,61,138)] bg-blue-50'
+                                    : 'border-gray-300 hover:bg-gray-50'
+                                }`}
+                                style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                              >
+                                {page}
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+                              disabled={boqCurrentPage === totalBoqPages}
+                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              style={{ color: 'rgb(36, 61, 138)' }}
+                            >
+                              Next
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </TabsContent>
 
             <TabsContent value="cancelled" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Cancelled BOQs</h2>
-                  <div className="text-xs sm:text-sm text-gray-600">
-                    {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} cancelled
-                  </div>
-                </div>
-                {viewMode === 'cards' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredBOQs.map((boq) => (
-                      <BOQCard key={boq.boq_id} boq={boq} />
-                    ))}
-                  </div>
-                ) : (
-                  <BOQTable boqList={filteredBOQs} />
-                )}
+                {(() => {
+                  const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+                  const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+                  const endIndex = startIndex + itemsPerPage;
+                  const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+
+                  return (
+                    <>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <h2 className="text-lg sm:text-xl font-bold text-gray-900">Cancelled BOQs</h2>
+                        <div className="text-xs sm:text-sm text-gray-600">
+                          {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} cancelled
+                        </div>
+                      </div>
+                      {viewMode === 'cards' ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                          {paginatedBOQs.map((boq) => (
+                            <BOQCard key={boq.boq_id} boq={boq} />
+                          ))}
+                        </div>
+                      ) : (
+                        <BOQTable boqList={paginatedBOQs} />
+                      )}
+
+                      {/* Pagination Controls */}
+                      {totalBoqPages > 1 && (
+                        <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+                          <div className="text-sm text-gray-600">
+                            Showing {startIndex + 1} to {Math.min(endIndex, filteredBOQs.length)} of {filteredBOQs.length} BOQs
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={boqCurrentPage === 1}
+                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              style={{ color: 'rgb(36, 61, 138)' }}
+                            >
+                              Previous
+                            </button>
+                            {Array.from({ length: totalBoqPages }, (_, i) => i + 1).map(page => (
+                              <button
+                                key={page}
+                                onClick={() => setBoqCurrentPage(page)}
+                                className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
+                                  boqCurrentPage === page
+                                    ? 'border-[rgb(36,61,138)] bg-blue-50'
+                                    : 'border-gray-300 hover:bg-gray-50'
+                                }`}
+                                style={{ color: boqCurrentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                              >
+                                {page}
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+                              disabled={boqCurrentPage === totalBoqPages}
+                              className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              style={{ color: 'rgb(36, 61, 138)' }}
+                            >
+                              Next
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </TabsContent>
           </Tabs>
@@ -2441,6 +2718,7 @@ const EstimatorHub: React.FC = () => {
           setSelectedBoqForDetails(null);
         }}
         boq={selectedBoqForDetails}
+        showNewPurchaseItems={false} // Projects page should NOT show new_purchase items
         onEdit={() => {
           if (selectedBoqForDetails) {
             setShowBoqDetails(false);

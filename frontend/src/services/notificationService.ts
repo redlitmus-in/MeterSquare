@@ -139,19 +139,7 @@ class NotificationService {
         if (permission === 'granted') {
           debug.info('Notification permission granted');
 
-          // Show welcome notification
-          this.sendBrowserNotification({
-            id: createSecureNotificationId('welcome'),
-            type: 'info',
-            title: 'MeterSquare ERP Notifications',
-            message: 'You will now receive real-time notifications for emails and approvals',
-            timestamp: new Date(),
-            read: false,
-            priority: 'medium',
-            category: 'system'
-          });
-
-          // Show toast as well
+          // Show toast only (removed welcome notification to avoid persistent display)
           toast.success('Notifications enabled! You will receive real-time updates.');
         } else if (permission === 'denied') {
           debug.warn('Notification permission denied');

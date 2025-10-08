@@ -305,8 +305,9 @@ export interface BOQGetResponse {
     hours: string | null;
     status: string | null;
   };
-  items: BOQItemDetailed[];
-  summary: {
+  // Old format (backward compatibility)
+  items?: BOQItemDetailed[];
+  summary?: {
     total_items: number;
     total_materials: number;
     total_labour: number;
@@ -316,6 +317,49 @@ export interface BOQGetResponse {
     selling_price: number;
     estimatedSellingPrice: number;
   };
+  // New format with existing and new purchases
+  existing_purchase?: {
+    items: BOQItemDetailed[];
+    summary: {
+      total_items: number;
+      total_materials: number;
+      total_labour: number;
+      total_material_cost: number;
+      total_labour_cost: number;
+      total_cost: number;
+      selling_price: number;
+      estimatedSellingPrice: number;
+    };
+  };
+  new_purchase?: {
+    items: BOQItemDetailed[];
+    summary: {
+      total_items: number;
+      total_materials: number;
+      total_labour: number;
+      total_material_cost: number;
+      total_labour_cost: number;
+      total_cost: number;
+      selling_price: number;
+      estimatedSellingPrice: number;
+    };
+  };
+  combined_summary?: {
+    total_items: number;
+    total_materials: number;
+    total_labour: number;
+    total_material_cost: number;
+    total_labour_cost: number;
+    total_cost: number;
+    selling_price: number;
+    estimatedSellingPrice: number;
+  };
+  overhead_percentage?: number;
+  profit_margin?: number;
+  profit_margin_percentage?: number;
+  total_labour_cost?: number;
+  total_material_cost?: number;
+  user_id?: number;
 }
 
 export interface BOQListResponse {

@@ -46,6 +46,10 @@ const TechnicalDirectorHub = lazy(() => import('@/roles/technical-director/pages
 const ProjectApprovals = lazy(() => import('@/roles/technical-director/pages/ProjectApprovals'));
 const TeamAssignment = lazy(() => import('@/roles/technical-director/pages/TeamAssignment'));
 const ProjectsOverview = lazy(() => import('@/roles/technical-director/pages/ProjectsOverview'));
+const TDChangeRequestsPage = lazy(() => import('@/roles/technical-director/pages/ChangeRequestsPage'));
+
+// Estimator Pages
+const EstimatorChangeRequestsPage = lazy(() => import('@/roles/estimator/pages/ChangeRequestsPage'));
 
 // Project Manager Pages
 const MyProjects = lazy(() => import('@/roles/project-manager/pages/MyProjects'));
@@ -414,6 +418,10 @@ function App() {
             <Route path="project-approvals" element={<ProjectApprovals />} />
             <Route path="team-assignment" element={<TeamAssignment />} />
             <Route path="projects-overview" element={<ProjectsOverview />} />
+            <Route path="change-requests" element={<TDChangeRequestsPage />} />
+
+            {/* Estimator Routes */}
+            <Route path="change-requests-estimator" element={<EstimatorChangeRequestsPage />} />
 
             {/* Project Manager specific routes */}
             <Route path="my-projects" element={<MyProjects />} />

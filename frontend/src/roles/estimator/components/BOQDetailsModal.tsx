@@ -30,6 +30,7 @@ interface BOQDetailsModalProps {
   onEdit?: () => void;
   onDownload?: () => void;
   onPrint?: () => void;
+  showNewPurchaseItems?: boolean; // Control whether to show new_purchase section (default: false for Projects, true for Change Requests)
 }
 
 const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
@@ -38,7 +39,8 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
   boq,
   onEdit,
   onDownload,
-  onPrint
+  onPrint,
+  showNewPurchaseItems = false // Default to false (Projects page won't show new items)
 }) => {
   const [boqData, setBoqData] = useState<BOQGetResponse | null>(null);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
@@ -59,8 +61,20 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
       const result = await estimatorService.getBOQById(boq.boq_id);
       if (result.success && result.data) {
         setBoqData(result.data);
+
         // Auto-expand first few items for better UX
-        setExpandedItems(result.data.items?.slice(0, 2).map((_, index) => `item-${index}`) || []);
+        const expandedIds: string[] = [];
+        // Expand first 2 existing items
+        if (result.data.existing_purchase?.items) {
+          expandedIds.push(...result.data.existing_purchase.items.slice(0, 2).map((_, index) => `existing-${index}`));
+        } else if (result.data.items) {
+          expandedIds.push(...result.data.items.slice(0, 2).map((_, index) => `item-${index}`));
+        }
+        // Also expand all new purchase items (since they're important)
+        if (result.data.new_purchase?.items) {
+          expandedIds.push(...result.data.new_purchase.items.map((_, index) => `new-${index}`));
+        }
+        setExpandedItems(expandedIds);
       } else {
         toast.error(result.message || 'Failed to fetch BOQ details');
       }
@@ -255,9 +269,369 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
 
                     {/* BOQ Items */}
                     <div>
-                      <h3 className="text-lg font-semibold text-gray-900 mb-4">BOQ Items</h3>
-                      <div className="space-y-4">
-                        {boqData.items?.map((item: BOQItemDetailed, index: number) => (
+                      {/* Existing Purchase Items */}
+                      {boqData.existing_purchase && boqData.existing_purchase.items.length > 0 && (
+                        <div className="mb-8">
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold text-gray-900">Existing BOQ Items</h3>
+                            <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+                              {boqData.existing_purchase.items.length} Items
+                            </span>
+                          </div>
+                          <div className="space-y-4">
+                            {boqData.existing_purchase.items.map((item: BOQItemDetailed, index: number) => (
+                              <div key={item.master_item_id || index} className="border border-blue-200 rounded-lg bg-blue-50/30">
+                                {/* Item Header */}
+                                <div className="bg-blue-50 px-4 py-3 flex items-center justify-between border-b border-blue-200">
+                                  <div className="flex items-center gap-3 flex-1">
+                                    <button
+                                      onClick={() => toggleItemExpanded(`existing-${index}`)}
+                                      className="p-1 hover:bg-blue-200 rounded"
+                                    >
+                                      {expandedItems.includes(`existing-${index}`) ? (
+                                        <ChevronDown className="w-4 h-4" />
+                                      ) : (
+                                        <ChevronRight className="w-4 h-4" />
+                                      )}
+                                    </button>
+                                    <div className="flex-1">
+                                      <span className="font-medium">{item.item_name}</span>
+                                      {item.description && (
+                                        <span className="ml-2 text-sm text-gray-600">{item.description}</span>
+                                      )}
+                                      {item.work_type && (
+                                        <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">
+                                          {item.work_type}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-lg font-semibold text-green-600">
+                                      {formatCurrency(item.selling_price)}
+                                    </p>
+                                    <p className="text-xs text-gray-600">Selling Price</p>
+                                  </div>
+                                </div>
+
+                                {/* Item Details (Expandable) */}
+                                {expandedItems.includes(`existing-${index}`) && (
+                                  <div className="p-4 space-y-4">
+                                    {/* Materials */}
+                                    {item.materials?.length > 0 && (
+                                      <div className="bg-gradient-to-r from-blue-50 to-blue-100/30 rounded-lg p-4 border border-blue-200">
+                                        <h4 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
+                                          <div className="p-1.5 bg-white rounded shadow-sm">
+                                            <Package className="w-4 h-4 text-blue-600" />
+                                          </div>
+                                          Sub Items (Materials)
+                                        </h4>
+                                        <div className="bg-white rounded-lg border border-blue-200 overflow-hidden">
+                                          <table className="w-full text-sm">
+                                            <thead className="bg-blue-100 border-b border-blue-200">
+                                              <tr>
+                                                <th className="text-left py-2 px-3 font-semibold text-blue-900">Sub Item Name</th>
+                                                <th className="text-center py-2 px-3 font-semibold text-blue-900">Quantity</th>
+                                                <th className="text-center py-2 px-3 font-semibold text-blue-900">Unit</th>
+                                                <th className="text-right py-2 px-3 font-semibold text-blue-900">Rate</th>
+                                                <th className="text-right py-2 px-3 font-semibold text-blue-900">Amount</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {item.materials.map((material, mIndex) => (
+                                                <tr key={mIndex} className={`border-b border-blue-100 ${mIndex % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
+                                                  <td className="py-2.5 px-3 text-gray-900">{material.material_name}</td>
+                                                  <td className="py-2.5 px-3 text-center text-gray-700">{material.quantity}</td>
+                                                  <td className="py-2.5 px-3 text-center text-gray-700 uppercase">{material.unit}</td>
+                                                  <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(material.unit_price)}</td>
+                                                  <td className="py-2.5 px-3 text-right font-semibold text-blue-700">{formatCurrency(material.total_price)}</td>
+                                                </tr>
+                                              ))}
+                                              <tr className="bg-blue-200 border-t-2 border-blue-400">
+                                                <td colSpan={4} className="py-2.5 px-3 font-bold text-blue-900 text-right">Total Materials:</td>
+                                                <td className="py-2.5 px-3 font-bold text-blue-900 text-right">
+                                                  {formatCurrency(item.materials.reduce((sum, m) => sum + (m.total_price || 0), 0))}
+                                                </td>
+                                              </tr>
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Labour */}
+                                    {item.labour?.length > 0 && (
+                                      <div className="bg-gradient-to-r from-orange-50 to-orange-100/30 rounded-lg p-4 border border-orange-200">
+                                        <h4 className="text-sm font-bold text-orange-900 mb-3 flex items-center gap-2">
+                                          <div className="p-1.5 bg-white rounded shadow-sm">
+                                            <Users className="w-4 h-4 text-orange-600" />
+                                          </div>
+                                          Labour Breakdown
+                                        </h4>
+                                        <div className="bg-white rounded-lg border border-orange-200 overflow-hidden">
+                                          <table className="w-full text-sm">
+                                            <thead className="bg-orange-100 border-b border-orange-200">
+                                              <tr>
+                                                <th className="text-left py-2 px-3 font-semibold text-orange-900">Labour Role</th>
+                                                <th className="text-center py-2 px-3 font-semibold text-orange-900">Working Hours</th>
+                                                <th className="text-right py-2 px-3 font-semibold text-orange-900">Rate/Hour</th>
+                                                <th className="text-right py-2 px-3 font-semibold text-orange-900">Amount</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {item.labour.map((labour, lIndex) => (
+                                                <tr key={lIndex} className={`border-b border-orange-100 ${lIndex % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
+                                                  <td className="py-2.5 px-3 text-gray-900">{labour.labour_role}</td>
+                                                  <td className="py-2.5 px-3 text-center text-gray-700">{labour.hours} hrs</td>
+                                                  <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(labour.rate_per_hour)}</td>
+                                                  <td className="py-2.5 px-3 text-right font-semibold text-orange-700">{formatCurrency(labour.total_cost)}</td>
+                                                </tr>
+                                              ))}
+                                              <tr className="bg-orange-200 border-t-2 border-orange-400">
+                                                <td colSpan={3} className="py-2.5 px-3 font-bold text-orange-900 text-right">Total Labour:</td>
+                                                <td className="py-2.5 px-3 font-bold text-orange-900 text-right">
+                                                  {formatCurrency(item.labour.reduce((sum, l) => sum + (l.total_cost || 0), 0))}
+                                                </td>
+                                              </tr>
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Overheads & Profit */}
+                                    <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
+                                      <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
+                                        <div className="p-1.5 bg-white rounded shadow-sm">
+                                          <Calculator className="w-4 h-4 text-green-600" />
+                                        </div>
+                                        Overheads & Profit
+                                      </h5>
+                                      <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-600">Overhead ({item.overhead_percentage}%):</span>
+                                          <span className="font-semibold">{formatCurrency(item.overhead_amount)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-600">Profit Margin ({item.profit_margin_percentage}%):</span>
+                                          <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Cost Summary */}
+                                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                                      <h5 className="text-sm font-bold text-gray-900 mb-3">Cost Summary</h5>
+                                      <div className="space-y-1 text-sm">
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-600">Base Cost:</span>
+                                          <span className="font-semibold">{formatCurrency(item.base_cost)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-600">Total Overhead:</span>
+                                          <span className="font-semibold">{formatCurrency(item.overhead_amount)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-600">Total Profit:</span>
+                                          <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
+                                        </div>
+                                        <div className="flex justify-between pt-2 border-t border-gray-300 font-bold">
+                                          <span className="text-gray-900">Selling Price:</span>
+                                          <span className="text-green-600">{formatCurrency(item.selling_price || item.estimatedSellingPrice || item.total_cost)}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* New Purchase Items */}
+                      {showNewPurchaseItems && boqData.new_purchase && boqData.new_purchase.items.length > 0 && (
+                        <div className="mb-8">
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold text-gray-900">New Purchase Items</h3>
+                            <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
+                              {boqData.new_purchase.items.length} Items
+                            </span>
+                          </div>
+                          <div className="space-y-4">
+                            {boqData.new_purchase.items.map((item: BOQItemDetailed, index: number) => (
+                              <div key={item.master_item_id || index} className="border border-purple-200 rounded-lg bg-purple-50/30">
+                                {/* Same structure as existing purchase, but with purple theme... */}
+                                {/* For brevity, using same component structure */}
+                                <div className="bg-purple-50 px-4 py-3 flex items-center justify-between border-b border-purple-200">
+                                  <div className="flex items-center gap-3 flex-1">
+                                    <button
+                                      onClick={() => toggleItemExpanded(`new-${index}`)}
+                                      className="p-1 hover:bg-purple-200 rounded"
+                                    >
+                                      {expandedItems.includes(`new-${index}`) ? (
+                                        <ChevronDown className="w-4 h-4" />
+                                      ) : (
+                                        <ChevronRight className="w-4 h-4" />
+                                      )}
+                                    </button>
+                                    <div className="flex-1">
+                                      <span className="font-medium">{item.item_name}</span>
+                                      <span className="ml-2 px-2 py-0.5 text-xs bg-purple-200 text-purple-800 rounded font-semibold">NEW</span>
+                                      {item.description && (
+                                        <span className="ml-2 text-sm text-gray-600">{item.description}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-lg font-semibold text-green-600">
+                                      {formatCurrency(item.selling_price)}
+                                    </p>
+                                    <p className="text-xs text-gray-600">Selling Price</p>
+                                  </div>
+                                </div>
+
+                                {/* Expandable Details */}
+                                {expandedItems.includes(`new-${index}`) && (
+                                  <div className="p-4 space-y-4">
+                                    {/* Materials - Purple Theme */}
+                                    {item.materials?.length > 0 && (
+                                      <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-4 border border-purple-200">
+                                        <h4 className="text-sm font-bold text-purple-900 mb-3 flex items-center gap-2">
+                                          <div className="p-1.5 bg-white rounded shadow-sm">
+                                            <Package className="w-4 h-4 text-purple-600" />
+                                          </div>
+                                          Sub Items (Materials)
+                                        </h4>
+                                        <div className="bg-white rounded-lg border border-purple-200 overflow-hidden">
+                                          <table className="w-full text-sm">
+                                            <thead className="bg-purple-100 border-b border-purple-200">
+                                              <tr>
+                                                <th className="text-left py-2 px-3 font-semibold text-purple-900">Sub Item Name</th>
+                                                <th className="text-center py-2 px-3 font-semibold text-purple-900">Quantity</th>
+                                                <th className="text-center py-2 px-3 font-semibold text-purple-900">Unit</th>
+                                                <th className="text-right py-2 px-3 font-semibold text-purple-900">Rate</th>
+                                                <th className="text-right py-2 px-3 font-semibold text-purple-900">Amount</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {item.materials.map((material, mIndex) => (
+                                                <tr key={mIndex} className={`border-b border-purple-100 ${mIndex % 2 === 0 ? 'bg-purple-50/30' : 'bg-white'}`}>
+                                                  <td className="py-2.5 px-3 text-gray-900">{material.material_name}</td>
+                                                  <td className="py-2.5 px-3 text-center text-gray-700">{material.quantity}</td>
+                                                  <td className="py-2.5 px-3 text-center text-gray-700 uppercase">{material.unit}</td>
+                                                  <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(material.unit_price)}</td>
+                                                  <td className="py-2.5 px-3 text-right font-semibold text-purple-700">{formatCurrency(material.total_price)}</td>
+                                                </tr>
+                                              ))}
+                                              <tr className="bg-purple-200 border-t-2 border-purple-400">
+                                                <td colSpan={4} className="py-2.5 px-3 font-bold text-purple-900 text-right">Total Materials:</td>
+                                                <td className="py-2.5 px-3 font-bold text-purple-900 text-right">
+                                                  {formatCurrency(item.materials.reduce((sum, m) => sum + (m.total_price || 0), 0))}
+                                                </td>
+                                              </tr>
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Labour - Orange Theme */}
+                                    {item.labour?.length > 0 && (
+                                      <div className="bg-gradient-to-r from-orange-50 to-orange-100/30 rounded-lg p-4 border border-orange-200">
+                                        <h4 className="text-sm font-bold text-orange-900 mb-3 flex items-center gap-2">
+                                          <div className="p-1.5 bg-white rounded shadow-sm">
+                                            <Users className="w-4 h-4 text-orange-600" />
+                                          </div>
+                                          Labour Breakdown
+                                        </h4>
+                                        <div className="bg-white rounded-lg border border-orange-200 overflow-hidden">
+                                          <table className="w-full text-sm">
+                                            <thead className="bg-orange-100 border-b border-orange-200">
+                                              <tr>
+                                                <th className="text-left py-2 px-3 font-semibold text-orange-900">Labour Role</th>
+                                                <th className="text-center py-2 px-3 font-semibold text-orange-900">Working Hours</th>
+                                                <th className="text-right py-2 px-3 font-semibold text-orange-900">Rate/Hour</th>
+                                                <th className="text-right py-2 px-3 font-semibold text-orange-900">Amount</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {item.labour.map((labour, lIndex) => (
+                                                <tr key={lIndex} className={`border-b border-orange-100 ${lIndex % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
+                                                  <td className="py-2.5 px-3 text-gray-900">{labour.labour_role}</td>
+                                                  <td className="py-2.5 px-3 text-center text-gray-700">{labour.hours} hrs</td>
+                                                  <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(labour.rate_per_hour)}</td>
+                                                  <td className="py-2.5 px-3 text-right font-semibold text-orange-700">{formatCurrency(labour.total_cost)}</td>
+                                                </tr>
+                                              ))}
+                                              <tr className="bg-orange-200 border-t-2 border-orange-400">
+                                                <td colSpan={3} className="py-2.5 px-3 font-bold text-orange-900 text-right">Total Labour:</td>
+                                                <td className="py-2.5 px-3 font-bold text-orange-900 text-right">
+                                                  {formatCurrency(item.labour.reduce((sum, l) => sum + (l.total_cost || 0), 0))}
+                                                </td>
+                                              </tr>
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Overheads & Profit - Green Theme */}
+                                    <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
+                                      <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
+                                        <div className="p-1.5 bg-white rounded shadow-sm">
+                                          <Calculator className="w-4 h-4 text-green-600" />
+                                        </div>
+                                        Overheads & Profit
+                                      </h5>
+                                      <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-600">Overhead ({item.overhead_percentage}%):</span>
+                                          <span className="font-semibold">{formatCurrency(item.overhead_amount)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-600">Profit Margin ({item.profit_margin_percentage}%):</span>
+                                          <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Cost Summary - Gray Theme */}
+                                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                                      <h5 className="text-sm font-bold text-gray-900 mb-3">Cost Summary</h5>
+                                      <div className="space-y-1 text-sm">
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-600">Base Cost:</span>
+                                          <span className="font-semibold">{formatCurrency(item.base_cost)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-600">Total Overhead:</span>
+                                          <span className="font-semibold">{formatCurrency(item.overhead_amount)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-600">Total Profit:</span>
+                                          <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
+                                        </div>
+                                        <div className="flex justify-between pt-2 border-t border-gray-300 font-bold">
+                                          <span className="text-gray-900">Selling Price:</span>
+                                          <span className="text-green-600">{formatCurrency(item.selling_price || item.estimatedSellingPrice || item.total_cost)}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Fallback: Old format (backward compatibility) */}
+                      {!boqData.existing_purchase && !boqData.new_purchase && boqData.items && (
+                        <>
+                          <h3 className="text-lg font-semibold text-gray-900 mb-4">BOQ Items</h3>
+                          <div className="space-y-4">
+                            {boqData.items?.map((item: BOQItemDetailed, index: number) => (
                           <div key={item.master_item_id || index} className="border border-gray-200 rounded-lg">
                             {/* Item Header */}
                             <div className="bg-gray-50 px-4 py-3 flex items-center justify-between">
@@ -423,10 +797,14 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                             )}
                           </div>
                         ))}
-                      </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
 
-                      {/* Overall Cost Summary */}
-                      {boqData.items && boqData.items.length > 0 && (
+                    {/* Overall Cost Summary - Updated to support both formats */}
+                    {((boqData.existing_purchase && boqData.existing_purchase.items.length > 0) ||
+                      (boqData.items && boqData.items.length > 0)) && (
                         <div className="mt-8 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-6 border-2 border-indigo-200 shadow-lg">
                           <h3 className="text-lg font-bold text-indigo-900 mb-5 flex items-center gap-2">
                             <div className="p-2 bg-white rounded-lg shadow-sm">
@@ -444,12 +822,18 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                               </div>
                               <div className="space-y-2 text-sm">
                                 {(() => {
-                                  const totalMaterialCost = boqData.items.reduce((sum, item) =>
-                                    sum + (item.materials?.reduce((mSum, m) => mSum + (m.total_price || 0), 0) || 0), 0
-                                  );
-                                  const totalMaterialCount = boqData.items.reduce((sum, item) =>
-                                    sum + (item.materials?.length || 0), 0
-                                  );
+                                  // Use combined_summary if available, otherwise calculate from items
+                                  const allItems = boqData.existing_purchase?.items || boqData.items || [];
+                                  const totalMaterialCost = boqData.combined_summary?.total_material_cost ||
+                                                          boqData.summary?.total_material_cost ||
+                                                          allItems.reduce((sum, item) =>
+                                                            sum + (item.materials?.reduce((mSum, m) => mSum + (m.total_price || 0), 0) || 0), 0
+                                                          );
+                                  const totalMaterialCount = boqData.combined_summary?.total_materials ||
+                                                           boqData.summary?.total_materials ||
+                                                           allItems.reduce((sum, item) =>
+                                                             sum + (item.materials?.length || 0), 0
+                                                           );
                                   return (
                                     <>
                                       <div className="flex justify-between text-gray-600">
@@ -474,12 +858,17 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                               </div>
                               <div className="space-y-2 text-sm">
                                 {(() => {
-                                  const totalLabourCost = boqData.items.reduce((sum, item) =>
-                                    sum + (item.labour?.reduce((lSum, l) => lSum + (l.total_cost || 0), 0) || 0), 0
-                                  );
-                                  const totalLabourCount = boqData.items.reduce((sum, item) =>
-                                    sum + (item.labour?.length || 0), 0
-                                  );
+                                  const allItems = boqData.existing_purchase?.items || boqData.items || [];
+                                  const totalLabourCost = boqData.combined_summary?.total_labour_cost ||
+                                                        boqData.summary?.total_labour_cost ||
+                                                        allItems.reduce((sum, item) =>
+                                                          sum + (item.labour?.reduce((lSum, l) => lSum + (l.total_cost || 0), 0) || 0), 0
+                                                        );
+                                  const totalLabourCount = boqData.combined_summary?.total_labour ||
+                                                         boqData.summary?.total_labour ||
+                                                         allItems.reduce((sum, item) =>
+                                                           sum + (item.labour?.length || 0), 0
+                                                         );
                                   return (
                                     <>
                                       <div className="flex justify-between text-gray-600">
@@ -500,43 +889,40 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                           {/* Grand Total */}
                           <div className="mt-6 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-5 border-2 border-green-300">
                             <div className="space-y-3">
-                              <div className="flex justify-between text-sm">
-                                <span className="text-gray-700">Subtotal (Materials + Labour):</span>
-                                <span className="font-semibold">
-                                  {formatCurrency(
-                                    boqData.items.reduce((sum, item) => sum + (item.base_cost || 0), 0)
-                                  )}
-                                </span>
-                              </div>
-                              <div className="flex justify-between text-sm">
-                                <span className="text-gray-700">Total Overheads:</span>
-                                <span className="font-semibold">
-                                  {formatCurrency(
-                                    boqData.items.reduce((sum, item) => sum + (item.overhead_amount || 0), 0)
-                                  )}
-                                </span>
-                              </div>
-                              <div className="flex justify-between text-sm">
-                                <span className="text-gray-700">Total Profit Margin:</span>
-                                <span className="font-semibold">
-                                  {formatCurrency(
-                                    boqData.items.reduce((sum, item) => sum + (item.profit_margin_amount || 0), 0)
-                                  )}
-                                </span>
-                              </div>
-                              <div className="flex justify-between pt-3 border-t-2 border-green-400 text-lg font-bold">
-                                <span className="text-green-900">Grand Total:</span>
-                                <span className="text-green-700">
-                                  {formatCurrency(
-                                    boqData.items.reduce((sum, item) => sum + (item.selling_price || item.total_cost || 0), 0)
-                                  )}
-                                </span>
-                              </div>
+                              {(() => {
+                                const allItems = boqData.existing_purchase?.items || boqData.items || [];
+                                const subtotal = allItems.reduce((sum, item) => sum + (item.base_cost || 0), 0);
+                                const totalOverheads = allItems.reduce((sum, item) => sum + (item.overhead_amount || 0), 0);
+                                const totalProfit = allItems.reduce((sum, item) => sum + (item.profit_margin_amount || 0), 0);
+                                const grandTotal = boqData.combined_summary?.selling_price ||
+                                                 boqData.summary?.selling_price ||
+                                                 allItems.reduce((sum, item) => sum + (item.selling_price || item.total_cost || 0), 0);
+
+                                return (
+                                  <>
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-700">Subtotal (Materials + Labour):</span>
+                                      <span className="font-semibold">{formatCurrency(subtotal)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-700">Total Overheads:</span>
+                                      <span className="font-semibold">{formatCurrency(totalOverheads)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-700">Total Profit Margin:</span>
+                                      <span className="font-semibold">{formatCurrency(totalProfit)}</span>
+                                    </div>
+                                    <div className="flex justify-between pt-3 border-t-2 border-green-400 text-lg font-bold">
+                                      <span className="text-green-900">Grand Total:</span>
+                                      <span className="text-green-700">{formatCurrency(grandTotal)}</span>
+                                    </div>
+                                  </>
+                                );
+                              })()}
                             </div>
-                          </div>
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </>
                 ) : (
                   // Simple BOQ display when full details aren't loaded

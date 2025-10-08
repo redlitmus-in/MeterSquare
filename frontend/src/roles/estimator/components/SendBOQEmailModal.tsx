@@ -49,23 +49,25 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
           if (response.success && response.data) {
             const boq = response.data;
 
-            // Transform BOQ data to match export function expectations (same as TD does)
+            // Transform BOQ data using the EXACT same logic as TD page (which works correctly)
+            const items = (boq.existing_purchase?.items || boq.items) || [];
+
             const transformedData = {
-              id: boq.boq_id || boqId,
-              projectName: boq.project_name || boq.project_details?.project_name || projectName,
-              clientName: boq.client || boq.project_details?.client || 'Unknown Client',
+              id: boq.boq_id,
+              projectName: boq.project_name || boq.project_details?.project_name || boq.project?.project_name || projectName,
+              clientName: boq.client_name || boq.client || boq.project_details?.client || boq.project?.client || 'Unknown Client',
               estimator: boq.created_by || boq.created_by_name || 'Unknown',
-              totalValue: boq.total_cost || boq.selling_price || 0,
-              itemCount: boq.items?.length || 0,
+              totalValue: boq.total_cost || 0,
+              itemCount: boq.items_count || items.length || 0,
               laborCost: boq.total_labour_cost || 0,
               materialCost: boq.total_material_cost || 0,
               profitMargin: boq.profit_margin || boq.profit_margin_percentage || 0,
               overheadPercentage: boq.overhead_percentage || boq.overhead || 0,
-              submittedDate: boq.created_at || new Date().toISOString(),
-              location: boq.location || boq.project_details?.location || 'N/A',
-              floor: boq.floor_name || boq.project_details?.floor || 'N/A',
-              workingHours: boq.working_hours || boq.project_details?.hours || 'N/A',
-              boqItems: boq.items?.map((item: any) => {
+              submittedDate: boq.created_at ? new Date(boq.created_at).toISOString().split('T')[0] : '',
+              location: boq.location || boq.project_details?.location || boq.project?.location || 'N/A',
+              floor: boq.floor || boq.floor_name || boq.project_details?.floor || boq.project?.floor_name || 'N/A',
+              workingHours: boq.hours || boq.working_hours || boq.project_details?.hours || boq.project?.working_hours || 'N/A',
+              boqItems: items.map((item: any) => {
                 const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
                 const sellingPrice = item.selling_price || 0;
 
@@ -81,20 +83,20 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                     name: mat.material_name,
                     quantity: mat.quantity,
                     unit: mat.unit,
-                    rate: mat.unit_price,
+                    rate: mat.unit_price || mat.rate_per_unit,
                     amount: mat.total_price
                   })) || [],
                   labour: item.labour?.map((lab: any) => ({
                     type: lab.labour_role,
-                    quantity: lab.hours,
+                    quantity: lab.hours || lab.no_of_hours,
                     unit: 'hrs',
                     rate: lab.rate_per_hour,
                     amount: lab.total_cost
                   })) || [],
                   laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
-                  estimatedSellingPrice: item.selling_price || 0
+                  estimatedSellingPrice: sellingPrice
                 };
-              }) || []
+              })
             };
 
             setBoqData(transformedData);
