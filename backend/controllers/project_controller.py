@@ -78,6 +78,7 @@ def create_project():
             start_date=start_date,
             end_date=end_date,
             status=data.get('status', 'active'),
+            completion_requested=False,
             user_id=None,  # PM will be assigned later by TD, not set on creation
             created_by=current_user.get('email'),
             created_at=datetime.utcnow(),
@@ -233,6 +234,9 @@ def update_project(project_id):
 
         if 'status' in data:
             project.status = data['status']
+            # Clear completion_requested flag when project is marked as completed
+            if data['status'].lower() == 'completed':
+                project.completion_requested = False
 
         # Handle dates
         if 'start_date' in data:

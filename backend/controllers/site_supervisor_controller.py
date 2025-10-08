@@ -114,7 +114,8 @@ def get_all_sitesupervisor_boqs():
                 "description": project.description,
                 "created_at": project.created_at.isoformat() if project.created_at else None,
                 "priority": getattr(project, 'priority', 'medium'),
-                "boq_ids": boq_ids  # List of BOQ IDs for reference
+                "boq_ids": boq_ids,  # List of BOQ IDs for reference
+                "completion_requested": project.completion_requested if project.completion_requested is not None else False
             })
 
         return jsonify({
@@ -536,4 +537,138 @@ def assign_projects_sitesupervisor():
         return jsonify({
             "error": f"Failed to assign projects: {str(e)}",
             "error_type": type(e).__name__
+        }), 500
+
+def request_project_completion(project_id):
+    """Site Engineer requests project completion - sends notification to PM"""
+    try:
+        current_user = g.user
+        user_id = current_user['user_id']
+        se_name = current_user.get('full_name', 'Site Engineer')
+
+        # Get the project
+        project = Project.query.filter_by(
+            project_id=project_id,
+            site_supervisor_id=user_id,
+            is_deleted=False
+        ).first()
+
+        if not project:
+            return jsonify({
+                "error": "Project not found or not assigned to you"
+            }), 404
+
+        # Check if already completed
+        if project.status and project.status.lower() == 'completed':
+            return jsonify({
+                "error": "Project is already completed"
+            }), 400
+
+        # Get BOQ and BOQ history
+        boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
+        boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
+        boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).first()
+
+        if not boq:
+            return jsonify({
+                "error": "BOQ not found for this project"
+            }), 404
+
+        boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        # Get Project Manager details
+        pm_user = User.query.filter_by(user_id=project.user_id).first()
+        pm_name = pm_user.full_name if pm_user else "Project Manager"
+        pm_email = pm_user.email if pm_user else None
+
+        # Handle existing actions - ensure it's always a list
+        if boq_history:
+            if boq_history.action is None:
+                current_actions = []
+            elif isinstance(boq_history.action, list):
+                current_actions = boq_history.action
+            elif isinstance(boq_history.action, dict):
+                current_actions = [boq_history.action]
+            else:
+                current_actions = []
+        else:
+            current_actions = []
+
+        # Create new action for completion request
+        new_action = {
+            "role": "site_engineer",
+            "type": "completion_requested",
+            "sender": "site_engineer",
+            "receiver": "project_manager",
+            "status": "pending_approval",
+            "boq_name": boq.boq_name,
+            "project_name": project.project_name,
+            "comments": f"Site Engineer {se_name} requested project completion",
+            "timestamp": datetime.utcnow().isoformat(),
+            "sender_name": se_name,
+            "sender_user_id": user_id,
+            "recipient_name": pm_name,
+            "recipient_email": pm_email,
+            "project_id": project_id
+        }
+
+        # Append new action
+        current_actions.append(new_action)
+
+        if boq_history:
+            # Update existing history
+            boq_history.action = current_actions
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(boq_history, "action")
+            boq_history.action_by = se_name
+            boq_history.sender = se_name
+            boq_history.receiver = pm_name
+            boq_history.comments = f"Completion request sent to {pm_name}"
+            boq_history.sender_role = 'site_engineer'
+            boq_history.receiver_role = 'project_manager'
+            boq_history.action_date = datetime.utcnow()
+            boq_history.last_modified_by = se_name
+            boq_history.last_modified_at = datetime.utcnow()
+        else:
+            # Create new history entry
+            boq_history = BOQHistory(
+                boq_id=boq.boq_id,
+                action=current_actions,
+                action_by=se_name,
+                boq_status=boq.status,
+                sender=se_name,
+                receiver=pm_name,
+                comments=f"Completion request sent to {pm_name}",
+                sender_role='site_engineer',
+                receiver_role='project_manager',
+                action_date=datetime.utcnow(),
+                created_by=se_name
+            )
+            db.session.add(boq_history)
+
+        # Set completion_requested flag
+        project.completion_requested = True
+        project.last_modified_at = datetime.utcnow()
+        project.last_modified_by = se_name
+        boq.status = "completed"
+        boq_history.boq_status = "completed"
+
+        db.session.commit()
+
+        log.info(f"Site Engineer {user_id} requested completion for project {project_id}")
+
+        return jsonify({
+            "success": True,
+            "message": "Completion request sent to Project Manager",
+            "project_id": project_id,
+            "completion_requested": True
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error requesting project completion: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to request completion: {str(e)}"
         }), 500

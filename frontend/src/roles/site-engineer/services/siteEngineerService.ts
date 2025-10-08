@@ -12,9 +12,9 @@ const getAuthHeaders = () => {
 };
 
 export const siteEngineerService = {
-  // Get all BOQs (changed from sitesupervisor_boq to all_boq)
+  // Get all BOQs for Site Engineer
   getMyProjects: async () => {
-    const response = await axios.get(`${API_URL}/all_boq`, {
+    const response = await axios.get(`${API_URL}/sitesupervisor_boq`, {
       headers: getAuthHeaders()
     });
     return response.data;
@@ -39,6 +39,25 @@ export const siteEngineerService = {
   // Get dashboard stats
   getDashboardStats: async () => {
     const response = await axios.get(`${API_URL}/sitesupervisor_boq/dashboard`, {
+      headers: getAuthHeaders()
+    });
+    return response.data;
+  },
+
+  // Update user status (online/offline)
+  updateUserStatus: async (userId: number, status: string) => {
+    const response = await axios.post(`${API_URL}/user_status`, {
+      user_id: userId,
+      status: status
+    }, {
+      headers: getAuthHeaders()
+    });
+    return response.data;
+  },
+
+  // Request project completion
+  requestProjectCompletion: async (projectId: number) => {
+    const response = await axios.post(`${API_URL}/request_completion/${projectId}`, {}, {
       headers: getAuthHeaders()
     });
     return response.data;

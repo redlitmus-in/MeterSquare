@@ -6,11 +6,43 @@ import {
   CalendarIcon,
   ClockIcon,
   CheckCircleIcon,
+  PlusIcon,
+  XMarkIcon,
+  ArrowDownTrayIcon,
+  DocumentTextIcon,
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
 import { siteEngineerService } from '../services/siteEngineerService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import BOQCreationForm from '@/components/forms/BOQCreationForm';
+
+interface BOQItem {
+  id: number;
+  description: string;
+  briefDescription?: string;
+  unit: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+  materials: {
+    name: string;
+    quantity: number;
+    unit: string;
+    rate: number;
+    amount: number;
+  }[];
+  labour: {
+    type: string;
+    quantity: number;
+    unit: string;
+    rate: number;
+    amount: number;
+  }[];
+  laborCost: number;
+  estimatedSellingPrice: number;
+  purchaseType?: 'existing' | 'new';
+}
 
 interface Project {
   project_id: number;
@@ -23,6 +55,16 @@ interface Project {
   description?: string;
   created_at?: string;
   priority?: 'high' | 'medium' | 'low';
+  boq_ids?: number[];
+  boq_summary?: {
+    total_cost: number;
+    total_items: number;
+    total_materials_cost: number;
+    total_labour_cost: number;
+  };
+  completion_requested?: boolean;
+  existingPurchaseItems?: BOQItem[];
+  newPurchaseItems?: BOQItem[];
 }
 
 const MyProjects: React.FC = () => {
@@ -30,7 +72,15 @@ const MyProjects: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [filterStatus, setFilterStatus] = useState<'assigned' | 'ongoing' | 'completed'>('assigned');
+  const [filterStatus, setFilterStatus] = useState<'ongoing' | 'completed'>('ongoing');
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [projectDetails, setProjectDetails] = useState<any>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [showCreateBOQModal, setShowCreateBOQModal] = useState(false);
+  const [selectedProjectForBOQ, setSelectedProjectForBOQ] = useState<Project | null>(null);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [projectToRequest, setProjectToRequest] = useState<Project | null>(null);
+  const [requesting, setRequesting] = useState(false);
 
   useEffect(() => {
     loadProjects();
@@ -53,22 +103,127 @@ const MyProjects: React.FC = () => {
     }
   };
 
-  const filteredProjects = projects.filter(project => {
-    if (filterStatus === 'assigned') {
-      return project.status?.toLowerCase() === 'assigned' || project.status?.toLowerCase() === 'pending';
+  const handleViewProject = async (project: Project) => {
+    try {
+      setSelectedProject(project);
+      setShowDetailsModal(true);
+      setLoadingDetails(true);
+
+      // Get the first BOQ ID from the project's boq_ids array
+      if (!project.boq_ids || project.boq_ids.length === 0) {
+        toast.error('No BOQ found for this project');
+        setShowDetailsModal(false);
+        return;
+      }
+
+      const boqId = project.boq_ids[0]; // Get the first BOQ ID
+      const details = await siteEngineerService.getProjectDetails(boqId);
+
+      // Helper function to process item
+      const processItem = (item: any, purchaseType: 'existing' | 'new'): BOQItem => ({
+        id: item.master_item_id || item.id,
+        description: item.item_name || item.description || item.item_description,
+        briefDescription: item.brief_description || item.description,
+        unit: 'unit',
+        quantity: 1,
+        rate: item.base_cost || item.rate || 0,
+        amount: item.total_cost || item.amount || 0,
+        materials: item.materials?.map((mat: any) => ({
+          name: mat.material_name,
+          quantity: mat.quantity,
+          unit: mat.unit,
+          rate: mat.unit_price,
+          amount: mat.total_price
+        })) || [],
+        labour: item.labour?.map((lab: any) => ({
+          type: lab.labour_role,
+          quantity: lab.hours,
+          unit: 'hours',
+          rate: lab.rate_per_hour,
+          amount: lab.total_cost
+        })) || [],
+        laborCost: item.totalLabourCost || item.labor_cost || 0,
+        estimatedSellingPrice: item.selling_price || item.estimatedSellingPrice || item.estimated_selling_price || item.amount,
+        purchaseType
+      });
+
+      // Process existing purchase items
+      const existingItems: BOQItem[] = details.existing_purchase?.items?.map((item: any) =>
+        processItem(item, 'existing')
+      ) || [];
+
+      // Process new purchase items - combine from new_purchase.items AND root items array
+      let newItems: BOQItem[] = [];
+
+      // Add items from new_purchase section
+      if (details.new_purchase?.items) {
+        newItems = details.new_purchase.items.map((item: any) => processItem(item, 'new'));
+      }
+
+      // Also check root items array for additional new purchases (when multiple new purchases are added)
+      if (details.items && Array.isArray(details.items)) {
+        const rootNewItems = details.items
+          .filter((item: any) => {
+            // Only include items that are not already in existing or new purchase
+            const itemId = item.master_item_id || item.id;
+            const existingIds = existingItems.map(i => i.id);
+            const newIds = newItems.map(i => i.id);
+            return !existingIds.includes(itemId) && !newIds.includes(itemId);
+          })
+          .map((item: any) => processItem(item, 'new'));
+
+        newItems = [...newItems, ...rootNewItems];
+      }
+
+      // Update project details with separated items
+      setProjectDetails({
+        ...details,
+        existingPurchaseItems: existingItems,
+        newPurchaseItems: newItems
+      });
+
+      // Update selected project
+      setSelectedProject({
+        ...project,
+        existingPurchaseItems: existingItems,
+        newPurchaseItems: newItems
+      });
+    } catch (error: any) {
+      console.error('Error loading project details:', error);
+      toast.error(error?.response?.data?.error || 'Failed to load project details');
+    } finally {
+      setLoadingDetails(false);
     }
+  };
+
+  const handleCloseModal = () => {
+    setShowDetailsModal(false);
+    setSelectedProject(null);
+    setProjectDetails(null);
+  };
+
+  const filteredProjects = projects.filter(project => {
+    const statusLower = project.status?.toLowerCase();
     if (filterStatus === 'ongoing') {
-      return project.status?.toLowerCase() === 'in_progress' || project.status?.toLowerCase() === 'active';
+      return statusLower === 'in_progress' ||
+             statusLower === 'active' ||
+             statusLower === 'assigned' ||
+             statusLower === 'pending';
     }
     if (filterStatus === 'completed') {
-      return project.status?.toLowerCase() === 'completed';
+      return statusLower === 'completed';
     }
     return false;
   });
 
   const getTabCounts = () => ({
-    assigned: projects.filter(p => p.status?.toLowerCase() === 'assigned' || p.status?.toLowerCase() === 'pending').length,
-    ongoing: projects.filter(p => p.status?.toLowerCase() === 'in_progress' || p.status?.toLowerCase() === 'active').length,
+    ongoing: projects.filter(p => {
+      const statusLower = p.status?.toLowerCase();
+      return statusLower === 'in_progress' ||
+             statusLower === 'active' ||
+             statusLower === 'assigned' ||
+             statusLower === 'pending';
+    }).length,
     completed: projects.filter(p => p.status?.toLowerCase() === 'completed').length
   });
 
@@ -143,17 +298,6 @@ const MyProjects: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-center gap-2">
             <button
-              onClick={() => setFilterStatus('assigned')}
-              className={`px-5 py-2 text-sm font-medium whitespace-nowrap transition-all rounded-lg ${
-                filterStatus === 'assigned'
-                  ? 'bg-white text-orange-600 shadow-sm border-2 border-orange-200'
-                  : 'bg-transparent text-gray-700 hover:bg-white/50'
-              }`}
-            >
-              Assigned Projects ({tabCounts.assigned})
-            </button>
-
-            <button
               onClick={() => setFilterStatus('ongoing')}
               className={`px-5 py-2 text-sm font-medium whitespace-nowrap transition-all rounded-lg ${
                 filterStatus === 'ongoing'
@@ -222,12 +366,47 @@ const MyProjects: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => setSelectedProject(project)}
+                        onClick={() => handleViewProject(project)}
                         className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                         title="View Details"
                       >
                         <EyeIcon className="w-5 h-5" />
                       </button>
+                      <button
+                        onClick={() => {
+                          setSelectedProjectForBOQ(project);
+                          setShowCreateBOQModal(true);
+                        }}
+                        className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                        title="Create New BOQ"
+                      >
+                        <PlusIcon className="w-5 h-5" />
+                      </button>
+                      {!project.completion_requested && project.status?.toLowerCase() !== 'completed' && (
+                        <button
+                          onClick={() => {
+                            setProjectToRequest(project);
+                            setShowRequestModal(true);
+                          }}
+                          className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors flex items-center gap-2 text-sm font-medium shadow-sm"
+                          title="Request Completion"
+                        >
+                          <CheckCircleIcon className="w-5 h-5" />
+                          Request Completion
+                        </button>
+                      )}
+                      {project.completion_requested && project.status?.toLowerCase() !== 'completed' && (
+                        <div className="px-4 py-2 bg-yellow-100 border-2 border-yellow-400 rounded-lg flex items-center gap-2">
+                          <ClockIcon className="w-5 h-5 text-yellow-600" />
+                          <span className="text-sm font-bold text-yellow-900">Pending PM Approval</span>
+                        </div>
+                      )}
+                      {project.status?.toLowerCase() === 'completed' && (
+                        <div className="px-4 py-2 bg-green-100 border-2 border-green-400 rounded-lg flex items-center gap-2">
+                          <CheckCircleIcon className="w-5 h-5 text-green-600" />
+                          <span className="text-sm font-bold text-green-900">Completed</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -256,6 +435,399 @@ const MyProjects: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Details Modal */}
+      {showDetailsModal && selectedProject && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden"
+          >
+            <div className="bg-blue-50 px-6 py-4 border-b border-blue-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-blue-900">BOQ Details - {selectedProject.project_name}</h2>
+                  <p className="text-sm text-blue-700 mt-1">
+                    {projectDetails?.project_details?.client || selectedProject.client} • {projectDetails?.project_details?.location || selectedProject.location}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center gap-2">
+                    <ArrowDownTrayIcon className="w-4 h-4" />
+                    Download
+                  </button>
+                  <button
+                    onClick={handleCloseModal}
+                    className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
+                  >
+                    <XMarkIcon className="w-6 h-6 text-blue-900" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[75vh]">
+              {loadingDetails ? (
+                <div className="text-center py-12">
+                  <ModernLoadingSpinners variant="pulse-wave" />
+                </div>
+              ) : (
+                <>
+                  {/* Existing Purchase Section */}
+                  {projectDetails?.existingPurchaseItems && projectDetails.existingPurchaseItems.length > 0 && (
+                    <div className="mb-8">
+                      <div className="bg-gradient-to-r from-purple-500 to-purple-600 rounded-t-lg px-4 py-3 flex items-center justify-between">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <DocumentTextIcon className="w-5 h-5" />
+                          Existing Purchase Items
+                        </h3>
+                        <span className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium text-white">
+                          {projectDetails.existingPurchaseItems.length} item{projectDetails.existingPurchaseItems.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <div className="border-2 border-purple-200 rounded-b-lg p-4 bg-purple-50/30">
+                        <div className="space-y-4">
+                          {projectDetails.existingPurchaseItems.map((item, idx) => (
+                            <div key={`existing-${item.id}-${idx}`} className="bg-white border-2 border-purple-200 rounded-lg p-4 shadow-sm">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h4 className="font-bold text-gray-900 text-lg">{item.description}</h4>
+                                    <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded">Existing</span>
+                                  </div>
+                                  {item.briefDescription && (
+                                    <p className="text-sm text-gray-600 mt-1">{item.briefDescription}</p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {item.materials?.length > 0 && (
+                                <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                                  <p className="text-sm font-medium text-blue-900 mb-2">+ Raw Materials</p>
+                                  <div className="space-y-1">
+                                    {item.materials.map((mat, matIdx) => (
+                                      <div key={matIdx} className="flex justify-between text-sm text-blue-800">
+                                        <span>{mat.name} ({mat.quantity} {mat.unit})</span>
+                                        <span className="font-medium">AED{(mat.amount || 0).toLocaleString()}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="text-sm font-bold text-blue-900 mt-2 pt-2 border-t border-blue-200">
+                                    Total Materials: AED{item.materials.reduce((sum, m) => sum + (m.amount || 0), 0).toLocaleString()}
+                                  </p>
+                                </div>
+                              )}
+
+                              {item.labour?.length > 0 && (
+                                <div className="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
+                                  <p className="text-sm font-medium text-green-900 mb-2">+ Labour</p>
+                                  <div className="space-y-1">
+                                    {item.labour.map((lab, labIdx) => (
+                                      <div key={labIdx} className="flex justify-between text-sm text-green-800">
+                                        <span>{lab.type} ({lab.quantity} {lab.unit})</span>
+                                        <span className="font-medium">AED{(lab.amount || 0).toLocaleString()}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="text-sm font-bold text-green-900 mt-2 pt-2 border-t border-green-200">
+                                    Total Labour: AED{(item.laborCost || 0).toLocaleString()}
+                                  </p>
+                                </div>
+                              )}
+
+                              <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm font-medium text-green-900">Estimated Selling Price:</span>
+                                  <span className="text-xl font-bold text-green-900">AED{(item.estimatedSellingPrice || 0).toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Existing Purchase Summary */}
+                        {projectDetails.existing_purchase?.summary && (
+                          <div className="mt-4 bg-white border-2 border-purple-300 rounded-lg p-4">
+                            <h4 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
+                              <DocumentTextIcon className="w-4 h-4" />
+                              Existing Purchase Summary
+                            </h4>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-blue-700">Total Material Cost:</span>
+                                <span className="font-bold text-blue-900">
+                                  AED{(projectDetails.existing_purchase.summary.total_material_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-green-700">Total Labour Cost:</span>
+                                <span className="font-bold text-green-900">
+                                  AED{(projectDetails.existing_purchase.summary.total_labour_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between pt-2 mt-2 border-t-2 border-purple-300">
+                                <span className="text-purple-900 font-bold">Existing Purchase Total:</span>
+                                <span className="font-bold text-purple-900">
+                                  AED{(projectDetails.existing_purchase.summary.total_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* New Purchase Section */}
+                  {projectDetails?.newPurchaseItems && projectDetails.newPurchaseItems.length > 0 && (
+                    <div className="mb-8">
+                      <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-t-lg px-4 py-3 flex items-center justify-between">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <DocumentTextIcon className="w-5 h-5" />
+                          New Purchase Items
+                        </h3>
+                        <span className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium text-white">
+                          {projectDetails.newPurchaseItems.length} item{projectDetails.newPurchaseItems.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <div className="border-2 border-emerald-200 rounded-b-lg p-4 bg-emerald-50/30">
+                        <div className="space-y-4">
+                          {projectDetails.newPurchaseItems.map((item, idx) => (
+                            <div key={`new-${item.id}-${idx}`} className="bg-white border-2 border-emerald-200 rounded-lg p-4 shadow-sm">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h4 className="font-bold text-gray-900 text-lg">{item.description}</h4>
+                                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-medium rounded">New</span>
+                                  </div>
+                                  {item.briefDescription && (
+                                    <p className="text-sm text-gray-600 mt-1">{item.briefDescription}</p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {item.materials?.length > 0 && (
+                                <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                                  <p className="text-sm font-medium text-blue-900 mb-2">+ Raw Materials</p>
+                                  <div className="space-y-1">
+                                    {item.materials.map((mat, matIdx) => (
+                                      <div key={matIdx} className="flex justify-between text-sm text-blue-800">
+                                        <span>{mat.name} ({mat.quantity} {mat.unit})</span>
+                                        <span className="font-medium">AED{(mat.amount || 0).toLocaleString()}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="text-sm font-bold text-blue-900 mt-2 pt-2 border-t border-blue-200">
+                                    Total Materials: AED{item.materials.reduce((sum, m) => sum + (m.amount || 0), 0).toLocaleString()}
+                                  </p>
+                                </div>
+                              )}
+
+                              {item.labour?.length > 0 && (
+                                <div className="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
+                                  <p className="text-sm font-medium text-green-900 mb-2">+ Labour</p>
+                                  <div className="space-y-1">
+                                    {item.labour.map((lab, labIdx) => (
+                                      <div key={labIdx} className="flex justify-between text-sm text-green-800">
+                                        <span>{lab.type} ({lab.quantity} {lab.unit})</span>
+                                        <span className="font-medium">AED{(lab.amount || 0).toLocaleString()}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="text-sm font-bold text-green-900 mt-2 pt-2 border-t border-green-200">
+                                    Total Labour: AED{(item.laborCost || 0).toLocaleString()}
+                                  </p>
+                                </div>
+                              )}
+
+                              <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm font-medium text-green-900">Estimated Selling Price:</span>
+                                  <span className="text-xl font-bold text-green-900">AED{(item.estimatedSellingPrice || 0).toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* New Purchase Summary */}
+                        {projectDetails.new_purchase?.summary && (
+                          <div className="mt-4 bg-white border-2 border-emerald-300 rounded-lg p-4">
+                            <h4 className="font-bold text-emerald-900 mb-3 flex items-center gap-2">
+                              <DocumentTextIcon className="w-4 h-4" />
+                              New Purchase Summary
+                            </h4>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-blue-700">Total Material Cost:</span>
+                                <span className="font-bold text-blue-900">
+                                  AED{(projectDetails.new_purchase.summary.total_material_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-green-700">Total Labour Cost:</span>
+                                <span className="font-bold text-green-900">
+                                  AED{(projectDetails.new_purchase.summary.total_labour_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between pt-2 mt-2 border-t-2 border-emerald-300">
+                                <span className="text-emerald-900 font-bold">New Purchase Total:</span>
+                                <span className="font-bold text-emerald-900">
+                                  AED{(projectDetails.new_purchase.summary.total_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Combined Cost Summary */}
+                  {projectDetails?.combined_summary && (
+                    <div className="mt-6 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-lg p-5 shadow-md">
+                      <h3 className="font-bold text-blue-900 mb-4 text-lg flex items-center gap-2">
+                        <DocumentTextIcon className="w-5 h-5" />
+                        Combined Cost Summary
+                      </h3>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-blue-700">Total Material Cost:</span>
+                          <span className="font-bold text-blue-900">AED{(projectDetails.combined_summary.total_material_cost || 0).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-green-700">Total Labour Cost:</span>
+                          <span className="font-bold text-green-900">AED{(projectDetails.combined_summary.total_labour_cost || 0).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between pt-3 mt-3 border-t-2 border-blue-400">
+                          <span className="text-blue-900 font-bold text-lg">Grand Total:</span>
+                          <span className="font-bold text-blue-900 text-xl">AED{(projectDetails.combined_summary.total_cost || 0).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-4 text-sm text-gray-600">
+                    Submitted by: {projectDetails?.created_by || 'Estimator'} on {formatDate(projectDetails?.created_at)}
+                  </div>
+                </>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Create BOQ Modal */}
+      <BOQCreationForm
+        isOpen={showCreateBOQModal}
+        onClose={() => {
+          setShowCreateBOQModal(false);
+          setSelectedProjectForBOQ(null);
+        }}
+        onSubmit={async () => {
+          toast.success('Extra items added successfully!');
+          setShowCreateBOQModal(false);
+          const currentProject = selectedProjectForBOQ;
+          setSelectedProjectForBOQ(null);
+
+          // Reload all projects first
+          await loadProjects();
+
+          // If there was a details modal open, reload its details
+          if (selectedProject && currentProject?.boq_ids?.[0]) {
+            await handleViewProject(selectedProject);
+          }
+        }}
+        selectedProject={selectedProjectForBOQ}
+        hideBulkUpload={true}
+        hideTemplate={true}
+        isNewPurchase={true}
+        existingBoqId={selectedProjectForBOQ?.boq_ids?.[0]}
+      />
+
+      {/* Request Completion Confirmation Modal */}
+      {showRequestModal && projectToRequest && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => {
+          setShowRequestModal(false);
+          setProjectToRequest(null);
+        }}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            transition={{ type: 'spring', duration: 0.3, bounce: 0.2 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden"
+          >
+            {/* Header */}
+            <div className="bg-gradient-to-r from-orange-500 to-amber-600 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-white/20 rounded-full">
+                  <CheckCircleIcon className="w-5 h-5 text-white" />
+                </div>
+                <h2 className="text-base font-bold text-white">Request Completion</h2>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="px-4 py-4">
+              <p className="text-gray-700 text-sm mb-3">
+                Request Project Manager to mark this project as completed?
+              </p>
+              <div className="bg-blue-50 border-l-3 border-blue-500 rounded-r px-3 py-2">
+                <p className="text-xs font-semibold text-blue-900">{projectToRequest.project_name}</p>
+                <p className="text-xs text-blue-600">{projectToRequest.client || 'N/A'}</p>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="bg-gray-50 px-4 py-3 flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowRequestModal(false);
+                  setProjectToRequest(null);
+                }}
+                disabled={requesting}
+                className="px-4 py-2 bg-white hover:bg-gray-100 text-gray-700 font-medium rounded-lg transition-colors border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    setRequesting(true);
+                    await siteEngineerService.requestProjectCompletion(projectToRequest.project_id);
+                    toast.success('Completion request sent to Project Manager');
+                    setShowRequestModal(false);
+                    setProjectToRequest(null);
+                    loadProjects();
+                  } catch (error: any) {
+                    console.error('Error requesting completion:', error);
+                    toast.error(error?.response?.data?.error || 'Failed to send request');
+                  } finally {
+                    setRequesting(false);
+                  }
+                }}
+                disabled={requesting}
+                className="px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center gap-1.5 text-sm"
+              >
+                {requesting ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircleIcon className="w-4 h-4" />
+                    Send Request
+                  </>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };
