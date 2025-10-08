@@ -372,7 +372,7 @@ const MyProjects: React.FC = () => {
                       >
                         <EyeIcon className="w-5 h-5" />
                       </button>
-                      <button
+                      {/* <button
                         onClick={() => {
                           setSelectedProjectForBOQ(project);
                           setShowCreateBOQModal(true);
@@ -381,7 +381,7 @@ const MyProjects: React.FC = () => {
                         title="Create New BOQ"
                       >
                         <PlusIcon className="w-5 h-5" />
-                      </button>
+                      </button> */}
                       {!project.completion_requested && project.status?.toLowerCase() !== 'completed' && (
                         <button
                           onClick={() => {
