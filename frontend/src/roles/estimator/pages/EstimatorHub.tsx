@@ -322,7 +322,8 @@ const EstimatorHub: React.FC = () => {
           status: boq.status || 'draft',
           client_rejection_reason: boq.client_rejection_reason,
           created_at: boq.created_at,
-          email_sent: boq.email_sent || false
+          email_sent: boq.email_sent || false,
+          pm_assigned: boq.pm_assigned || false
         }));
 
         // Sort by created_at - most recent first
@@ -428,10 +429,11 @@ const EstimatorHub: React.FC = () => {
           boq.status?.toLowerCase() === 'pending'
         );
       } else if (activeTab === 'approved') {
-        // Approved: TD approved (includes: approved, sent_for_confirmation, client_confirmed, client_rejected)
+        // Approved: TD approved (includes all stages after TD approval until PM assignment)
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
-          return status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed' || status === 'client_rejected';
+          // Show if approved, sent to client, or client confirmed (but not yet PM assigned/completed)
+          return (status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed') && !boq.pm_assigned;
         });
       } else if (activeTab === 'rejected') {
         // Rejected: TD rejected OR client rejected
@@ -1093,20 +1095,6 @@ const EstimatorHub: React.FC = () => {
               <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
               Sent to TD (Pending Approval)
             </div>
-          ) : isApprovedByTD ? (
-            /* Approved by TD - Can send to client */
-            <button
-              className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
-              style={{ backgroundColor: 'rgb(34, 197, 94)' }}
-              onClick={() => {
-                setBoqToEmail(boq);
-                setEmailMode('client'); // Set mode to client
-                setShowSendEmailModal(true);
-              }}
-            >
-              <Mail className="h-3.5 w-3.5" />
-              <span>Send to Client</span>
-            </button>
           ) : isSentToClient ? (
             /* Sent to client - waiting for client confirmation */
             <>
@@ -1141,11 +1129,18 @@ const EstimatorHub: React.FC = () => {
               </button>
             </>
           ) : isClientConfirmed ? (
-            /* Client confirmed - ready for PM assignment */
-            <div className="col-span-2 flex items-center justify-center text-xs text-green-700 font-medium">
-              <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
-              Client Approved
-            </div>
+            /* Client confirmed - check if PM is assigned */
+            boq.pm_assigned ? (
+              <div className="col-span-2 flex items-center justify-center text-xs text-blue-700 font-medium">
+                <UserIcon className="h-4 w-4 text-blue-600 mr-1" />
+                PM Assigned
+              </div>
+            ) : (
+              <div className="col-span-2 flex items-center justify-center text-xs text-green-700 font-medium">
+                <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
+                Client Approved (Awaiting PM)
+              </div>
+            )
           ) : isClientRejected ? (
             /* Client rejected - can revise and resend OR cancel project */
             <>
@@ -1180,6 +1175,20 @@ const EstimatorHub: React.FC = () => {
               <XCircleIcon className="h-4 w-4 text-gray-600 mr-1" />
               Project Permanently Cancelled
             </div>
+          ) : isApprovedByTD ? (
+            /* Approved by TD - Can send to client */
+            <button
+              className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
+              style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+              onClick={() => {
+                setBoqToEmail(boq);
+                setEmailMode('client');
+                setShowSendEmailModal(true);
+              }}
+            >
+              <Mail className="h-3.5 w-3.5" />
+              <span>Send to Client</span>
+            </button>
           ) : null}
         </div>
       </motion.div>
@@ -1285,13 +1294,6 @@ const EstimatorHub: React.FC = () => {
                             </Button>
                           </>
                         );
-                      } else if (isApprovedByTD) {
-                        return (
-                          <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('client'); setShowSendEmailModal(true); }} className="h-8 px-3" title="Send to Client">
-                            <Send className="h-4 w-4 mr-1" />
-                            <span className="text-xs">Send to Client</span>
-                          </Button>
-                        );
                       } else if (isSentToClient) {
                         return (
                           <>
@@ -1306,11 +1308,23 @@ const EstimatorHub: React.FC = () => {
                           </>
                         );
                       } else if (isClientConfirmed) {
-                        return (
+                        return boq.pm_assigned ? (
+                          <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                            <UserIcon className="h-4 w-4" />
+                            PM Assigned
+                          </span>
+                        ) : (
                           <span className="text-xs text-green-600 font-medium flex items-center gap-1">
                             <CheckCircle className="h-4 w-4" />
-                            Client Approved
+                            Client Approved (Awaiting PM)
                           </span>
+                        );
+                      } else if (isApprovedByTD) {
+                        return (
+                          <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('client'); setShowSendEmailModal(true); }} className="h-8 px-3" title="Send to Client">
+                            <Send className="h-4 w-4 mr-1" />
+                            <span className="text-xs">Send to Client</span>
+                          </Button>
                         );
                       }
                       return null;

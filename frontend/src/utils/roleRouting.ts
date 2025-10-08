@@ -20,11 +20,11 @@ import { UserRole } from '@/types';
 export const ROLE_ID_TO_NAME: Record<number, string> = {
   1: 'admin',
   2: 'siteEngineer',
-  3: UserRole.MEP_SUPERVISOR,
-  4: UserRole.PROCUREMENT,
+  3: 'siteEngineer', // site engineer
+  4: 'estimator', // estimator
   5: UserRole.PROJECT_MANAGER,
-  6: UserRole.DESIGN,
-  7: 'estimator', // Map ESTIMATION role ID to estimator
+  6: 'projectManager',
+  7: 'technicalDirector',
   8: UserRole.ACCOUNTS,
   9: UserRole.TECHNICAL_DIRECTOR,
   10: 'estimator' // Map ESTIMATOR role ID to estimator
