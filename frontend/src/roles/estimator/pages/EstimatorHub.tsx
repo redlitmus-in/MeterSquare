@@ -686,13 +686,16 @@ const EstimatorHub: React.FC = () => {
       const boqData = result.data;
 
       // Transform BOQ data to match export function expectations (same as TD does)
+      // IMPORTANT: Use existing_purchase.items OR items (same logic as SendBOQEmailModal)
+      const items = (boqData.existing_purchase?.items || boqData.items) || [];
+
       const transformedData = {
         id: boqData.boq_id || boq.boq_id,
         projectName: boqData.project_name || boqData.project_details?.project_name || boq.project?.name || 'Unknown Project',
         clientName: boqData.client || boqData.project_details?.client || boqData.project?.client || boq.client || boq.project_details?.client || 'Unknown Client',
         estimator: boqData.created_by || boqData.created_by_name || 'Unknown',
         totalValue: boqData.selling_price || boqData.estimatedSellingPrice || boqData.total_cost || 0,
-        itemCount: boqData.items?.length || 0,
+        itemCount: items.length || boqData.items_count || 0,
         laborCost: boqData.total_labour_cost || 0,
         materialCost: boqData.total_material_cost || 0,
         profitMargin: boqData.profit_margin || boqData.profit_margin_percentage || 0,
@@ -701,7 +704,7 @@ const EstimatorHub: React.FC = () => {
         location: boqData.location || boqData.project_details?.location || 'N/A',
         floor: boqData.floor_name || boqData.project_details?.floor || 'N/A',
         workingHours: boqData.working_hours || boqData.project_details?.hours || 'N/A',
-        boqItems: boqData.items?.map((item: any) => {
+        boqItems: items.map((item: any) => {
           const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
           const sellingPrice = item.selling_price || 0;
 

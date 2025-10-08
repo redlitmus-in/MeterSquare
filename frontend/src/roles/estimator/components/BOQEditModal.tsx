@@ -225,13 +225,16 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       if (response.success && response.data) {
         setOriginalBoq(response.data);
 
+        // Get items from correct location (existing_purchase.items OR items)
+        const items = (response.data.existing_purchase?.items || response.data.items) || [];
+
         // Convert to editable format
         const editableBoq: BOQUpdatePayload = {
           project_id: response.data.project_id,
           boq_id: response.data.boq_id,
           boq_name: response.data.boq_name || boq.boq_name || boq.title || '',
           status: response.data.status,
-          items: (response.data.items || []).map((item: BOQItemDetailed) => ({
+          items: items.map((item: BOQItemDetailed) => ({
             item_id: item.master_item_id,
             item_name: item.item_name,
             description: item.description || '',

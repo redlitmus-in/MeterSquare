@@ -82,7 +82,8 @@ def send_email_sync(email_data):
                                 <!-- Header -->
                                 <tr>
                                     <td style="background: linear-gradient(to right, rgb(255, 255, 255), rgb(255, 255, 255)); border-bottom: 2px solid rgb(254, 202, 202); padding: 25px; text-align: center;">
-                                        <h1 style="color: #243d8a; margin: 0; font-size: 24px;">Meter Square</h1>
+                                        <!-- Logo Image using CID reference -->
+                                        <img src="cid:logo" alt="Meter Square Logo" style="display: block; max-width: 200px; height: auto; margin: 0 auto;">
                                     </td>
                                 </tr>
                                 <!-- Content -->
@@ -130,15 +131,46 @@ def send_email_sync(email_data):
             </html>
             """
 
-        # Create message
-        message = MIMEMultipart('alternative')
+        # Create message with related type for embedded images
+        message = MIMEMultipart('related')
         sender_name = "Meter Square"
         message["From"] = formataddr((str(Header(sender_name, 'utf-8')), SENDER_EMAIL))
         message["To"] = email_id
         message["Subject"] = subject
 
+        # Create alternative part for HTML
+        msg_alternative = MIMEMultipart('alternative')
+        message.attach(msg_alternative)
+
         # Attach HTML body
-        message.attach(MIMEText(body, "html"))
+        msg_alternative.attach(MIMEText(body, "html"))
+
+        # Attach the logo image from local file
+        logo_attached = False
+        try:
+            possible_logo_paths = [
+                os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logo.png'),  # backend/logo.png
+                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logo.png'),  # Project root
+                os.path.join(os.getcwd(), 'logo.png'),  # Current working directory
+            ]
+
+            for logo_path in possible_logo_paths:
+                if os.path.exists(logo_path):
+                    with open(logo_path, 'rb') as f:
+                        logo_data = f.read()
+                        logo_image = MIMEImage(logo_data, _subtype='png')
+                        logo_image.add_header('Content-ID', '<logo>')
+                        logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
+                        message.attach(logo_image)
+                        logo_attached = True
+                        log.info(f"Logo attached successfully from: {logo_path}")
+                        break
+
+            if not logo_attached:
+                log.warning("Logo file not found, sending email without logo")
+
+        except Exception as e:
+            log.error(f"Error attaching logo: {e}")
 
         # Send email
         if EMAIL_USE_TLS:

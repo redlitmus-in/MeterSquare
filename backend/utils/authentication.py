@@ -228,9 +228,9 @@ def send_otp(email_id):
         try:
             # Try to find and attach the logo
             possible_logo_paths = [
+                os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logo.png'),  # backend/logo.png
                 os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logo.png'),  # Project root
                 os.path.join(os.getcwd(), 'logo.png'),  # Current working directory
-                'C:\\Users\\developer\\Documents\\metersquare-ERP\\logo.png',  # Absolute path
             ]
             
             for logo_path in possible_logo_paths:

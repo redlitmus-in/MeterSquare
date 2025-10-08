@@ -232,6 +232,22 @@ class TDService {
     }
   }
 
+  async deletePM(userId: number): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await apiClient.delete(`/delete_pm/${userId}`);
+      return {
+        success: true,
+        message: response.data.message || 'Project Manager deleted successfully'
+      };
+    } catch (error: any) {
+      console.error('Delete PM error:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to delete Project Manager'
+      };
+    }
+  }
+
   async getAllTDBOQs(page: number = 1, perPage: number = 100): Promise<{ success: boolean; data?: any[]; count?: number; message?: string }> {
     try {
       const response = await apiClient.get('/td_boqs', {
