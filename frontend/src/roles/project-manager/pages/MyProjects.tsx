@@ -89,9 +89,16 @@ interface SiteEngineer {
   sitesupervisor_name: string;
   email: string;
   phone: string;
-  project_id: number | null;
+  project_id?: number | null;
   project_name?: string | null;
-  assigned_projects?: number;
+  projects?: Array<{
+    project_id: number;
+    project_name: string;
+    status?: string;
+  }>;
+  project_count: number;
+  total_projects?: number;
+  completed_projects_count?: number;
   user_status?: string;
 }
 
@@ -644,10 +651,10 @@ const MyProjects: React.FC = () => {
                   <p className="text-xs text-blue-600 mt-1">Working Hours: {selectedProject.area || 'N/A'}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center gap-2">
+                  {/* <button className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center gap-2">
                     <ArrowDownTrayIcon className="w-4 h-4" />
                     Download
-                  </button>
+                  </button> */}
                   <button
                     onClick={() => setShowBOQModal(false)}
                     className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
@@ -1065,7 +1072,7 @@ const MyProjects: React.FC = () => {
                           <div className="space-y-2">
                             {filteredSEs.filter(se => se.user_status === 'online').map((se) => {
                               const isSelected = selectedSE?.user_id === se.user_id;
-                              const projectCount = se.assigned_projects || (se.project_id ? 1 : 0);
+                              const projectCount = se.project_count || 0;
                               const isMaxCapacity = projectCount >= 2;
 
                               return (
@@ -1113,7 +1120,7 @@ const MyProjects: React.FC = () => {
                                         <div className="flex items-center gap-2 text-[10px] text-gray-500 mt-0.5">
                                           <BuildingOfficeIcon className="w-3 h-3 flex-shrink-0" />
                                           <span>{projectCount}/2 projects</span>
-                                          {se.project_name && (
+                                          {se.projects && se.projects.length > 0 && (
                                             <button
                                               onClick={(e) => {
                                                 e.stopPropagation();
@@ -1150,7 +1157,7 @@ const MyProjects: React.FC = () => {
                           </div>
                           <div className="space-y-2">
                             {filteredSEs.filter(se => se.user_status !== 'online').map((se) => {
-                              const projectCount = se.assigned_projects || (se.project_id ? 1 : 0);
+                              const projectCount = se.project_count || 0;
                               const isMaxCapacity = projectCount >= 2;
 
                               return (
@@ -1191,7 +1198,7 @@ const MyProjects: React.FC = () => {
                                         <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-0.5">
                                           <BuildingOfficeIcon className="w-3 h-3 flex-shrink-0" />
                                           <span>{projectCount}/2 projects</span>
-                                          {se.project_name && (
+                                          {se.projects && se.projects.length > 0 && (
                                             <button
                                               onClick={(e) => {
                                                 e.stopPropagation();
@@ -1381,8 +1388,14 @@ const MyProjects: React.FC = () => {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-1">
                       <h3 className="text-base font-bold text-gray-900 truncate">{selectedSEDetails.sitesupervisor_name}</h3>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-yellow-200 text-yellow-800 flex-shrink-0">
-                        Busy
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${
+                        selectedSEDetails.project_count >= 2
+                          ? 'bg-red-200 text-red-800'
+                          : selectedSEDetails.project_count > 0
+                          ? 'bg-yellow-200 text-yellow-800'
+                          : 'bg-green-200 text-green-800'
+                      }`}>
+                        {selectedSEDetails.project_count >= 2 ? 'Busy' : selectedSEDetails.project_count > 0 ? 'Busy' : 'Available'}
                       </span>
                     </div>
                     <p className="text-xs text-gray-600 truncate">Email: {selectedSEDetails.email}</p>
@@ -1392,17 +1405,39 @@ const MyProjects: React.FC = () => {
 
                 <div className="flex items-center gap-1.5 text-sm text-gray-700 mb-2">
                   <BuildingOfficeIcon className="w-4 h-4" />
-                  <span className="font-bold">1</span>
-                  <span>projects assigned</span>
+                  <span className="font-bold">{selectedSEDetails.project_count}</span>
+                  <span>ongoing project{selectedSEDetails.project_count !== 1 ? 's' : ''} assigned</span>
+                  {selectedSEDetails.completed_projects_count ? (
+                    <span className="text-xs text-gray-500">
+                      ({selectedSEDetails.completed_projects_count} completed)
+                    </span>
+                  ) : null}
                 </div>
 
                 <div>
                   <div className="flex items-center justify-between text-xs mb-1">
                     <span className="text-gray-600">Workload Capacity</span>
-                    <span className="font-bold text-yellow-700">50%</span>
+                    <span className={`font-bold ${
+                      selectedSEDetails.project_count >= 2
+                        ? 'text-red-700'
+                        : selectedSEDetails.project_count > 0
+                        ? 'text-yellow-700'
+                        : 'text-green-700'
+                    }`}>
+                      {(selectedSEDetails.project_count / 2 * 100).toFixed(0)}%
+                    </span>
                   </div>
                   <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-yellow-400 to-yellow-500" style={{ width: '50%' }}></div>
+                    <div
+                      className={`h-full ${
+                        selectedSEDetails.project_count >= 2
+                          ? 'bg-gradient-to-r from-red-400 to-red-500'
+                          : selectedSEDetails.project_count > 0
+                          ? 'bg-gradient-to-r from-yellow-400 to-yellow-500'
+                          : 'bg-gradient-to-r from-green-400 to-green-500'
+                      }`}
+                      style={{ width: `${(selectedSEDetails.project_count / 2 * 100)}%` }}
+                    ></div>
                   </div>
                 </div>
               </div>
@@ -1415,12 +1450,29 @@ const MyProjects: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5">
-                  {selectedSEDetails.project_name && (
-                    <div className="bg-white border border-gray-200 rounded-lg p-2.5">
-                      <div className="flex items-center gap-2">
-                        <BuildingOfficeIcon className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                        <p className="text-sm font-medium text-gray-900 truncate">{selectedSEDetails.project_name}</p>
+                  {selectedSEDetails.projects && selectedSEDetails.projects.length > 0 ? (
+                    selectedSEDetails.projects.map((project) => (
+                      <div key={project.project_id} className="bg-white border border-gray-200 rounded-lg p-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <BuildingOfficeIcon className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                            <p className="text-sm font-medium text-gray-900 truncate">{project.project_name}</p>
+                          </div>
+                          {project.status && (
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${
+                              project.status.toLowerCase() === 'completed'
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-blue-100 text-blue-700'
+                            }`}>
+                              {project.status}
+                            </span>
+                          )}
+                        </div>
                       </div>
+                    ))
+                  ) : (
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
+                      <p className="text-xs text-gray-500">No projects assigned</p>
                     </div>
                   )}
                 </div>

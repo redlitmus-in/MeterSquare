@@ -191,20 +191,45 @@ def get_all_sitesupervisor():
         unassigned_list = []
 
         for sitesupervisor in get_sitesupervisors:
-            # Fetch all projects assigned to this sitesupervisor
-            projects = Project.query.filter_by(site_supervisor_id=sitesupervisor.user_id).all()
+            # Fetch all projects assigned to this sitesupervisor (exclude deleted)
+            all_projects = Project.query.filter_by(site_supervisor_id=sitesupervisor.user_id, is_deleted=False).all()
 
-            if projects and len(projects) > 0:
-                # Add each project under assigned list
-                for project in projects:
-                    assigned_list.append({
-                        "user_id": sitesupervisor.user_id,
-                        "sitesupervisor_name": sitesupervisor.full_name,
-                        "email": sitesupervisor.email,
-                        "phone": sitesupervisor.phone,
-                        "project_id": project.project_id,
-                        "project_name": project.project_name if hasattr(project, "project_name") else None
-                    })
+            # Separate ongoing and completed projects
+            ongoing_projects = []
+            completed_projects = []
+
+            for project in all_projects:
+                project_status = (project.status or '').lower()
+                project_data = {
+                    "project_id": project.project_id,
+                    "project_name": project.project_name if hasattr(project, "project_name") else None,
+                    "status": project.status
+                }
+
+                if project_status == 'completed':
+                    completed_projects.append(project_data)
+                else:
+                    ongoing_projects.append(project_data)
+
+            # Combine all projects for display (ongoing first, then completed)
+            all_project_list = ongoing_projects + completed_projects
+
+            # Count only ongoing projects for assignment limit
+            ongoing_count = len(ongoing_projects)
+
+            if all_projects and len(all_projects) > 0:
+                # Add single entry for this sitesupervisor with all their projects
+                assigned_list.append({
+                    "user_id": sitesupervisor.user_id,
+                    "sitesupervisor_name": sitesupervisor.full_name,
+                    "email": sitesupervisor.email,
+                    "phone": sitesupervisor.phone,
+                    "user_status": getattr(sitesupervisor, 'user_status', 'offline'),
+                    "projects": all_project_list,
+                    "project_count": ongoing_count,  # Only count ongoing projects
+                    "total_projects": len(all_projects),
+                    "completed_projects_count": len(completed_projects)
+                })
             else:
                 # sitesupervisor without project assignment
                 unassigned_list.append({
@@ -212,7 +237,11 @@ def get_all_sitesupervisor():
                     "sitesupervisor_name": sitesupervisor.full_name,
                     "email": sitesupervisor.email,
                     "phone": sitesupervisor.phone,
-                    "project_id": None
+                    "user_status": getattr(sitesupervisor, 'user_status', 'offline'),
+                    "projects": [],
+                    "project_count": 0,
+                    "total_projects": 0,
+                    "completed_projects_count": 0
                 })
 
         return jsonify({

@@ -453,10 +453,10 @@ const MyProjects: React.FC = () => {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center gap-2">
+                  {/* <button className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center gap-2">
                     <ArrowDownTrayIcon className="w-4 h-4" />
                     Download
-                  </button>
+                  </button> */}
                   <button
                     onClick={handleCloseModal}
                     className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
