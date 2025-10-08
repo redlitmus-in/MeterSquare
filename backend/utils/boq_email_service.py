@@ -1195,3 +1195,372 @@ class BOQEmailService:
             import traceback
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
+
+    def generate_new_purchase_approval_email(self, recipient_name, recipient_role, estimator_name, boq_data, project_data, new_items_data, total_amount):
+        """
+        Generate email for new purchase approval notification to PM or TD
+
+        Args:
+            recipient_name: PM or TD name
+            recipient_role: 'project_manager' or 'technical_director'
+            estimator_name: Estimator name who approved
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            new_items_data: List of approved items
+            total_amount: Total amount of approved purchases
+
+        Returns:
+            str: HTML formatted email content
+        """
+        boq_id = boq_data.get('boq_id', 'N/A')
+        boq_name = boq_data.get('boq_name', 'N/A')
+        project_name = project_data.get('project_name', 'N/A')
+        client = project_data.get('client', 'N/A')
+
+        role_display = "Project Manager" if recipient_role == "project_manager" else "Technical Director"
+
+        # Build items table
+        items_table_rows = ""
+        for idx, item in enumerate(new_items_data, 1):
+            item_name = item.get('item_name', 'N/A')
+            selling_price = item.get('selling_price', 0)
+            materials_count = len(item.get('materials', []))
+            labour_count = len(item.get('labour', []))
+
+            items_table_rows += f"""
+                <tr>
+                    <td>{idx}</td>
+                    <td><strong>{item_name}</strong></td>
+                    <td>{materials_count}</td>
+                    <td>{labour_count}</td>
+                    <td><strong>₹ {selling_price:,.2f}</strong></td>
+                </tr>
+            """
+
+        email_body = f"""
+        <div class="email-container">
+            <!-- Header -->
+            <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                <h1>NEW PURCHASE APPROVED ✓</h1>
+                <h2>Ready for Procurement</h2>
+            </div>
+
+            <!-- Content -->
+            <div class="content">
+                <p>Dear <strong>{recipient_name}</strong>,</p>
+
+                <p>
+                    Great news! The new purchase items you requested have been <span style="color: #10b981; font-weight: bold;">APPROVED</span>
+                    by <strong>{estimator_name}</strong> (Estimator). You can now proceed with procurement and project execution.
+                </p>
+
+                <div class="divider"></div>
+
+                <!-- BOQ Information -->
+                <h2>BOQ Details</h2>
+                <div class="info-box">
+                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
+                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
+                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
+                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
+                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #d1fae5; color: #065f46; border: 1px solid #10b981;">APPROVED</span></p>
+                </div>
+
+                <!-- Approval Details -->
+                <h2>Approval Details</h2>
+                <div class="info-box">
+                    <p><span class="label">Approved By:</span> <span class="value">{estimator_name}</span></p>
+                    <p><span class="label">Role:</span> <span class="value">Estimator</span></p>
+                    <p><span class="label">Total Items Approved:</span> <span class="value">{len(new_items_data)}</span></p>
+                </div>
+
+                <!-- Items Table -->
+                <h2>Approved Items</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>S.No</th>
+                                <th>Item Name</th>
+                                <th>Materials</th>
+                                <th>Labour</th>
+                                <th>Selling Price</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {items_table_rows}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Total Amount -->
+                <div class="total-cost" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981;">
+                    <span class="label">Total Approved Amount:</span>
+                    <span class="amount" style="color: #065f46;">₹ {total_amount:,.2f}</span>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Next Steps -->
+                <div class="alert" style="background-color: #d1fae5; border-left: 4px solid #10b981;">
+                    <strong>Next Steps:</strong>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>Review the approved items in the system</li>
+                        <li>Initiate procurement process for materials</li>
+                        <li>Coordinate with procurement team</li>
+                        <li>Update project timeline if needed</li>
+                        <li>Monitor budget allocation</li>
+                    </ul>
+                </div>
+
+                <!-- Signature -->
+                <div class="signature">
+                    <p><strong>Best Regards,</strong></p>
+                    <p>{estimator_name}</p>
+                    <p>Estimator</p>
+                    <p>MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
+                <p>This is an automated email notification. Please do not reply to this email.</p>
+                <p>© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def generate_new_purchase_rejection_email(self, recipient_name, recipient_role, estimator_name, boq_data, project_data, new_items_data, rejection_reason, total_amount):
+        """
+        Generate email for new purchase rejection notification to PM or TD
+
+        Args:
+            recipient_name: PM or TD name
+            recipient_role: 'project_manager' or 'technical_director'
+            estimator_name: Estimator name who rejected
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            new_items_data: List of rejected items
+            rejection_reason: Reason for rejection
+            total_amount: Total amount of rejected purchases
+
+        Returns:
+            str: HTML formatted email content
+        """
+        boq_id = boq_data.get('boq_id', 'N/A')
+        boq_name = boq_data.get('boq_name', 'N/A')
+        project_name = project_data.get('project_name', 'N/A')
+        client = project_data.get('client', 'N/A')
+
+        role_display = "Project Manager" if recipient_role == "project_manager" else "Technical Director"
+
+        # Build items table
+        items_table_rows = ""
+        for idx, item in enumerate(new_items_data, 1):
+            item_name = item.get('item_name', 'N/A')
+            selling_price = item.get('selling_price', 0)
+            materials_count = len(item.get('materials', []))
+            labour_count = len(item.get('labour', []))
+
+            items_table_rows += f"""
+                <tr>
+                    <td>{idx}</td>
+                    <td><strong>{item_name}</strong></td>
+                    <td>{materials_count}</td>
+                    <td>{labour_count}</td>
+                    <td><strong>₹ {selling_price:,.2f}</strong></td>
+                </tr>
+            """
+
+        email_body = f"""
+        <div class="email-container">
+            <!-- Header -->
+            <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                <h1>NEW PURCHASE REJECTED</h1>
+                <h2>Revision Required</h2>
+            </div>
+
+            <!-- Content -->
+            <div class="content">
+                <p>Dear <strong>{recipient_name}</strong>,</p>
+
+                <p>
+                    The new purchase items you requested have been <span style="color: #ef4444; font-weight: bold;">REJECTED</span>
+                    by <strong>{estimator_name}</strong> (Estimator). Please review the feedback and make necessary revisions.
+                </p>
+
+                <div class="divider"></div>
+
+                <!-- BOQ Information -->
+                <h2>BOQ Details</h2>
+                <div class="info-box">
+                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
+                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
+                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
+                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
+                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #fee2e2; color: #991b1b; border: 1px solid #ef4444;">REJECTED</span></p>
+                </div>
+
+                <!-- Rejection Details -->
+                <h2>Rejection Details</h2>
+                <div class="info-box">
+                    <p><span class="label">Rejected By:</span> <span class="value">{estimator_name}</span></p>
+                    <p><span class="label">Role:</span> <span class="value">Estimator</span></p>
+                    <p><span class="label">Total Items Rejected:</span> <span class="value">{len(new_items_data)}</span></p>
+                </div>
+
+                <!-- Rejection Reason -->
+                <h2>Reason for Rejection</h2>
+                <div class="alert" style="background-color: #fee2e2; border-left: 4px solid #ef4444;">
+                    <p style="color: #991b1b; margin: 0; font-weight: 500;">{rejection_reason if rejection_reason else 'Please review and revise the purchase items as per Estimator feedback.'}</p>
+                </div>
+
+                <!-- Items Table -->
+                <h2>Rejected Items</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>S.No</th>
+                                <th>Item Name</th>
+                                <th>Materials</th>
+                                <th>Labour</th>
+                                <th>Selling Price</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {items_table_rows}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Total Amount -->
+                <div class="total-cost" style="background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); border-left: 4px solid #ef4444;">
+                    <span class="label">Total Rejected Amount:</span>
+                    <span class="amount" style="color: #991b1b;">₹ {total_amount:,.2f}</span>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Action Required -->
+                <div class="alert alert-info">
+                    <strong>Action Required:</strong>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>Review the rejection feedback carefully</li>
+                        <li>Revise item specifications and costs</li>
+                        <li>Consult with Estimator if needed</li>
+                        <li>Resubmit the purchase request after revision</li>
+                    </ul>
+                </div>
+
+                <!-- Signature -->
+                <div class="signature">
+                    <p><strong>Best Regards,</strong></p>
+                    <p>{estimator_name}</p>
+                    <p>Estimator</p>
+                    <p>MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
+                <p>This is an automated email notification. Please do not reply to this email.</p>
+                <p>© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def send_new_purchase_approval(self, recipient_email, recipient_name, recipient_role, estimator_name, boq_data, project_data, new_items_data, total_amount):
+        """
+        Send new purchase approval email to PM or TD
+
+        Args:
+            recipient_email: PM or TD email address
+            recipient_name: PM or TD name
+            recipient_role: 'project_manager' or 'technical_director'
+            estimator_name: Estimator's name
+            boq_data: Dictionary with BOQ information
+            project_data: Dictionary with project information
+            new_items_data: List of approved items
+            total_amount: Total approved amount
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            # Generate email content
+            email_html = self.generate_new_purchase_approval_email(
+                recipient_name, recipient_role, estimator_name, boq_data, project_data, new_items_data, total_amount
+            )
+
+            # Create subject
+            project_name = project_data.get('project_name', 'Project')
+            items_count = len(new_items_data)
+            subject = f"✓ New Purchase Approved - {items_count} item(s) for {project_name}"
+
+            # Send email
+            success = self.send_email(recipient_email, subject, email_html)
+
+            if success:
+                log.info(f"New purchase approval email sent successfully to {recipient_email}")
+            else:
+                log.error(f"Failed to send new purchase approval email to {recipient_email}")
+
+            return success
+
+        except Exception as e:
+            log.error(f"Error sending new purchase approval email: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_new_purchase_rejection(self, recipient_email, recipient_name, recipient_role, estimator_name, boq_data, project_data, new_items_data, rejection_reason, total_amount):
+        """
+        Send new purchase rejection email to PM or TD
+
+        Args:
+            recipient_email: PM or TD email address
+            recipient_name: PM or TD name
+            recipient_role: 'project_manager' or 'technical_director'
+            estimator_name: Estimator's name
+            boq_data: Dictionary with BOQ information
+            project_data: Dictionary with project information
+            new_items_data: List of rejected items
+            rejection_reason: Reason for rejection
+            total_amount: Total rejected amount
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            # Generate email content
+            email_html = self.generate_new_purchase_rejection_email(
+                recipient_name, recipient_role, estimator_name, boq_data, project_data, new_items_data, rejection_reason, total_amount
+            )
+
+            # Create subject
+            project_name = project_data.get('project_name', 'Project')
+            items_count = len(new_items_data)
+            subject = f"⚠ New Purchase Rejected - {items_count} item(s) for {project_name}"
+
+            # Send email
+            success = self.send_email(recipient_email, subject, email_html)
+
+            if success:
+                log.info(f"New purchase rejection email sent successfully to {recipient_email}")
+            else:
+                log.error(f"Failed to send new purchase rejection email to {recipient_email}")
+
+            return success
+
+        except Exception as e:
+            log.error(f"Error sending new purchase rejection email: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False

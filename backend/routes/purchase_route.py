@@ -16,14 +16,8 @@ def add_new_purchase_route():
 def send_new_purchase_to_estimator(boq_id):
     return new_purchase_send_estimator(boq_id)
 
-# Estimator Approves New Purchase
-@purchase_routes.route('/new_purchase/approve/<int:boq_id>', methods=['POST'])
+# Estimator Approves or Rejects New Purchase (Single API)
+@purchase_routes.route('/new_purchase/decision/<int:boq_id>', methods=['POST'])
 @jwt_required
-def approve_new_purchase_route(boq_id):
-    return approve_new_purchase(boq_id)
-
-# Estimator Rejects New Purchase
-@purchase_routes.route('/new_purchase/reject/<int:boq_id>', methods=['POST'])
-@jwt_required
-def reject_new_purchase_route(boq_id):
-    return reject_new_purchase(boq_id)
+def process_purchase_decision(boq_id):
+    return process_new_purchase_decision(boq_id)

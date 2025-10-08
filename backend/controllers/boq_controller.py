@@ -309,7 +309,6 @@ def create_boq():
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Error: {str(e)}"}), 500
 
-
 def get_boq(boq_id):
     """Get BOQ details from JSON storage with existing and new purchases separated"""
     try:
@@ -322,12 +321,20 @@ def get_boq(boq_id):
         if not boq_details:
             return jsonify({"error": "BOQ details not found"}), 404
 
+        # Get current user for role-based access control
+        current_user = getattr(g, 'user', None)
+        user_role = ''
+        user_role_id = None
+
+        if current_user:
+            # Try 'role' first (set by jwt_required), then 'role_name' as fallback
+            role_name = current_user.get('role') or current_user.get('role_name', '')
+            user_role = role_name.lower().replace(' ', '').replace('_', '') if isinstance(role_name, str) else ''
+            user_role_id = current_user.get('role_id')
         # Fetch project details
         project = Project.query.filter_by(project_id=boq.project_id).first()
-
         # Get BOQ history to track which items were added via new_purchase
         boq_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.asc()).all()
-
         # Track newly added items using master_item_id and item_name from history
         new_purchase_item_ids = set()  # Track by master_item_id
         new_purchase_item_names = set()  # Track by item_name as fallback
@@ -378,7 +385,6 @@ def get_boq(boq_id):
         all_items = []
         if boq_details.boq_details and "items" in boq_details.boq_details:
             all_items = boq_details.boq_details["items"]
-
         # If no history of new purchases, determine original items count from first creation
         if not new_purchase_item_ids and not new_purchase_item_names and boq_history:
             # Find the creation action to determine original item count
@@ -432,7 +438,6 @@ def get_boq(boq_id):
             existing_labour_cost += item.get("totalLabourCost", 0)
             existing_materials_count += len(item.get("materials", []))
             existing_labour_count += len(item.get("labour", []))
-
         # Calculate summary for new purchases
         new_material_cost = 0
         new_labour_cost = 0
@@ -446,11 +451,57 @@ def get_boq(boq_id):
             new_labour_cost += item.get("totalLabourCost", 0)
             new_materials_count += len(item.get("materials", []))
             new_labour_count += len(item.get("labour", []))
+        # Role-based access control for new purchase items
+        # Determine if user can view new purchase details based on status and role
+        can_view_new_purchase = False
+        boq_status = boq.status.lower() if boq.status else ''
 
-        # Calculate combined totals
-        total_material_cost = existing_material_cost + new_material_cost
-        total_labour_cost = existing_labour_cost + new_labour_cost
-        total_cost = existing_total_cost + new_total_cost
+        if boq_status == 'new_purchase_create':
+            # Only Project Manager can view
+            if user_role in ['projectmanager', 'project_manager']:
+                can_view_new_purchase = True
+            else:
+                log.info(f"BOQ {boq_id} - Access DENIED: Only PM can view 'new_purchase_create', current role: '{user_role}'")
+        elif boq_status in ['add_new_purchase', 'new_purchase_request']:
+            # Estimator and Project Manager can view
+            if user_role in ['estimator', 'projectmanager', 'project_manager']:
+                can_view_new_purchase = True
+            else:
+                log.info(f"BOQ {boq_id} - Access DENIED: Only Estimator/PM can view '{boq_status}', current role: '{user_role}'")
+        elif boq_status == 'approved':
+            # All roles can view
+            can_view_new_purchase = True
+            log.info(f"BOQ {boq_id} - Access GRANTED: All roles can view 'approved'")
+        elif boq_status == 'rejected':
+            # All roles except Technical Director
+            if user_role not in ['technicaldirector', 'technical_director'] and user_role_id != 1:
+                can_view_new_purchase = True
+            else:
+                log.info(f"BOQ {boq_id} - Access DENIED: TD cannot view 'rejected'")
+        else:
+            log.info(f"BOQ {boq_id} - Access DENIED: Unknown status '{boq_status}'")
+
+        # Filter new purchase items based on access control
+        filtered_new_purchase_items = []
+        filtered_new_total_cost = 0
+        filtered_new_material_cost = 0
+        filtered_new_labour_cost = 0
+        filtered_new_materials_count = 0
+        filtered_new_labour_count = 0
+
+        if can_view_new_purchase:
+            # User has permission to view new purchases
+            filtered_new_purchase_items = new_add_purchase_items
+            filtered_new_total_cost = new_total_cost
+            filtered_new_material_cost = new_material_cost
+            filtered_new_labour_cost = new_labour_cost
+            filtered_new_materials_count = new_materials_count
+            filtered_new_labour_count = new_labour_count
+
+        # Calculate combined totals (with filtered new purchases)
+        total_material_cost = existing_material_cost + filtered_new_material_cost
+        total_labour_cost = existing_labour_cost + filtered_new_labour_cost
+        total_cost = existing_total_cost + filtered_new_total_cost
         overhead_percentage = 0
         profit_margin = 0
 
@@ -501,22 +552,27 @@ def get_boq(boq_id):
                 }
             },
             "new_purchase": {
-                "items": new_add_purchase_items,
+                "items": filtered_new_purchase_items,
                 "summary": {
-                    "total_items": len(new_add_purchase_items),
-                    "total_materials": new_materials_count,
-                    "total_labour": new_labour_count,
-                    "total_material_cost": new_material_cost,
-                    "total_labour_cost": new_labour_cost,
-                    "total_cost": new_total_cost,
-                    "selling_price": new_total_cost,
-                    "estimatedSellingPrice": new_total_cost
+                    "total_items": len(filtered_new_purchase_items),
+                    "total_materials": filtered_new_materials_count,
+                    "total_labour": filtered_new_labour_count,
+                    "total_material_cost": filtered_new_material_cost,
+                    "total_labour_cost": filtered_new_labour_cost,
+                    "total_cost": filtered_new_total_cost,
+                    "selling_price": filtered_new_total_cost,
+                    "estimatedSellingPrice": filtered_new_total_cost
+                },
+                "access_info": {
+                    "can_view": can_view_new_purchase,
+                    "user_role": user_role,
+                    "boq_status": boq.status
                 }
             },
             "combined_summary": {
-                "total_items": len(all_items),
-                "total_materials": existing_materials_count + new_materials_count,
-                "total_labour": existing_labour_count + new_labour_count,
+                "total_items": len(existing_purchase_items) + len(filtered_new_purchase_items),
+                "total_materials": existing_materials_count + filtered_new_materials_count,
+                "total_labour": existing_labour_count + filtered_new_labour_count,
                 "total_material_cost": total_material_cost,
                 "total_labour_cost": total_labour_cost,
                 "total_cost": total_cost,
@@ -554,6 +610,13 @@ def get_all_boq():
             # Fetch project details
             project = Project.query.filter_by(project_id=boq.project_id).first()
 
+            # Map internal status to display status
+            # When status is 'new_purchase_create' or 'new_purchase_request', show as 'approved'
+            # because the original BOQ was approved and new purchases are being added
+            display_status = boq.status
+            if boq.status in ['new_purchase_create']:
+                display_status = 'approved'
+
             boq_summary = {
                 "boq_id": boq.boq_id,
                 "boq_name": boq.boq_name,
@@ -563,7 +626,7 @@ def get_all_boq():
                 "location": project.location if project else None,
                 "floor": project.floor_name if project else None,
                 "hours": project.working_hours if project else None,
-                "status": boq.status,
+                "status": display_status,
                 "client_rejection_reason": boq.client_rejection_reason,
                 "email_sent" : boq.email_sent,
                 "user_id": project.user_id if project else None,  # PM assignment indicator
