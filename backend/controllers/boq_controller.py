@@ -733,6 +733,28 @@ def update_boq(boq_id):
         if not boq_details:
             return jsonify({"error": "BOQ details not found"}), 404
 
+        # Save current BOQ details to history before updating
+        # Get the latest version number for this BOQ detail
+        latest_history = BOQDetailsHistory.query.filter_by(
+            boq_detail_id=boq_details.boq_detail_id
+        ).order_by(BOQDetailsHistory.version.desc()).first()
+
+        next_version = 1 if not latest_history else latest_history.version + 1
+
+        # Create history entry with current BOQ details
+        boq_detail_history = BOQDetailsHistory(
+            boq_detail_id=boq_details.boq_detail_id,
+            boq_id=boq_id,
+            version=next_version,
+            boq_details=boq_details.boq_details,  # Save current state
+            total_cost=boq_details.total_cost,
+            total_items=boq_details.total_items,
+            total_materials=boq_details.total_materials,
+            total_labour=boq_details.total_labour,
+            created_by=boq_details.last_modified_by or boq_details.created_by
+        )
+        db.session.add(boq_detail_history)
+
         # If items are provided, update the JSON structure
         if "items" in data:
             # Use the same current user logic for BOQ details
@@ -779,6 +801,15 @@ def update_boq(boq_id):
                 profit_margin_amount = (base_cost * profit_margin_percentage) / 100
                 total_cost = base_cost + overhead_amount
                 selling_price = total_cost + profit_margin_amount
+
+                # Handle discount (can be null or a value)
+                discount_percentage = item_data.get("discount_percentage")
+                discount_amount = 0.0
+                final_selling_price = selling_price
+
+                if discount_percentage is not None and discount_percentage > 0:
+                    discount_amount = (selling_price * float(discount_percentage)) / 100
+                    final_selling_price = selling_price - discount_amount
 
                 # Add new items/materials/labour to master tables with calculated values
                 master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
@@ -836,18 +867,21 @@ def update_boq(boq_id):
                     "overhead_amount": overhead_amount,
                     "profit_margin_percentage": profit_margin_percentage,
                     "profit_margin_amount": profit_margin_amount,
+                    "discount_percentage": discount_percentage if discount_percentage is not None else 0.0,
+                    "discount_amount": discount_amount,
                     "total_cost": total_cost,
-                    "selling_price": selling_price,
+                    "selling_price": final_selling_price,  # Use final_selling_price after discount
+                    "selling_price_before_discount": selling_price,  # Original selling price
                     "totalMaterialCost": materials_cost,
                     "totalLabourCost": labour_cost,
                     "actualItemCost": base_cost,
-                    "estimatedSellingPrice": selling_price,
+                    "estimatedSellingPrice": final_selling_price,  # Use final_selling_price after discount
                     "materials": processed_materials,
                     "labour": processed_labour
                 }
 
                 boq_items.append(item_json)
-                total_boq_cost += selling_price
+                total_boq_cost += final_selling_price  # Add final price after discount to total
                 total_materials += len(materials_data)
                 total_labour += len(labour_data)
 
@@ -875,10 +909,81 @@ def update_boq(boq_id):
             boq_details.total_labour = total_labour
             boq_details.last_modified_by = created_by
 
+        # Log the update action in BOQ history
+        current_user = getattr(g, 'user', None)
+        user_name = "Admin"
+        user_id = None
+
+        if current_user:
+            user_name = current_user.get('username') or current_user.get('full_name') or current_user.get('user_id', 'Admin')
+            user_id = current_user.get('user_id')
+
+        # Create action for BOQ history
+        update_action = {
+            "type": "boq_updated",
+            "role": current_user.get('role', 'unknown') if current_user else 'unknown',
+            "status": boq.status,
+            "version": next_version,
+            "timestamp": datetime.utcnow().isoformat(),
+            "updated_by": user_name,
+            "updated_by_user_id": user_id,
+            "boq_name": boq.boq_name,
+            "total_items": len(boq_items) if "items" in data else boq_details.total_items,
+            "total_cost": total_boq_cost if "items" in data else boq_details.total_cost,
+            "changes": {
+                "boq_name_changed": "boq_name" in data,
+                "items_updated": "items" in data
+            }
+        }
+
+        # Check if history entry exists for this BOQ
+        existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        if existing_history:
+            # Append to existing action array
+            if existing_history.action is None:
+                current_actions = []
+            elif isinstance(existing_history.action, list):
+                current_actions = existing_history.action
+            elif isinstance(existing_history.action, dict):
+                current_actions = [existing_history.action]
+            else:
+                current_actions = []
+
+            current_actions.append(update_action)
+            existing_history.action = current_actions
+
+            # Mark JSONB field as modified for SQLAlchemy
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(existing_history, "action")
+
+            existing_history.action_by = user_name
+            existing_history.boq_status = boq.status
+            existing_history.comments = f"BOQ updated - Version {next_version}"
+            existing_history.action_date = datetime.utcnow()
+            existing_history.last_modified_by = user_name
+            existing_history.last_modified_at = datetime.utcnow()
+        else:
+            # Create new history entry
+            boq_history = BOQHistory(
+                boq_id=boq_id,
+                action=[update_action],
+                action_by=user_name,
+                boq_status=boq.status,
+                comments=f"BOQ updated - Version {next_version}",
+                action_date=datetime.utcnow(),
+                created_by=user_name
+            )
+            db.session.add(boq_history)
+
         db.session.commit()
 
         # Return updated BOQ
-        return jsonify({"message": "BOQ Updated successfully"}), 200
+        return jsonify({
+            "message": "BOQ Updated successfully",
+            "version": next_version,
+            "boq_id": boq_id
+        }), 200
         # return get_boq(boq_id)
 
     except Exception as e:

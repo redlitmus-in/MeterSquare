@@ -24,5 +24,11 @@ def reject_client_approval_route(boq_id):
 
 @estimator_routes.route('/cancel_boq/<int:boq_id>', methods=['PUT'])
 @jwt_required
-def cancel_boq(boq_id):
- return cancel_boq(boq_id)
+def cancel_boq_route(boq_id):
+    return cancel_boq(boq_id)
+
+# revision history view
+@estimator_routes.route('/boq_details_history/<int:boq_id>', methods=['GET'])
+@jwt_required
+def get_boq_details_history_route(boq_id):
+    return get_boq_details_history(boq_id)

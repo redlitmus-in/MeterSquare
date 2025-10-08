@@ -95,6 +95,32 @@ class BOQDetails(db.Model):
     boq = db.relationship("BOQ", backref=db.backref("details", lazy=True))
 
 
+# BOQ Details History Table - Stores version history of BOQ details
+class BOQDetailsHistory(db.Model):
+    __tablename__ = "boq_details_history"
+
+    boq_detail_history_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    boq_detail_id = db.Column(db.Integer, db.ForeignKey("boq_details.boq_detail_id"), nullable=False)
+    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False)
+    version = db.Column(db.Integer, nullable=False)  # Version number (1, 2, 3...)
+
+    # Complete BOQ structure stored as JSONB (snapshot of that version)
+    boq_details = db.Column(JSONB, nullable=False)
+
+    # Summary fields
+    total_cost = db.Column(db.Float, default=0.0)
+    total_items = db.Column(db.Integer, default=0)
+    total_materials = db.Column(db.Integer, default=0)
+    total_labour = db.Column(db.Integer, default=0)
+
+    # Metadata
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+
+    boq = db.relationship("BOQ", backref=db.backref("details_history", lazy=True))
+    boq_detail = db.relationship("BOQDetails", backref=db.backref("history", lazy=True))
+
+
 # BOQ History Table - Stores all BOQ actions and changes
 class BOQHistory(db.Model):
     __tablename__ = "boq_history"
@@ -114,5 +140,42 @@ class BOQHistory(db.Model):
     created_by = db.Column(db.String(255), nullable=False)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     last_modified_by = db.Column(db.String(255), nullable=True)
-    
+
     boq = db.relationship("BOQ", backref=db.backref("history", lazy=True))
+
+
+# Material Purchase Tracking Table - Tracks all material purchases with history
+class MaterialPurchaseTracking(db.Model):
+    __tablename__ = "material_purchase_tracking"
+
+    purchase_tracking_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False)
+    project_id = db.Column(db.Integer, db.ForeignKey("project.project_id"), nullable=False)
+    master_item_id = db.Column(db.Integer, nullable=True)
+    item_name = db.Column(db.String(255), nullable=False)
+    master_material_id = db.Column(db.Integer, db.ForeignKey("boq_material.material_id"), nullable=True)
+    material_name = db.Column(db.String(255), nullable=False)
+
+    # Purchase history stored as JSONB array
+    # Each entry: {purchase_date, quantity, unit, unit_price, total_price, purchased_by, remaining_quantity}
+    purchase_history = db.Column(JSONB, nullable=False, default=[])
+
+    # Current totals (aggregated from history)
+    total_quantity_purchased = db.Column(db.Float, default=0.0)
+    total_quantity_used = db.Column(db.Float, default=0.0)
+    remaining_quantity = db.Column(db.Float, default=0.0)
+    unit = db.Column(db.String(50), nullable=False)
+
+    # Latest purchase info
+    latest_unit_price = db.Column(db.Float, nullable=True)
+    latest_purchase_date = db.Column(db.DateTime, nullable=True)
+
+    # Metadata
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
+    last_modified_by = db.Column(db.String(255), nullable=True)
+    is_deleted = db.Column(db.Boolean, default=False)
+
+    boq = db.relationship("BOQ", backref=db.backref("material_tracking", lazy=True))
+    material = db.relationship("MasterMaterial", backref=db.backref("purchase_tracking", lazy=True))

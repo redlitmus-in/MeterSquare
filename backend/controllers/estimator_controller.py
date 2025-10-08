@@ -226,3 +226,82 @@ def cancel_boq(boq_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"success": False, "error": str(e)}), 500
+
+def get_boq_details_history(boq_id):
+    """Get all version history of BOQ details for a particular BOQ ID"""
+    try:
+        # Check if BOQ exists
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+
+        if not boq:
+            return jsonify({
+                "success": False,
+                "error": "BOQ not found"
+            }), 404
+
+        # Get current BOQ details
+        current_boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+
+        if not current_boq_details:
+            return jsonify({
+                "success": False,
+                "error": "BOQ details not found"
+            }), 404
+
+        # Get all history versions for this BOQ detail
+        history_records = BOQDetailsHistory.query.filter_by(
+            boq_id=boq_id
+        ).order_by(BOQDetailsHistory.version.desc()).all()
+
+        # Prepare history list
+        history_list = []
+
+        for history in history_records:
+            history_data = {
+                "boq_detail_history_id": history.boq_detail_history_id,
+                "boq_id": history.boq_id,
+                "boq_detail_id": history.boq_detail_id,
+                "version": history.version,
+                "boq_details": history.boq_details,  # Complete BOQ structure
+                "total_cost": history.total_cost,
+                "total_items": history.total_items,
+                "total_materials": history.total_materials,
+                "total_labour": history.total_labour,
+                "created_at": history.created_at.isoformat() if history.created_at else None,
+                "created_by": history.created_by
+            }
+            history_list.append(history_data)
+
+        # Get current/latest version info
+        current_version = {
+            "boq_detail_id": current_boq_details.boq_detail_id,
+            "boq_id": current_boq_details.boq_id,
+            "version": "current",
+            "boq_details": current_boq_details.boq_details,
+            "total_cost": current_boq_details.total_cost,
+            "total_items": current_boq_details.total_items,
+            "total_materials": current_boq_details.total_materials,
+            "total_labour": current_boq_details.total_labour,
+            "created_at": current_boq_details.created_at.isoformat() if current_boq_details.created_at else None,
+            "created_by": current_boq_details.created_by,
+            "last_modified_at": current_boq_details.last_modified_at.isoformat() if current_boq_details.last_modified_at else None,
+            "last_modified_by": current_boq_details.last_modified_by
+        }
+
+        return jsonify({
+            "success": True,
+            "boq_id": boq_id,
+            "boq_name": boq.boq_name,
+            "total_versions": len(history_records),
+            "current_version": current_version,
+            "history": history_list
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching BOQ details history: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
