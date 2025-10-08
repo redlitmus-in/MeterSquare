@@ -15,7 +15,9 @@ import {
   DocumentTextIcon,
   XMarkIcon,
   ArrowDownTrayIcon,
-  UserPlusIcon
+  UserPlusIcon,
+  TableCellsIcon,
+  Squares2X2Icon
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
@@ -28,6 +30,14 @@ import {
   exportBOQToPDFInternal,
   exportBOQToPDFClient
 } from '@/utils/boqExportUtils';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableHead,
+  TableRow,
+  TableCell,
+} from '@/components/ui/table';
 
 interface BOQItem {
   id: number;
@@ -67,7 +77,7 @@ interface EstimationItem {
   profitMargin: number;
   overheadPercentage: number;
   submittedDate: string;
-  status: 'pending' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed';
+  status: 'pending' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' | 'client_rejected' | 'cancelled' | 'completed';
   priority: 'high' | 'medium' | 'low';
   location: string;
   floor: string;
@@ -106,6 +116,7 @@ const ProjectApprovals: React.FC = () => {
   const [showPMWorkloadView, setShowPMWorkloadView] = useState(false);
   const [showPMDetailsModal, setShowPMDetailsModal] = useState(false);
   const [selectedProjectPM, setSelectedProjectPM] = useState<any>(null);
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
   // Format currency for display
   const formatCurrency = (amount: number): string => {
@@ -378,7 +389,7 @@ const ProjectApprovals: React.FC = () => {
   };
 
   // Map BOQ status to estimation status
-  const mapBOQStatus = (status: string): 'pending' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' | 'client_rejected' | 'cancelled' => {
+  const mapBOQStatus = (status: string): 'pending' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' | 'client_rejected' | 'cancelled' | 'completed' => {
     if (!status) return 'pending';
 
     const normalizedStatus = status.toLowerCase().trim();
@@ -391,6 +402,11 @@ const ProjectApprovals: React.FC = () => {
     // Check for rejected status
     if (normalizedStatus === 'rejected' || normalizedStatus === 'reject') {
       return 'rejected';
+    }
+
+    // Check for completed status
+    if (normalizedStatus === 'completed' || normalizedStatus === 'complete') {
+      return 'completed';
     }
 
     // Check for client confirmed (ready for PM assignment)
@@ -668,29 +684,57 @@ const ProjectApprovals: React.FC = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-6">
-        {/* Filter Tabs */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 mb-6 inline-flex gap-1">
-          {[
-            { key: 'pending', label: 'Pending' },
-            { key: 'approved', label: 'Approved' },
-            { key: 'sent', label: 'Client Response' },
-            { key: 'assigned', label: 'Assigned' },
-            { key: 'completed', label: 'Completed' },
-            { key: 'rejected', label: 'Rejected by TD' },
-            { key: 'cancelled', label: 'Cancelled' }
-          ].map((tab) => (
+        {/* Filter Tabs and View Toggle */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 inline-flex gap-1">
+            {[
+              { key: 'pending', label: 'Pending' },
+              { key: 'approved', label: 'Approved' },
+              { key: 'sent', label: 'Client Response' },
+              { key: 'assigned', label: 'Assigned' },
+              { key: 'completed', label: 'Completed' },
+              { key: 'rejected', label: 'Rejected by TD' },
+              { key: 'cancelled', label: 'Cancelled' }
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setFilterStatus(tab.key as any)}
+                className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                  filterStatus === tab.key
+                    ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 border border-red-200 shadow-md'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* View Mode Toggle */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 inline-flex gap-1">
             <button
-              key={tab.key}
-              onClick={() => setFilterStatus(tab.key as any)}
-              className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                filterStatus === tab.key
+              onClick={() => setViewMode('cards')}
+              className={`p-2 rounded-lg transition-all ${
+                viewMode === 'cards'
                   ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 border border-red-200 shadow-md'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
               }`}
+              title="Card View"
             >
-              {tab.label}
+              <Squares2X2Icon className="w-5 h-5" />
             </button>
-          ))}
+            <button
+              onClick={() => setViewMode('table')}
+              className={`p-2 rounded-lg transition-all ${
+                viewMode === 'table'
+                  ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 border border-red-200 shadow-md'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+              }`}
+              title="Table View"
+            >
+              <TableCellsIcon className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Estimations List - Always show */}
@@ -819,8 +863,8 @@ const ProjectApprovals: React.FC = () => {
               );
             })}
           </div>
-        ) : (
-          /* Estimations List */
+        ) : viewMode === 'cards' ? (
+          /* Card View */
           <div className="space-y-4">
             {filteredEstimations.map((estimation, index) => (
             <motion.div
@@ -965,6 +1009,143 @@ const ProjectApprovals: React.FC = () => {
               </div>
             </motion.div>
           ))}
+          </div>
+        ) : (
+          /* Table View */
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-gray-200">
+                    <TableHead className="text-gray-600">Project</TableHead>
+                    <TableHead className="text-gray-600">Client</TableHead>
+                    <TableHead className="text-gray-600">Submitted</TableHead>
+                    <TableHead className="text-right text-gray-600">Total Value</TableHead>
+                    <TableHead className="text-right text-gray-600">Items</TableHead>
+                    <TableHead className="text-gray-600">Status</TableHead>
+                    <TableHead className="text-gray-600">Priority</TableHead>
+                    <TableHead className="text-gray-600">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredEstimations.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-12 text-gray-500">
+                        <div className="flex flex-col items-center">
+                          <DocumentTextIcon className="h-12 w-12 text-gray-300 mb-3" />
+                          <p className="text-base">No estimations found</p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredEstimations.map((estimation) => (
+                      <TableRow key={estimation.id} className="border-gray-200 hover:bg-gray-50/50">
+                        <TableCell className="font-medium">
+                          <div className="flex flex-col">
+                            <span className="font-bold text-gray-900">{estimation.projectName}</span>
+                            <span className="text-xs text-gray-500">{estimation.location}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-gray-600">{estimation.clientName}</TableCell>
+                        <TableCell className="text-gray-600">{estimation.submittedDate}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          AED{formatCurrency(estimation.totalValue)}
+                        </TableCell>
+                        <TableCell className="text-right">{estimation.itemCount}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            {getStatusIcon(estimation.status)}
+                            <span className={`text-sm font-medium ${
+                              estimation.status === 'cancelled' ? 'text-red-600' :
+                              estimation.status === 'rejected' ? 'text-red-600' :
+                              estimation.status === 'approved' ? 'text-green-600' :
+                              estimation.status === 'client_confirmed' ? 'text-green-600' :
+                              estimation.status === 'client_rejected' ? 'text-orange-600' :
+                              'text-gray-600'
+                            }`}>
+                              {estimation.status === 'cancelled' ? 'CLIENT CANCELLED' :
+                               estimation.status === 'client_confirmed' ? 'CLIENT CONFIRMED' :
+                               estimation.status === 'client_rejected' ? 'CLIENT REJECTED' :
+                               estimation.status === 'sent_for_confirmation' ? 'SENT TO CLIENT' :
+                               estimation.status.toUpperCase()}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getPriorityColor(estimation.priority)}`}>
+                            {estimation.priority}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            {/* View BOQ Details - Always shown */}
+                            <button
+                              onClick={async () => {
+                                const currentEstimation = estimation;
+                                await loadBOQDetails(currentEstimation.id, currentEstimation);
+                                setShowBOQModal(true);
+                              }}
+                              className="p-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors group"
+                              title="View BOQ Details"
+                            >
+                              <EyeIcon className="w-4 h-4 text-blue-600 group-hover:text-blue-700" />
+                            </button>
+
+                            {/* View PM Details - Only when PM is assigned */}
+                            {estimation.pmAssigned && (
+                              <button
+                                onClick={async () => {
+                                  if (allPMs.length === 0) {
+                                    await loadPMs();
+                                  }
+                                  const pmForProject = allPMs.find(pm =>
+                                    pm.projects?.some((p: any) => p.project_id === estimation.projectId)
+                                  );
+                                  if (pmForProject) {
+                                    setSelectedProjectPM(pmForProject);
+                                    setShowPMDetailsModal(true);
+                                  } else {
+                                    await loadPMs();
+                                    const retryPM = allPMs.find(pm =>
+                                      pm.projects?.some((p: any) => p.project_id === estimation.projectId)
+                                    );
+                                    if (retryPM) {
+                                      setSelectedProjectPM(retryPM);
+                                      setShowPMDetailsModal(true);
+                                    } else {
+                                      toast.error('PM details not found. Please refresh the page.');
+                                    }
+                                  }
+                                }}
+                                className="p-2 bg-green-50 hover:bg-green-100 rounded-lg transition-colors group"
+                                title="View Assigned PM Details"
+                              >
+                                <UserIcon className="w-4 h-4 text-green-600 group-hover:text-green-700" />
+                              </button>
+                            )}
+
+                            {/* Assign PM - Only when client confirmed and PM not assigned */}
+                            {estimation.status === 'client_confirmed' && !estimation.pmAssigned && (
+                              <button
+                                onClick={() => {
+                                  setSelectedEstimation(estimation);
+                                  setShowAssignPMModal(true);
+                                }}
+                                className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-[#243d8a] text-xs font-medium flex items-center gap-1 group"
+                                title="Assign Project Manager"
+                              >
+                                <UserPlusIcon className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                                Assign PM
+                              </button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         )}
 
