@@ -2176,8 +2176,58 @@ const ProjectApprovals: React.FC = () => {
                     <span className="text-xs text-gray-600">(What TD sees)</span>
                   </div>
 
+                  {/* BOQ Items - Internal */}
+                  <div className="space-y-3 mb-4">
+                    {(selectedEstimation.boqItems || []).map((item, index) => {
+                      const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
+                      return (
+                        <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                          <h4 className="font-bold text-gray-900 mb-2">{index + 1}. {item.description}</h4>
+
+                          {/* Materials */}
+                          {item.materials.length > 0 && (
+                            <div className="mb-3">
+                              <p className="text-xs font-semibold text-gray-700 mb-1">+ RAW MATERIALS</p>
+                              <div className="space-y-1">
+                                {item.materials.map((mat, mIdx) => (
+                                  <div key={mIdx} className="flex justify-between text-xs">
+                                    <span className="text-gray-600">{mat.name} ({mat.quantity} {mat.unit})</span>
+                                    <span className="font-medium">AED{formatCurrency(mat.amount)}</span>
+                                  </div>
+                                ))}
+                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                  <span>Total Materials:</span>
+                                  <span>AED{formatCurrency(materialTotal)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Labor */}
+                          {item.labour && item.labour.length > 0 && (
+                            <div className="mb-2">
+                              <p className="text-xs font-semibold text-gray-700 mb-1">+ LABOUR</p>
+                              <div className="space-y-1">
+                                {item.labour.map((lab, lIdx) => (
+                                  <div key={lIdx} className="flex justify-between text-xs">
+                                    <span className="text-gray-600">{lab.type} ({lab.quantity} {lab.unit})</span>
+                                    <span className="font-medium">AED{formatCurrency(lab.amount)}</span>
+                                  </div>
+                                ))}
+                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                  <span>Total Labour:</span>
+                                  <span>AED{formatCurrency(item.laborCost)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
                   {/* Cost Summary - Internal */}
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+                  <div className="bg-white rounded-lg shadow-sm border border-orange-300 border-2 p-4 mb-4">
                     <h3 className="font-bold text-gray-900 mb-3">Cost Breakdown</h3>
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
@@ -2222,8 +2272,79 @@ const ProjectApprovals: React.FC = () => {
                     <span className="text-xs text-gray-600">(What Client sees)</span>
                   </div>
 
+                  {/* BOQ Items - Client (with distributed markup) */}
+                  <div className="space-y-3 mb-4">
+                    {(selectedEstimation.boqItems || []).map((item, index) => {
+                      const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
+                      const itemBaseCost = materialTotal + item.laborCost;
+
+                      // Calculate item's overhead and profit
+                      const itemOverhead = itemBaseCost * selectedEstimation.overheadPercentage / 100;
+                      const itemProfit = itemBaseCost * selectedEstimation.profitMargin / 100;
+                      const itemTotalMarkup = itemOverhead + itemProfit;
+
+                      // Calculate distribution ratios
+                      const materialRatio = itemBaseCost > 0 ? materialTotal / itemBaseCost : 0;
+                      const laborRatio = itemBaseCost > 0 ? item.laborCost / itemBaseCost : 0;
+                      const materialMarkupShare = itemTotalMarkup * materialRatio;
+                      const laborMarkupShare = itemTotalMarkup * laborRatio;
+
+                      return (
+                        <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                          <h4 className="font-bold text-gray-900 mb-2">{index + 1}. {item.description}</h4>
+
+                          {/* Materials with distributed markup */}
+                          {item.materials.length > 0 && (
+                            <div className="mb-3">
+                              <p className="text-xs font-semibold text-gray-700 mb-1">+ RAW MATERIALS</p>
+                              <div className="space-y-1">
+                                {item.materials.map((mat, mIdx) => {
+                                  const matShare = materialTotal > 0 ? (mat.amount / materialTotal) * materialMarkupShare : 0;
+                                  const adjustedAmount = mat.amount + matShare;
+                                  return (
+                                    <div key={mIdx} className="flex justify-between text-xs">
+                                      <span className="text-gray-600">{mat.name} ({mat.quantity} {mat.unit})</span>
+                                      <span className="font-medium">AED{formatCurrency(adjustedAmount)}</span>
+                                    </div>
+                                  );
+                                })}
+                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                  <span>Total Materials:</span>
+                                  <span>AED{formatCurrency(materialTotal + materialMarkupShare)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Labor with distributed markup */}
+                          {item.labour && item.labour.length > 0 && (
+                            <div className="mb-2">
+                              <p className="text-xs font-semibold text-gray-700 mb-1">+ LABOUR</p>
+                              <div className="space-y-1">
+                                {item.labour.map((lab, lIdx) => {
+                                  const labShare = item.laborCost > 0 ? (lab.amount / item.laborCost) * laborMarkupShare : 0;
+                                  const adjustedAmount = lab.amount + labShare;
+                                  return (
+                                    <div key={lIdx} className="flex justify-between text-xs">
+                                      <span className="text-gray-600">{lab.type} ({lab.quantity} {lab.unit})</span>
+                                      <span className="font-medium">AED{formatCurrency(adjustedAmount)}</span>
+                                    </div>
+                                  );
+                                })}
+                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                  <span>Total Labour:</span>
+                                  <span>AED{formatCurrency(item.laborCost + laborMarkupShare)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
                   {/* Cost Summary - Client */}
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+                  <div className="bg-white rounded-lg shadow-sm border border-blue-300 border-2 p-4 mb-4">
                     <h3 className="font-bold text-gray-900 mb-3">Cost Breakdown</h3>
                     <div className="space-y-2 text-sm">
                       {(() => {
