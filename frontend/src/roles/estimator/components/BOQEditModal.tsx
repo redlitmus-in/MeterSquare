@@ -233,7 +233,8 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
           project_id: response.data.project_id,
           boq_id: response.data.boq_id,
           boq_name: response.data.boq_name || boq.boq_name || boq.title || '',
-          status: response.data.status,
+          // Reset status to 'draft' when editing - estimator must manually send to TD again
+          status: 'draft',
           items: items.map((item: BOQItemDetailed) => ({
             item_id: item.master_item_id,
             item_name: item.item_name,

@@ -1093,8 +1093,8 @@ const EstimatorHub: React.FC = () => {
               <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
               Sent to TD (Pending Approval)
             </div>
-          ) : isApprovedByTD ? (
-            /* Approved by TD - Can send to client */
+          ) : isApprovedByTD && !boq.email_sent ? (
+            /* Approved by TD AND not yet sent to client - Can send to client */
             <button
               className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
               style={{ backgroundColor: 'rgb(34, 197, 94)' }}
@@ -1285,7 +1285,7 @@ const EstimatorHub: React.FC = () => {
                             </Button>
                           </>
                         );
-                      } else if (isApprovedByTD) {
+                      } else if (isApprovedByTD && !boq.email_sent) {
                         return (
                           <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('client'); setShowSendEmailModal(true); }} className="h-8 px-3" title="Send to Client">
                             <Send className="h-4 w-4 mr-1" />
@@ -2711,6 +2711,7 @@ const EstimatorHub: React.FC = () => {
         }}
         onSubmit={handleBOQCreated}
         selectedProject={selectedProjectForBOQ}
+        hideTemplate={true}
       />
 
       {/* BOQ Details Modal */}
@@ -2729,11 +2730,20 @@ const EstimatorHub: React.FC = () => {
             setShowBoqEdit(true);
           }
         }}
-        onDownload={() => {
-          if (selectedBoqForDetails) {
-            handleDownloadBOQ(selectedBoqForDetails);
-          }
-        }}
+        onDownload={
+          // Only show download button if BOQ is approved or later stages
+          selectedBoqForDetails?.status === 'approved' ||
+          selectedBoqForDetails?.status === 'sent_for_confirmation' ||
+          selectedBoqForDetails?.status === 'client_confirmed' ||
+          selectedBoqForDetails?.status === 'client_rejected' ||
+          selectedBoqForDetails?.status === 'completed'
+            ? () => {
+                if (selectedBoqForDetails) {
+                  handleDownloadBOQ(selectedBoqForDetails);
+                }
+              }
+            : undefined
+        }
       />
 
       {/* BOQ Edit Modal */}
