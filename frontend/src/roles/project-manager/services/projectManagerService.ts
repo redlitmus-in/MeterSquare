@@ -257,5 +257,30 @@ export const projectManagerService = {
       console.error('Error fetching BOQ history:', error);
       throw error;
     }
+  },
+
+  // Update user status (online/offline)
+  async updateUserStatus(userId: number, status: string): Promise<any> {
+    try {
+      const response = await apiClient.post('/user_status', {
+        user_id: userId,
+        status: status
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error updating user status:', error);
+      throw error;
+    }
+  },
+
+  // Update project details
+  async updateProject(projectId: number, data: { status?: string; [key: string]: any }): Promise<any> {
+    try {
+      const response = await apiClient.put(`/update_project/${projectId}`, data);
+      return response.data;
+    } catch (error) {
+      console.error('Error updating project:', error);
+      throw error;
+    }
   }
 };

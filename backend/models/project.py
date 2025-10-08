@@ -22,6 +22,7 @@ class Project(db.Model):
     end_date = db.Column(db.Date, nullable=True)  # Optional - changed from required
     status = db.Column(db.String(50), nullable=False, default='active')  # Default status
     description = db.Column(db.Text, nullable=True)  # Changed to Text for longer descriptions
+    completion_requested = db.Column(db.Boolean, default=False)  # SE completion request flag
     is_deleted = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
@@ -48,6 +49,7 @@ class Project(db.Model):
             'end_date': self.end_date.isoformat() if self.end_date else None,
             'status': self.status,
             'description': self.description,
+            'completion_requested': self.completion_requested,
             'is_deleted': self.is_deleted,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by,

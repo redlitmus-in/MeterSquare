@@ -55,7 +55,8 @@ def jwt_required(func):
                 "phone": user.phone,
                 "role_id": user.role_id,
                 "department": user.department,
-                "is_active": user.is_active
+                "is_active": user.is_active,
+                "user_status": user.user_status or 'offline'
             }
             g.user_id = user.user_id
 
@@ -216,7 +217,8 @@ def handle_get_logged_in_user():
                 "role": role_name,
                 "role_id": current_user.get("role_id"),  # Include numeric role_id
                 "department": current_user.get("department"),
-                "is_active": current_user.get("is_active")
+                "is_active": current_user.get("is_active"),
+                "user_status": current_user.get("user_status", "offline")
             },
             "api_info": {
                 "endpoint": "/self",

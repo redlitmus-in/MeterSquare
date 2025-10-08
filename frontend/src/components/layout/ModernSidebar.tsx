@@ -39,6 +39,10 @@ import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
 import { getRoleDisplayName, getRoleThemeColor, buildRolePath, getRoleName } from '@/utils/roleRouting';
 import { clsx } from 'clsx';
+import { siteEngineerService } from '@/roles/site-engineer/services/siteEngineerService';
+import { projectManagerService } from '@/roles/project-manager/services/projectManagerService';
+import { toast } from 'sonner';
+import axios from 'axios';
 
 interface NavigationItem {
   name: string;
@@ -197,6 +201,15 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     return saved === 'true';
   });
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState(user?.user_status === 'online');
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  // Sync status with user data when it changes
+  React.useEffect(() => {
+    if (user?.user_status) {
+      setIsOnline(user.user_status === 'online');
+    }
+  }, [user?.user_status]);
 
   // Listen for storage changes to sync collapsed state across components
   React.useEffect(() => {
@@ -229,6 +242,54 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     // Dispatch event for same-tab updates
     window.dispatchEvent(new Event('sidebarToggle'));
   }, [isCollapsed]);
+
+  const handleToggleStatus = async () => {
+    if (!user?.user_id) return;
+
+    try {
+      setUpdatingStatus(true);
+      const newStatus = isOnline ? 'offline' : 'online';
+
+      // Use the appropriate service based on role
+      if (user?.role_id === UserRole.SITE_ENGINEER) {
+        await siteEngineerService.updateUserStatus(user.user_id, newStatus);
+      } else if (user?.role_id === UserRole.PROJECT_MANAGER) {
+        await projectManagerService.updateUserStatus(user.user_id, newStatus);
+      } else {
+        // For all other roles, use direct API call
+        const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+        const token = localStorage.getItem('access_token');
+        await axios.post(`${API_URL}/user_status`, {
+          user_id: user.user_id,
+          status: newStatus
+        }, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+      }
+
+      // Update local state
+      setIsOnline(!isOnline);
+
+      // Update the user in auth store
+      const { setUser } = useAuthStore.getState();
+      if (user) {
+        setUser({
+          ...user,
+          user_status: newStatus
+        });
+      }
+
+      toast.success(`You are now ${newStatus}`);
+
+      // Close the dropdown after toggling status
+      setUserDropdownOpen(false);
+    } catch (error: any) {
+      console.error('Error updating status:', error);
+      toast.error('Failed to update status');
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
 
   // Memoized navigation items to prevent re-calculation on every render
   const navigation = useMemo(() => {
@@ -615,6 +676,34 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                     transition={{ duration: 0.12, ease: 'easeInOut' }}
                     className="absolute bottom-full mb-2 left-0 right-0 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-50"
                   >
+                    {/* Status Toggle - Available for all roles */}
+                    <div className="px-4 py-3 border-b border-gray-100">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                          <span className="text-xs font-medium text-gray-700">Status</span>
+                        </div>
+                        <button
+                          onClick={handleToggleStatus}
+                          disabled={updatingStatus}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            isOnline ? 'bg-green-500' : 'bg-gray-300'
+                          } ${updatingStatus ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-lg transition-transform ${
+                              isOnline ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                      <div className="mt-1">
+                        <span className={`text-xs font-semibold ${isOnline ? 'text-green-600' : 'text-gray-500'}`}>
+                          {isOnline ? 'Online' : 'Offline'}
+                        </span>
+                      </div>
+                    </div>
+
                     <Link
                       to="/profile"
                       onClick={() => {
@@ -626,7 +715,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                       <UserCircleIcon className="w-4 h-4 text-gray-500 mr-3" />
                       <span>Profile Settings</span>
                     </Link>
-                    
+
                     <button
                       onClick={() => {
                         const { logout } = useAuthStore.getState();

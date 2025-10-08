@@ -29,6 +29,7 @@ export interface User extends BaseEntity {
   address?: string;
   bio?: string;
   is_active: boolean;
+  user_status?: string; // 'online' | 'offline'
 }
 
 export interface UserCreate {

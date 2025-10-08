@@ -54,6 +54,10 @@ interface BOQCreationFormProps {
   onClose: () => void;
   onSubmit?: (boqId: number) => void;
   selectedProject?: any;
+  hideBulkUpload?: boolean;
+  hideTemplate?: boolean;
+  isNewPurchase?: boolean; // For PM/SE adding extra BOQ
+  existingBoqId?: number; // BOQ ID to add items to
 }
 
 // Master data interfaces
@@ -79,7 +83,16 @@ interface MasterLabour {
   work_type: string;
 }
 
-const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSubmit, selectedProject }) => {
+const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
+  isOpen,
+  onClose,
+  onSubmit,
+  selectedProject,
+  hideBulkUpload = false,
+  hideTemplate = false,
+  isNewPurchase = false,
+  existingBoqId
+}) => {
   const [boqName, setBoqName] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -646,44 +659,95 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
     setIsSubmitting(true);
 
     try {
-      const payload: BOQCreatePayload = {
-        project_id: selectedProjectId,
-        boq_name: boqName,
-        status: 'Draft',
-        created_by: 'Estimator', // You can get this from auth context
-        items: items.map(item => ({
-          item_name: item.item_name,
-          description: item.description || undefined,
-          work_type: item.work_type,
-          overhead_percentage: item.overhead_percentage,
-          profit_margin_percentage: item.profit_margin_percentage,
-          materials: item.materials.map(material => ({
-            material_name: material.material_name,
-            quantity: material.quantity,
-            unit: material.unit,
-            unit_price: material.unit_price
-          })),
-          labour: item.labour.map(labour => ({
-            labour_role: labour.labour_role,
-            hours: labour.hours,
-            rate_per_hour: labour.rate_per_hour
+      // Use new_purchase endpoint for PM/SE adding extra items
+      if (isNewPurchase && existingBoqId) {
+        const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+        const token = localStorage.getItem('access_token');
+
+        const newPurchasePayload = {
+          boq_id: existingBoqId,
+          items: items.map(item => ({
+            item_name: item.item_name,
+            description: item.description || '',
+            work_type: item.work_type,
+            overhead_percentage: item.overhead_percentage,
+            profit_margin_percentage: item.profit_margin_percentage,
+            materials: item.materials.map(material => ({
+              material_name: material.material_name,
+              quantity: material.quantity,
+              unit: material.unit,
+              unit_price: material.unit_price
+            })),
+            labour: item.labour.map(labour => ({
+              labour_role: labour.labour_role,
+              hours: labour.hours,
+              rate_per_hour: labour.rate_per_hour,
+              work_type: labour.work_type || 'daily_wages'
+            }))
           }))
-        }))
-      };
+        };
 
-      const result = await estimatorService.createBOQ(payload);
+        const response = await fetch(`${API_URL}/new_purchase`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify(newPurchasePayload)
+        });
 
-      if (result.success && result.boq_id) {
-        toast.success(result.message);
-        if (onSubmit) {
-          onSubmit(result.boq_id);
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+          toast.success(result.message || 'Extra items added successfully');
+          if (onSubmit) {
+            onSubmit(existingBoqId);
+          }
+          onClose();
+        } else {
+          toast.error(result.error || 'Failed to add extra items');
         }
-        onClose();
       } else {
-        toast.error(result.message);
+        // Regular BOQ creation for Estimator
+        const payload: BOQCreatePayload = {
+          project_id: selectedProjectId,
+          boq_name: boqName,
+          status: 'Draft',
+          created_by: 'Estimator',
+          items: items.map(item => ({
+            item_name: item.item_name,
+            description: item.description || undefined,
+            work_type: item.work_type,
+            overhead_percentage: item.overhead_percentage,
+            profit_margin_percentage: item.profit_margin_percentage,
+            materials: item.materials.map(material => ({
+              material_name: material.material_name,
+              quantity: material.quantity,
+              unit: material.unit,
+              unit_price: material.unit_price
+            })),
+            labour: item.labour.map(labour => ({
+              labour_role: labour.labour_role,
+              hours: labour.hours,
+              rate_per_hour: labour.rate_per_hour
+            }))
+          }))
+        };
+
+        const result = await estimatorService.createBOQ(payload);
+
+        if (result.success && result.boq_id) {
+          toast.success(result.message);
+          if (onSubmit) {
+            onSubmit(result.boq_id);
+          }
+          onClose();
+        } else {
+          toast.error(result.message);
+        }
       }
     } catch (error) {
-      toast.error('Failed to create BOQ');
+      toast.error(isNewPurchase ? 'Failed to add extra items' : 'Failed to create BOQ');
     } finally {
       setIsSubmitting(false);
     }
@@ -1558,35 +1622,39 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({ isOpen, onClose, onSu
               Cancel
             </button>
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleDownloadTemplate}
-                className="flex items-center gap-2 px-5 py-2.5 bg-white border-2 border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-all font-semibold shadow-sm"
-                disabled={isSubmitting || isUploadingBulk}
-                title="Download Excel template for bulk import"
-              >
-                <FileText className="w-5 h-5" />
-                Download Template
-              </button>
-              <button
-                type="button"
-                onClick={handleImportTemplate}
-                className="flex items-center gap-2 px-5 py-2.5 bg-white border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all font-semibold shadow-sm"
-                disabled={isSubmitting || isUploadingBulk || !selectedProjectId || !boqName}
-                title={!selectedProjectId || !boqName ? "Please fill BOQ name and select project first" : "Import BOQ from Excel template"}
-              >
-                {isUploadingBulk ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Importing...
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-5 h-5" />
-                    Import Template
-                  </>
-                )}
-              </button>
+              {!hideTemplate && (
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplate}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-white border-2 border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-all font-semibold shadow-sm"
+                  disabled={isSubmitting || isUploadingBulk}
+                  title="Download Excel template for bulk import"
+                >
+                  <FileText className="w-5 h-5" />
+                  Download Template
+                </button>
+              )}
+              {!hideBulkUpload && (
+                <button
+                  type="button"
+                  onClick={handleImportTemplate}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-white border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all font-semibold shadow-sm"
+                  disabled={isSubmitting || isUploadingBulk || !selectedProjectId || !boqName}
+                  title={!selectedProjectId || !boqName ? "Please fill BOQ name and select project first" : "Import BOQ from Excel template"}
+                >
+                  {isUploadingBulk ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Importing...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-5 h-5" />
+                      Import Template
+                    </>
+                  )}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleSubmit}

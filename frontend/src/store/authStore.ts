@@ -10,13 +10,14 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
-  
+
   // Actions
   login: (credentials: LoginRequest) => Promise<void>;
   register: (userData: any) => Promise<void>;
   logout: () => void;
   getCurrentUser: () => Promise<void>;
   updateProfile: (userData: any) => Promise<void>;
+  setUser: (user: User) => void;
   clearError: () => void;
   getRoleDashboard: () => string;
 }
@@ -203,9 +204,15 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
+      setUser: (user: User) => {
+        // Update user in state and cache
+        localStorage.setItem('user', JSON.stringify(user));
+        set({ user });
+      },
+
       clearError: () => set({ error: null }),
-      
-      
+
+
       getRoleDashboard: () => {
         const state = get();
         if (!state.user || !state.user.role_id) {

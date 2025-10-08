@@ -56,6 +56,7 @@ interface BOQItem {
   }[];
   laborCost: number;
   estimatedSellingPrice: number;
+  purchaseType?: 'existing' | 'new';
 }
 
 interface Project {
@@ -77,6 +78,10 @@ interface Project {
   created_at?: string;
   priority?: 'high' | 'medium' | 'low';
   boqItems?: BOQItem[];
+  existingPurchaseItems?: BOQItem[];
+  newPurchaseItems?: BOQItem[];
+  boq_ids?: number[];
+  completion_requested?: boolean;
 }
 
 interface SiteEngineer {
@@ -87,6 +92,7 @@ interface SiteEngineer {
   project_id: number | null;
   project_name?: string | null;
   assigned_projects?: number;
+  user_status?: string;
 }
 
 const MyProjects: React.FC = () => {
@@ -113,6 +119,9 @@ const MyProjects: React.FC = () => {
   const [selectedSEDetails, setSelectedSEDetails] = useState<SiteEngineer | null>(null);
   const [showCreateBOQModal, setShowCreateBOQModal] = useState(false);
   const [selectedProjectForBOQ, setSelectedProjectForBOQ] = useState<Project | null>(null);
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [projectToComplete, setProjectToComplete] = useState<Project | null>(null);
+  const [completing, setCompleting] = useState(false);
 
   useEffect(() => {
     loadProjects();
@@ -130,33 +139,13 @@ const MyProjects: React.FC = () => {
       const boqsResponse = await projectManagerService.getMyBOQs();
       const boqsList = boqsResponse.boqs || [];
 
-      // Fetch BOQ summaries in parallel for all projects
-      const enrichedProjects = await Promise.all(boqsList.map(async (boq: any) => {
+      // Map projects with data from backend response
+      const enrichedProjects = boqsList.map((boq: any) => {
         const siteSupervisorId = boq.project_details?.site_supervisor_id;
         const hasSiteSupervisor = siteSupervisorId !== null &&
                                   siteSupervisorId !== undefined &&
                                   siteSupervisorId !== 0;
         const effectiveStatus = hasSiteSupervisor ? 'assigned' : (boq.boq_status || 'pending');
-
-        // Fetch BOQ summary without items (lightweight)
-        let boqDetails: BOQDetails | undefined = undefined;
-        try {
-          const detailsResponse = await estimatorService.getBOQById(boq.boq_id);
-          if (detailsResponse.success && detailsResponse.data) {
-            const data: any = detailsResponse.data;
-            boqDetails = {
-              boq_detail_id: boq.boq_id,
-              total_cost: data.summary?.total_cost || data.total_cost || 0,
-              total_items: data.summary?.total_items || data.items?.length || 0,
-              total_materials: data.summary?.total_material_cost || data.total_material_cost || 0,
-              total_labour: data.summary?.total_labour_cost || data.total_labour_cost || 0,
-              overhead_percentage: data.overhead_percentage || 10,
-              profit_margin_percentage: data.profit_margin_percentage || 15
-            };
-          }
-        } catch (error) {
-          console.error(`Error loading BOQ summary for ${boq.boq_id}:`, error);
-        }
 
         return {
           project_id: boq.project_details?.project_id || boq.project_id,
@@ -169,15 +158,16 @@ const MyProjects: React.FC = () => {
           status: boq.project_details?.project_status || 'active',
           description: boq.project_details?.description,
           site_supervisor_id: siteSupervisorId,
-          site_supervisor_name: boq.project_details?.site_supervisor_name,
+          site_supervisor_name: boq.project_details?.site_supervisor_name || null,
+          completion_requested: boq.project_details?.completion_requested === true,
           boq_id: boq.boq_id,
           boq_name: boq.boq_name,
           boq_status: effectiveStatus,
-          boq_details: boqDetails,
+          boq_details: undefined, // Load on demand when viewing BOQ
           created_at: boq.created_at,
           priority: boq.priority || 'medium'
         };
-      }));
+      });
 
       setProjects(enrichedProjects);
 
@@ -215,10 +205,12 @@ const MyProjects: React.FC = () => {
       const response = await estimatorService.getBOQById(boqId);
       if (response.success && response.data) {
         const boqData = response.data;
-        const items: BOQItem[] = boqData.items?.map((item: any) => ({
+
+        // Helper function to process item
+        const processItem = (item: any, purchaseType: 'existing' | 'new'): BOQItem => ({
           id: item.master_item_id || item.id,
           description: item.item_name || item.description || item.item_description,
-          briefDescription: item.brief_description,
+          briefDescription: item.brief_description || item.description,
           unit: 'unit',
           quantity: 1,
           rate: item.base_cost || item.rate || 0,
@@ -238,24 +230,58 @@ const MyProjects: React.FC = () => {
             amount: lab.total_cost
           })) || [],
           laborCost: item.totalLabourCost || item.labor_cost || 0,
-          estimatedSellingPrice: item.selling_price || item.estimatedSellingPrice || item.estimated_selling_price || item.amount
-        })) || [];
+          estimatedSellingPrice: item.selling_price || item.estimatedSellingPrice || item.estimated_selling_price || item.amount,
+          purchaseType
+        });
+
+        // Process existing purchase items
+        const existingItems: BOQItem[] = boqData.existing_purchase?.items?.map((item: any) =>
+          processItem(item, 'existing')
+        ) || [];
+
+        // Process new purchase items - combine from new_purchase.items AND root items array
+        let newItems: BOQItem[] = [];
+
+        // Add items from new_purchase section
+        if (boqData.new_purchase?.items) {
+          newItems = boqData.new_purchase.items.map((item: any) => processItem(item, 'new'));
+        }
+
+        // Also check root items array for additional new purchases (when multiple new purchases are added)
+        if (boqData.items && Array.isArray(boqData.items)) {
+          const rootNewItems = boqData.items
+            .filter((item: any) => {
+              // Only include items that are not already in existing or new purchase
+              const itemId = item.master_item_id || item.id;
+              const existingIds = existingItems.map(i => i.id);
+              const newIds = newItems.map(i => i.id);
+              return !existingIds.includes(itemId) && !newIds.includes(itemId);
+            })
+            .map((item: any) => processItem(item, 'new'));
+
+          newItems = [...newItems, ...rootNewItems];
+        }
 
         const boqDataAny: any = boqData;
+        // Use combined_summary if available (for BOQs with new purchases), otherwise use summary
+        const summaryData = boqDataAny.combined_summary || boqDataAny.summary || boqDataAny;
         const boqDetails: BOQDetails = {
           boq_detail_id: boqId,
-          total_cost: boqDataAny.summary?.total_cost || boqDataAny.total_cost || 0,
-          total_items: boqDataAny.summary?.total_items || boqDataAny.items?.length || 0,
-          total_materials: boqDataAny.summary?.total_material_cost || boqDataAny.total_material_cost || 0,
-          total_labour: boqDataAny.summary?.total_labour_cost || boqDataAny.total_labour_cost || 0,
+          total_cost: summaryData.total_cost || boqDataAny.total_cost || 0,
+          total_items: summaryData.total_items || boqDataAny.items?.length || 0,
+          total_materials: summaryData.total_material_cost || boqDataAny.total_material_cost || 0,
+          total_labour: summaryData.total_labour_cost || boqDataAny.total_labour_cost || 0,
           overhead_percentage: boqDataAny.overhead_percentage || 10,
-          profit_margin_percentage: boqDataAny.profit_margin_percentage || 15
+          profit_margin_percentage: boqDataAny.profit_margin_percentage || 15,
+          boq_details: boqDataAny
         };
 
         // Update selected project
         setSelectedProject(prev => prev ? {
           ...prev,
-          boqItems: items,
+          boqItems: [...existingItems, ...newItems],
+          existingPurchaseItems: existingItems,
+          newPurchaseItems: newItems,
           boq_details: boqDetails
         } : null);
 
@@ -309,14 +335,18 @@ const MyProjects: React.FC = () => {
     }
 
     try {
-      // Call update API here when available
+      await projectManagerService.updateSiteSupervisor(editingSE.user_id, {
+        full_name: editSEData.full_name,
+        email: editSEData.email,
+        phone: editSEData.phone
+      });
       toast.success('Site Engineer updated successfully');
       setShowEditModal(false);
       setEditingSE(null);
       await loadAvailableSEs();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating SE:', error);
-      toast.error('Failed to update Site Engineer');
+      toast.error(error?.response?.data?.error || 'Failed to update Site Engineer');
     }
   };
 
@@ -493,6 +523,12 @@ const MyProjects: React.FC = () => {
                           <CalendarIcon className="w-4 h-4" />
                           <span>{formatDate(project.created_at)}</span>
                         </div>
+                        {project.site_supervisor_id && project.site_supervisor_name && (
+                          <div className="flex items-center gap-1 px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md">
+                            <UserIcon className="w-3.5 h-3.5 text-purple-600" />
+                            <span className="text-xs font-medium text-purple-900">{project.site_supervisor_name}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -520,64 +556,66 @@ const MyProjects: React.FC = () => {
                           <UserPlusIcon className="w-5 h-5" />
                         </button>
                       )}
-                      {project.site_supervisor_id && (
+                      {project.site_supervisor_id && project.status?.toLowerCase() !== 'completed' && (
                         <>
-                          <button
-                            onClick={() => {
-                              const se = availableSEs.find(s => s.user_id === project.site_supervisor_id);
-                              if (se) {
-                                setSelectedSEDetails(se);
-                                setShowSEDetailsModal(true);
-                              }
-                            }}
-                            className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-                            title="View Assigned SE"
-                          >
-                            <UserIcon className="w-5 h-5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedProjectForBOQ(project);
-                              setShowCreateBOQModal(true);
-                            }}
-                            className="p-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
-                            title="Create New BOQ"
-                          >
-                            <DocumentTextIcon className="w-5 h-5" />
-                          </button>
+                          {project.completion_requested ? (
+                            <button
+                              onClick={() => {
+                                setProjectToComplete(project);
+                                setShowCompleteModal(true);
+                              }}
+                              className="px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg transition-colors flex items-center gap-2 text-sm font-medium shadow-sm relative animate-pulse"
+                              title="SE Requested Completion - Click to Approve"
+                            >
+                              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-orange-500"></span>
+                              </span>
+                              <CheckCircleIcon className="w-5 h-5" />
+                              Confirm Complete
+                            </button>
+                          ) : (
+                            <button
+                              disabled
+                              className="px-4 py-2 bg-gray-300 text-gray-500 rounded-lg flex items-center gap-2 text-sm font-medium shadow-sm cursor-not-allowed opacity-60"
+                              title="Waiting for SE completion request"
+                            >
+                              <CheckCircleIcon className="w-5 h-5" />
+                              Complete
+                            </button>
+                          )}
                         </>
+                      )}
+                      {project.status?.toLowerCase() === 'completed' && (
+                        <div className="px-4 py-2 bg-green-100 border-2 border-green-400 rounded-lg flex items-center gap-2">
+                          <CheckCircleIcon className="w-5 h-5 text-green-600" />
+                          <span className="text-sm font-bold text-green-900">Completed</span>
+                        </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Project Stats - TD Style */}
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-4">
-                    <div className="bg-white border border-gray-200 rounded-lg p-3">
-                      <p className="text-xs text-gray-500 mb-1">Total Value</p>
-                      <p className="text-lg font-bold text-gray-900">
-                        AED{(project.boq_details?.total_cost || 0).toLocaleString()}
-                      </p>
-                    </div>
+                  {/* Project Stats */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                      <p className="text-xs text-blue-700 mb-1">Items</p>
-                      <p className="text-lg font-bold text-blue-900">{project.boq_details?.total_items || 0}</p>
+                      <p className="text-xs text-blue-700 mb-1">Location</p>
+                      <p className="text-lg font-bold text-blue-900">{project.location || 'N/A'}</p>
                     </div>
                     <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                      <p className="text-xs text-green-700 mb-1">Labor Cost</p>
-                      <p className="text-lg font-bold text-green-900">
-                        AED{(project.boq_details?.total_labour || 0).toLocaleString()}
-                      </p>
+                      <p className="text-xs text-green-700 mb-1">Status</p>
+                      <p className="text-lg font-bold text-green-900 capitalize">{project.status || 'Active'}</p>
                     </div>
                     <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                      <p className="text-xs text-purple-700 mb-1">Material Cost</p>
+                      <p className="text-xs text-purple-700 mb-1">Start Date</p>
                       <p className="text-lg font-bold text-purple-900">
-                        AED{(project.boq_details?.total_materials || 0).toLocaleString()}
+                        {project.start_date ? new Date(project.start_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A'}
                       </p>
                     </div>
                     <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                      <p className="text-xs text-orange-700 mb-1">O&P Margin</p>
-                      <p className="text-lg font-bold text-orange-900">10%</p>
-                      <p className="text-xs text-orange-600">OH: 10% | P: 0%</p>
+                      <p className="text-xs text-orange-700 mb-1">End Date</p>
+                      <p className="text-lg font-bold text-orange-900">
+                        {project.end_date ? new Date(project.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A'}
+                      </p>
                     </div>
                   </div>
 
@@ -627,85 +665,258 @@ const MyProjects: React.FC = () => {
                 </div>
               ) : (
                 <>
-                  {/* BOQ Items */}
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">Bill of Quantities - Items</h3>
-                  <div className="space-y-4">
-                    {selectedProject.boqItems?.map((item, idx) => (
-                      <div key={item.id} className="bg-white border border-gray-200 rounded-lg p-4">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex-1">
-                            <h4 className="font-bold text-gray-900">{item.description}</h4>
-                            {item.briefDescription && (
-                              <p className="text-sm text-gray-600 mt-1">{item.briefDescription}</p>
-                            )}
-                          </div>
-                          <div className="text-right ml-4">
-                            <p className="text-sm text-gray-500">Qty: {item.quantity} {item.unit}</p>
-                            <p className="text-sm text-gray-500">Rate: AED{(item.rate || 0).toLocaleString()}/{item.unit}</p>
-                          </div>
-                        </div>
-
-                        {item.materials?.length > 0 && (
-                          <div className="mb-3 bg-blue-50 rounded-lg p-3">
-                            <p className="text-sm font-medium text-blue-900 mb-2">+ Raw Materials</p>
-                            <div className="space-y-1">
-                              {item.materials.map((mat, matIdx) => (
-                                <div key={matIdx} className="flex justify-between text-sm text-blue-800">
-                                  <span>{mat.name} ({mat.quantity} {mat.unit})</span>
-                                  <span className="font-medium">Est. Cost: AED{(mat.amount || 0).toLocaleString()}</span>
-                                </div>
-                              ))}
-                            </div>
-                            <p className="text-sm font-bold text-blue-900 mt-2 pt-2 border-t border-blue-200">
-                              Total Materials: AED{item.materials.reduce((sum, m) => sum + (m.amount || 0), 0).toLocaleString()}
-                            </p>
-                          </div>
-                        )}
-
-                        {item.labour?.length > 0 && (
-                          <div className="mb-3 bg-green-50 rounded-lg p-3">
-                            <p className="text-sm font-medium text-green-900 mb-2">+ Labour</p>
-                            <div className="space-y-1">
-                              {item.labour.map((lab, labIdx) => (
-                                <div key={labIdx} className="flex justify-between text-sm text-green-800">
-                                  <span>{lab.type} ({lab.quantity} {lab.unit})</span>
-                                  <span className="font-medium">Est. Cost: AED{(lab.amount || 0).toLocaleString()}</span>
-                                </div>
-                              ))}
-                            </div>
-                            <p className="text-sm font-bold text-green-900 mt-2 pt-2 border-t border-green-200">
-                              Total Labour: AED{(item.laborCost || 0).toLocaleString()}
-                            </p>
-                          </div>
-                        )}
-
-                        <div className="bg-orange-50 rounded-lg p-3 mb-3">
-                          <p className="text-sm font-medium text-orange-900 mb-2">+ Overheads & Profit</p>
-                          <div className="space-y-1 text-sm text-orange-800">
-                            <div className="flex justify-between">
-                              <span>Overhead ({selectedProject.boq_details?.overhead_percentage || 10}%)</span>
-                              <span>AED{(item.amount * ((selectedProject.boq_details?.overhead_percentage || 10) / 100)).toLocaleString()}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>Profit Margin ({selectedProject.boq_details?.profit_margin_percentage || 15}%)</span>
-                              <span>AED{(item.amount * ((selectedProject.boq_details?.profit_margin_percentage || 15) / 100)).toLocaleString()}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm font-medium text-green-900">Estimated Selling Price:</span>
-                            <span className="text-xl font-bold text-green-900">AED{(item.estimatedSellingPrice || 0).toLocaleString()}</span>
-                          </div>
-                        </div>
+                  {/* Existing Purchase Section */}
+                  {selectedProject.existingPurchaseItems && selectedProject.existingPurchaseItems.length > 0 && (
+                    <div className="mb-8">
+                      <div className="bg-gradient-to-r from-purple-500 to-purple-600 rounded-t-lg px-4 py-3 flex items-center justify-between">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <DocumentTextIcon className="w-5 h-5" />
+                          Existing Purchase Items
+                        </h3>
+                        <span className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium text-white">
+                          {selectedProject.existingPurchaseItems.length} item{selectedProject.existingPurchaseItems.length > 1 ? 's' : ''}
+                        </span>
                       </div>
-                    ))}
-                  </div>
+                      <div className="border-2 border-purple-200 rounded-b-lg p-4 bg-purple-50/30">
+                        <div className="space-y-4">
+                          {selectedProject.existingPurchaseItems.map((item, idx) => (
+                            <div key={`existing-${item.id}-${idx}`} className="bg-white border-2 border-purple-200 rounded-lg p-4 shadow-sm">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h4 className="font-bold text-gray-900 text-lg">{item.description}</h4>
+                                    <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded">Existing</span>
+                                  </div>
+                                  {item.briefDescription && (
+                                    <p className="text-sm text-gray-600 mt-1">{item.briefDescription}</p>
+                                  )}
+                                </div>
+                                <div className="text-right ml-4">
+                                  <p className="text-sm text-gray-500">Qty: {item.quantity} {item.unit}</p>
+                                  <p className="text-sm text-gray-500">Rate: AED{(item.rate || 0).toLocaleString()}/{item.unit}</p>
+                                </div>
+                              </div>
 
-                  {/* Cost Summary */}
-                  <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h3 className="font-bold text-blue-900 mb-3">Cost Summary</h3>
+                              {item.materials?.length > 0 && (
+                                <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                                  <p className="text-sm font-medium text-blue-900 mb-2">+ Raw Materials</p>
+                                  <div className="space-y-1">
+                                    {item.materials.map((mat, matIdx) => (
+                                      <div key={matIdx} className="flex justify-between text-sm text-blue-800">
+                                        <span>{mat.name} ({mat.quantity} {mat.unit})</span>
+                                        <span className="font-medium">AED{(mat.amount || 0).toLocaleString()}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="text-sm font-bold text-blue-900 mt-2 pt-2 border-t border-blue-200">
+                                    Total Materials: AED{item.materials.reduce((sum, m) => sum + (m.amount || 0), 0).toLocaleString()}
+                                  </p>
+                                </div>
+                              )}
+
+                              {item.labour?.length > 0 && (
+                                <div className="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
+                                  <p className="text-sm font-medium text-green-900 mb-2">+ Labour</p>
+                                  <div className="space-y-1">
+                                    {item.labour.map((lab, labIdx) => (
+                                      <div key={labIdx} className="flex justify-between text-sm text-green-800">
+                                        <span>{lab.type} ({lab.quantity} {lab.unit})</span>
+                                        <span className="font-medium">AED{(lab.amount || 0).toLocaleString()}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="text-sm font-bold text-green-900 mt-2 pt-2 border-t border-green-200">
+                                    Total Labour: AED{(item.laborCost || 0).toLocaleString()}
+                                  </p>
+                                </div>
+                              )}
+
+                              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-3">
+                                <p className="text-sm font-medium text-orange-900 mb-2">+ Overheads & Profit</p>
+                                <div className="space-y-1 text-sm text-orange-800">
+                                  <div className="flex justify-between">
+                                    <span>Overhead ({selectedProject.boq_details?.overhead_percentage || 10}%)</span>
+                                    <span>AED{(item.amount * ((selectedProject.boq_details?.overhead_percentage || 10) / 100)).toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Profit Margin ({selectedProject.boq_details?.profit_margin_percentage || 15}%)</span>
+                                    <span>AED{(item.amount * ((selectedProject.boq_details?.profit_margin_percentage || 15) / 100)).toLocaleString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm font-medium text-green-900">Estimated Selling Price:</span>
+                                  <span className="text-xl font-bold text-green-900">AED{(item.estimatedSellingPrice || 0).toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Existing Purchase Summary */}
+                        {selectedProject.boq_details?.boq_details?.existing_purchase?.summary && (
+                          <div className="mt-4 bg-white border-2 border-purple-300 rounded-lg p-4">
+                            <h4 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
+                              <DocumentTextIcon className="w-4 h-4" />
+                              Existing Purchase Summary
+                            </h4>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-blue-700">Total Material Cost:</span>
+                                <span className="font-bold text-blue-900">
+                                  AED{(selectedProject.boq_details.boq_details.existing_purchase.summary.total_material_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-green-700">Total Labour Cost:</span>
+                                <span className="font-bold text-green-900">
+                                  AED{(selectedProject.boq_details.boq_details.existing_purchase.summary.total_labour_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between pt-2 mt-2 border-t-2 border-purple-300">
+                                <span className="text-purple-900 font-bold">Existing Purchase Total:</span>
+                                <span className="font-bold text-purple-900">
+                                  AED{(selectedProject.boq_details.boq_details.existing_purchase.summary.total_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* New Purchase Section */}
+                  {selectedProject.newPurchaseItems && selectedProject.newPurchaseItems.length > 0 && (
+                    <div className="mb-8">
+                      <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-t-lg px-4 py-3 flex items-center justify-between">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <DocumentTextIcon className="w-5 h-5" />
+                          New Purchase Items
+                        </h3>
+                        <span className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium text-white">
+                          {selectedProject.newPurchaseItems.length} item{selectedProject.newPurchaseItems.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <div className="border-2 border-emerald-200 rounded-b-lg p-4 bg-emerald-50/30">
+                        <div className="space-y-4">
+                          {selectedProject.newPurchaseItems.map((item, idx) => (
+                            <div key={`new-${item.id}-${idx}`} className="bg-white border-2 border-emerald-200 rounded-lg p-4 shadow-sm">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h4 className="font-bold text-gray-900 text-lg">{item.description}</h4>
+                                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-medium rounded">New</span>
+                                  </div>
+                                  {item.briefDescription && (
+                                    <p className="text-sm text-gray-600 mt-1">{item.briefDescription}</p>
+                                  )}
+                                </div>
+                                <div className="text-right ml-4">
+                                  <p className="text-sm text-gray-500">Qty: {item.quantity} {item.unit}</p>
+                                  <p className="text-sm text-gray-500">Rate: AED{(item.rate || 0).toLocaleString()}/{item.unit}</p>
+                                </div>
+                              </div>
+
+                              {item.materials?.length > 0 && (
+                                <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                                  <p className="text-sm font-medium text-blue-900 mb-2">+ Raw Materials</p>
+                                  <div className="space-y-1">
+                                    {item.materials.map((mat, matIdx) => (
+                                      <div key={matIdx} className="flex justify-between text-sm text-blue-800">
+                                        <span>{mat.name} ({mat.quantity} {mat.unit})</span>
+                                        <span className="font-medium">AED{(mat.amount || 0).toLocaleString()}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="text-sm font-bold text-blue-900 mt-2 pt-2 border-t border-blue-200">
+                                    Total Materials: AED{item.materials.reduce((sum, m) => sum + (m.amount || 0), 0).toLocaleString()}
+                                  </p>
+                                </div>
+                              )}
+
+                              {item.labour?.length > 0 && (
+                                <div className="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
+                                  <p className="text-sm font-medium text-green-900 mb-2">+ Labour</p>
+                                  <div className="space-y-1">
+                                    {item.labour.map((lab, labIdx) => (
+                                      <div key={labIdx} className="flex justify-between text-sm text-green-800">
+                                        <span>{lab.type} ({lab.quantity} {lab.unit})</span>
+                                        <span className="font-medium">AED{(lab.amount || 0).toLocaleString()}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="text-sm font-bold text-green-900 mt-2 pt-2 border-t border-green-200">
+                                    Total Labour: AED{(item.laborCost || 0).toLocaleString()}
+                                  </p>
+                                </div>
+                              )}
+
+                              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-3">
+                                <p className="text-sm font-medium text-orange-900 mb-2">+ Overheads & Profit</p>
+                                <div className="space-y-1 text-sm text-orange-800">
+                                  <div className="flex justify-between">
+                                    <span>Overhead ({selectedProject.boq_details?.boq_details?.new_purchase?.items?.[idx]?.overhead_percentage || 8}%)</span>
+                                    <span>AED{(selectedProject.boq_details?.boq_details?.new_purchase?.items?.[idx]?.overhead_amount || 0).toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Profit Margin ({selectedProject.boq_details?.boq_details?.new_purchase?.items?.[idx]?.profit_margin_percentage || 12}%)</span>
+                                    <span>AED{(selectedProject.boq_details?.boq_details?.new_purchase?.items?.[idx]?.profit_margin_amount || 0).toLocaleString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm font-medium text-green-900">Estimated Selling Price:</span>
+                                  <span className="text-xl font-bold text-green-900">AED{(item.estimatedSellingPrice || 0).toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* New Purchase Summary */}
+                        {selectedProject.boq_details?.boq_details?.new_purchase?.summary && (
+                          <div className="mt-4 bg-white border-2 border-emerald-300 rounded-lg p-4">
+                            <h4 className="font-bold text-emerald-900 mb-3 flex items-center gap-2">
+                              <DocumentTextIcon className="w-4 h-4" />
+                              New Purchase Summary
+                            </h4>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-blue-700">Total Material Cost:</span>
+                                <span className="font-bold text-blue-900">
+                                  AED{(selectedProject.boq_details.boq_details.new_purchase.summary.total_material_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-green-700">Total Labour Cost:</span>
+                                <span className="font-bold text-green-900">
+                                  AED{(selectedProject.boq_details.boq_details.new_purchase.summary.total_labour_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between pt-2 mt-2 border-t-2 border-emerald-300">
+                                <span className="text-emerald-900 font-bold">New Purchase Total:</span>
+                                <span className="font-bold text-emerald-900">
+                                  AED{(selectedProject.boq_details.boq_details.new_purchase.summary.total_cost || 0).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Combined Cost Summary */}
+                  <div className="mt-6 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-lg p-5 shadow-md">
+                    <h3 className="font-bold text-blue-900 mb-4 text-lg flex items-center gap-2">
+                      <DocumentTextIcon className="w-5 h-5" />
+                      Combined Cost Summary
+                    </h3>
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
                         <span className="text-blue-700">Total Material Cost:</span>
@@ -718,28 +929,34 @@ const MyProjects: React.FC = () => {
                       <div className="flex justify-between">
                         <span className="text-orange-700">Overhead ({selectedProject.boq_details?.overhead_percentage || 10}%):</span>
                         <span className="font-bold text-orange-900">
-                          AED{(((selectedProject.boq_details?.total_materials || 0) + (selectedProject.boq_details?.total_labour || 0)) * ((selectedProject.boq_details?.overhead_percentage || 10) / 100)).toLocaleString()}
+                          AED{(selectedProject.boq_details?.boq_details?.combined_summary?.total_material_cost && selectedProject.boq_details?.boq_details?.combined_summary?.total_labour_cost
+                            ? ((selectedProject.boq_details.boq_details.combined_summary.total_material_cost + selectedProject.boq_details.boq_details.combined_summary.total_labour_cost) * ((selectedProject.boq_details?.overhead_percentage || 10) / 100))
+                            : (((selectedProject.boq_details?.total_materials || 0) + (selectedProject.boq_details?.total_labour || 0)) * ((selectedProject.boq_details?.overhead_percentage || 10) / 100))
+                          ).toLocaleString()}
                         </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-orange-700">Profit Margin ({selectedProject.boq_details?.profit_margin_percentage || 15}%):</span>
                         <span className="font-bold text-orange-900">
-                          AED{(((selectedProject.boq_details?.total_materials || 0) + (selectedProject.boq_details?.total_labour || 0)) * ((selectedProject.boq_details?.profit_margin_percentage || 15) / 100)).toLocaleString()}
+                          AED{(selectedProject.boq_details?.boq_details?.combined_summary?.total_material_cost && selectedProject.boq_details?.boq_details?.combined_summary?.total_labour_cost
+                            ? ((selectedProject.boq_details.boq_details.combined_summary.total_material_cost + selectedProject.boq_details.boq_details.combined_summary.total_labour_cost) * ((selectedProject.boq_details?.profit_margin_percentage || 15) / 100))
+                            : (((selectedProject.boq_details?.total_materials || 0) + (selectedProject.boq_details?.total_labour || 0)) * ((selectedProject.boq_details?.profit_margin_percentage || 15) / 100))
+                          ).toLocaleString()}
                         </span>
                       </div>
-                      <div className="flex justify-between pt-2 mt-2 border-t-2 border-blue-300">
-                        <span className="text-blue-900 font-bold text-base">Grand Total:</span>
-                        <span className="font-bold text-blue-900 text-base">AED{(selectedProject.boq_details?.total_cost || 0).toLocaleString()}</span>
+                      <div className="flex justify-between pt-3 mt-3 border-t-2 border-blue-400">
+                        <span className="text-blue-900 font-bold text-lg">Grand Total:</span>
+                        <span className="font-bold text-blue-900 text-xl">AED{(selectedProject.boq_details?.total_cost || 0).toLocaleString()}</span>
                       </div>
                     </div>
                   </div>
 
                   <div className="mt-4 text-sm text-gray-600">
                     Submitted by: Estimator on {formatDate(selectedProject.created_at)}
-                    {selectedProject.boq_status === 'client_confirmed' && (
-                      <span className="ml-3 text-green-600 font-medium flex items-center gap-1">
+                    {selectedProject.boq_status === 'Client_Confirmed' && (
+                      <span className="ml-3 text-green-600 font-medium inline-flex items-center gap-1">
                         <CheckCircleIcon className="w-4 h-4" />
-                        Sent to Client
+                        Client Confirmed
                       </span>
                     )}
                   </div>
@@ -835,73 +1052,167 @@ const MyProjects: React.FC = () => {
                       <p className="text-gray-500 text-lg">No site engineers found</p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {filteredSEs.map((se) => {
-                        const isSelected = selectedSE?.user_id === se.user_id;
-                        const projectCount = se.assigned_projects || (se.project_id ? 1 : 0);
-                        const isMaxCapacity = projectCount >= 2;
+                    <div className="space-y-4">
+                      {/* Online Users Section */}
+                      {filteredSEs.filter(se => se.user_status === 'online').length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-2 px-1">
+                            <UserIcon className="w-4 h-4 text-green-600" />
+                            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                            <h3 className="text-xs font-bold text-green-700 uppercase tracking-wide">Online</h3>
+                            <div className="flex-1 h-px bg-green-200"></div>
+                          </div>
+                          <div className="space-y-2">
+                            {filteredSEs.filter(se => se.user_status === 'online').map((se) => {
+                              const isSelected = selectedSE?.user_id === se.user_id;
+                              const projectCount = se.assigned_projects || (se.project_id ? 1 : 0);
+                              const isMaxCapacity = projectCount >= 2;
 
-                        return (
-                          <div
-                            key={se.user_id}
-                            onClick={() => !isMaxCapacity && setSelectedSE(se)}
-                            className={`border-2 rounded-lg p-2.5 transition-all ${
-                              isMaxCapacity
-                                ? 'border-red-200 bg-red-50 cursor-not-allowed opacity-60'
-                                : isSelected
-                                ? 'border-blue-500 bg-blue-50 cursor-pointer'
-                                : 'border-gray-200 hover:border-gray-300 bg-white cursor-pointer'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 flex-1">
-                                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center flex-shrink-0">
-                                  <span className="text-white font-bold text-sm">
-                                    {se.sitesupervisor_name.charAt(0).toUpperCase()}
-                                  </span>
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-1.5">
-                                    <p className="font-bold text-sm text-gray-900 truncate">{se.sitesupervisor_name}</p>
-                                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${
-                                      isMaxCapacity
-                                        ? 'bg-red-100 text-red-700'
-                                        : projectCount > 0
-                                        ? 'bg-yellow-100 text-yellow-700'
-                                        : 'bg-green-100 text-green-700'
-                                    }`}>
-                                      {isMaxCapacity ? 'Full' : projectCount > 0 ? 'Busy' : 'Available'}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-2 text-[10px] text-gray-600 mt-0.5">
-                                    <span className="truncate">{se.email}</span>
-                                    <span className="flex-shrink-0">{se.phone}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2 text-[10px] text-gray-500 mt-0.5">
-                                    <BuildingOfficeIcon className="w-3 h-3 flex-shrink-0" />
-                                    <span>{projectCount}/2 projects</span>
-                                    {se.project_name && (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setSelectedSEDetails(se);
-                                          setShowSEDetailsModal(true);
-                                        }}
-                                        className="text-blue-600 hover:text-blue-800 underline"
-                                      >
-                                        View Projects
-                                      </button>
+                              return (
+                                <div
+                                  key={se.user_id}
+                                  onClick={() => !isMaxCapacity && setSelectedSE(se)}
+                                  className={`border-2 rounded-lg p-2.5 transition-all ${
+                                    isMaxCapacity
+                                      ? 'border-red-200 bg-red-50 cursor-not-allowed opacity-60'
+                                      : isSelected
+                                      ? 'border-blue-500 bg-blue-50 cursor-pointer'
+                                      : 'border-gray-200 hover:border-gray-300 bg-white cursor-pointer'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2 flex-1">
+                                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center flex-shrink-0">
+                                        <span className="text-white font-bold text-sm">
+                                          {se.sitesupervisor_name.charAt(0).toUpperCase()}
+                                        </span>
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                          <p className="font-bold text-sm text-gray-900 truncate">{se.sitesupervisor_name}</p>
+                                          {/* Online/Offline Status */}
+                                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-green-100 text-green-700">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                                            Online
+                                          </span>
+                                          {/* Availability Status */}
+                                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${
+                                            isMaxCapacity
+                                              ? 'bg-red-100 text-red-700'
+                                              : projectCount > 0
+                                              ? 'bg-yellow-100 text-yellow-700'
+                                              : 'bg-green-100 text-green-700'
+                                          }`}>
+                                            {isMaxCapacity ? 'Busy' : projectCount > 0 ? 'Busy' : 'Available'}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-[10px] text-gray-600 mt-0.5">
+                                          <span className="truncate">{se.email}</span>
+                                          <span className="flex-shrink-0">{se.phone}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-[10px] text-gray-500 mt-0.5">
+                                          <BuildingOfficeIcon className="w-3 h-3 flex-shrink-0" />
+                                          <span>{projectCount}/2 projects</span>
+                                          {se.project_name && (
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setSelectedSEDetails(se);
+                                                setShowSEDetailsModal(true);
+                                              }}
+                                              className="text-blue-600 hover:text-blue-800 underline"
+                                            >
+                                              View Projects
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {isSelected && !isMaxCapacity && (
+                                      <CheckCircleIcon className="w-5 h-5 text-blue-600 flex-shrink-0" />
                                     )}
                                   </div>
                                 </div>
-                              </div>
-                              {isSelected && !isMaxCapacity && (
-                                <CheckCircleIcon className="w-5 h-5 text-blue-600 flex-shrink-0" />
-                              )}
-                            </div>
+                              );
+                            })}
                           </div>
-                        );
-                      })}
+                        </div>
+                      )}
+
+                      {/* Offline Users Section */}
+                      {filteredSEs.filter(se => se.user_status !== 'online').length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-2 px-1">
+                            <UserIcon className="w-4 h-4 text-gray-500" />
+                            <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                            <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wide">Offline</h3>
+                            <div className="flex-1 h-px bg-gray-200"></div>
+                          </div>
+                          <div className="space-y-2">
+                            {filteredSEs.filter(se => se.user_status !== 'online').map((se) => {
+                              const projectCount = se.assigned_projects || (se.project_id ? 1 : 0);
+                              const isMaxCapacity = projectCount >= 2;
+
+                              return (
+                                <div
+                                  key={se.user_id}
+                                  className="border-2 border-gray-200 bg-gray-50 rounded-lg p-2.5 cursor-not-allowed opacity-60"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2 flex-1">
+                                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center flex-shrink-0">
+                                        <span className="text-white font-bold text-sm">
+                                          {se.sitesupervisor_name.charAt(0).toUpperCase()}
+                                        </span>
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                          <p className="font-bold text-sm text-gray-700 truncate">{se.sitesupervisor_name}</p>
+                                          {/* Offline Status */}
+                                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-gray-200 text-gray-700">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+                                            Offline
+                                          </span>
+                                          {/* Availability Status */}
+                                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${
+                                            isMaxCapacity
+                                              ? 'bg-red-100 text-red-700'
+                                              : projectCount > 0
+                                              ? 'bg-yellow-100 text-yellow-700'
+                                              : 'bg-green-100 text-green-700'
+                                          }`}>
+                                            {isMaxCapacity ? 'Busy' : projectCount > 0 ? 'Busy' : 'Available'}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-[10px] text-gray-500 mt-0.5">
+                                          <span className="truncate">{se.email}</span>
+                                          <span className="flex-shrink-0">{se.phone}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-0.5">
+                                          <BuildingOfficeIcon className="w-3 h-3 flex-shrink-0" />
+                                          <span>{projectCount}/2 projects</span>
+                                          {se.project_name && (
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setSelectedSEDetails(se);
+                                                setShowSEDetailsModal(true);
+                                              }}
+                                              className="text-gray-500 hover:text-gray-700 underline"
+                                            >
+                                              View Projects
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1137,14 +1448,128 @@ const MyProjects: React.FC = () => {
           setShowCreateBOQModal(false);
           setSelectedProjectForBOQ(null);
         }}
-        onSubmit={() => {
-          toast.success('BOQ created successfully!');
+        onSubmit={async () => {
+          toast.success('Extra items added successfully!');
           setShowCreateBOQModal(false);
+          const projectId = selectedProjectForBOQ?.project_id;
           setSelectedProjectForBOQ(null);
-          loadProjects();
+
+          // Reload all projects first
+          await loadProjects();
+
+          // If there was a BOQ modal open, reload its details
+          if (selectedProject && selectedProject.boq_id) {
+            await loadBOQDetails(selectedProject.boq_id);
+          }
         }}
         selectedProject={selectedProjectForBOQ}
+        hideBulkUpload={true}
+        hideTemplate={true}
+        isNewPurchase={true}
+        existingBoqId={selectedProjectForBOQ?.boq_ids?.[0]}
       />
+
+      {/* Complete Project Confirmation Modal */}
+      {showCompleteModal && projectToComplete && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => {
+          setShowCompleteModal(false);
+          setProjectToComplete(null);
+        }}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            transition={{ type: 'spring', duration: 0.3, bounce: 0.2 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden"
+          >
+            {/* Header */}
+            <div className={`bg-gradient-to-r ${
+              projectToComplete.completion_requested
+                ? 'from-orange-500 to-orange-600'
+                : 'from-green-500 to-emerald-600'
+            } px-4 py-3`}>
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-white/20 rounded-full">
+                  <CheckCircleIcon className="w-5 h-5 text-white" />
+                </div>
+                <h2 className="text-base font-bold text-white">
+                  {projectToComplete.completion_requested ? 'Approve Completion Request' : 'Complete Project'}
+                </h2>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="px-4 py-4">
+              {projectToComplete.completion_requested && (
+                <div className="mb-3 p-2 bg-orange-50 border border-orange-200 rounded-lg">
+                  <p className="text-xs text-orange-800 font-medium">
+                    Site Engineer has requested project completion
+                  </p>
+                </div>
+              )}
+              <p className="text-gray-700 text-sm mb-3">
+                {projectToComplete.completion_requested
+                  ? 'Approve completion request and mark this project as completed?'
+                  : 'Mark this project as completed?'}
+              </p>
+              <div className="bg-blue-50 border-l-3 border-blue-500 rounded-r px-3 py-2">
+                <p className="text-xs font-semibold text-blue-900">{projectToComplete.project_name}</p>
+                <p className="text-xs text-blue-600">{projectToComplete.client || 'N/A'}</p>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="bg-gray-50 px-4 py-3 flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowCompleteModal(false);
+                  setProjectToComplete(null);
+                }}
+                disabled={completing}
+                className="px-4 py-2 bg-white hover:bg-gray-100 text-gray-700 font-medium rounded-lg transition-colors border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    setCompleting(true);
+                    await projectManagerService.updateProject(projectToComplete.project_id, { status: 'completed' });
+                    toast.success(projectToComplete.completion_requested ? 'Completion request approved' : 'Project marked as completed');
+                    setShowCompleteModal(false);
+                    setProjectToComplete(null);
+                    loadProjects();
+                  } catch (error: any) {
+                    console.error('Error completing project:', error);
+                    toast.error(error?.response?.data?.error || 'Failed to complete project');
+                  } finally {
+                    setCompleting(false);
+                  }
+                }}
+                disabled={completing}
+                className={`px-4 py-2 bg-gradient-to-r ${
+                  projectToComplete.completion_requested
+                    ? 'from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800'
+                    : 'from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700'
+                } text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center gap-1.5 text-sm`}
+              >
+                {completing ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircleIcon className="w-4 h-4" />
+                    {projectToComplete.completion_requested ? 'Confirm Complete' : 'Complete'}
+                  </>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

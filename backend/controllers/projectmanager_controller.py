@@ -121,18 +121,25 @@ def get_all_pm_boqs():
             # Build complete project details
             project_details = None
             if boq.project:
+                # Get Site Engineer name if assigned
+                se_name = None
+                if boq.project.site_supervisor_id:
+                    se_user = User.query.filter_by(user_id=boq.project.site_supervisor_id).first()
+                    if se_user:
+                        se_name = se_user.full_name
+
                 project_details = {
                     "project_id": boq.project.project_id,
                     "project_name": boq.project.project_name,
                     "user_id": boq.project.user_id,
                     "user_name": pm_name,
                     "site_supervisor_id": boq.project.site_supervisor_id,
+                    "site_supervisor_name": se_name,
                     "location": boq.project.location,
                     "area": boq.project.area,
                     "floor_name": boq.project.floor_name,
                     "working_hours": boq.project.working_hours,
                     "client": boq.project.client,
-                    "site_supervisor_id": boq.project.site_supervisor_id if boq.project else None,
                     "work_type": boq.project.work_type,
                     "start_date": boq.project.start_date.isoformat() if boq.project.start_date else None,
                     "end_date": boq.project.end_date.isoformat() if boq.project.end_date else None,
@@ -142,7 +149,8 @@ def get_all_pm_boqs():
                     "created_at": boq.project.created_at.isoformat() if boq.project.created_at else None,
                     "created_by": boq.project.created_by,
                     "last_modified_at": boq.project.last_modified_at.isoformat() if boq.project.last_modified_at else None,
-                    "last_modified_by": boq.project.last_modified_by
+                    "last_modified_by": boq.project.last_modified_by,
+                    "completion_requested": boq.project.completion_requested if boq.project.completion_requested is not None else False
                 }
 
             boq_data = {

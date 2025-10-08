@@ -15,3 +15,9 @@ def get_all_sitesupervisor_boqs_route():
 @jwt_required
 def get_sitesupervisor_dashboard_route():
     return get_sitesupervisor_dashboard()
+
+#Site Engineer requests project completion
+@sitesupervisor_routes.route('/request_completion/<int:project_id>', methods=['POST'])
+@jwt_required
+def request_project_completion_route(project_id):
+    return request_project_completion(project_id)
