@@ -719,7 +719,7 @@ def update_boq(boq_id):
             boq.boq_name = data["boq_name"]
 
         # Automatically set status to pending Q is updated
-        boq.status = "draft"
+        boq.status = "pending"
 
         # Get current logged-in user from Flask-Login or session
         current_user = getattr(g, 'user', None)
