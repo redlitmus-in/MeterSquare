@@ -32,3 +32,9 @@ def cancel_boq_route(boq_id):
 @jwt_required
 def get_boq_details_history_route(boq_id):
     return get_boq_details_history(boq_id)
+
+# BOQ Email Notification to Project Manager
+@estimator_routes.route('/boq/send_to_pm', methods=['POST'])
+@jwt_required
+def send_boq_to_pm_route():
+    return send_boq_to_project_manager()

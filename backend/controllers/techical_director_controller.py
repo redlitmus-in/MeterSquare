@@ -30,6 +30,9 @@ def get_all_td_boqs():
             history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).all()
             # Get BOQ details
             boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+            display_status = boq.status
+            if boq.status in ['new_purchase_create']:
+                display_status = 'approved'
 
             # Serialize history data
             history_list = []
@@ -67,8 +70,8 @@ def get_all_td_boqs():
                 "location": boq.project.location if boq.project else None,
                 "area": boq.project.area if boq.project else None,
                 "floor_name": boq.project.floor_name if boq.project else None,
-                "status": boq.status,  # Use 'status' to match frontend expectations
-                "boq_status": boq.status,
+                "status": display_status,  # Use 'status' to match frontend expectations
+                "boq_status": display_status,
                 "client_rejection_reason": boq.client_rejection_reason,  # Include rejection/cancellation reason
                 "project_status" : boq.project.status if boq.project else None,
                 "email_sent": boq.email_sent,

@@ -177,9 +177,20 @@ def create_boq():
 
             # Calculate amounts based on percentages
             overhead_amount = (base_cost * overhead_percentage) / 100
-            profit_margin_amount = (base_cost * profit_margin_percentage) / 100
             total_cost = base_cost + overhead_amount
-            selling_price = total_cost + profit_margin_amount
+
+            # Profit margin should be calculated on cost AFTER overhead
+            profit_margin_amount = (total_cost * profit_margin_percentage) / 100
+            selling_price_before_discount = total_cost + profit_margin_amount
+
+            # Handle discount (can be null or a value)
+            discount_percentage = item_data.get("discount_percentage")
+            discount_amount = 0.0
+            final_selling_price = selling_price_before_discount
+
+            if discount_percentage is not None and discount_percentage > 0:
+                discount_amount = (selling_price_before_discount * float(discount_percentage)) / 100
+                final_selling_price = selling_price_before_discount - discount_amount
 
             # Now add to master tables with calculated values
             master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
@@ -237,18 +248,21 @@ def create_boq():
                 "overhead_amount": overhead_amount,
                 "profit_margin_percentage": profit_margin_percentage,
                 "profit_margin_amount": profit_margin_amount,
+                "discount_percentage": discount_percentage if discount_percentage is not None else 0.0,
+                "discount_amount": discount_amount,
                 "total_cost": total_cost,
-                "selling_price": selling_price,
+                "selling_price": final_selling_price,  # Use final_selling_price after discount
+                "selling_price_before_discount": selling_price_before_discount,  # Selling price before discount
                 "totalMaterialCost": materials_cost,
                 "totalLabourCost": labour_cost,
                 "actualItemCost": base_cost,
-                "estimatedSellingPrice": selling_price,
+                "estimatedSellingPrice": final_selling_price,  # Use final_selling_price after discount
                 "materials": item_materials,
                 "labour": item_labour
             }
 
             boq_items.append(item_json)
-            total_boq_cost += selling_price
+            total_boq_cost += final_selling_price  # Add final price after discount to total
             total_materials += len(item_materials)
             total_labour += len(item_labour)
 
@@ -419,6 +433,13 @@ def get_boq(boq_id):
                 if idx >= original_item_count:
                     is_new_purchase = True
 
+            # Ensure purchase_tracking exists in item
+            if "purchase_tracking" not in item:
+                item["purchase_tracking"] = {
+                    "total_purchased_amount": 0.0,
+                    "purchased_materials": []
+                }
+
             # Add to appropriate list
             if is_new_purchase:
                 new_add_purchase_items.append(item)
@@ -468,16 +489,17 @@ def get_boq(boq_id):
                 can_view_new_purchase = True
             else:
                 log.info(f"BOQ {boq_id} - Access DENIED: Only Estimator/PM can view '{boq_status}', current role: '{user_role}'")
-        elif boq_status == 'approved':
-            # All roles can view
+        elif boq_status == 'new_purchase_approved':
+            # All roles can view when new purchase is approved
             can_view_new_purchase = True
-            log.info(f"BOQ {boq_id} - Access GRANTED: All roles can view 'approved'")
-        elif boq_status == 'rejected':
-            # All roles except Technical Director
-            if user_role not in ['technicaldirector', 'technical_director'] and user_role_id != 1:
+            log.info(f"BOQ {boq_id} - Access GRANTED: All roles can view 'new_purchase_approved'")
+        elif boq_status == 'new_purchase_rejected':
+            # Only Project Manager can view when new purchase is rejected
+            if user_role in ['projectmanager', 'project_manager']:
                 can_view_new_purchase = True
+                log.info(f"BOQ {boq_id} - Access GRANTED: PM can view 'new_purchase_rejected'")
             else:
-                log.info(f"BOQ {boq_id} - Access DENIED: TD cannot view 'rejected'")
+                log.info(f"BOQ {boq_id} - Access DENIED: Only PM can view 'new_purchase_rejected', current role: '{user_role}'")
         else:
             log.info(f"BOQ {boq_id} - Access DENIED: Unknown status '{boq_status}'")
 
@@ -497,6 +519,91 @@ def get_boq(boq_id):
             filtered_new_labour_cost = new_labour_cost
             filtered_new_materials_count = new_materials_count
             filtered_new_labour_count = new_labour_count
+
+        # Process items with purchase_tracking and add them to new_purchase.items
+        # BUT only if user has permission to view (can_view_new_purchase)
+        new_purchase_items_with_tracking = []
+        new_purchase_total_materials_count = 0
+        new_purchase_total_labour_count = 0
+        new_purchase_total_material_cost = 0.0
+        new_purchase_total_labour_cost = 0.0
+        new_purchase_total_cost = 0.0
+
+        # Calculate total purchased amounts (all purchases, not just latest)
+        total_all_purchased_amount = 0.0
+        existing_purchased_amount = 0.0
+
+        for item in all_items:
+            purchase_tracking = item.get("purchase_tracking", {})
+            total_all_purchased_amount += purchase_tracking.get("total_purchased_amount", 0.0)
+
+        if can_view_new_purchase:
+            # Get the LATEST add_new_purchase action timestamp from BOQ history
+            latest_purchase_action_date = None
+            for history in boq_history:
+                if history.action:
+                    actions = history.action if isinstance(history.action, list) else [history.action]
+                    for action in actions:
+                        if isinstance(action, dict) and action.get("type") == "add_new_purchase":
+                            action_timestamp = action.get("timestamp")
+                            if action_timestamp:
+                                try:
+                                    action_date = datetime.fromisoformat(action_timestamp)
+                                    if latest_purchase_action_date is None or action_date > latest_purchase_action_date:
+                                        latest_purchase_action_date = action_date
+                                except:
+                                    pass
+
+            # Process items with purchase_tracking and add them to new purchase items
+            if latest_purchase_action_date:
+                for item in all_items:
+                    purchase_tracking = item.get("purchase_tracking", {})
+                    purchased_materials = purchase_tracking.get("purchased_materials", [])
+
+                    if purchased_materials:
+                        # Collect only the LATEST purchased materials (from most recent add_new_purchase)
+                        latest_materials = []
+                        earlier_materials = []
+
+                        for material in purchased_materials:
+                            purchase_date_str = material.get("purchase_date")
+                            if purchase_date_str:
+                                try:
+                                    purchase_date = datetime.fromisoformat(purchase_date_str)
+                                    # Check if this material was purchased during the latest add_new_purchase action
+                                    time_diff = abs((purchase_date - latest_purchase_action_date).total_seconds())
+                                    if time_diff <= 60:  # Within 1 minute
+                                        latest_materials.append(material)
+                                    else:
+                                        earlier_materials.append(material)
+                                except:
+                                    earlier_materials.append(material)
+
+                        # Calculate existing purchase amount (purchased before latest action)
+                        existing_purchased_amount += sum(mat.get("total_price", 0) for mat in earlier_materials)
+
+                        # If there are latest materials, create a simple purchase entry
+                        if latest_materials:
+                            # Calculate totals for this purchase
+                            new_materials_total = sum(mat.get("total_price", 0) for mat in latest_materials)
+
+                            new_purchase_items_with_tracking.append({
+                                "master_item_id": item.get("master_item_id"),
+                                "item_name": item.get("item_name"),
+                                "description": item.get("description"),
+                                "materials": latest_materials,
+                                "total_purchased_amount": new_materials_total
+                            })
+
+                            new_purchase_total_materials_count += len(latest_materials)
+                            new_purchase_total_material_cost += new_materials_total
+                            new_purchase_total_cost += new_materials_total
+
+        # Remove purchase_tracking from existing_purchase items (keep all items)
+        for item in existing_purchase_items:
+            # Remove purchase_tracking completely from existing purchase items
+            if "purchase_tracking" in item:
+                del item["purchase_tracking"]
 
         # Calculate combined totals (with filtered new purchases)
         total_material_cost = existing_material_cost + filtered_new_material_cost
@@ -521,12 +628,17 @@ def get_boq(boq_id):
                 if overhead_percentage > 0 and profit_margin > 0:
                     break
 
+        # Determine display status for Technical Director
+        display_status = boq.status
+        if boq.status == "new_purchase_approved" and user_role in ['technicaldirector', 'technical_director']:
+            display_status = "approved"
+
         # Build response with project details
         response_data = {
             "boq_id": boq.boq_id,
             "boq_name": boq.boq_name,
             "project_id": boq.project_id,
-            "status": boq.status,
+            "status": display_status,
             "email_sent": boq.email_sent,
             "created_at": boq.created_at.isoformat() if boq.created_at else None,
             "created_by": boq.created_by,
@@ -552,16 +664,14 @@ def get_boq(boq_id):
                 }
             },
             "new_purchase": {
-                "items": filtered_new_purchase_items,
+                "items": new_purchase_items_with_tracking,
                 "summary": {
-                    "total_items": len(filtered_new_purchase_items),
-                    "total_materials": filtered_new_materials_count,
-                    "total_labour": filtered_new_labour_count,
-                    "total_material_cost": filtered_new_material_cost,
-                    "total_labour_cost": filtered_new_labour_cost,
-                    "total_cost": filtered_new_total_cost,
-                    "selling_price": filtered_new_total_cost,
-                    "estimatedSellingPrice": filtered_new_total_cost
+                    "total_items": len(new_purchase_items_with_tracking),
+                    "total_materials": new_purchase_total_materials_count,
+                    "total_material_cost": new_purchase_total_material_cost,
+                    "total_cost": new_purchase_total_cost,
+                    "selling_price": new_purchase_total_cost,
+                    "estimatedSellingPrice": new_purchase_total_cost
                 },
                 "access_info": {
                     "can_view": can_view_new_purchase,
@@ -570,14 +680,19 @@ def get_boq(boq_id):
                 }
             },
             "combined_summary": {
-                "total_items": len(existing_purchase_items) + len(filtered_new_purchase_items),
-                "total_materials": existing_materials_count + filtered_new_materials_count,
-                "total_labour": existing_labour_count + filtered_new_labour_count,
-                "total_material_cost": total_material_cost,
-                "total_labour_cost": total_labour_cost,
-                "total_cost": total_cost,
-                "selling_price": total_cost,
-                "estimatedSellingPrice": total_cost
+                "total_items": len(existing_purchase_items),
+                "total_materials": existing_materials_count + new_purchase_total_materials_count,
+                "total_labour": existing_labour_count,
+                "total_item_amount": existing_total_cost,  # Total amount from existing BOQ items
+                "total_material_cost": existing_material_cost,
+                "total_labour_cost": existing_labour_cost,
+                "existing_purchase_amount": existing_purchased_amount,  # Materials purchased before latest action
+                "new_purchase_amount": new_purchase_total_cost,  # Materials from latest purchase
+                "total_purchased_amount": total_all_purchased_amount,  # Sum of all purchases
+                "balance_amount": existing_total_cost - total_all_purchased_amount,  # Remaining to be purchased
+                "total_cost": existing_total_cost,
+                "selling_price": existing_total_cost,
+                "estimatedSellingPrice": existing_total_cost
             },
             "total_material_cost": total_material_cost,
             "total_labour_cost": total_labour_cost,
@@ -602,20 +717,23 @@ def get_all_boq():
             .filter(BOQ.is_deleted == False)
             .all()
         )
-
-
         complete_boqs = []
-
         for boq, boq_detail in boqs:
             # Fetch project details
             project = Project.query.filter_by(project_id=boq.project_id).first()
 
-            # Map internal status to display status
-            # When status is 'new_purchase_create' or 'new_purchase_request', show as 'approved'
-            # because the original BOQ was approved and new purchases are being added
+            # Check BOQ history for sender and receiver roles
             display_status = boq.status
-            if boq.status in ['new_purchase_create']:
-                display_status = 'approved'
+            boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.created_at.desc()).first()
+
+            if boq_history and boq_history.sender_role and boq_history.receiver_role:
+                sender_role = boq_history.sender_role.lower().replace('_', '').replace(' ', '')
+                receiver_role = boq_history.receiver_role.lower().replace('_', '').replace(' ', '')
+
+                if sender_role == 'technicaldirector' and receiver_role == 'projectmanager':
+                    display_status = 'Client_Confirmed'
+            elif boq.status in ['new_purchase_create', 'new_purchase_approved', 'new_purchase_rejected', 'approved']:
+                display_status = 'Client_Confirmed'
 
             boq_summary = {
                 "boq_id": boq.boq_id,
@@ -1179,17 +1297,13 @@ def send_boq_email(boq_id):
 
             if email_sent:
                 # Update BOQ status and mark email as sent to TD
-                # Log current status for debugging
-                log.info(f"BOQ {boq_id} current status before sending: {boq.status}")
-
                 # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, or Revision_Approved) or a new submission
                 is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved"]
                 new_status = "Pending_Revision" if is_revision else "Pending"
 
-                log.info(f"BOQ {boq_id} is_revision: {is_revision}, setting status to: {new_status}")
-
                 boq.email_sent = True
-                boq.status = new_status
+                # boq.status = new_status
+                boq.status = "Pending"
                 boq.last_modified_by = boq.created_by
                 boq.last_modified_at = datetime.utcnow()
 
@@ -1203,6 +1317,7 @@ def send_boq_email(boq_id):
                     "sender": "estimator",
                     "receiver": "technicalDirector",
                     "status": new_status.lower(),
+                    # "pending",
                     "comments": comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval"),
                     "timestamp": datetime.utcnow().isoformat(),
                     "decided_by": boq.created_by,
@@ -1254,10 +1369,10 @@ def send_boq_email(boq_id):
                         flag_modified(existing_history, "action")
 
                     existing_history.action_by = boq.created_by
-                    existing_history.boq_status = new_status
+                    existing_history.boq_status = "Pending"
                     existing_history.sender = boq.created_by
                     existing_history.receiver = td_name if td_name else td_email
-                    existing_history.comments = comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval")
+                    existing_history.comments = comments if comments else "BOQ sent for review and approval"
                     existing_history.sender_role = 'estimator'
                     existing_history.receiver_role = 'technicalDirector'
                     existing_history.action_date = datetime.utcnow()
@@ -1269,10 +1384,10 @@ def send_boq_email(boq_id):
                         boq_id=boq_id,
                         action=[new_action],  # Store as array
                         action_by=boq.created_by,
-                        boq_status=new_status,
+                        boq_status="Pending",
                         sender=boq.created_by,
                         receiver=td_name if td_name else td_email,
-                        comments=comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval"),
+                        comments=comments if comments else "BOQ sent for review and approval",
                         sender_role='estimator',
                         receiver_role='technicalDirector',
                         action_date=datetime.utcnow(),
@@ -1330,17 +1445,11 @@ def send_boq_email(boq_id):
 
             if email_sent:
                 # Update BOQ status and mark email as sent to TD
-                # Log current status for debugging
-                log.info(f"BOQ {boq_id} current status before sending: {boq.status}")
-
                 # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, or Revision_Approved) or a new submission
                 is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved"]
                 new_status = "Pending_Revision" if is_revision else "Pending"
-
-                log.info(f"BOQ {boq_id} is_revision: {is_revision}, setting status to: {new_status}")
-
                 boq.email_sent = True
-                boq.status = new_status
+                boq.status = "Pending"
                 boq.last_modified_by = boq.created_by
                 boq.last_modified_at = datetime.utcnow()
 
@@ -1354,7 +1463,8 @@ def send_boq_email(boq_id):
                     "sender": "estimator",
                     "receiver": "technicalDirector",
                     "status": new_status.lower(),
-                    "comments": comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval"),
+                    "status": "pending",
+                    "comments": comments if comments else "BOQ sent for review and approval",
                     "timestamp": datetime.utcnow().isoformat(),
                     "decided_by": boq.created_by,
                     "decided_by_user_id": g.user.get('user_id') if hasattr(g, 'user') and g.user else None,
@@ -1362,8 +1472,7 @@ def send_boq_email(boq_id):
                     "recipient_name": technical_director.full_name if technical_director.full_name else None,
                     "boq_name": boq.boq_name,
                     "project_name": project_data.get("project_name"),
-                    "total_cost": items_summary.get("total_cost"),
-                    "is_revision": is_revision
+                    "total_cost": items_summary.get("total_cost")
                 }
 
                 if existing_history:
@@ -1405,10 +1514,10 @@ def send_boq_email(boq_id):
                         flag_modified(existing_history, "action")
 
                     existing_history.action_by = boq.created_by
-                    existing_history.boq_status = new_status
+                    existing_history.boq_status = "Pending"
                     existing_history.sender = boq.created_by
                     existing_history.receiver = technical_director.full_name if technical_director.full_name else technical_director.email
-                    existing_history.comments = comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval")
+                    existing_history.comments = comments if comments else "BOQ sent for review and approval"
                     existing_history.sender_role = 'estimator'
                     existing_history.receiver_role = 'technicalDirector'
                     existing_history.action_date = datetime.utcnow()
@@ -1420,10 +1529,10 @@ def send_boq_email(boq_id):
                         boq_id=boq_id,
                         action=[new_action],  # Store as array
                         action_by=boq.created_by,
-                        boq_status=new_status,
+                        boq_status="Pending",
                         sender=boq.created_by,
                         receiver=technical_director.full_name if technical_director.full_name else technical_director.email,
-                        comments=comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval"),
+                        comments=comments if comments else "BOQ sent for review and approval",
                         sender_role='estimator',
                         receiver_role='technicalDirector',
                         action_date=datetime.utcnow(),
