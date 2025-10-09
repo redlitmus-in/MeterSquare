@@ -288,6 +288,46 @@ class TechnicalDirectorService {
       };
     }
   }
+
+  /**
+   * Get BOQ details history (for revision history)
+   */
+  async getBOQDetailsHistory(boqId: number): Promise<{
+    success: boolean;
+    data?: any;
+    message?: string;
+  }> {
+    try {
+      const response = await apiClient.get(`/boq_details_history/${boqId}`);
+
+      if (response.data) {
+        return {
+          success: true,
+          data: response.data
+        };
+      }
+
+      return {
+        success: true,
+        data: { history: [], current_version: null }
+      };
+    } catch (error: any) {
+      console.error('Error fetching BOQ details history:', error.response?.data || error.message);
+
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'BOQ not found'
+        };
+      }
+
+      return {
+        success: false,
+        data: { history: [], current_version: null },
+        message: error.response?.data?.error || 'Failed to fetch BOQ details history'
+      };
+    }
+  }
 }
 
 export const technicalDirectorService = new TechnicalDirectorService();

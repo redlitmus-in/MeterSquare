@@ -238,7 +238,10 @@ def td_mail_send():
         # ==================== APPROVED STATUS ====================
         if technical_director_status.lower() == 'approved':
             log.info(f"BOQ {boq_id} approved by TD, sending to Estimator")
-            new_status = "Approved"
+
+            # Check if this is a revision approval (status was Pending_Revision)
+            is_revision_approval = boq.status.lower() == 'pending_revision'
+            new_status = "Revision_Approved" if is_revision_approval else "Approved"
 
             if not estimator or not estimator_email:
                 return jsonify({
@@ -265,19 +268,20 @@ def td_mail_send():
             # Prepare new action for APPROVED
             new_action = {
                 "role": "technicalDirector",
-                "type": "status_change",
+                "type": "revision_approved" if is_revision_approval else "status_change",
                 "sender": "technicalDirector",
                 "receiver": "estimator",
-                "status": "approved",
+                "status": "revision_approved" if is_revision_approval else "approved",
                 "boq_name": boq.boq_name,
-                "comments": comments or "BOQ approved by Technical Director",
+                "comments": comments or ("BOQ revision approved by Technical Director" if is_revision_approval else "BOQ approved by Technical Director"),
                 "timestamp": datetime.utcnow().isoformat(),
                 "decided_by": td_name,
                 "decided_by_user_id": td_user_id,
                 "total_cost": items_summary.get("total_cost"),
                 "project_name": project_data.get("project_name"),
                 "recipient_email": recipient_email,
-                "recipient_name": recipient_name
+                "recipient_name": recipient_name,
+                "is_revision": is_revision_approval
             }
 
         # ==================== REJECTED STATUS ====================

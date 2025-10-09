@@ -18,7 +18,7 @@ def create_project():
     """
     Create a new project with validation for required and optional fields
     Required: project_name
-    Optional: description, location, client, work_type, start_date, end_date, floor_name
+    Optional: description, location, client, work_type, start_date, duration_days, floor_name
     """
     try:
         data = request.get_json()
@@ -29,7 +29,7 @@ def create_project():
             return jsonify({
                 "error": "Project name is required",
                 "required_fields": ["project_name"],
-                "optional_fields": ["description", "location", "client", "work_type", "start_date", "end_date", "floor_name"]
+                "optional_fields": ["description", "location", "client", "work_type", "start_date", "duration_days", "floor_name"]
             }), 400
 
         # Validate project name length
@@ -45,26 +45,23 @@ def create_project():
         if existing_project:
             return jsonify({"error": f"Project with name '{data['project_name']}' already exists"}), 409
 
-        # Validate dates if provided
+        # Validate start_date if provided
         start_date = None
-        end_date = None
-
         if data.get('start_date'):
             try:
                 start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
             except ValueError:
                 return jsonify({"error": "Invalid start_date format. Use YYYY-MM-DD"}), 400
 
-        if data.get('end_date'):
+        # Validate duration_days if provided
+        duration_days = None
+        if data.get('duration_days'):
             try:
-                end_date = datetime.strptime(data['end_date'], '%Y-%m-%d').date()
-            except ValueError:
-                return jsonify({"error": "Invalid end_date format. Use YYYY-MM-DD"}), 400
-
-        # Validate date range if both dates provided
-        if start_date and end_date:
-            if start_date > end_date:
-                return jsonify({"error": "Start date cannot be after end date"}), 400
+                duration_days = int(data['duration_days'])
+                if duration_days <= 0:
+                    return jsonify({"error": "Duration days must be greater than 0"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"error": "Invalid duration_days. Must be a positive integer"}), 400
 
         # Create new project
         new_project = Project(
@@ -76,7 +73,7 @@ def create_project():
             work_type=data.get('work_type'),
             floor_name=data.get('floor_name'),
             start_date=start_date,
-            end_date=end_date,
+            duration_days=duration_days,
             status=data.get('status', 'active'),
             completion_requested=False,
             user_id=None,  # PM will be assigned later by TD, not set on creation
@@ -248,19 +245,18 @@ def update_project(project_id):
             else:
                 project.start_date = None
 
-        if 'end_date' in data:
-            if data['end_date']:
+        # Handle duration_days
+        if 'duration_days' in data:
+            if data['duration_days']:
                 try:
-                    project.end_date = datetime.strptime(data['end_date'], '%Y-%m-%d').date()
-                except ValueError:
-                    return jsonify({"error": "Invalid end_date format. Use YYYY-MM-DD"}), 400
+                    duration_days = int(data['duration_days'])
+                    if duration_days <= 0:
+                        return jsonify({"error": "Duration days must be greater than 0"}), 400
+                    project.duration_days = duration_days
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid duration_days. Must be a positive integer"}), 400
             else:
-                project.end_date = None
-
-        # Validate date range if both dates exist
-        if project.start_date and project.end_date:
-            if project.start_date > project.end_date:
-                return jsonify({"error": "Start date cannot be after end date"}), 400
+                project.duration_days = None
 
         # Update modification info
         project.last_modified_at = datetime.utcnow()

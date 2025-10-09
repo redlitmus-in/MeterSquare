@@ -82,7 +82,7 @@ const ProjectCreationForm: React.FC<{
     working_hours: initialData?.working_hours || '',
     floor_name: initialData?.floor_name || '',
     start_date: initialData?.start_date || '',
-    end_date: initialData?.end_date || '',
+    duration_days: initialData?.duration_days || '',
     status: initialData?.status || 'active'
   });
 
@@ -178,16 +178,14 @@ const ProjectCreationForm: React.FC<{
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="end_date">End Date</Label>
-          <DatePicker
-            id="end_date"
-            selected={formData.end_date ? new Date(formData.end_date) : null}
-            onChange={(date: Date | null) => handleChange('end_date', date ? date.toISOString().split('T')[0] : '')}
-            dateFormat="dd/MM/yyyy"
-            placeholderText="Select end date"
-            minDate={formData.start_date ? new Date(formData.start_date) : new Date()}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            wrapperClassName="w-full"
+          <Label htmlFor="duration_days">Number of Days</Label>
+          <Input
+            id="duration_days"
+            type="number"
+            value={formData.duration_days || ''}
+            onChange={(e) => handleChange('duration_days', e.target.value)}
+            placeholder="e.g., 80 days"
+            min="1"
           />
         </div>
       </div>
@@ -260,6 +258,12 @@ const EstimatorHub: React.FC = () => {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [boqToCancel, setBoqToCancel] = useState<BOQ | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
+  const [showRevisionModal, setShowRevisionModal] = useState(false);
+  const [selectedBoqForRevision, setSelectedBoqForRevision] = useState<BOQ | null>(null);
+  const [showSendToTDPopup, setShowSendToTDPopup] = useState(false);
+  const [boqToSendToTD, setBoqToSendToTD] = useState<BOQ | null>(null);
+  const [isRevisionEdit, setIsRevisionEdit] = useState(false);
+  const [isSendingToTD, setIsSendingToTD] = useState(false);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -424,10 +428,17 @@ const EstimatorHub: React.FC = () => {
           return !status || status === 'draft' || status === 'client_rejected' || (status !== 'pending' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled');
         });
       } else if (activeTab === 'sent') {
-        // Send BOQ: Sent to TD, waiting for approval (status = pending)
-        filtered = filtered.filter(boq =>
-          boq.status?.toLowerCase() === 'pending'
-        );
+        // Send BOQ: Sent to TD, waiting for approval (status = pending ONLY, not revisions)
+        filtered = filtered.filter(boq => {
+          const status = boq.status?.toLowerCase();
+          return status === 'pending';
+        });
+      } else if (activeTab === 'revisions') {
+        // Revisions: BOQs under revision OR sent to TD for revision approval OR revision approved
+        filtered = filtered.filter(boq => {
+          const status = boq.status?.toLowerCase();
+          return status === 'under_revision' || status === 'pending_revision' || status === 'revision_approved';
+        });
       } else if (activeTab === 'approved') {
         // Approved: TD approved (includes all stages after TD approval until PM assignment)
         filtered = filtered.filter(boq => {
@@ -913,6 +924,8 @@ const EstimatorHub: React.FC = () => {
       approved: { className: 'bg-green-50 text-green-700 border-green-200', icon: CheckCircle },
       sentforconfirmation: { className: 'bg-blue-50 text-blue-700 border-blue-200', icon: Send },
       pending: { className: 'bg-orange-50 text-orange-700 border-orange-200', icon: Clock },
+      pendingrevision: { className: 'bg-purple-50 text-purple-700 border-purple-200', icon: Clock, label: 'PENDING REVISION' },
+      underrevision: { className: 'bg-purple-50 text-purple-700 border-purple-200', icon: Edit, label: 'UNDER REVISION' },
       rejected: { className: 'bg-red-50 text-red-700 border-red-200', icon: AlertCircle },
       clientrejected: { className: 'bg-red-50 text-red-700 border-red-200', icon: AlertCircle },
       clientcancelled: {
@@ -941,16 +954,34 @@ const EstimatorHub: React.FC = () => {
     // Check BOQ workflow status - Use status field as PRIMARY indicator
     const status = boq.status?.toLowerCase() || '';
 
+    // Count revisions from history
+    const revisionCount = React.useMemo(() => {
+      if (!boq.history || !Array.isArray(boq.history)) return 0;
+      return boq.history.filter((action: any) =>
+        action.type === 'revision_sent' ||
+        action.type === 'revision_approved' ||
+        action.is_revision === true
+      ).length;
+    }, [boq.history]);
+
     // Draft: Not sent to TD yet (can edit/delete/send) - status NOT in workflow states
-    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled');
+    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled');
     // Sent to TD: Waiting for TD approval
     const isSentToTD = status === 'pending';
+    // Pending Revision: Revised BOQ sent to TD for approval
+    const isPendingRevision = status === 'pending_revision';
+    // Under Revision: BOQ edited, ready to send to TD
+    const isUnderRevision = status === 'under_revision';
     // Approved by TD: Ready to send to client
     const isApprovedByTD = status === 'approved';
+    // Revision Approved: TD approved revision, ready to send to client
+    const isRevisionApproved = status === 'revision_approved';
     // Sent to client: Waiting for client confirmation
     const isSentToClient = status === 'sent_for_confirmation';
     // Client confirmed: Ready for TD to assign PM
     const isClientConfirmed = status === 'client_confirmed';
+    // TD rejected: Rejected by Technical Director, can edit and resend
+    const isTDRejected = status === 'rejected';
     // Client rejected: Can be edited and resent OR cancelled
     const isClientRejected = status === 'client_rejected';
     // Client cancelled: Permanently cancelled, no actions allowed
@@ -965,7 +996,14 @@ const EstimatorHub: React.FC = () => {
         {/* Header */}
         <div className="p-4">
           <div className="flex items-start justify-between mb-2">
-            <h3 className="font-semibold text-gray-900 text-base flex-1">{boq.title}</h3>
+            <div className="flex items-center gap-2 flex-1">
+              <h3 className="font-semibold text-gray-900 text-base">{boq.title}</h3>
+              {revisionCount > 0 && (
+                <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
+                  Rev {revisionCount}
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-1">
               <button
                 className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
@@ -1038,7 +1076,7 @@ const EstimatorHub: React.FC = () => {
         </div>
 
         {/* Actions */}
-        <div className="border-t border-gray-200 p-2 sm:p-3 grid grid-cols-3 gap-1 sm:gap-2">
+        <div className={`border-t border-gray-200 p-2 sm:p-3 grid ${isClientRejected ? 'grid-cols-3' : 'grid-cols-3'} gap-1 sm:gap-2`}>
           <button
             className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
             style={{ backgroundColor: 'rgb(36, 61, 138)' }}
@@ -1076,8 +1114,7 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Edit</span>
               </button>
               <button
-                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
-                style={{ backgroundColor: 'rgb(168, 85, 247)' }}
+                className="text-purple-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 shadow-sm"
                 onClick={() => {
                   setBoqToEmail(boq);
                   setEmailMode('td'); // Set mode to TD
@@ -1095,11 +1132,51 @@ const EstimatorHub: React.FC = () => {
               <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
               Sent to TD (Pending Approval)
             </div>
+          ) : isPendingRevision ? (
+            /* Revision sent to TD - waiting for approval */
+            <div className="col-span-2 flex items-center justify-center text-xs text-purple-700 font-medium">
+              <Clock className="h-4 w-4 text-purple-600 mr-1" />
+              Revision Pending TD Approval
+            </div>
+          ) : isUnderRevision ? (
+            /* Under Revision - edited and ready to send to TD */
+            <>
+              <button
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+                style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+                onClick={() => {
+                  setEditingBoq(boq);
+                  setIsRevisionEdit(true); // Set flag for revision edit
+                  setShowBoqEdit(true);
+                }}
+              >
+                <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Edit Again</span>
+                <span className="sm:hidden">Edit</span>
+              </button>
+              <button
+                className="text-purple-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 shadow-sm"
+                onClick={async () => {
+                  const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
+                  if (result.success) {
+                    toast.success('Revision sent to Technical Director successfully!');
+                    loadBOQs();
+                  } else {
+                    toast.error(result.message || 'Failed to send revision');
+                  }
+                }}
+                title="Send revised BOQ to Technical Director for approval"
+              >
+                <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Send to TD</span>
+                <span className="sm:hidden">To TD</span>
+              </button>
+            </>
           ) : isSentToClient ? (
             /* Sent to client - waiting for client confirmation */
             <>
               <button
-                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-1"
                 style={{ backgroundColor: 'rgb(34, 197, 94)' }}
                 onClick={async () => {
                   const result = await estimatorService.confirmClientApproval(boq.boq_id!);
@@ -1116,16 +1193,27 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Approved</span>
               </button>
               <button
-                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
+                className="text-purple-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-1 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 shadow-sm"
+                onClick={() => {
+                  setSelectedBoqForRevision(boq);
+                  setShowRevisionModal(true);
+                }}
+              >
+                <Edit className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Revisions</span>
+                <span className="sm:hidden">Revise</span>
+              </button>
+              <button
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-1"
                 style={{ backgroundColor: 'rgb(239, 68, 68)' }}
                 onClick={() => {
-                  setBoqToReject(boq);
-                  setShowClientRejectionModal(true);
+                  setBoqToCancel(boq);
+                  setShowCancelModal(true);
                 }}
               >
                 <XCircleIcon className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Client Rejected</span>
-                <span className="sm:hidden">Rejected</span>
+                <span className="hidden sm:inline">Cancel</span>
+                <span className="sm:hidden">Cancel</span>
               </button>
             </>
           ) : isClientConfirmed ? (
@@ -1142,7 +1230,7 @@ const EstimatorHub: React.FC = () => {
               </div>
             )
           ) : isClientRejected ? (
-            /* Client rejected - can revise and resend OR cancel project */
+            /* Client rejected - can revise, send to TD, or cancel project */
             <>
               <button
                 className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
@@ -1157,15 +1245,29 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Edit</span>
               </button>
               <button
+                className="text-purple-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 shadow-sm"
+                onClick={() => {
+                  setBoqToEmail(boq);
+                  setEmailMode('td');
+                  setShowSendEmailModal(true);
+                }}
+                title="Send revised BOQ to Technical Director for approval"
+              >
+                <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Send to TD</span>
+                <span className="sm:hidden">To TD</span>
+              </button>
+              <button
                 className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
                 style={{ backgroundColor: 'rgb(239, 68, 68)' }}
                 onClick={() => {
                   setBoqToCancel(boq);
                   setShowCancelModal(true);
                 }}
+                title="Cancel this project permanently"
               >
                 <XCircleIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                <span className="hidden sm:inline">Cancel Project</span>
+                <span className="hidden sm:inline">Cancel</span>
                 <span className="sm:hidden">Cancel</span>
               </button>
             </>
@@ -1175,7 +1277,36 @@ const EstimatorHub: React.FC = () => {
               <XCircleIcon className="h-4 w-4 text-gray-600 mr-1" />
               Project Permanently Cancelled
             </div>
-          ) : isApprovedByTD ? (
+          ) : isTDRejected ? (
+            /* TD Rejected - Can edit and resend to TD */
+            <>
+              <button
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+                style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+                onClick={() => {
+                  setEditingBoq(boq);
+                  setShowBoqEdit(true);
+                }}
+              >
+                <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Edit BOQ</span>
+                <span className="sm:hidden">Edit</span>
+              </button>
+              <button
+                className="text-purple-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 shadow-sm"
+                onClick={() => {
+                  setBoqToEmail(boq);
+                  setEmailMode('td');
+                  setShowSendEmailModal(true);
+                }}
+                title="Resend to Technical Director"
+              >
+                <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Send to TD</span>
+                <span className="sm:hidden">To TD</span>
+              </button>
+            </>
+          ) : isApprovedByTD || isRevisionApproved ? (
             /* Approved by TD - Can send to client */
             <button
               className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
@@ -1187,7 +1318,7 @@ const EstimatorHub: React.FC = () => {
               }}
             >
               <Mail className="h-3.5 w-3.5" />
-              <span>Send to Client</span>
+              <span>{isRevisionApproved ? 'Send Revision to Client' : 'Send to Client'}</span>
             </button>
           ) : null}
         </div>
@@ -1255,7 +1386,9 @@ const EstimatorHub: React.FC = () => {
                     </Button>
                     {(() => {
                       const status = boq.status?.toLowerCase() || '';
-                      const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled' && status !== 'client_rejected');
+                      const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled' && status !== 'client_rejected');
+                      const isPendingRevision = status === 'pending_revision';
+                      const isUnderRevision = status === 'under_revision';
                       const isApprovedByTD = status === 'approved';
                       const isSentToClient = status === 'sent_for_confirmation';
                       const isClientConfirmed = status === 'client_confirmed';
@@ -1269,11 +1402,40 @@ const EstimatorHub: React.FC = () => {
                             Cancelled
                           </span>
                         );
+                      } else if (isPendingRevision) {
+                        return (
+                          <span className="text-xs text-purple-700 font-medium flex items-center gap-1">
+                            <Clock className="h-4 w-4" />
+                            Revision Pending TD Approval
+                          </span>
+                        );
+                      } else if (isUnderRevision) {
+                        return (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setIsRevisionEdit(true); setShowBoqEdit(true); }} className="h-8 w-8 p-0" title="Edit Again">
+                              <Edit className="h-4 w-4 text-green-600" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={async () => {
+                              const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
+                              if (result.success) {
+                                toast.success('Revision sent to Technical Director successfully!');
+                                loadBOQs();
+                              } else {
+                                toast.error(result.message || 'Failed to send revision');
+                              }
+                            }} className="h-8 w-8 p-0" title="Send Revision to TD">
+                              <Mail className="h-4 w-4 text-purple-600" />
+                            </Button>
+                          </>
+                        );
                       } else if (isClientRejected) {
                         return (
                           <>
                             <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setShowBoqEdit(true); }} className="h-8 w-8 p-0" title="Revise BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('td'); setShowSendEmailModal(true); }} className="h-8 w-8 p-0" title="Send Revision to TD">
+                              <Mail className="h-4 w-4 text-purple-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => { setBoqToCancel(boq); setShowCancelModal(true); }} className="h-8 w-8 p-0" title="Cancel Project">
                               <XCircleIcon className="h-4 w-4 text-red-600" />
@@ -1297,13 +1459,17 @@ const EstimatorHub: React.FC = () => {
                       } else if (isSentToClient) {
                         return (
                           <>
-                            <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { toast.success(result.message); loadBOQs(); } else { toast.error(result.message); } }} className="h-8 px-3 text-green-600 hover:text-green-700 hover:bg-green-50" title="Client Approved">
+                            <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { toast.success(result.message); loadBOQs(); } else { toast.error(result.message); } }} className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Client Approved">
                               <CheckCircle className="h-4 w-4 mr-1" />
-                              <span className="text-xs">Client Approved</span>
+                              <span className="text-xs">Approved</span>
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => { setBoqToReject(boq); setShowClientRejectionModal(true); }} className="h-8 px-3 text-red-600 hover:text-red-700 hover:bg-red-50" title="Client Rejected">
+                            <Button variant="ghost" size="sm" onClick={() => { setSelectedBoqForRevision(boq); setShowRevisionModal(true); }} className="h-8 px-2 text-purple-600 hover:text-purple-700 hover:bg-purple-50" title="Revisions">
+                              <Edit className="h-4 w-4 mr-1" />
+                              <span className="text-xs">Revisions</span>
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => { setBoqToCancel(boq); setShowCancelModal(true); }} className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" title="Cancel Project">
                               <XCircleIcon className="h-4 w-4 mr-1" />
-                              <span className="text-xs">Client Rejected</span>
+                              <span className="text-xs">Cancel</span>
                             </Button>
                           </>
                         );
@@ -1319,11 +1485,18 @@ const EstimatorHub: React.FC = () => {
                             Client Approved (Awaiting PM)
                           </span>
                         );
-                      } else if (isApprovedByTD) {
+                      } else if (isApprovedByTD || boq.status?.toLowerCase() === 'revision_approved') {
+                        const isRevApproved = boq.status?.toLowerCase() === 'revision_approved';
                         return (
-                          <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('client'); setShowSendEmailModal(true); }} className="h-8 px-3" title="Send to Client">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => { setBoqToEmail(boq); setEmailMode('client'); setShowSendEmailModal(true); }}
+                            className="h-8 px-3 text-green-600 hover:text-green-700"
+                            title={isRevApproved ? "Send Revision to Client" : "Send to Client"}
+                          >
                             <Send className="h-4 w-4 mr-1" />
-                            <span className="text-xs">Send to Client</span>
+                            <span className="text-xs">{isRevApproved ? 'Send Revision' : 'Send to Client'}</span>
                           </Button>
                         );
                       }
@@ -1439,17 +1612,24 @@ const EstimatorHub: React.FC = () => {
               </TabsTrigger>
               <TabsTrigger
                 value="sent"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
-                style={{
-                  borderBottomColor: activeTab === 'sent' ? 'rgb(36, 61, 138)' : 'transparent',
-                  color: activeTab === 'sent' ? 'rgb(36, 61, 138)' : ''
-                }}
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
                 <span className="hidden sm:inline">Send BOQ</span>
                 <span className="sm:hidden">Sent</span>
                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
                   const status = b.status?.toLowerCase();
                   return status === 'pending';
+                }).length})</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="revisions"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-purple-600 data-[state=active]:text-purple-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+              >
+                <span className="hidden sm:inline">Revisions</span>
+                <span className="sm:hidden">Revisions</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
+                  const s = b.status?.toLowerCase();
+                  return s === 'under_revision' || s === 'pending_revision' || s === 'revision_approved';
                 }).length})</span>
               </TabsTrigger>
               <TabsTrigger
@@ -2055,6 +2235,60 @@ const EstimatorHub: React.FC = () => {
                               Next
                             </button>
                           </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="revisions" className="mt-0 p-0">
+              <div className="space-y-4 sm:space-y-6">
+                {(() => {
+                  const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+                  const startIndex = (boqCurrentPage - 1) * itemsPerPage;
+                  const endIndex = startIndex + itemsPerPage;
+                  const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+
+                  return (
+                    <>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <h2 className="text-lg sm:text-xl font-bold text-gray-900">BOQs Under Revision</h2>
+                        <div className="text-xs sm:text-sm text-gray-600">
+                          {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} edited and ready to send to TD
+                        </div>
+                      </div>
+                      {viewMode === 'cards' ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                          {paginatedBOQs.map((boq) => (
+                            <BOQCard key={boq.boq_id} boq={boq} />
+                          ))}
+                        </div>
+                      ) : (
+                        <BOQTable boqList={paginatedBOQs} />
+                      )}
+
+                      {/* Pagination */}
+                      {totalBoqPages > 1 && (
+                        <div className="flex items-center justify-between pt-4">
+                          <button
+                            className="px-4 py-2 bg-white border border-gray-300 rounded-lg disabled:opacity-50 text-sm"
+                            onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
+                            disabled={boqCurrentPage === 1}
+                          >
+                            Previous
+                          </button>
+                          <span className="text-sm text-gray-600">
+                            Page {boqCurrentPage} of {totalBoqPages}
+                          </span>
+                          <button
+                            className="px-4 py-2 bg-white border border-gray-300 rounded-lg disabled:opacity-50 text-sm"
+                            onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
+                            disabled={boqCurrentPage === totalBoqPages}
+                          >
+                            Next
+                          </button>
                         </div>
                       )}
                     </>
@@ -2716,6 +2950,131 @@ const EstimatorHub: React.FC = () => {
         </DialogContent>
       </Dialog>
 
+      {/* Send to TD Popup after Edit */}
+      <Dialog open={showSendToTDPopup} onOpenChange={(open) => {
+        if (!open) {
+          setShowSendToTDPopup(false);
+          setBoqToSendToTD(null);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-purple-600">
+              <CheckCircle className="h-5 w-5" />
+              BOQ Revision Saved Successfully!
+            </DialogTitle>
+            <DialogDescription>
+              Your changes to "{boqToSendToTD?.title || boqToSendToTD?.boq_name}" have been saved.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 mt-4">
+            <p className="text-sm text-gray-600">
+              Would you like to send this revision to the Technical Director for approval now?
+            </p>
+            <Button
+              className="w-full bg-gradient-to-r from-purple-50 to-purple-100 text-purple-900 hover:from-purple-100 hover:to-purple-200 border border-purple-200 shadow-sm"
+              onClick={async () => {
+                setIsSendingToTD(true);
+                try {
+                  const result = await estimatorService.sendBOQEmail(boqToSendToTD?.boq_id!, { comments: 'Sending revised BOQ for review' });
+                  if (result.success) {
+                    setShowSendToTDPopup(false);
+                    toast.success('Revision sent to Technical Director successfully!');
+                    await loadBOQs();
+                    setActiveTab('revisions'); // Auto-switch to Revisions tab
+                  } else {
+                    toast.error(result.message || 'Failed to send revision');
+                  }
+                } finally {
+                  setIsSendingToTD(false);
+                  setBoqToSendToTD(null);
+                }
+              }}
+              disabled={isSendingToTD}
+            >
+              {isSendingToTD ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-900 mr-2"></div>
+                  Sending to TD...
+                </>
+              ) : (
+                <>
+                  <Mail className="h-4 w-4 mr-2" />
+                  Send to Technical Director
+                </>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                setShowSendToTDPopup(false);
+                setBoqToSendToTD(null);
+                toast.success('Revision saved! You can send it to TD later from the Revisions tab.');
+              }}
+            >
+              Send Later
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Revision Options Modal */}
+      <Dialog open={showRevisionModal} onOpenChange={(open) => {
+        if (!open) {
+          setShowRevisionModal(false);
+          setSelectedBoqForRevision(null);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-purple-600">
+              <Edit className="h-5 w-5" />
+              BOQ Revisions
+            </DialogTitle>
+            <DialogDescription>
+              Choose an action for "{selectedBoqForRevision?.title || selectedBoqForRevision?.boq_name}"
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 mt-4">
+            <Button
+              className="w-full bg-gradient-to-r from-purple-50 to-purple-100 text-purple-900 hover:from-purple-100 hover:to-purple-200 border border-purple-200 shadow-sm"
+              onClick={() => {
+                setShowRevisionModal(false);
+                setEditingBoq(selectedBoqForRevision);
+                setIsRevisionEdit(true); // Set flag for revision edit
+                setShowBoqEdit(true);
+              }}
+            >
+              <Edit className="h-4 w-4 mr-2" />
+              Make Revision
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full bg-gradient-to-r from-red-50 to-red-100 text-red-900 hover:from-red-100 hover:to-red-200 border border-red-200"
+              onClick={() => {
+                setShowRevisionModal(false);
+                setBoqToCancel(selectedBoqForRevision);
+                setShowCancelModal(true);
+              }}
+            >
+              <XCircleIcon className="h-4 w-4 mr-2" />
+              Cancel Project
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                setShowRevisionModal(false);
+                setSelectedBoqForRevision(null);
+              }}
+            >
+              Go Back
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* BOQ Creation Dialog */}
       <BOQCreationForm
         isOpen={showBOQCreationDialog}
@@ -2756,12 +3115,18 @@ const EstimatorHub: React.FC = () => {
         onClose={() => {
           setShowBoqEdit(false);
           setEditingBoq(null);
+          setIsRevisionEdit(false); // Reset revision flag
         }}
         boq={editingBoq}
-        onSave={() => {
-          loadBOQs(); // Refresh the list
+        isRevision={isRevisionEdit} // Pass revision flag to modal
+        onSave={async () => {
+          await loadBOQs(); // Refresh the list
           setShowBoqEdit(false);
+          // Show Send to TD popup after save
+          setBoqToSendToTD(editingBoq);
+          setShowSendToTDPopup(true);
           setEditingBoq(null);
+          setIsRevisionEdit(false); // Reset revision flag
         }}
       />
 

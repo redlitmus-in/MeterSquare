@@ -25,6 +25,7 @@ import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { tdService } from '@/roles/technical-director/services/tdService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQHistoryTimeline from '@/roles/estimator/components/BOQHistoryTimeline';
+import BOQRevisionHistory from '@/roles/estimator/components/BOQRevisionHistory';
 import {
   exportBOQToExcelInternal,
   exportBOQToExcelClient,
@@ -78,7 +79,7 @@ interface EstimationItem {
   profitMargin: number;
   overheadPercentage: number;
   submittedDate: string;
-  status: 'pending' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' | 'client_rejected' | 'cancelled' | 'completed';
+  status: 'pending' | 'pending_revision' | 'revision_approved' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' | 'client_rejected' | 'cancelled' | 'completed';
   priority: 'high' | 'medium' | 'low';
   location: string;
   floor: string;
@@ -93,7 +94,8 @@ interface EstimationItem {
 
 const ProjectApprovals: React.FC = () => {
   const [selectedEstimation, setSelectedEstimation] = useState<EstimationItem | null>(null);
-  const [filterStatus, setFilterStatus] = useState<'pending' | 'approved' | 'sent' | 'assigned' | 'rejected'>('pending');
+  const [filterStatus, setFilterStatus] = useState<'pending' | 'revisions' | 'approved' | 'sent' | 'assigned' | 'rejected'>('pending');
+  const [revisionSubTab, setRevisionSubTab] = useState<'pending_approval' | 'revision_approved'>('pending_approval');
   const [showBOQModal, setShowBOQModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
@@ -104,6 +106,7 @@ const ProjectApprovals: React.FC = () => {
   const [loadingBOQDetails, setLoadingBOQDetails] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyTab, setHistoryTab] = useState<'full' | 'revisions'>('full');
   const [showFormatModal, setShowFormatModal] = useState(false);
   const [downloadType, setDownloadType] = useState<'internal' | 'client'>('internal');
   const [showAssignPMModal, setShowAssignPMModal] = useState(false);
@@ -390,10 +393,20 @@ const ProjectApprovals: React.FC = () => {
   };
 
   // Map BOQ status to estimation status
-  const mapBOQStatus = (status: string): 'pending' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' | 'client_rejected' | 'cancelled' | 'completed' => {
+  const mapBOQStatus = (status: string): 'pending' | 'pending_revision' | 'revision_approved' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' | 'client_rejected' | 'cancelled' | 'completed' => {
     if (!status) return 'pending';
 
     const normalizedStatus = status.toLowerCase().trim();
+
+    // Check for pending revision (estimator sent revised BOQ)
+    if (normalizedStatus === 'pending_revision') {
+      return 'pending_revision';
+    }
+
+    // Check for revision approved (TD approved the revision)
+    if (normalizedStatus === 'revision_approved') {
+      return 'revision_approved';
+    }
 
     // Check for approved status
     if (normalizedStatus === 'approved' || normalizedStatus === 'approve') {
@@ -448,6 +461,14 @@ const ProjectApprovals: React.FC = () => {
     if (filterStatus === 'pending') {
       // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
       return est.status === 'pending' && !est.pmAssigned;
+    } else if (filterStatus === 'revisions') {
+      // Revisions: Has sub-tabs for pending_approval and revision_approved
+      if (revisionSubTab === 'pending_approval') {
+        return est.status === 'pending_revision' && !est.pmAssigned;
+      } else if (revisionSubTab === 'revision_approved') {
+        return est.status === 'revision_approved' && !est.pmAssigned;
+      }
+      return false;
     } else if (filterStatus === 'approved') {
       // Approved: TD approved internally, includes both "approved" and "sent_for_confirmation" (waiting for client)
       return (est.status === 'approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned;
@@ -682,6 +703,7 @@ const ProjectApprovals: React.FC = () => {
       case 'client_confirmed': return <CheckCircleIcon className="w-5 h-5 text-green-600" />;
       case 'client_rejected': return <XCircleIcon className="w-5 h-5 text-orange-600" />;
       case 'sent_for_confirmation': return <ClockIcon className="w-5 h-5 text-blue-600" />;
+      case 'pending_revision': return <DocumentCheckIcon className="w-5 h-5 text-purple-600" />;
       default: return <ClockIcon className="w-5 h-5 text-yellow-600" />;
     }
   };
@@ -714,6 +736,7 @@ const ProjectApprovals: React.FC = () => {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 inline-flex gap-1">
             {[
               { key: 'pending', label: 'Pending' },
+              { key: 'revisions', label: 'Revisions' },
               { key: 'approved', label: 'Approved' },
               { key: 'sent', label: 'Client Response' },
               { key: 'assigned', label: 'Assigned' },
@@ -723,7 +746,13 @@ const ProjectApprovals: React.FC = () => {
             ].map((tab) => (
               <button
                 key={tab.key}
-                onClick={() => setFilterStatus(tab.key as any)}
+                onClick={() => {
+                  setFilterStatus(tab.key as any);
+                  // Reset sub-tab when switching main tabs
+                  if (tab.key === 'revisions') {
+                    setRevisionSubTab('pending_approval');
+                  }
+                }}
                 className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
                   filterStatus === tab.key
                     ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 border border-red-200 shadow-md'
@@ -761,6 +790,32 @@ const ProjectApprovals: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Revision Sub-Tabs - Only show when Revisions tab is active */}
+        {filterStatus === 'revisions' && (
+          <div className="mb-6 bg-white rounded-xl shadow-sm border border-gray-100 p-1 inline-flex gap-1">
+            <button
+              onClick={() => setRevisionSubTab('pending_approval')}
+              className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                revisionSubTab === 'pending_approval'
+                  ? 'bg-gradient-to-r from-purple-50 to-purple-100 text-purple-900 border border-purple-200 shadow-md'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+              }`}
+            >
+              Pending Approval ({filteredEstimations.filter(est => est.status === 'pending_revision').length})
+            </button>
+            <button
+              onClick={() => setRevisionSubTab('revision_approved')}
+              className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                revisionSubTab === 'revision_approved'
+                  ? 'bg-gradient-to-r from-green-50 to-green-100 text-green-900 border border-green-200 shadow-md'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+              }`}
+            >
+              Approved ({sortedEstimations.filter(est => est.status === 'revision_approved' && !est.pmAssigned).length})
+            </button>
+          </div>
+        )}
 
         {/* Estimations List - Always show */}
         {false ? (
@@ -915,12 +970,14 @@ const ProjectApprovals: React.FC = () => {
                           estimation.status === 'approved' ? 'text-green-600' :
                           estimation.status === 'client_confirmed' ? 'text-green-600' :
                           estimation.status === 'client_rejected' ? 'text-orange-600' :
+                          estimation.status === 'pending_revision' ? 'text-purple-600' :
                           'text-gray-600'
                         }`}>
                           {estimation.status === 'cancelled' ? 'CLIENT CANCELLED' :
                            estimation.status === 'client_confirmed' ? 'CLIENT CONFIRMED' :
                            estimation.status === 'client_rejected' ? 'CLIENT REJECTED' :
                            estimation.status === 'sent_for_confirmation' ? 'SENT TO CLIENT' :
+                           estimation.status === 'pending_revision' ? 'PENDING REVISION' :
                            estimation.status.toUpperCase()}
                         </span>
                       </div>
@@ -1086,12 +1143,14 @@ const ProjectApprovals: React.FC = () => {
                               estimation.status === 'approved' ? 'text-green-600' :
                               estimation.status === 'client_confirmed' ? 'text-green-600' :
                               estimation.status === 'client_rejected' ? 'text-orange-600' :
+                              estimation.status === 'pending_revision' ? 'text-purple-600' :
                               'text-gray-600'
                             }`}>
                               {estimation.status === 'cancelled' ? 'CLIENT CANCELLED' :
                                estimation.status === 'client_confirmed' ? 'CLIENT CONFIRMED' :
                                estimation.status === 'client_rejected' ? 'CLIENT REJECTED' :
                                estimation.status === 'sent_for_confirmation' ? 'SENT TO CLIENT' :
+                               estimation.status === 'pending_revision' ? 'PENDING REVISION' :
                                estimation.status.toUpperCase()}
                             </span>
                           </div>
@@ -1706,6 +1765,34 @@ const ProjectApprovals: React.FC = () => {
                         >
                           <CheckCircleIcon className="w-5 h-5" />
                           Approve
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Re-Approve Button - For pending_revision BOQs */}
+                {selectedEstimation.status === 'pending_revision' && (
+                  <div className="px-6 py-4 border-b border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium text-purple-700">Revision Approval:</span>
+                        <span className="text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded-full">Revised by Estimator</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setShowRejectionModal(true)}
+                          className="px-5 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2 shadow-md"
+                        >
+                          <XCircleIcon className="w-5 h-5" />
+                          Reject
+                        </button>
+                        <button
+                          onClick={() => setShowApprovalModal(true)}
+                          className="px-5 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2 shadow-md"
+                        >
+                          <CheckCircleIcon className="w-5 h-5" />
+                          Re-Approve
                         </button>
                       </div>
                     </div>
@@ -2635,9 +2722,39 @@ const ProjectApprovals: React.FC = () => {
                 </div>
               </div>
 
+              {/* Tabs */}
+              <div className="px-6 pt-4 bg-white border-b border-gray-200">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setHistoryTab('full')}
+                    className={`px-4 py-2 rounded-t-lg font-medium text-sm transition-all ${
+                      historyTab === 'full'
+                        ? 'bg-gradient-to-r from-blue-50 to-blue-100 text-blue-900 border-t border-l border-r border-blue-200'
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    }`}
+                  >
+                    Full History
+                  </button>
+                  <button
+                    onClick={() => setHistoryTab('revisions')}
+                    className={`px-4 py-2 rounded-t-lg font-medium text-sm transition-all ${
+                      historyTab === 'revisions'
+                        ? 'bg-gradient-to-r from-purple-50 to-purple-100 text-purple-900 border-t border-l border-r border-purple-200'
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    }`}
+                  >
+                    Revision History
+                  </button>
+                </div>
+              </div>
+
               {/* Content with light background */}
               <div className="p-6 overflow-y-auto flex-1 bg-gray-50">
-                <BOQHistoryTimeline boqId={selectedEstimation.id} />
+                {historyTab === 'full' ? (
+                  <BOQHistoryTimeline boqId={selectedEstimation.id} />
+                ) : (
+                  <BOQRevisionHistory boqId={selectedEstimation.id} />
+                )}
               </div>
             </motion.div>
           </div>

@@ -50,13 +50,15 @@ interface BOQEditModalProps {
   onClose: () => void;
   boq: BOQ | null;
   onSave: () => void;
+  isRevision?: boolean; // Flag to indicate this is a revision edit
 }
 
 const BOQEditModal: React.FC<BOQEditModalProps> = ({
   isOpen,
   onClose,
   boq,
-  onSave
+  onSave,
+  isRevision = false
 }) => {
   const [editedBoq, setEditedBoq] = useState<BOQUpdatePayload | null>(null);
   const [originalBoq, setOriginalBoq] = useState<any>(null);
@@ -521,8 +523,14 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
         return;
       }
 
+      // Add is_revision flag to the payload if this is a revision edit
+      const payload = {
+        ...editedBoq,
+        is_revision: isRevision
+      };
+
       // Service layer handles total_price and total_cost calculation
-      const result = await estimatorService.updateBOQ(editedBoq.boq_id, editedBoq);
+      const result = await estimatorService.updateBOQ(editedBoq.boq_id, payload);
 
       if (result.success) {
         toast.success('BOQ updated successfully');

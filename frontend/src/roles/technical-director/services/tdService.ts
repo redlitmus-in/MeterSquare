@@ -67,6 +67,23 @@ class TDService {
     }
   }
 
+  async getBOQDetailsHistory(boqId: number): Promise<{ success: boolean; data?: any; message?: string }> {
+    try {
+      const response = await apiClient.get(`/boq_details_history/${boqId}`);
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error: any) {
+      console.error('BOQ details history error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: { history: [], current_version: null },
+        message: error.response?.data?.error || 'Failed to load BOQ details history'
+      };
+    }
+  }
+
   async sendBOQToClient(
     boqId: number,
     clientEmail: string,

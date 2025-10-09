@@ -718,8 +718,21 @@ def update_boq(boq_id):
         if "boq_name" in data:
             boq.boq_name = data["boq_name"]
 
-        # Automatically set status to pending Q is updated
-        boq.status = "draft"
+        # Check if this is a revision edit (from Revisions button)
+        is_revision = data.get("is_revision", False)
+
+        # Set status based on current status and revision mode
+        current_status = boq.status
+        if is_revision:
+            # If this is a revision edit, always set to Under_Revision
+            boq.status = "Under_Revision"
+        elif current_status == "Client_Rejected":
+            boq.status = "Under_Revision"
+        elif current_status in ["Sent_for_Confirmation", "Pending_Revision", "Pending", "Approved", "Client_Confirmed", "Under_Revision"]:
+            # Keep the current status (don't change workflow statuses)
+            pass
+        else:
+            boq.status = "draft"
 
         # Get current logged-in user from Flask-Login or session
         current_user = getattr(g, 'user', None)
@@ -1163,8 +1176,12 @@ def send_boq_email(boq_id):
 
             if email_sent:
                 # Update BOQ status and mark email as sent to TD
+                # Check if this is a revision (was Client_Rejected or Under_Revision) or a new submission
+                is_revision = boq.status in ["Client_Rejected", "Under_Revision"]
+                new_status = "Pending_Revision" if is_revision else "Pending"
+
                 boq.email_sent = True
-                boq.status = "Pending"
+                boq.status = new_status
                 boq.last_modified_by = boq.created_by
                 boq.last_modified_at = datetime.utcnow()
 
@@ -1174,11 +1191,11 @@ def send_boq_email(boq_id):
                 # Prepare action data in the new format
                 new_action = {
                     "role": "estimator",
-                    "type": "email_sent",
+                    "type": "revision_sent" if is_revision else "email_sent",
                     "sender": "estimator",
                     "receiver": "technicalDirector",
-                    "status": "pending",
-                    "comments": comments if comments else "BOQ sent for review and approval",
+                    "status": new_status.lower(),
+                    "comments": comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval"),
                     "timestamp": datetime.utcnow().isoformat(),
                     "decided_by": boq.created_by,
                     "decided_by_user_id": g.user.get('user_id') if hasattr(g, 'user') and g.user else None,
@@ -1186,7 +1203,8 @@ def send_boq_email(boq_id):
                     "recipient_name": td_name if td_name else None,
                     "boq_name": boq.boq_name,
                     "project_name": project_data.get("project_name"),
-                    "total_cost": items_summary.get("total_cost")
+                    "total_cost": items_summary.get("total_cost"),
+                    "is_revision": is_revision
                 }
 
                 if existing_history:
@@ -1228,10 +1246,10 @@ def send_boq_email(boq_id):
                         flag_modified(existing_history, "action")
 
                     existing_history.action_by = boq.created_by
-                    existing_history.boq_status = "Pending"
+                    existing_history.boq_status = new_status
                     existing_history.sender = boq.created_by
                     existing_history.receiver = td_name if td_name else td_email
-                    existing_history.comments = comments if comments else "BOQ sent for review and approval"
+                    existing_history.comments = comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval")
                     existing_history.sender_role = 'estimator'
                     existing_history.receiver_role = 'technicalDirector'
                     existing_history.action_date = datetime.utcnow()
@@ -1243,10 +1261,10 @@ def send_boq_email(boq_id):
                         boq_id=boq_id,
                         action=[new_action],  # Store as array
                         action_by=boq.created_by,
-                        boq_status="Pending",
+                        boq_status=new_status,
                         sender=boq.created_by,
                         receiver=td_name if td_name else td_email,
-                        comments=comments if comments else "BOQ sent for review and approval",
+                        comments=comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval"),
                         sender_role='estimator',
                         receiver_role='technicalDirector',
                         action_date=datetime.utcnow(),
@@ -1304,8 +1322,12 @@ def send_boq_email(boq_id):
 
             if email_sent:
                 # Update BOQ status and mark email as sent to TD
+                # Check if this is a revision (was Client_Rejected or Under_Revision) or a new submission
+                is_revision = boq.status in ["Client_Rejected", "Under_Revision"]
+                new_status = "Pending_Revision" if is_revision else "Pending"
+
                 boq.email_sent = True
-                boq.status = "Pending"
+                boq.status = new_status
                 boq.last_modified_by = boq.created_by
                 boq.last_modified_at = datetime.utcnow()
 
@@ -1315,11 +1337,11 @@ def send_boq_email(boq_id):
                 # Prepare action data in the new format
                 new_action = {
                     "role": "estimator",
-                    "type": "email_sent",
+                    "type": "revision_sent" if is_revision else "email_sent",
                     "sender": "estimator",
                     "receiver": "technicalDirector",
-                    "status": "pending",
-                    "comments": comments if comments else "BOQ sent for review and approval",
+                    "status": new_status.lower(),
+                    "comments": comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval"),
                     "timestamp": datetime.utcnow().isoformat(),
                     "decided_by": boq.created_by,
                     "decided_by_user_id": g.user.get('user_id') if hasattr(g, 'user') and g.user else None,
@@ -1327,7 +1349,8 @@ def send_boq_email(boq_id):
                     "recipient_name": technical_director.full_name if technical_director.full_name else None,
                     "boq_name": boq.boq_name,
                     "project_name": project_data.get("project_name"),
-                    "total_cost": items_summary.get("total_cost")
+                    "total_cost": items_summary.get("total_cost"),
+                    "is_revision": is_revision
                 }
 
                 if existing_history:
@@ -1369,10 +1392,10 @@ def send_boq_email(boq_id):
                         flag_modified(existing_history, "action")
 
                     existing_history.action_by = boq.created_by
-                    existing_history.boq_status = "Pending"
+                    existing_history.boq_status = new_status
                     existing_history.sender = boq.created_by
                     existing_history.receiver = technical_director.full_name if technical_director.full_name else technical_director.email
-                    existing_history.comments = comments if comments else "BOQ sent for review and approval"
+                    existing_history.comments = comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval")
                     existing_history.sender_role = 'estimator'
                     existing_history.receiver_role = 'technicalDirector'
                     existing_history.action_date = datetime.utcnow()
@@ -1384,10 +1407,10 @@ def send_boq_email(boq_id):
                         boq_id=boq_id,
                         action=[new_action],  # Store as array
                         action_by=boq.created_by,
-                        boq_status="Pending",
+                        boq_status=new_status,
                         sender=boq.created_by,
                         receiver=technical_director.full_name if technical_director.full_name else technical_director.email,
-                        comments=comments if comments else "BOQ sent for review and approval",
+                        comments=comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval"),
                         sender_role='estimator',
                         receiver_role='technicalDirector',
                         action_date=datetime.utcnow(),

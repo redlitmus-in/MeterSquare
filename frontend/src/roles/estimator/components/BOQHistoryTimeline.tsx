@@ -173,27 +173,31 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
     switch (normalizedType) {
       case 'SENT_TO_TD':
       case 'EMAIL_SENT':
-        return 'from-purple-50 to-purple-100 border-purple-200';
+        return 'from-purple-50 to-purple-100/30 border-purple-200';
+      case 'REVISION_SENT':
+        return 'from-purple-50 to-purple-100/30 border-purple-200';
+      case 'REVISION_APPROVED':
+        return 'from-green-50 to-green-100/30 border-green-200';
       case 'SENT_TO_CLIENT':
-        return 'from-blue-50 to-blue-100 border-blue-200';
+        return 'from-blue-50 to-blue-100/30 border-blue-200';
       case 'STATUS_CHANGED':
-        return 'from-blue-50 to-blue-100 border-blue-200';
+        return 'from-green-50 to-green-100/30 border-green-200';
       case 'CREATED':
       case 'BOQ_CREATED':
-        return 'from-green-50 to-green-100 border-green-200';
+        return 'from-green-50 to-green-100/30 border-green-200';
       case 'UPDATED':
       case 'BOQ_UPDATED':
-        return 'from-orange-50 to-orange-100 border-orange-200';
+        return 'from-orange-50 to-orange-100/30 border-orange-200';
       case 'APPROVED':
       case 'TD_APPROVED':
       case 'CLIENT_APPROVED':
-        return 'from-green-50 to-green-100 border-green-200';
+        return 'from-green-50 to-green-100/30 border-green-200';
       case 'REJECTED':
       case 'TD_REJECTED':
       case 'CLIENT_REJECTED':
-        return 'from-red-50 to-red-100 border-red-200';
+        return 'from-red-50 to-red-100/30 border-red-200';
       default:
-        return 'from-gray-50 to-gray-100 border-gray-200';
+        return 'from-gray-50 to-gray-100/30 border-gray-200';
     }
   };
 
@@ -293,25 +297,38 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
             onClick={() => setFilterType('all')}
             className={`px-3 py-1 text-xs rounded-full transition-all ${
               filterType === 'all'
-                ? 'bg-blue-600 text-white'
+                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md'
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
             All
           </button>
-          {uniqueActionTypes.map(type => (
-            <button
-              key={type}
-              onClick={() => setFilterType(type)}
-              className={`px-3 py-1 text-xs rounded-full transition-all ${
-                filterType === type
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {type.replace('_', ' ')}
-            </button>
-          ))}
+          {uniqueActionTypes.map(type => {
+            const isActive = filterType === type;
+            let activeColor = 'from-blue-500 to-blue-600';
+
+            if (type.includes('REVISION')) {
+              activeColor = 'from-purple-500 to-purple-600';
+            } else if (type.includes('STATUS') || type.includes('APPROVED')) {
+              activeColor = 'from-green-500 to-green-600';
+            } else if (type.includes('REJECTED') || type.includes('CANCELLED')) {
+              activeColor = 'from-red-500 to-red-600';
+            }
+
+            return (
+              <button
+                key={type}
+                onClick={() => setFilterType(type)}
+                className={`px-3 py-1 text-xs rounded-full transition-all ${
+                  isActive
+                    ? `bg-gradient-to-r ${activeColor} text-white shadow-md`
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {type.replace('_', ' ')}
+              </button>
+            );
+          })}
         </div>
       )}
 
