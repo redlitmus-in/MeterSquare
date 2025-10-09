@@ -728,6 +728,9 @@ def update_boq(boq_id):
             boq.status = "Under_Revision"
         elif current_status == "Client_Rejected":
             boq.status = "Under_Revision"
+        elif current_status == "Rejected":
+            # If TD rejected, keep as Under_Revision when editing
+            boq.status = "Under_Revision"
         elif current_status in ["Sent_for_Confirmation", "Pending_Revision", "Pending", "Approved", "Client_Confirmed", "Under_Revision"]:
             # Keep the current status (don't change workflow statuses)
             pass
@@ -1176,9 +1179,14 @@ def send_boq_email(boq_id):
 
             if email_sent:
                 # Update BOQ status and mark email as sent to TD
-                # Check if this is a revision (was Client_Rejected or Under_Revision) or a new submission
-                is_revision = boq.status in ["Client_Rejected", "Under_Revision"]
+                # Log current status for debugging
+                log.info(f"BOQ {boq_id} current status before sending: {boq.status}")
+
+                # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, or Revision_Approved) or a new submission
+                is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved"]
                 new_status = "Pending_Revision" if is_revision else "Pending"
+
+                log.info(f"BOQ {boq_id} is_revision: {is_revision}, setting status to: {new_status}")
 
                 boq.email_sent = True
                 boq.status = new_status
@@ -1322,9 +1330,14 @@ def send_boq_email(boq_id):
 
             if email_sent:
                 # Update BOQ status and mark email as sent to TD
-                # Check if this is a revision (was Client_Rejected or Under_Revision) or a new submission
-                is_revision = boq.status in ["Client_Rejected", "Under_Revision"]
+                # Log current status for debugging
+                log.info(f"BOQ {boq_id} current status before sending: {boq.status}")
+
+                # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, or Revision_Approved) or a new submission
+                is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved"]
                 new_status = "Pending_Revision" if is_revision else "Pending"
+
+                log.info(f"BOQ {boq_id} is_revision: {is_revision}, setting status to: {new_status}")
 
                 boq.email_sent = True
                 boq.status = new_status

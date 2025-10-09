@@ -924,8 +924,8 @@ const EstimatorHub: React.FC = () => {
       approved: { className: 'bg-green-50 text-green-700 border-green-200', icon: CheckCircle },
       sentforconfirmation: { className: 'bg-blue-50 text-blue-700 border-blue-200', icon: Send },
       pending: { className: 'bg-orange-50 text-orange-700 border-orange-200', icon: Clock },
-      pendingrevision: { className: 'bg-purple-50 text-purple-700 border-purple-200', icon: Clock, label: 'PENDING REVISION' },
-      underrevision: { className: 'bg-purple-50 text-purple-700 border-purple-200', icon: Edit, label: 'UNDER REVISION' },
+      pendingrevision: { className: 'bg-red-50 text-red-700 border-red-200', icon: Clock, label: 'PENDING REVISION' },
+      underrevision: { className: 'bg-red-50 text-red-700 border-red-200', icon: Edit, label: 'UNDER REVISION' },
       rejected: { className: 'bg-red-50 text-red-700 border-red-200', icon: AlertCircle },
       clientrejected: { className: 'bg-red-50 text-red-700 border-red-200', icon: AlertCircle },
       clientcancelled: {
@@ -999,7 +999,7 @@ const EstimatorHub: React.FC = () => {
             <div className="flex items-center gap-2 flex-1">
               <h3 className="font-semibold text-gray-900 text-base">{boq.title}</h3>
               {revisionCount > 0 && (
-                <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
+                <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full">
                   Rev {revisionCount}
                 </span>
               )}
@@ -1114,7 +1114,7 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Edit</span>
               </button>
               <button
-                className="text-purple-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 shadow-sm"
+                className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
                 onClick={() => {
                   setBoqToEmail(boq);
                   setEmailMode('td'); // Set mode to TD
@@ -1134,8 +1134,8 @@ const EstimatorHub: React.FC = () => {
             </div>
           ) : isPendingRevision ? (
             /* Revision sent to TD - waiting for approval */
-            <div className="col-span-2 flex items-center justify-center text-xs text-purple-700 font-medium">
-              <Clock className="h-4 w-4 text-purple-600 mr-1" />
+            <div className="col-span-2 flex items-center justify-center text-xs text-red-700 font-medium">
+              <Clock className="h-4 w-4 text-red-600 mr-1" />
               Revision Pending TD Approval
             </div>
           ) : isUnderRevision ? (
@@ -1155,7 +1155,7 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Edit</span>
               </button>
               <button
-                className="text-purple-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 shadow-sm"
+                className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
                 onClick={async () => {
                   const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
                   if (result.success) {
@@ -1193,7 +1193,7 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Approved</span>
               </button>
               <button
-                className="text-purple-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-1 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 shadow-sm"
+                className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
                 onClick={() => {
                   setSelectedBoqForRevision(boq);
                   setShowRevisionModal(true);
@@ -1245,15 +1245,19 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Edit</span>
               </button>
               <button
-                className="text-purple-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 shadow-sm"
+                className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
                 onClick={() => {
-                  setBoqToEmail(boq);
-                  setEmailMode('td');
-                  setShowSendEmailModal(true);
+                  setBoqToSendToTD(boq);
+                  setShowSendToTDPopup(true);
                 }}
                 title="Send revised BOQ to Technical Director for approval"
+                disabled={isSendingToTD}
               >
-                <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                {isSendingToTD ? (
+                  <div className="animate-spin rounded-full h-3 w-3 sm:h-3.5 sm:w-3.5 border-b-2 border-red-900"></div>
+                ) : (
+                  <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                )}
                 <span className="hidden sm:inline">Send to TD</span>
                 <span className="sm:hidden">To TD</span>
               </button>
@@ -1278,34 +1282,19 @@ const EstimatorHub: React.FC = () => {
               Project Permanently Cancelled
             </div>
           ) : isTDRejected ? (
-            /* TD Rejected - Can edit and resend to TD */
-            <>
-              <button
-                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
-                style={{ backgroundColor: 'rgb(34, 197, 94)' }}
-                onClick={() => {
-                  setEditingBoq(boq);
-                  setShowBoqEdit(true);
-                }}
-              >
-                <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                <span className="hidden sm:inline">Edit BOQ</span>
-                <span className="sm:hidden">Edit</span>
-              </button>
-              <button
-                className="text-purple-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 shadow-sm"
-                onClick={() => {
-                  setBoqToEmail(boq);
-                  setEmailMode('td');
-                  setShowSendEmailModal(true);
-                }}
-                title="Resend to Technical Director"
-              >
-                <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                <span className="hidden sm:inline">Send to TD</span>
-                <span className="sm:hidden">To TD</span>
-              </button>
-            </>
+            /* TD Rejected - Can only edit (after edit, popup will ask to send to TD) */
+            <button
+              className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+              style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+              onClick={() => {
+                setEditingBoq(boq);
+                setShowBoqEdit(true);
+              }}
+            >
+              <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+              <span className="hidden sm:inline">Edit BOQ</span>
+              <span className="sm:hidden">Edit</span>
+            </button>
           ) : isApprovedByTD || isRevisionApproved ? (
             /* Approved by TD - Can send to client */
             <button
@@ -1404,7 +1393,7 @@ const EstimatorHub: React.FC = () => {
                         );
                       } else if (isPendingRevision) {
                         return (
-                          <span className="text-xs text-purple-700 font-medium flex items-center gap-1">
+                          <span className="text-xs text-red-700 font-medium flex items-center gap-1">
                             <Clock className="h-4 w-4" />
                             Revision Pending TD Approval
                           </span>
@@ -1424,7 +1413,7 @@ const EstimatorHub: React.FC = () => {
                                 toast.error(result.message || 'Failed to send revision');
                               }
                             }} className="h-8 w-8 p-0" title="Send Revision to TD">
-                              <Mail className="h-4 w-4 text-purple-600" />
+                              <Mail className="h-4 w-4 text-red-600" />
                             </Button>
                           </>
                         );
@@ -1435,7 +1424,7 @@ const EstimatorHub: React.FC = () => {
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('td'); setShowSendEmailModal(true); }} className="h-8 w-8 p-0" title="Send Revision to TD">
-                              <Mail className="h-4 w-4 text-purple-600" />
+                              <Mail className="h-4 w-4 text-red-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => { setBoqToCancel(boq); setShowCancelModal(true); }} className="h-8 w-8 p-0" title="Cancel Project">
                               <XCircleIcon className="h-4 w-4 text-red-600" />
@@ -1449,7 +1438,7 @@ const EstimatorHub: React.FC = () => {
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('td'); setShowSendEmailModal(true); }} className="h-8 w-8 p-0" title="Send to TD">
-                              <Mail className="h-4 w-4 text-purple-600" />
+                              <Mail className="h-4 w-4 text-red-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => setDeletingBoq(boq)} className="h-8 w-8 p-0" title="Delete BOQ">
                               <Trash2 className="h-4 w-4 text-red-600" />
@@ -1463,7 +1452,7 @@ const EstimatorHub: React.FC = () => {
                               <CheckCircle className="h-4 w-4 mr-1" />
                               <span className="text-xs">Approved</span>
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => { setSelectedBoqForRevision(boq); setShowRevisionModal(true); }} className="h-8 px-2 text-purple-600 hover:text-purple-700 hover:bg-purple-50" title="Revisions">
+                            <Button variant="ghost" size="sm" onClick={() => { setSelectedBoqForRevision(boq); setShowRevisionModal(true); }} className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" title="Revisions">
                               <Edit className="h-4 w-4 mr-1" />
                               <span className="text-xs">Revisions</span>
                             </Button>
@@ -1622,17 +1611,6 @@ const EstimatorHub: React.FC = () => {
                 }).length})</span>
               </TabsTrigger>
               <TabsTrigger
-                value="revisions"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-purple-600 data-[state=active]:text-purple-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
-              >
-                <span className="hidden sm:inline">Revisions</span>
-                <span className="sm:hidden">Revisions</span>
-                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
-                  const s = b.status?.toLowerCase();
-                  return s === 'under_revision' || s === 'pending_revision' || s === 'revision_approved';
-                }).length})</span>
-              </TabsTrigger>
-              <TabsTrigger
                 value="approved"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
@@ -1641,6 +1619,17 @@ const EstimatorHub: React.FC = () => {
                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
                   const s = b.status?.toLowerCase();
                   return s === 'approved' || s === 'sent_for_confirmation' || s === 'client_confirmed' || s === 'client_rejected';
+                }).length})</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="revisions"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-600 data-[state=active]:text-red-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+              >
+                <span className="hidden sm:inline">Revisions</span>
+                <span className="sm:hidden">Revisions</span>
+                <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
+                  const s = b.status?.toLowerCase();
+                  return s === 'under_revision' || s === 'pending_revision' || s === 'revision_approved';
                 }).length})</span>
               </TabsTrigger>
               <TabsTrigger
@@ -2591,10 +2580,10 @@ const EstimatorHub: React.FC = () => {
                   <p className="text-sm font-medium text-gray-900">{viewingProject.client || 'Not assigned'}</p>
                 </div>
 
-                <div className="bg-gradient-to-br from-purple-50 to-purple-100/20 rounded-lg p-3 border border-purple-200">
+                <div className="bg-gradient-to-br from-red-50 to-red-100/20 rounded-lg p-3 border border-red-200">
                   <div className="flex items-center gap-2 mb-1">
-                    <MapPin className="h-3.5 w-3.5 text-purple-600" />
-                    <Label className="text-xs font-semibold text-purple-900">Location</Label>
+                    <MapPin className="h-3.5 w-3.5 text-red-600" />
+                    <Label className="text-xs font-semibold text-red-900">Location</Label>
                   </div>
                   <p className="text-sm font-medium text-gray-900">{viewingProject.location || 'Not specified'}</p>
                 </div>
@@ -2959,7 +2948,7 @@ const EstimatorHub: React.FC = () => {
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-purple-600">
+            <DialogTitle className="flex items-center gap-2 text-red-600">
               <CheckCircle className="h-5 w-5" />
               BOQ Revision Saved Successfully!
             </DialogTitle>
@@ -2972,7 +2961,7 @@ const EstimatorHub: React.FC = () => {
               Would you like to send this revision to the Technical Director for approval now?
             </p>
             <Button
-              className="w-full bg-gradient-to-r from-purple-50 to-purple-100 text-purple-900 hover:from-purple-100 hover:to-purple-200 border border-purple-200 shadow-sm"
+              className="w-full bg-gradient-to-r from-red-50 to-red-100 text-red-900 hover:from-purple-100 hover:to-purple-200 border border-red-200 shadow-sm"
               onClick={async () => {
                 setIsSendingToTD(true);
                 try {
@@ -2994,7 +2983,7 @@ const EstimatorHub: React.FC = () => {
             >
               {isSendingToTD ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-900 mr-2"></div>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-900 mr-2"></div>
                   Sending to TD...
                 </>
               ) : (
@@ -3004,17 +2993,20 @@ const EstimatorHub: React.FC = () => {
                 </>
               )}
             </Button>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => {
-                setShowSendToTDPopup(false);
-                setBoqToSendToTD(null);
-                toast.success('Revision saved! You can send it to TD later from the Revisions tab.');
-              }}
-            >
-              Send Later
-            </Button>
+            {/* Only show "Send Later" if BOQ is not from rejected tab */}
+            {boqToSendToTD?.status?.toLowerCase() !== 'rejected' && boqToSendToTD?.status?.toLowerCase() !== 'client_rejected' && (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  setShowSendToTDPopup(false);
+                  setBoqToSendToTD(null);
+                  toast.success('Revision saved! You can send it to TD later.');
+                }}
+              >
+                Send Later
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -3028,7 +3020,7 @@ const EstimatorHub: React.FC = () => {
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-purple-600">
+            <DialogTitle className="flex items-center gap-2 text-red-600">
               <Edit className="h-5 w-5" />
               BOQ Revisions
             </DialogTitle>
@@ -3038,7 +3030,7 @@ const EstimatorHub: React.FC = () => {
           </DialogHeader>
           <div className="space-y-3 mt-4">
             <Button
-              className="w-full bg-gradient-to-r from-purple-50 to-purple-100 text-purple-900 hover:from-purple-100 hover:to-purple-200 border border-purple-200 shadow-sm"
+              className="w-full bg-gradient-to-r from-red-50 to-red-100 text-red-900 hover:from-red-100 hover:to-red-200 border border-red-200 shadow-sm"
               onClick={() => {
                 setShowRevisionModal(false);
                 setEditingBoq(selectedBoqForRevision);
@@ -3051,7 +3043,7 @@ const EstimatorHub: React.FC = () => {
             </Button>
             <Button
               variant="outline"
-              className="w-full bg-gradient-to-r from-red-50 to-red-100 text-red-900 hover:from-red-100 hover:to-red-200 border border-red-200"
+              className="w-full bg-gradient-to-r from-red-100 to-red-200 text-red-900 hover:from-red-200 hover:to-red-300 border border-red-300"
               onClick={() => {
                 setShowRevisionModal(false);
                 setBoqToCancel(selectedBoqForRevision);

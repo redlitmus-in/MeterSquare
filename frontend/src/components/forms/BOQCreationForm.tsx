@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { ProjectOption, BOQMaterial, BOQLabour, BOQCreatePayload, WorkType } from '@/roles/estimator/types';
+import { ModernSelect } from '@/components/ui/modern-select';
 
 // Backend-aligned interfaces
 interface BOQItemForm {
@@ -82,6 +83,32 @@ interface MasterLabour {
   amount: number;
   work_type: string;
 }
+
+// Unit options for materials
+const UNIT_OPTIONS = [
+  { value: 'nos', label: 'Nos' },
+  { value: 'kg', label: 'Kg' },
+  { value: 'ltr', label: 'Ltr' },
+  { value: 'mtr', label: 'Mtr' },
+  { value: 'sqm', label: 'Sqm' },
+  { value: 'cum', label: 'Cum' },
+  { value: 'box', label: 'Box' },
+  { value: 'bag', label: 'Bag' },
+  { value: 'pcs', label: 'Pcs' },
+  { value: 'bundle', label: 'Bundle' },
+  { value: 'roll', label: 'Roll' },
+  { value: 'sheet', label: 'Sheet' },
+  { value: 'ton', label: 'Ton' },
+  { value: 'gm', label: 'Gm' },
+  { value: 'ml', label: 'Ml' },
+  { value: 'ft', label: 'Ft' },
+  { value: 'sqft', label: 'Sqft' },
+  { value: 'set', label: 'Set' },
+  { value: 'pair', label: 'Pair' },
+  { value: 'carton', label: 'Carton' },
+  { value: 'drum', label: 'Drum' },
+  { value: 'can', label: 'Can' }
+];
 
 const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   isOpen,
@@ -234,8 +261,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       profit_margin_percentage: overallProfit,
       is_new: true
     };
-    setItems(prevItems => [newItem, ...prevItems]); // Add new item at the beginning
-    setExpandedItems(prev => [newItem.id, ...prev]);
+    setItems(prevItems => [...prevItems, newItem]); // Add new item at the end
+    setExpandedItems(prev => [...prev, newItem.id]);
     setItemSearchTerms(prev => ({ ...prev, [newItem.id]: '' }));
   };
 
@@ -915,7 +942,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           )}
                         </button>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-800">Item #{items.length - index}</span>
+                          <span className="text-sm font-semibold text-gray-800">Item #{index + 1}</span>
                           {item.master_item_id && (
                             <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">
                               Master
@@ -1038,7 +1065,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               <div className="p-1.5 bg-white rounded shadow-sm">
                                 <Package className="w-4 h-4 text-blue-600" />
                               </div>
-                              Raw Materials
+                              Sub Items
                             </h4>
                             <button
                               type="button"
@@ -1180,20 +1207,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     </button>
                                   </div>
                                 </div>
-                                <select
+                                <ModernSelect
                                   value={material.unit}
-                                  onChange={(e) => updateMaterial(item.id, material.id, 'unit', e.target.value)}
-                                  className="px-3 py-1.5 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white"
+                                  onChange={(value) => updateMaterial(item.id, material.id, 'unit', value)}
+                                  options={UNIT_OPTIONS}
                                   disabled={isSubmitting}
-                                  aria-label="Material unit"
-                                >
-                                  <option value="nos">Nos</option>
-                                  <option value="kg">Kg</option>
-                                  <option value="ltr">Ltr</option>
-                                  <option value="mtr">Mtr</option>
-                                  <option value="sqm">Sqm</option>
-                                  <option value="cum">Cum</option>
-                                </select>
+                                  className="w-24"
+                                />
                                 <div className="flex items-center gap-1">
                                   <span className="text-sm text-gray-500 font-medium">AED</span>
                                   <div className="relative">

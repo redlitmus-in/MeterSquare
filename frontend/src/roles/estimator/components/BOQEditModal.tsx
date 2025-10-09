@@ -21,6 +21,7 @@ import {
 import { toast } from 'sonner';
 import { BOQ, BOQItemDetailed, BOQUpdatePayload, BOQMaterial, BOQLabour, WorkType } from '../types';
 import { estimatorService } from '../services/estimatorService';
+import { ModernSelect } from '@/components/ui/modern-select';
 
 // Master data interfaces
 interface MasterItem {
@@ -52,6 +53,32 @@ interface BOQEditModalProps {
   onSave: () => void;
   isRevision?: boolean; // Flag to indicate this is a revision edit
 }
+
+// Unit options for materials
+const UNIT_OPTIONS = [
+  { value: 'nos', label: 'Nos' },
+  { value: 'kg', label: 'Kg' },
+  { value: 'ltr', label: 'Ltr' },
+  { value: 'mtr', label: 'Mtr' },
+  { value: 'sqm', label: 'Sqm' },
+  { value: 'cum', label: 'Cum' },
+  { value: 'box', label: 'Box' },
+  { value: 'bag', label: 'Bag' },
+  { value: 'pcs', label: 'Pcs' },
+  { value: 'bundle', label: 'Bundle' },
+  { value: 'roll', label: 'Roll' },
+  { value: 'sheet', label: 'Sheet' },
+  { value: 'ton', label: 'Ton' },
+  { value: 'gm', label: 'Gm' },
+  { value: 'ml', label: 'Ml' },
+  { value: 'ft', label: 'Ft' },
+  { value: 'sqft', label: 'Sqft' },
+  { value: 'set', label: 'Set' },
+  { value: 'pair', label: 'Pair' },
+  { value: 'carton', label: 'Carton' },
+  { value: 'drum', label: 'Drum' },
+  { value: 'can', label: 'Can' }
+];
 
 const BOQEditModal: React.FC<BOQEditModalProps> = ({
   isOpen,
@@ -373,20 +400,22 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       labour: []
     };
 
-    const newIndex = 0;
+    setEditedBoq(prev => {
+      const newIndex = prev.items.length; // Add at the end
+      return {
+        ...prev,
+        items: [...prev.items, newItem] // Add new item at the end
+      };
+    });
 
-    setEditedBoq(prev => ({
-      ...prev,
-      items: [newItem, ...prev.items] // Add new item at the beginning
-    }));
-
-    // Expand the new item and shift other expanded items
+    // Expand the new item
     setExpandedItems(prev => {
-      const shiftedIndexes = Array.from(prev).map(i => i + 1);
-      return new Set([newIndex, ...shiftedIndexes]);
+      const newIndex = editedBoq.items.length; // The index after adding
+      return new Set([...prev, newIndex]);
     });
 
     // Clear search term for new item and open dropdown
+    const newIndex = editedBoq.items.length;
     setItemSearchTerms(prev => ({ ...prev, [newIndex]: '' }));
     setItemDropdownOpen(prev => ({ ...prev, [newIndex]: false }));
 
@@ -672,7 +701,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                   <ChevronRight className="w-4 h-4" />
                                 )}
                               </button>
-                              <span className="text-sm font-medium text-gray-700">Item #{editedBoq.items.length - itemIndex}</span>
+                              <span className="text-sm font-medium text-gray-700">Item #{itemIndex + 1}</span>
                               {item.item_id && (
                                 <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">
                                   From Master
@@ -786,14 +815,14 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                           {/* Item Details (Expandable) */}
                           {expandedItems.has(itemIndex) && (
                             <div className="p-4 space-y-4 bg-gray-50/50">
-                              {/* Raw Materials Section */}
+                              {/* Sub Items Section */}
                               <div className="bg-gradient-to-r from-blue-50 to-blue-100/30 rounded-lg p-4 border border-blue-200">
                                 <div className="flex items-center justify-between mb-3">
                                   <h4 className="text-sm font-bold text-blue-900 flex items-center gap-2">
                                     <div className="p-1.5 bg-white rounded shadow-sm">
                                       <Package className="w-4 h-4 text-blue-600" />
                                     </div>
-                                    Raw Materials
+                                    Sub Items
                                   </h4>
                                   <button
                                     type="button"
@@ -872,11 +901,11 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                               </div>
                                             </td>
                                             <td className="p-2">
-                                              <input
-                                                type="text"
+                                              <ModernSelect
                                                 value={material.unit}
-                                                onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'unit', e.target.value)}
-                                                className="w-20 px-3 py-1.5 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white"
+                                                onChange={(value) => handleMaterialChange(itemIndex, matIndex, 'unit', value)}
+                                                options={UNIT_OPTIONS}
+                                                className="w-28"
                                               />
                                             </td>
                                             <td className="p-2">

@@ -703,7 +703,7 @@ const ProjectApprovals: React.FC = () => {
       case 'client_confirmed': return <CheckCircleIcon className="w-5 h-5 text-green-600" />;
       case 'client_rejected': return <XCircleIcon className="w-5 h-5 text-orange-600" />;
       case 'sent_for_confirmation': return <ClockIcon className="w-5 h-5 text-blue-600" />;
-      case 'pending_revision': return <DocumentCheckIcon className="w-5 h-5 text-purple-600" />;
+      case 'pending_revision': return <DocumentCheckIcon className="w-5 h-5 text-red-600" />;
       default: return <ClockIcon className="w-5 h-5 text-yellow-600" />;
     }
   };
@@ -736,9 +736,9 @@ const ProjectApprovals: React.FC = () => {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 inline-flex gap-1">
             {[
               { key: 'pending', label: 'Pending' },
-              { key: 'revisions', label: 'Revisions' },
               { key: 'approved', label: 'Approved' },
               { key: 'sent', label: 'Client Response' },
+              { key: 'revisions', label: 'Revisions' },
               { key: 'assigned', label: 'Assigned' },
               { key: 'completed', label: 'Completed' },
               { key: 'rejected', label: 'Rejected by TD' },
@@ -798,7 +798,7 @@ const ProjectApprovals: React.FC = () => {
               onClick={() => setRevisionSubTab('pending_approval')}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
                 revisionSubTab === 'pending_approval'
-                  ? 'bg-gradient-to-r from-purple-50 to-purple-100 text-purple-900 border border-purple-200 shadow-md'
+                  ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 border border-red-200 shadow-md'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
               }`}
             >
@@ -970,7 +970,7 @@ const ProjectApprovals: React.FC = () => {
                           estimation.status === 'approved' ? 'text-green-600' :
                           estimation.status === 'client_confirmed' ? 'text-green-600' :
                           estimation.status === 'client_rejected' ? 'text-orange-600' :
-                          estimation.status === 'pending_revision' ? 'text-purple-600' :
+                          estimation.status === 'pending_revision' ? 'text-red-600' :
                           'text-gray-600'
                         }`}>
                           {estimation.status === 'cancelled' ? 'CLIENT CANCELLED' :
@@ -1007,9 +1007,9 @@ const ProjectApprovals: React.FC = () => {
                         <p className="text-xs text-gray-500 mb-1">Labor Cost</p>
                         <p className="text-lg font-bold text-green-900">AED{formatCurrency(estimation.laborCost)}</p>
                       </div>
-                      <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-3">
+                      <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-3">
                         <p className="text-xs text-gray-500 mb-1">Material Cost</p>
-                        <p className="text-lg font-bold text-purple-900">AED{formatCurrency(estimation.materialCost)}</p>
+                        <p className="text-lg font-bold text-red-900">AED{formatCurrency(estimation.materialCost)}</p>
                       </div>
                       <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-3">
                         <p className="text-xs text-gray-500 mb-1">O&P Margin</p>
@@ -1143,7 +1143,7 @@ const ProjectApprovals: React.FC = () => {
                               estimation.status === 'approved' ? 'text-green-600' :
                               estimation.status === 'client_confirmed' ? 'text-green-600' :
                               estimation.status === 'client_rejected' ? 'text-orange-600' :
-                              estimation.status === 'pending_revision' ? 'text-purple-600' :
+                              estimation.status === 'pending_revision' ? 'text-red-600' :
                               'text-gray-600'
                             }`}>
                               {estimation.status === 'cancelled' ? 'CLIENT CANCELLED' :
@@ -1550,20 +1550,20 @@ const ProjectApprovals: React.FC = () => {
                       <div className="mb-8">
                         <div className="flex items-center justify-between mb-4">
                           <h3 className="text-lg font-bold text-gray-900">New Purchase Items</h3>
-                          <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
+                          <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-medium">
                             {selectedEstimation.newItems.length} Items
                           </span>
                         </div>
                         <div className="space-y-4">
                           {selectedEstimation.newItems.map((item, index) => (
-                            <div key={item.id} className="border border-purple-200 rounded-xl p-4 bg-purple-50/30 hover:shadow-md transition-all">
+                            <div key={item.id} className="border border-red-200 rounded-xl p-4 bg-red-50/30 hover:shadow-md transition-all">
                               <div className="flex items-start justify-between mb-3">
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2">
                                     <h4 className="font-bold text-gray-900">
                                       {item.description}
                                     </h4>
-                                    <span className="px-2 py-0.5 text-xs bg-purple-200 text-purple-800 rounded font-semibold">NEW</span>
+                                    <span className="px-2 py-0.5 text-xs bg-purple-200 text-red-800 rounded font-semibold">NEW</span>
                                   </div>
                                   {item.briefDescription && (
                                     <p className="text-sm text-gray-600 mt-1">{item.briefDescription}</p>
@@ -1576,8 +1576,8 @@ const ProjectApprovals: React.FC = () => {
                               </div>
 
                               {/* Materials Breakdown - Purple Theme */}
-                              <div className="bg-purple-50 rounded-lg p-3 mb-3 border border-purple-200">
-                                <p className="text-sm font-semibold text-purple-900 mb-2">+ Raw Materials</p>
+                              <div className="bg-red-50 rounded-lg p-3 mb-3 border border-red-200">
+                                <p className="text-sm font-semibold text-red-900 mb-2">+ Raw Materials</p>
                                 <div className="space-y-1">
                                   {item.materials.map((material, mIndex) => (
                                     <div key={mIndex} className="flex items-center justify-between text-sm">
@@ -1590,10 +1590,10 @@ const ProjectApprovals: React.FC = () => {
                                     </div>
                                   ))}
                                 </div>
-                                <div className="border-t border-purple-200 mt-2 pt-2">
+                                <div className="border-t border-red-200 mt-2 pt-2">
                                   <div className="flex justify-between text-sm font-semibold">
-                                    <span className="text-purple-900">Total Materials:</span>
-                                    <span className="text-purple-900">AED{item.materials.reduce((sum, m) => sum + m.amount, 0).toLocaleString()}</span>
+                                    <span className="text-red-900">Total Materials:</span>
+                                    <span className="text-red-900">AED{item.materials.reduce((sum, m) => sum + m.amount, 0).toLocaleString()}</span>
                                   </div>
                                 </div>
                               </div>
@@ -1776,8 +1776,8 @@ const ProjectApprovals: React.FC = () => {
                   <div className="px-6 py-4 border-b border-gray-200">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <span className="text-sm font-medium text-purple-700">Revision Approval:</span>
-                        <span className="text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded-full">Revised by Estimator</span>
+                        <span className="text-sm font-medium text-red-700">Revision Approval:</span>
+                        <span className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded-full">Revised by Estimator</span>
                       </div>
                       <div className="flex items-center gap-3">
                         <button
@@ -1886,7 +1886,7 @@ const ProjectApprovals: React.FC = () => {
                         value="client"
                         checked={downloadType === 'client'}
                         onChange={() => setDownloadType('client')}
-                        className="w-4 h-4 text-purple-600"
+                        className="w-4 h-4 text-red-600"
                       />
                       <div className="ml-3 flex-1">
                         <span className="font-semibold text-gray-900">Client Version</span>
@@ -2739,7 +2739,7 @@ const ProjectApprovals: React.FC = () => {
                     onClick={() => setHistoryTab('revisions')}
                     className={`px-4 py-2 rounded-t-lg font-medium text-sm transition-all ${
                       historyTab === 'revisions'
-                        ? 'bg-gradient-to-r from-purple-50 to-purple-100 text-purple-900 border-t border-l border-r border-purple-200'
+                        ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 border-t border-l border-r border-red-200'
                         : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                     }`}
                   >
