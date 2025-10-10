@@ -1564,3 +1564,20 @@ class BOQEmailService:
             import traceback
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
+
+    def send_estimator_assignment_notification(self, to_email, to_name, from_name, projects_data):
+        subject = f"New BOQ Assigned for Estimation"
+        body = f"""
+        Dear {to_name},
+
+        You have been assigned a BOQ for estimation by {from_name}.
+
+        Project Details:
+        {projects_data}
+
+        Please log in to the system to proceed.
+
+        Regards,
+        BOQ Management System
+        """
+        return self.send_email(to_email, subject, body)

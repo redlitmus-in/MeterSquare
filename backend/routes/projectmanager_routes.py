@@ -47,3 +47,7 @@ def delete_sitesupervisor_route(site_supervisor_id):
 def assign_projects_sitesupervisor_route():
     return assign_projects_sitesupervisor()
 
+@pm_routes.route('/boq/send_estimator', methods=['POST'])
+@jwt_required
+def send_boq_to_estimator_route():
+    return send_boq_to_estimator() 
