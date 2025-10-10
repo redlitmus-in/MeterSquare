@@ -265,6 +265,14 @@ const EstimatorHub: React.FC = () => {
   const [isRevisionEdit, setIsRevisionEdit] = useState(false);
   const [isSendingToTD, setIsSendingToTD] = useState(false);
 
+  // PM Selection Modal States
+  const [showPMSelectionModal, setShowPMSelectionModal] = useState(false);
+  const [projectToSendToPM, setProjectToSendToPM] = useState<any>(null);
+  const [projectManagers, setProjectManagers] = useState<any[]>([]);
+  const [selectedPM, setSelectedPM] = useState<number | null>(null);
+  const [isSendingToPM, setIsSendingToPM] = useState(false);
+  const [loadingPMs, setLoadingPMs] = useState(false);
+
   useEffect(() => {
     const abortController = new AbortController();
 
@@ -588,6 +596,76 @@ const EstimatorHub: React.FC = () => {
     }
   };
 
+  const handleSendToPM = async (project: any) => {
+    try {
+      // Find BOQs for this project
+      const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
+
+      if (projectBoqs.length === 0) {
+        toast.error('No BOQ found for this project. Please create a BOQ first.');
+        return;
+      }
+
+      // Store project and open PM selection modal
+      setProjectToSendToPM(project);
+      setShowPMSelectionModal(true);
+
+      // Fetch Project Managers from API
+      setLoadingPMs(true);
+      const pmResult = await estimatorService.getAllProjectManagers();
+
+      if (pmResult.success) {
+        setProjectManagers(pmResult.data);
+      } else {
+        toast.error(pmResult.message || 'Failed to load Project Managers');
+      }
+      setLoadingPMs(false);
+    } catch (error) {
+      console.error('Error opening PM selection:', error);
+      toast.error('Failed to load Project Managers');
+    }
+  };
+
+  const handleConfirmSendToPM = async () => {
+    if (!selectedPM || !projectToSendToPM) {
+      toast.error('Please select a Project Manager');
+      return;
+    }
+
+    setIsSendingToPM(true);
+    try {
+      // Find BOQ for this project
+      const projectBoqs = boqs.filter(boq => boq.project?.project_id == projectToSendToPM.project_id);
+
+      if (projectBoqs.length === 0) {
+        toast.error('No BOQ found for this project');
+        setIsSendingToPM(false);
+        return;
+      }
+
+      const boq = projectBoqs[0]; // Get the first BOQ
+      const selectedPMData = projectManagers.find(pm => pm.user_id === selectedPM);
+
+      // Send BOQ to PM using real API
+      const response = await estimatorService.sendBOQToProjectManager(boq.boq_id, selectedPM);
+
+      if (response.success) {
+        toast.success(`Successfully sent BOQ to ${selectedPMData?.full_name}`);
+        setShowPMSelectionModal(false);
+        setSelectedPM(null);
+        setProjectToSendToPM(null);
+        await loadBOQs(); // Refresh BOQ list
+      } else {
+        toast.error(response.message || 'Failed to send BOQ to Project Manager');
+      }
+    } catch (error) {
+      console.error('Error sending BOQ to PM:', error);
+      toast.error('Failed to send BOQ to Project Manager');
+    } finally {
+      setIsSendingToPM(false);
+    }
+  };
+
   const handleDeleteBOQ = async () => {
     if (!deletingBoq) return;
 
@@ -713,6 +791,7 @@ const EstimatorHub: React.FC = () => {
         materialCost: boqData.total_material_cost || 0,
         profitMargin: boqData.profit_margin || boqData.profit_margin_percentage || 0,
         overheadPercentage: boqData.overhead_percentage || boqData.overhead || 0,
+        discountPercentage: boqData.discount_percentage || 0,
         submittedDate: boqData.created_at || new Date().toISOString(),
         location: boqData.location || boqData.project_details?.location || 'N/A',
         floor: boqData.floor_name || boqData.project_details?.floor || 'N/A',
@@ -744,7 +823,10 @@ const EstimatorHub: React.FC = () => {
               amount: lab.total_cost
             })) || [],
             laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
-            estimatedSellingPrice: item.selling_price || 0
+            estimatedSellingPrice: item.selling_price || 0,
+            overheadPercentage: item.overhead_percentage || 0,
+            profitMarginPercentage: item.profit_margin_percentage || 0,
+            discountPercentage: item.discount_percentage || 0
           };
         }) || []
       };
@@ -986,6 +1068,8 @@ const EstimatorHub: React.FC = () => {
     const isClientRejected = status === 'client_rejected';
     // Client cancelled: Permanently cancelled, no actions allowed
     const isClientCancelled = status === 'client_cancelled';
+    // Can Edit: Estimator can edit BOQ if it's draft OR approved OR sent to client OR any revision status
+    const canEdit = isDraft || isApprovedByTD || isRevisionApproved || isSentToClient || isUnderRevision || isPendingRevision;
 
     return (
       <motion.div
@@ -1015,26 +1099,26 @@ const EstimatorHub: React.FC = () => {
               >
                 <Eye className="h-4 w-4" />
               </button>
+              {canEdit && (
+                <button
+                  className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-all"
+                  onClick={() => {
+                    setEditingBoq(boq);
+                    setShowBoqEdit(true);
+                  }}
+                  title="Edit BOQ"
+                >
+                  <Edit className="h-4 w-4" />
+                </button>
+              )}
               {isDraft && (
-                <>
-                  <button
-                    className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-all"
-                    onClick={() => {
-                      setEditingBoq(boq);
-                      setShowBoqEdit(true);
-                    }}
-                    title="Edit BOQ"
-                  >
-                    <Edit className="h-4 w-4" />
-                  </button>
-                  <button
-                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
-                    onClick={() => setDeletingBoq(boq)}
-                    title="Delete BOQ"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </>
+                <button
+                  className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
+                  onClick={() => setDeletingBoq(boq)}
+                  title="Delete BOQ"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               )}
             </div>
           </div>
@@ -1379,6 +1463,7 @@ const EstimatorHub: React.FC = () => {
                       const isPendingRevision = status === 'pending_revision';
                       const isUnderRevision = status === 'under_revision';
                       const isApprovedByTD = status === 'approved';
+                      const isRevisionApproved = status === 'revision_approved';
                       const isSentToClient = status === 'sent_for_confirmation';
                       const isClientConfirmed = status === 'client_confirmed';
                       const isClientRejected = status === 'client_rejected';
@@ -1448,6 +1533,9 @@ const EstimatorHub: React.FC = () => {
                       } else if (isSentToClient) {
                         return (
                           <>
+                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setShowBoqEdit(true); }} className="h-8 w-8 p-0" title="Edit BOQ">
+                              <Edit className="h-4 w-4 text-green-600" />
+                            </Button>
                             <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { toast.success(result.message); loadBOQs(); } else { toast.error(result.message); } }} className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Client Approved">
                               <CheckCircle className="h-4 w-4 mr-1" />
                               <span className="text-xs">Approved</span>
@@ -1477,16 +1565,27 @@ const EstimatorHub: React.FC = () => {
                       } else if (isApprovedByTD || boq.status?.toLowerCase() === 'revision_approved') {
                         const isRevApproved = boq.status?.toLowerCase() === 'revision_approved';
                         return (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => { setBoqToEmail(boq); setEmailMode('client'); setShowSendEmailModal(true); }}
-                            className="h-8 px-3 text-green-600 hover:text-green-700"
-                            title={isRevApproved ? "Send Revision to Client" : "Send to Client"}
-                          >
-                            <Send className="h-4 w-4 mr-1" />
-                            <span className="text-xs">{isRevApproved ? 'Send Revision' : 'Send to Client'}</span>
-                          </Button>
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => { setEditingBoq(boq); setIsRevisionEdit(isRevApproved); setShowBoqEdit(true); }}
+                              className="h-8 w-8 p-0"
+                              title="Edit BOQ"
+                            >
+                              <Edit className="h-4 w-4 text-green-600" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => { setBoqToEmail(boq); setEmailMode('client'); setShowSendEmailModal(true); }}
+                              className="h-8 px-3 text-green-600 hover:text-green-700"
+                              title={isRevApproved ? "Send Revision to Client" : "Send to Client"}
+                            >
+                              <Send className="h-4 w-4 mr-1" />
+                              <span className="text-xs">{isRevApproved ? 'Send Revision' : 'Send to Client'}</span>
+                            </Button>
+                          </>
                         );
                       }
                       return null;
@@ -1763,9 +1862,9 @@ const EstimatorHub: React.FC = () => {
                       </div>
 
                       {/* Actions */}
-                      <div className="border-t border-gray-200 p-2 sm:p-3 grid grid-cols-3 gap-1 sm:gap-2">
+                      <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-wrap gap-1 sm:gap-2">
                         <button
-                          className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                          className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
                           style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                           onClick={() => setViewingProject(project)}
                         >
@@ -1775,7 +1874,7 @@ const EstimatorHub: React.FC = () => {
                         </button>
                         {boqCount === 0 ? (
                           <button
-                            className="bg-transparent border-2 border-red-500 text-red-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                            className="flex-1 min-w-[90px] bg-transparent border-2 border-red-500 text-red-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
                             style={{
                               boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.15)'
                             }}
@@ -1815,32 +1914,43 @@ const EstimatorHub: React.FC = () => {
                           </button>
                         )}
                         {!hasSentBoq && boqCount > 0 ? (
-                          <button
-                            className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                            style={{ backgroundColor: 'rgb(22, 163, 74)' }}
-                            onClick={() => handleSendToTD(project)}
-                            disabled={sendingToTD}
-                            title="Send to Technical Director"
-                          >
-                            {sendingToTD ? (
-                              <>
-                                <div className="scale-50">
-                                  <ModernLoadingSpinners variant="dots" size="sm" color="white" />
-                                </div>
-                                <span className="hidden sm:inline">Sending...</span>
-                                <span className="sm:hidden">...</span>
-                              </>
-                            ) : (
-                              <>
-                                <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                                <span className="hidden sm:inline">Send to TD</span>
-                                <span className="sm:hidden">Send</span>
-                              </>
-                            )}
-                          </button>
-                        ) : (
-                          <div className="text-xs h-8 flex items-center justify-center"></div>
-                        )}
+                          <>
+                            <button
+                              className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                              style={{ backgroundColor: 'rgb(22, 163, 74)' }}
+                              onClick={() => handleSendToTD(project)}
+                              disabled={sendingToTD}
+                              title="Send to Technical Director"
+                            >
+                              {sendingToTD ? (
+                                <>
+                                  <div className="scale-50">
+                                    <ModernLoadingSpinners variant="dots" size="sm" color="white" />
+                                  </div>
+                                  <span className="hidden sm:inline">Sending...</span>
+                                  <span className="sm:hidden">...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                                  <span className="hidden sm:inline">Send to TD</span>
+                                  <span className="sm:hidden">TD</span>
+                                </>
+                              )}
+                            </button>
+                            <button
+                              className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                              style={{ backgroundColor: 'rgb(59, 130, 246)' }}
+                              onClick={() => handleSendToPM(project)}
+                              disabled={sendingToTD}
+                              title="Send to Project Manager"
+                            >
+                              <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                              <span className="hidden sm:inline">Send to PM</span>
+                              <span className="sm:hidden">PM</span>
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     </motion.div>
                     );
@@ -2101,7 +2211,7 @@ const EstimatorHub: React.FC = () => {
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                         <h2 className="text-lg sm:text-xl font-bold text-gray-900">BOQs Sent for Review</h2>
                         <div className="text-xs sm:text-sm text-gray-600">
-                          {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} pending Technical Director review
+                          {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} pending review
                         </div>
                       </div>
                       {viewMode === 'cards' ? (
@@ -2961,7 +3071,7 @@ const EstimatorHub: React.FC = () => {
               Would you like to send this revision to the Technical Director for approval now?
             </p>
             <Button
-              className="w-full bg-gradient-to-r from-red-50 to-red-100 text-red-900 hover:from-purple-100 hover:to-purple-200 border border-red-200 shadow-sm"
+              className="w-full bg-gradient-to-r from-red-50 to-red-100 text-red-900 hover:from-red-100 hover:to-red-200 border border-red-200 shadow-sm"
               onClick={async () => {
                 setIsSendingToTD(true);
                 try {
@@ -3006,6 +3116,100 @@ const EstimatorHub: React.FC = () => {
               >
                 Send Later
               </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* PM Selection Modal */}
+      <Dialog open={showPMSelectionModal} onOpenChange={(open) => {
+        if (!open) {
+          setShowPMSelectionModal(false);
+          setProjectToSendToPM(null);
+          setSelectedPM(null);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-blue-600">
+              <Users className="h-5 w-5" />
+              Send BOQ to Project Manager
+            </DialogTitle>
+            <DialogDescription>
+              Select a Project Manager to review BOQ for "{projectToSendToPM?.project_name}"
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-4">
+            {loadingPMs ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className="ml-3 text-gray-600">Loading Project Managers...</span>
+              </div>
+            ) : projectManagers.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <AlertCircle className="h-12 w-12 mx-auto mb-2 text-gray-400" />
+                <p>No Project Managers found</p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">Select Project Manager</label>
+                  {projectManagers.map((pm) => (
+                    <button
+                      key={pm.user_id}
+                      onClick={() => setSelectedPM(pm.user_id)}
+                      className={`w-full p-4 rounded-lg border-2 transition-all text-left ${
+                        selectedPM === pm.user_id
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold text-gray-900">{pm.full_name}</p>
+                          <p className="text-sm text-gray-500">{pm.department}</p>
+                          <p className="text-xs text-gray-400">{pm.email}</p>
+                        </div>
+                        {selectedPM === pm.user_id && (
+                          <CheckCircle className="h-6 w-6 text-blue-600" />
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex gap-2 pt-4">
+                  <Button
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={handleConfirmSendToPM}
+                    disabled={!selectedPM || isSendingToPM}
+                  >
+                    {isSendingToPM ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4 mr-2" />
+                        Send to PM
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowPMSelectionModal(false);
+                      setProjectToSendToPM(null);
+                      setSelectedPM(null);
+                    }}
+                    disabled={isSendingToPM}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </>
             )}
           </div>
         </DialogContent>

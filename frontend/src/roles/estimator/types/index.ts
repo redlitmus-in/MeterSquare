@@ -56,12 +56,14 @@ export interface BOQCreatePayload {
   boq_name: string;
   status?: string;
   created_by?: string;
+  discount_percentage?: number;
   items: {
     item_name: string;
     description?: string;
     work_type?: WorkType;
     overhead_percentage?: number;
     profit_margin_percentage?: number;
+    discount_percentage?: number;
     materials: {
       material_name: string;
       quantity: number;
@@ -246,6 +248,7 @@ export interface BOQUpdatePayload {
   boq_id?: number;
   boq_name: string;
   status?: string;
+  discount_percentage?: number;
   items: {
     item_id?: number;
     item_name: string;
@@ -253,6 +256,7 @@ export interface BOQUpdatePayload {
     work_type?: WorkType;
     overhead_percentage?: number;
     profit_margin_percentage?: number;
+    discount_percentage?: number;
     status?: string;
     materials: {
       material_id?: number;

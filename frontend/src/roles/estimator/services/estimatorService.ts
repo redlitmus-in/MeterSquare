@@ -1210,6 +1210,90 @@ class EstimatorService {
     }
   }
 
+  // Send BOQ to Project Manager
+  async sendBOQToProjectManager(boqId: number, projectManagerId: number): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    try {
+      const response = await apiClient.post('/boq/send_to_pm', {
+        boq_id: boqId,
+        project_manager_id: projectManagerId
+      });
+
+      return {
+        success: true,
+        message: response.data.message || 'BOQ sent to Project Manager successfully'
+      };
+    } catch (error: any) {
+      console.error('Failed to send BOQ to PM:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to send BOQ to Project Manager'
+      };
+    }
+  }
+
+  // Get all Project Managers (both assigned and unassigned)
+  async getAllProjectManagers(): Promise<{
+    success: boolean;
+    data: Array<{
+      user_id: number;
+      full_name: string;
+      email: string;
+      phone?: string;
+      department?: string;
+    }>;
+    message?: string;
+  }> {
+    try {
+      const response = await apiClient.get('/all_pm');
+
+      // Get both assigned and unassigned PMs
+      const assignedPMs = response.data.assigned_project_managers || [];
+      const unassignedPMs = response.data.unassigned_project_managers || [];
+
+      // Get unique PMs from assigned list (since one PM can have multiple projects)
+      const uniqueAssignedPMs = assignedPMs.reduce((acc: any[], pm: any) => {
+        const exists = acc.find((p: any) => p.user_id === pm.user_id);
+        if (!exists) {
+          acc.push({
+            user_id: pm.user_id,
+            full_name: pm.pm_name,
+            email: pm.email,
+            phone: pm.phone,
+            department: 'Project Management'
+          });
+        }
+        return acc;
+      }, []);
+
+      // Map unassigned PMs to our format
+      const formattedUnassignedPMs = unassignedPMs.map((pm: any) => ({
+        user_id: pm.user_id,
+        full_name: pm.pm_name || pm.full_name,
+        email: pm.email,
+        phone: pm.phone,
+        department: 'Project Management'
+      }));
+
+      // Combine both lists (unassigned first, then assigned)
+      const allPMs = [...formattedUnassignedPMs, ...uniqueAssignedPMs];
+
+      return {
+        success: true,
+        data: allPMs
+      };
+    } catch (error: any) {
+      console.error('Failed to fetch project managers:', error);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to fetch project managers'
+      };
+    }
+  }
+
 }
 
 export const estimatorService = new EstimatorService();

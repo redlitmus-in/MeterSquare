@@ -78,6 +78,7 @@ interface EstimationItem {
   materialCost: number;
   profitMargin: number;
   overheadPercentage: number;
+  discountPercentage?: number;
   submittedDate: string;
   status: 'pending' | 'pending_revision' | 'revision_approved' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' | 'client_rejected' | 'cancelled' | 'completed';
   priority: 'high' | 'medium' | 'low';
@@ -246,6 +247,7 @@ const ProjectApprovals: React.FC = () => {
       materialCost: materialCost,
       profitMargin: boq.profit_margin || boq.profit_margin_percentage || 0,
       overheadPercentage: boq.overhead_percentage || boq.overhead || 0,
+      discountPercentage: boq.discount_percentage || 0,
       submittedDate: boq.created_at ? new Date(boq.created_at).toISOString().split('T')[0] : '',
       status: status,
       priority: 'medium',
@@ -287,6 +289,9 @@ const ProjectApprovals: React.FC = () => {
           })) || [],
           laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
           estimatedSellingPrice: item.selling_price || 0,
+          overheadPercentage: item.overhead_percentage || 0,
+          profitMarginPercentage: item.profit_margin_percentage || 0,
+          discountPercentage: item.discount_percentage || 0,
           isNew: false // Mark as existing item
         };
       }) || [],
@@ -319,6 +324,9 @@ const ProjectApprovals: React.FC = () => {
           })) || [],
           laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
           estimatedSellingPrice: item.selling_price || 0,
+          overheadPercentage: item.overhead_percentage || 0,
+          profitMarginPercentage: item.profit_margin_percentage || 0,
+          discountPercentage: item.discount_percentage || 0,
           isNew: true // Mark as new item
         };
       }) || [],
@@ -353,6 +361,9 @@ const ProjectApprovals: React.FC = () => {
             })) || [],
             laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
             estimatedSellingPrice: item.selling_price || 0,
+            overheadPercentage: item.overhead_percentage || 0,
+            profitMarginPercentage: item.profit_margin_percentage || 0,
+            discountPercentage: item.discount_percentage || 0,
             isNew: false
           };
         }) || []),
@@ -385,6 +396,9 @@ const ProjectApprovals: React.FC = () => {
             })) || [],
             laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
             estimatedSellingPrice: item.selling_price || 0,
+            overheadPercentage: item.overhead_percentage || 0,
+            profitMarginPercentage: item.profit_margin_percentage || 0,
+            discountPercentage: item.discount_percentage || 0,
             isNew: true
           };
         }) || [])
@@ -1517,17 +1531,27 @@ const ProjectApprovals: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Overhead & Profit */}
+                        {/* Overhead, Profit & Discount */}
                         <div className="bg-orange-50 rounded-lg p-3 mb-3">
-                          <p className="text-sm font-semibold text-orange-900 mb-2">+ Overheads & Profit</p>
+                          <p className="text-sm font-semibold text-orange-900 mb-2">+ Overheads, Profit & Discount</p>
                           <div className="space-y-1 text-sm">
                             <div className="flex justify-between">
-                              <span className="text-gray-700">Overhead ({selectedEstimation.overheadPercentage}%)</span>
-                              <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * selectedEstimation.overheadPercentage / 100).toLocaleString()}</span>
+                              <span className="text-gray-700">Overhead ({item.overheadPercentage || 0}%)</span>
+                              <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * (item.overheadPercentage || 0) / 100).toLocaleString()}</span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-gray-700">Profit Margin ({selectedEstimation.profitMargin}%)</span>
-                              <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * selectedEstimation.profitMargin / 100).toLocaleString()}</span>
+                              <span className="text-gray-700">Profit Margin ({item.profitMarginPercentage || 0}%)</span>
+                              <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * (item.profitMarginPercentage || 0) / 100).toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className={`${(item.discountPercentage || 0) > 0 ? 'text-red-600' : 'text-gray-700'}`}>Discount ({item.discountPercentage || 0}%)</span>
+                              <span className={`${(item.discountPercentage || 0) > 0 ? 'text-red-600' : 'text-gray-900'}`}>{(item.discountPercentage || 0) > 0 ? '- ' : ''}AED{((() => {
+                                const baseCost = item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost;
+                                const overhead = baseCost * (item.overheadPercentage || 0) / 100;
+                                const profit = baseCost * (item.profitMarginPercentage || 0) / 100;
+                                const subtotal = baseCost + overhead + profit;
+                                return (subtotal * (item.discountPercentage || 0) / 100).toLocaleString();
+                              })())}</span>
                             </div>
                           </div>
                         </div>
@@ -1621,17 +1645,27 @@ const ProjectApprovals: React.FC = () => {
                                 </div>
                               </div>
 
-                              {/* Overheads & Profit */}
+                              {/* Overheads, Profit & Discount */}
                               <div className="bg-yellow-50 rounded-lg p-3 mb-3">
-                                <p className="text-sm font-semibold text-gray-900 mb-2">+ Overheads & Profit</p>
+                                <p className="text-sm font-semibold text-gray-900 mb-2">+ Overheads, Profit & Discount</p>
                                 <div className="space-y-1">
                                   <div className="flex justify-between">
-                                    <span className="text-gray-700">Overhead ({selectedEstimation.overheadPercentage}%)</span>
-                                    <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * selectedEstimation.overheadPercentage / 100).toLocaleString()}</span>
+                                    <span className="text-gray-700">Overhead ({item.overheadPercentage || 0}%)</span>
+                                    <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * (item.overheadPercentage || 0) / 100).toLocaleString()}</span>
                                   </div>
                                   <div className="flex justify-between">
-                                    <span className="text-gray-700">Profit Margin ({selectedEstimation.profitMargin}%)</span>
-                                    <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * selectedEstimation.profitMargin / 100).toLocaleString()}</span>
+                                    <span className="text-gray-700">Profit Margin ({item.profitMarginPercentage || 0}%)</span>
+                                    <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * (item.profitMarginPercentage || 0) / 100).toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className={`${(item.discountPercentage || 0) > 0 ? 'text-red-600' : 'text-gray-700'}`}>Discount ({item.discountPercentage || 0}%)</span>
+                                    <span className={`${(item.discountPercentage || 0) > 0 ? 'text-red-600' : 'text-gray-900'}`}>{(item.discountPercentage || 0) > 0 ? '- ' : ''}AED{((() => {
+                                      const baseCost = item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost;
+                                      const overhead = baseCost * (item.overheadPercentage || 0) / 100;
+                                      const profit = baseCost * (item.profitMarginPercentage || 0) / 100;
+                                      const subtotal = baseCost + overhead + profit;
+                                      return (subtotal * (item.discountPercentage || 0) / 100).toLocaleString();
+                                    })())}</span>
                                   </div>
                                 </div>
                               </div>
@@ -1682,6 +1716,9 @@ const ProjectApprovals: React.FC = () => {
                       const baseCost = totalMaterialCost + totalLaborCost;
                       const overheadAmount = baseCost * selectedEstimation.overheadPercentage / 100;
                       const profitAmount = baseCost * selectedEstimation.profitMargin / 100;
+                      const subtotal = baseCost + overheadAmount + profitAmount;
+                      const discountAmount = subtotal * (selectedEstimation.discountPercentage || 0) / 100;
+                      const finalTotal = subtotal - discountAmount;
 
                       return (
                         <>
@@ -1701,11 +1738,17 @@ const ProjectApprovals: React.FC = () => {
                             <span className="text-gray-600">Profit ({selectedEstimation.profitMargin}%):</span>
                             <span className="font-semibold">AED{profitAmount.toLocaleString()}</span>
                           </div>
+                          {(selectedEstimation.discountPercentage || 0) > 0 && (
+                            <div className="flex justify-between text-sm">
+                              <span className="text-red-600">Discount ({selectedEstimation.discountPercentage}%):</span>
+                              <span className="font-semibold text-red-600">- AED{discountAmount.toLocaleString()}</span>
+                            </div>
+                          )}
                           <div className="border-t border-blue-300 pt-2 mt-2">
                             <div className="flex justify-between">
                               <span className="font-bold text-gray-900">Grand Total:</span>
                               <span className="font-bold text-lg text-green-600">
-                                AED{grandTotal.toLocaleString()}
+                                AED{(grandTotal || finalTotal).toLocaleString()}
                               </span>
                             </div>
                           </div>
@@ -2317,35 +2360,66 @@ const ProjectApprovals: React.FC = () => {
                   <div className="bg-white rounded-lg shadow-sm border border-orange-300 border-2 p-4 mb-4">
                     <h3 className="font-bold text-gray-900 mb-3">Cost Breakdown</h3>
                     <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Material Cost:</span>
-                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.materialCost)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Labour Cost:</span>
-                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.laborCost)}</span>
-                      </div>
-                      <div className="flex justify-between pt-2 border-t">
-                        <span className="text-gray-600">Base Cost:</span>
-                        <span className="font-semibold">AED{formatCurrency(selectedEstimation.materialCost + selectedEstimation.laborCost)}</span>
-                      </div>
-                      <div className="flex justify-between bg-orange-50 p-2 rounded">
-                        <span className="text-orange-800 font-medium">Overhead ({selectedEstimation.overheadPercentage}%):</span>
-                        <span className="font-bold text-orange-800">AED{formatCurrency((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.overheadPercentage / 100)}</span>
-                      </div>
-                      <div className="flex justify-between bg-orange-50 p-2 rounded">
-                        <span className="text-orange-800 font-medium">Profit ({selectedEstimation.profitMargin}%):</span>
-                        <span className="font-bold text-orange-800">AED{formatCurrency((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.profitMargin / 100)}</span>
-                      </div>
-                      <div className="flex justify-between pt-3 border-t-2 border-orange-300 mt-2">
-                        <span className="text-lg font-bold text-gray-900">Total:</span>
-                        <span className="text-lg font-bold text-green-600">AED{formatCurrency(
-                          selectedEstimation.materialCost +
-                          selectedEstimation.laborCost +
-                          ((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.overheadPercentage / 100) +
-                          ((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.profitMargin / 100)
-                        )}</span>
-                      </div>
+                      {(() => {
+                        // Calculate actual overhead, profit, and discount from items
+                        const baseCost = selectedEstimation.materialCost + selectedEstimation.laborCost;
+                        let totalOverhead = 0;
+                        let totalProfit = 0;
+                        let totalDiscount = 0;
+
+                        (selectedEstimation.boqItems || []).forEach((item: any) => {
+                          const itemBaseCost = item.materials.reduce((sum: number, m: any) => sum + m.amount, 0) + item.laborCost;
+                          const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
+                          const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
+                          const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
+                          const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+
+                          totalOverhead += itemOverhead;
+                          totalProfit += itemProfit;
+                          totalDiscount += itemDiscount;
+                        });
+
+                        const subtotalBeforeDiscount = baseCost + totalOverhead + totalProfit;
+                        const finalTotal = subtotalBeforeDiscount - totalDiscount;
+
+                        // Calculate average percentages for display
+                        const avgOverheadPct = baseCost > 0 ? (totalOverhead / baseCost) * 100 : 0;
+                        const avgProfitPct = baseCost > 0 ? (totalProfit / baseCost) * 100 : 0;
+                        const avgDiscountPct = subtotalBeforeDiscount > 0 ? (totalDiscount / subtotalBeforeDiscount) * 100 : 0;
+
+                        return (
+                          <>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Material Cost:</span>
+                              <span className="font-semibold">AED{formatCurrency(selectedEstimation.materialCost)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Labour Cost:</span>
+                              <span className="font-semibold">AED{formatCurrency(selectedEstimation.laborCost)}</span>
+                            </div>
+                            <div className="flex justify-between pt-2 border-t">
+                              <span className="text-gray-600">Base Cost:</span>
+                              <span className="font-semibold">AED{formatCurrency(baseCost)}</span>
+                            </div>
+                            <div className="flex justify-between bg-orange-50 p-2 rounded">
+                              <span className="text-orange-800 font-medium">Overhead ({avgOverheadPct.toFixed(0)}%):</span>
+                              <span className="font-bold text-orange-800">AED{formatCurrency(totalOverhead)}</span>
+                            </div>
+                            <div className="flex justify-between bg-orange-50 p-2 rounded">
+                              <span className="text-orange-800 font-medium">Profit ({avgProfitPct.toFixed(0)}%):</span>
+                              <span className="font-bold text-orange-800">AED{formatCurrency(totalProfit)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className={`${totalDiscount > 0 ? 'text-red-600' : 'text-gray-700'}`}>Discount ({avgDiscountPct.toFixed(0)}%):</span>
+                              <span className={`font-semibold ${totalDiscount > 0 ? 'text-red-600' : 'text-gray-900'}`}>{totalDiscount > 0 ? '- ' : ''}AED{formatCurrency(totalDiscount)}</span>
+                            </div>
+                            <div className="flex justify-between pt-3 border-t-2 border-orange-300 mt-2">
+                              <span className="text-lg font-bold text-gray-900">Total:</span>
+                              <span className="text-lg font-bold text-green-600">AED{formatCurrency(finalTotal)}</span>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -2435,15 +2509,34 @@ const ProjectApprovals: React.FC = () => {
                     <h3 className="font-bold text-gray-900 mb-3">Cost Breakdown</h3>
                     <div className="space-y-2 text-sm">
                       {(() => {
+                        // Calculate actual overhead, profit, and discount from items
                         const baseCost = selectedEstimation.materialCost + selectedEstimation.laborCost;
-                        const overheadAmount = baseCost * selectedEstimation.overheadPercentage / 100;
-                        const profitAmount = baseCost * selectedEstimation.profitMargin / 100;
-                        const totalMarkup = overheadAmount + profitAmount;
-                        const sellingPrice = baseCost + totalMarkup;
+                        let totalOverhead = 0;
+                        let totalProfit = 0;
+                        let totalDiscount = 0;
+
+                        (selectedEstimation.boqItems || []).forEach((item: any) => {
+                          const itemBaseCost = item.materials.reduce((sum: number, m: any) => sum + m.amount, 0) + item.laborCost;
+                          const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
+                          const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
+                          const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
+                          const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+
+                          totalOverhead += itemOverhead;
+                          totalProfit += itemProfit;
+                          totalDiscount += itemDiscount;
+                        });
+
+                        const totalMarkup = totalOverhead + totalProfit;
+                        const subtotalBeforeDiscount = baseCost + totalMarkup;
+                        const finalTotal = subtotalBeforeDiscount - totalDiscount;
+
+                        // Calculate average discount percentage for display
+                        const avgDiscountPct = subtotalBeforeDiscount > 0 ? (totalDiscount / subtotalBeforeDiscount) * 100 : 0;
 
                         // Distribute markup proportionally to materials and labor
-                        const materialRatio = selectedEstimation.materialCost / baseCost;
-                        const laborRatio = selectedEstimation.laborCost / baseCost;
+                        const materialRatio = baseCost > 0 ? selectedEstimation.materialCost / baseCost : 0;
+                        const laborRatio = baseCost > 0 ? selectedEstimation.laborCost / baseCost : 0;
                         const materialMarkupShare = totalMarkup * materialRatio;
                         const laborMarkupShare = totalMarkup * laborRatio;
                         const adjustedMaterialCost = selectedEstimation.materialCost + materialMarkupShare;
@@ -2461,15 +2554,19 @@ const ProjectApprovals: React.FC = () => {
                             </div>
                             <div className="flex justify-between pt-2 border-t">
                               <span className="text-gray-600">Base Cost:</span>
-                              <span className="font-semibold">AED{formatCurrency(sellingPrice)}</span>
+                              <span className="font-semibold">AED{formatCurrency(subtotalBeforeDiscount)}</span>
                             </div>
                             <div className="flex justify-between bg-gray-100 p-2 rounded opacity-40">
                               <span className="text-gray-500 line-through">Overhead & Profit:</span>
                               <span className="text-gray-500 line-through">Hidden from client</span>
                             </div>
+                            <div className="flex justify-between">
+                              <span className={`${totalDiscount > 0 ? 'text-red-600' : 'text-gray-700'}`}>Discount ({avgDiscountPct.toFixed(0)}%):</span>
+                              <span className={`font-semibold ${totalDiscount > 0 ? 'text-red-600' : 'text-gray-900'}`}>{totalDiscount > 0 ? '- ' : ''}AED{formatCurrency(totalDiscount)}</span>
+                            </div>
                             <div className="flex justify-between pt-3 border-t-2 border-blue-300 mt-2">
                               <span className="text-lg font-bold text-gray-900">Total:</span>
-                              <span className="text-lg font-bold text-green-600">AED{formatCurrency(sellingPrice)}</span>
+                              <span className="text-lg font-bold text-green-600">AED{formatCurrency(finalTotal)}</span>
                             </div>
                           </>
                         );

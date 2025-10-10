@@ -63,6 +63,7 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
               materialCost: boq.total_material_cost || 0,
               profitMargin: boq.profit_margin || boq.profit_margin_percentage || 0,
               overheadPercentage: boq.overhead_percentage || boq.overhead || 0,
+              discountPercentage: boq.discount_percentage || 0,
               submittedDate: boq.created_at ? new Date(boq.created_at).toISOString().split('T')[0] : '',
               location: boq.location || boq.project_details?.location || boq.project?.location || 'N/A',
               floor: boq.floor || boq.floor_name || boq.project_details?.floor || boq.project?.floor_name || 'N/A',
@@ -94,7 +95,10 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                     amount: lab.total_cost
                   })) || [],
                   laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
-                  estimatedSellingPrice: sellingPrice
+                  estimatedSellingPrice: sellingPrice,
+                  overheadPercentage: item.overhead_percentage || 0,
+                  profitMarginPercentage: item.profit_margin_percentage || 0,
+                  discountPercentage: item.discount_percentage || 0
                 };
               })
             };

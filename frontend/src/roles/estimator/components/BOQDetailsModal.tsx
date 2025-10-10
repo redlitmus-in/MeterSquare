@@ -148,7 +148,19 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {onEdit && !(displayData?.email_sent || displayData?.status?.toLowerCase() === 'pending' || displayData?.status?.toLowerCase() === 'sent_for_confirmation') && (
+                    {onEdit && (() => {
+                      const status = displayData?.status?.toLowerCase() || '';
+                      // Estimator can edit if: draft, approved, revision_approved, sent_for_confirmation, under_revision, pending_revision
+                      // Cannot edit if: pending (sent to TD), client_confirmed, rejected, completed, client_rejected, client_cancelled
+                      const canEdit = !status ||
+                        status === 'draft' ||
+                        status === 'approved' ||
+                        status === 'revision_approved' ||
+                        status === 'sent_for_confirmation' ||
+                        status === 'under_revision' ||
+                        status === 'pending_revision';
+                      return canEdit;
+                    })() && (
                       <button
                         onClick={onEdit}
                         className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
@@ -452,6 +464,12 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                           <span className="text-gray-600">Total Profit:</span>
                                           <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
                                         </div>
+                                        {(item.discount_percentage || 0) > 0 && (
+                                          <div className="flex justify-between">
+                                            <span className="text-red-600">Discount ({item.discount_percentage}%):</span>
+                                            <span className="font-semibold text-red-600">- {formatCurrency(((item.base_cost || 0) + (item.overhead_amount || 0) + (item.profit_margin_amount || 0)) * (item.discount_percentage / 100))}</span>
+                                          </div>
+                                        )}
                                         <div className="flex justify-between pt-2 border-t border-gray-300 font-bold">
                                           <span className="text-gray-900">Selling Price:</span>
                                           <span className="text-green-600">{formatCurrency(item.selling_price || item.estimatedSellingPrice || item.total_cost)}</span>
@@ -629,6 +647,12 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                           <span className="text-gray-600">Total Profit:</span>
                                           <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
                                         </div>
+                                        {(item.discount_percentage || 0) > 0 && (
+                                          <div className="flex justify-between">
+                                            <span className="text-red-600">Discount ({item.discount_percentage}%):</span>
+                                            <span className="font-semibold text-red-600">- {formatCurrency(((item.base_cost || 0) + (item.overhead_amount || 0) + (item.profit_margin_amount || 0)) * (item.discount_percentage / 100))}</span>
+                                          </div>
+                                        )}
                                         <div className="flex justify-between pt-2 border-t border-gray-300 font-bold">
                                           <span className="text-gray-900">Selling Price:</span>
                                           <span className="text-green-600">{formatCurrency(item.selling_price || item.estimatedSellingPrice || item.total_cost)}</span>
@@ -804,6 +828,12 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                       <span className="text-gray-600">Total Profit:</span>
                                       <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
                                     </div>
+                                    {(item.discount_percentage || 0) > 0 && (
+                                      <div className="flex justify-between">
+                                        <span className="text-red-600">Discount ({item.discount_percentage}%):</span>
+                                        <span className="font-semibold text-red-600">- {formatCurrency(((item.base_cost || 0) + (item.overhead_amount || 0) + (item.profit_margin_amount || 0)) * (item.discount_percentage / 100))}</span>
+                                      </div>
+                                    )}
                                     <div className="flex justify-between pt-2 border-t border-gray-300 font-bold">
                                       <span className="text-gray-900">Selling Price:</span>
                                       <span className="text-green-600">{formatCurrency(item.selling_price || item.estimatedSellingPrice || item.total_cost)}</span>

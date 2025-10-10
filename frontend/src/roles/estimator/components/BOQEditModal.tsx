@@ -270,6 +270,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
             work_type: item.work_type || 'contract',
             overhead_percentage: item.overhead_percentage || 8,
             profit_margin_percentage: item.profit_margin_percentage || 12,
+            discount_percentage: (item as any).discount_percentage || 0,
             status: 'Active',
             materials: (item.materials || []).map(mat => ({
               material_id: mat.master_material_id,
@@ -394,6 +395,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       description: '',
       overhead_percentage: 8,
       profit_margin_percentage: 12,
+      discount_percentage: 0,
       status: 'Active',
       work_type: 'contract' as WorkType,
       materials: [],
@@ -525,7 +527,9 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
     const baseTotal = materialTotal + labourTotal;
     const overheadAmount = baseTotal * (item.overhead_percentage || 0) / 100;
     const profitAmount = baseTotal * (item.profit_margin_percentage || 0) / 100;
-    const sellingPrice = baseTotal + overheadAmount + profitAmount;
+    const subtotal = baseTotal + overheadAmount + profitAmount;
+    const discountAmount = subtotal * (item.discount_percentage || 0) / 100;
+    const sellingPrice = subtotal - discountAmount;
 
     return {
       materialTotal,
@@ -533,6 +537,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       baseTotal,
       overheadAmount,
       profitAmount,
+      discountAmount,
       sellingPrice
     };
   };
@@ -1110,15 +1115,15 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                 )}
                               </div>
 
-                              {/* Overheads & Profit Section */}
+                              {/* Overheads, Profit & Discount Section */}
                               <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
                                 <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
                                   <div className="p-1.5 bg-white rounded shadow-sm">
                                     <Calculator className="w-4 h-4 text-green-600" />
                                   </div>
-                                  Overheads & Profit
+                                  Overheads, Profit & Discount
                                 </h5>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                   <div>
                                     <label className="block text-xs font-semibold text-green-900 mb-2">
                                       Overhead Percentage (%)
@@ -1153,6 +1158,25 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                       <span className="text-sm text-gray-500">%</span>
                                     </div>
                                   </div>
+                                  <div>
+                                    <label className="block text-xs font-semibold text-green-900 mb-2">
+                                      Discount (%)
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="number"
+                                        value={item.discount_percentage || 0}
+                                        onChange={(e) => handleItemChange(itemIndex, 'discount_percentage', Number(e.target.value))}
+                                        className="flex-1 px-3 py-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+                                        step="0.1"
+                                        disabled={isSaving}
+                                        placeholder="0"
+                                        min="0"
+                                        max="100"
+                                      />
+                                      <span className="text-sm text-gray-500">%</span>
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
 
@@ -1176,6 +1200,12 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                     <span className="text-gray-600">Profit:</span>
                                     <span className="font-semibold text-gray-900">AED {totals.profitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                   </div>
+                                  {(item.discount_percentage || 0) > 0 && (
+                                    <div className="flex justify-between py-1">
+                                      <span className="text-red-600">Discount ({item.discount_percentage}%):</span>
+                                      <span className="font-semibold text-red-600">- AED {totals.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                    </div>
+                                  )}
                                   <div className="flex justify-between font-bold border-t border-gray-300 pt-2 mt-2">
                                     <span className="text-gray-900">Selling Price:</span>
                                     <span className="text-gray-900">AED {totals.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>

@@ -31,6 +31,7 @@ interface BOQItemForm {
   labour: BOQLabourForm[];
   overhead_percentage: number;
   profit_margin_percentage: number;
+  discount_percentage: number;
   master_item_id?: number; // Track if this is an existing item
   is_new?: boolean; // Track if this is a new item
 }
@@ -259,6 +260,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       labour: [],
       overhead_percentage: overallOverhead,
       profit_margin_percentage: overallProfit,
+      discount_percentage: 0,
       is_new: true
     };
     setItems(prevItems => [...prevItems, newItem]); // Add new item at the end
@@ -511,7 +513,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     const overheadAmount = baseCost * (item.overhead_percentage / 100);
     const totalCost = baseCost + overheadAmount;
     const profitAmount = baseCost * (item.profit_margin_percentage / 100);
-    const sellingPrice = totalCost + profitAmount;
+    const subtotal = totalCost + profitAmount;
+    const discountAmount = subtotal * (item.discount_percentage / 100);
+    const sellingPrice = subtotal - discountAmount;
     return {
       baseCost,
       materialCost,
@@ -519,6 +523,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       overheadAmount,
       totalCost,
       profitAmount,
+      discountAmount,
       sellingPrice
     };
   };
@@ -699,6 +704,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             work_type: item.work_type,
             overhead_percentage: item.overhead_percentage,
             profit_margin_percentage: item.profit_margin_percentage,
+            discount_percentage: item.discount_percentage,
             materials: item.materials.map(material => ({
               material_name: material.material_name,
               quantity: material.quantity,
@@ -747,6 +753,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             work_type: item.work_type,
             overhead_percentage: item.overhead_percentage,
             profit_margin_percentage: item.profit_margin_percentage,
+            discount_percentage: item.discount_percentage,
             materials: item.materials.map(material => ({
               material_name: material.material_name,
               quantity: material.quantity,
@@ -1506,15 +1513,15 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           </div>
                         </div>
 
-                        {/* Overhead & Profit for this item - Green Theme */}
+                        {/* Overhead, Profit & Discount for this item - Green Theme */}
                         <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
                           <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
                             <div className="p-1.5 bg-white rounded shadow-sm">
                               <Calculator className="w-4 h-4 text-green-600" />
                             </div>
-                            Overheads & Profit
+                            Overheads, Profit & Discount
                           </h5>
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-3 gap-4">
                           <div>
                             <label htmlFor={`overhead-${item.id}`} className="block text-xs text-gray-600 mb-1">Overhead %</label>
                             <div className="flex items-center gap-2">
@@ -1555,6 +1562,27 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               <span className="text-sm text-gray-500">%</span>
                             </div>
                           </div>
+                          <div>
+                            <label htmlFor={`discount-${item.id}`} className="block text-xs text-gray-600 mb-1">Discount %</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                id={`discount-${item.id}`}
+                                type="number"
+                                value={item.discount_percentage === 0 ? '' : item.discount_percentage}
+                                onChange={(e) => {
+                                  const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                  updateItem(item.id, 'discount_percentage', value);
+                                }}
+                                className="flex-1 px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+                                min="0"
+                                max="100"
+                                step="0.1"
+                                disabled={isSubmitting}
+                                placeholder="0"
+                              />
+                              <span className="text-sm text-gray-500">%</span>
+                            </div>
+                          </div>
                           </div>
                         </div>
 
@@ -1581,6 +1609,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                   <span className="text-gray-600">Profit:</span>
                                   <span className="font-semibold text-gray-900">AED {costs.profitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
+                                {(item.discount_percentage || 0) > 0 && (
+                                  <div className="flex justify-between py-1">
+                                    <span className="text-red-600">Discount ({item.discount_percentage}%):</span>
+                                    <span className="font-semibold text-red-600">- AED {costs.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                )}
                                 <div className="flex justify-between font-bold border-t border-gray-300 pt-2 mt-2">
                                   <span className="text-gray-900">Selling Price:</span>
                                   <span className="text-gray-900">AED {costs.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>

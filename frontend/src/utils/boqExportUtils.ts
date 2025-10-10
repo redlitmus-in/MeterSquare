@@ -35,6 +35,9 @@ interface BOQItem {
   }[];
   laborCost: number;
   estimatedSellingPrice: number;
+  overheadPercentage?: number;
+  profitMarginPercentage?: number;
+  discountPercentage?: number;
 }
 
 interface BOQEstimation {
@@ -48,6 +51,7 @@ interface BOQEstimation {
   materialCost: number;
   profitMargin: number;
   overheadPercentage: number;
+  discountPercentage?: number;
   submittedDate: string;
   location: string;
   floor: string;
@@ -71,11 +75,31 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
   const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
-  // Calculate grand total properly
+  // Calculate grand total from items
   const baseCost = estimation.materialCost + estimation.laborCost;
-  const overheadAmount = baseCost * estimation.overheadPercentage / 100;
-  const profitAmount = baseCost * estimation.profitMargin / 100;
-  const grandTotal = baseCost + overheadAmount + profitAmount;
+  let totalOverhead = 0;
+  let totalProfit = 0;
+  let totalDiscount = 0;
+
+  (estimation.boqItems || []).forEach((item) => {
+    const itemBaseCost = item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost;
+    const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
+    const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
+    const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
+    const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+
+    totalOverhead += itemOverhead;
+    totalProfit += itemProfit;
+    totalDiscount += itemDiscount;
+  });
+
+  const subtotal = baseCost + totalOverhead + totalProfit;
+  const grandTotal = subtotal - totalDiscount;
+
+  // Calculate average percentages for display
+  const avgOverheadPct = baseCost > 0 ? (totalOverhead / baseCost) * 100 : 0;
+  const avgProfitPct = baseCost > 0 ? (totalProfit / baseCost) * 100 : 0;
+  const avgDiscountPct = subtotal > 0 ? (totalDiscount / subtotal) * 100 : 0;
 
   // ============================================
   // SINGLE SHEET WITH EVERYTHING
@@ -100,8 +124,11 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
   // Add each BOQ item with full breakdown
   (estimation.boqItems || []).forEach((item, itemIndex) => {
     const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
-    const overhead = (materialTotal + item.laborCost) * estimation.overheadPercentage / 100;
-    const profit = (materialTotal + item.laborCost) * estimation.profitMargin / 100;
+    const itemBaseCost = materialTotal + item.laborCost;
+    const overhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
+    const profit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
+    const itemSubtotal = itemBaseCost + overhead + profit;
+    const discount = itemSubtotal * (item.discountPercentage || 0) / 100;
 
     // Item Header
     allData.push([`${itemIndex + 1}. ${item.description}`, '', '', '']);
@@ -149,10 +176,11 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
       allData.push([]);
     }
 
-    // Overhead & Profit
-    allData.push(['+ OVERHEADS & PROFIT', '', '', '']);
-    allData.push([`Overhead (${estimation.overheadPercentage}%)`, '', '', '', formatCurrency(overhead)]);
-    allData.push([`Profit Margin (${estimation.profitMargin}%)`, '', '', '', formatCurrency(profit)]);
+    // Overhead, Profit & Discount
+    allData.push(['+ OVERHEADS, PROFIT & DISCOUNT', '', '', '']);
+    allData.push([`Overhead (${item.overheadPercentage || 0}%)`, '', '', '', formatCurrency(overhead)]);
+    allData.push([`Profit Margin (${item.profitMarginPercentage || 0}%)`, '', '', '', formatCurrency(profit)]);
+    allData.push([`Discount (${item.discountPercentage || 0}%)`, '', '', '', discount > 0 ? `-${formatCurrency(discount)}` : formatCurrency(0)]);
     allData.push([]);
 
     // Item Total
@@ -168,8 +196,9 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
   allData.push(['Total Material Cost:', formatCurrency(estimation.materialCost)]);
   allData.push(['Total Labor Cost:', formatCurrency(estimation.laborCost)]);
   allData.push(['Base Cost (Material + Labor):', formatCurrency(baseCost)]);
-  allData.push([`Overhead (${estimation.overheadPercentage}%):`, formatCurrency(overheadAmount)]);
-  allData.push([`Profit Margin (${estimation.profitMargin}%):`, formatCurrency(profitAmount)]);
+  allData.push([`Overhead (${avgOverheadPct.toFixed(0)}%):`, formatCurrency(totalOverhead)]);
+  allData.push([`Profit Margin (${avgProfitPct.toFixed(0)}%):`, formatCurrency(totalProfit)]);
+  allData.push([`Discount (${avgDiscountPct.toFixed(0)}%):`, totalDiscount > 0 ? `-${formatCurrency(totalDiscount)}` : formatCurrency(0)]);
   allData.push([]);
   allData.push(['GRAND TOTAL:', formatCurrency(grandTotal)]);
 
@@ -199,12 +228,30 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
   const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
-  // Calculate total - CLIENT VERSION: Selling price with distributed markup
+  // Calculate total from items - CLIENT VERSION: Selling price with distributed markup
   const baseCost = estimation.materialCost + estimation.laborCost;
-  const overheadAmount = baseCost * estimation.overheadPercentage / 100;
-  const profitAmount = baseCost * estimation.profitMargin / 100;
-  const totalMarkup = overheadAmount + profitAmount;
-  const grandTotal = baseCost + totalMarkup; // Client sees same total as internal
+  let totalOverhead = 0;
+  let totalProfit = 0;
+  let totalDiscount = 0;
+
+  (estimation.boqItems || []).forEach((item) => {
+    const itemBaseCost = item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost;
+    const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
+    const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
+    const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
+    const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+
+    totalOverhead += itemOverhead;
+    totalProfit += itemProfit;
+    totalDiscount += itemDiscount;
+  });
+
+  const totalMarkup = totalOverhead + totalProfit;
+  const subtotal = baseCost + totalMarkup;
+  const grandTotal = subtotal - totalDiscount;
+
+  // Calculate average discount percentage for display
+  const avgDiscountPct = subtotal > 0 ? (totalDiscount / subtotal) * 100 : 0;
 
   // Calculate adjusted totals for summary
   let adjustedTotalMaterialCost = 0;
@@ -234,9 +281,9 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
     const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
     const itemBaseCost = materialTotal + item.laborCost;
 
-    // Calculate item's overhead and profit
-    const itemOverhead = itemBaseCost * estimation.overheadPercentage / 100;
-    const itemProfit = itemBaseCost * estimation.profitMargin / 100;
+    // Calculate item's overhead and profit from item-level percentages
+    const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
+    const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
     const itemTotalMarkup = itemOverhead + itemProfit;
 
     // Calculate distribution ratios
@@ -319,8 +366,9 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
   allData.push(['Total Material Cost:', formatCurrency(adjustedTotalMaterialCost)]);
   allData.push(['Total Labor Cost:', formatCurrency(adjustedTotalLaborCost)]);
   allData.push(['Total Project Cost:', formatCurrency(adjustedTotalMaterialCost + adjustedTotalLaborCost)]);
+  allData.push([`Discount (${avgDiscountPct.toFixed(0)}%):`, totalDiscount > 0 ? `-${formatCurrency(totalDiscount)}` : formatCurrency(0)]);
   allData.push([]);
-  allData.push(['TOTAL PROJECT VALUE:', formatCurrency(adjustedTotalMaterialCost + adjustedTotalLaborCost)]);
+  allData.push(['TOTAL PROJECT VALUE:', formatCurrency(grandTotal)]);
 
   const ws = XLSX.utils.aoa_to_sheet(allData);
   ws['!cols'] = [
@@ -351,11 +399,31 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
   const doc = new jsPDF();
   let yPos = 15;
 
-  // Calculate totals
+  // Calculate totals from items
   const baseCost = estimation.materialCost + estimation.laborCost;
-  const overheadAmount = baseCost * estimation.overheadPercentage / 100;
-  const profitAmount = baseCost * estimation.profitMargin / 100;
-  const grandTotal = baseCost + overheadAmount + profitAmount;
+  let totalOverhead = 0;
+  let totalProfit = 0;
+  let totalDiscount = 0;
+
+  (estimation.boqItems || []).forEach((item) => {
+    const itemBaseCost = item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost;
+    const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
+    const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
+    const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
+    const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+
+    totalOverhead += itemOverhead;
+    totalProfit += itemProfit;
+    totalDiscount += itemDiscount;
+  });
+
+  const subtotal = baseCost + totalOverhead + totalProfit;
+  const grandTotal = subtotal - totalDiscount;
+
+  // Calculate average percentages for display
+  const avgOverheadPct = baseCost > 0 ? (totalOverhead / baseCost) * 100 : 0;
+  const avgProfitPct = baseCost > 0 ? (totalProfit / baseCost) * 100 : 0;
+  const avgDiscountPct = subtotal > 0 ? (totalDiscount / subtotal) * 100 : 0;
 
   // Add company logo
   try {
@@ -413,8 +481,11 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
     }
 
     const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
-    const overhead = (materialTotal + item.laborCost) * estimation.overheadPercentage / 100;
-    const profit = (materialTotal + item.laborCost) * estimation.profitMargin / 100;
+    const itemBaseCost = materialTotal + item.laborCost;
+    const overhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
+    const profit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
+    const itemSubtotal = itemBaseCost + overhead + profit;
+    const discount = itemSubtotal * (item.discountPercentage || 0) / 100;
 
     // Item Header
     doc.setFillColor(230, 240, 255);
@@ -506,17 +577,25 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
     doc.rect(16, yPos - 2, 178, 6, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.text('+ Overheads & Profit', 18, yPos + 2);
+    doc.text('+ Overheads, Profit & Discount', 18, yPos + 2);
     yPos += 8;
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
-    doc.text(`Overhead (${estimation.overheadPercentage}%)`, 20, yPos);
+    doc.text(`Overhead (${item.overheadPercentage || 0}%)`, 20, yPos);
     doc.text(`AED ${formatCurrency(overhead)}`, 170, yPos, { align: 'right' });
     yPos += 5;
 
-    doc.text(`Profit Margin (${estimation.profitMargin}%)`, 20, yPos);
+    doc.text(`Profit Margin (${item.profitMarginPercentage || 0}%)`, 20, yPos);
     doc.text(`AED ${formatCurrency(profit)}`, 170, yPos, { align: 'right' });
+    yPos += 5;
+
+    if (discount > 0) {
+      doc.setTextColor(220, 38, 38);
+    }
+    doc.text(`Discount (${item.discountPercentage || 0}%)`, 20, yPos);
+    doc.text(`${discount > 0 ? '-' : ''}AED ${formatCurrency(discount)}`, 170, yPos, { align: 'right' });
+    doc.setTextColor(0);
     yPos += 7;
 
     // Item Total
@@ -568,12 +647,26 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
   doc.text('Base Cost:', leftX, yPos);
   doc.text(`AED ${formatCurrency(baseCost)}`, leftX + 50, yPos);
 
-  doc.text(`Overhead (${estimation.overheadPercentage}%):`, rightX, yPos);
-  doc.text(`AED ${formatCurrency(overheadAmount)}`, rightX + 40, yPos);
+  doc.text(`Overhead (${avgOverheadPct.toFixed(0)}%):`, rightX, yPos);
+  doc.text(`AED ${formatCurrency(totalOverhead)}`, rightX + 40, yPos);
   yPos += 5;
 
-  doc.text(`Profit (${estimation.profitMargin}%):`, leftX, yPos);
-  doc.text(`AED ${formatCurrency(profitAmount)}`, leftX + 50, yPos);
+  doc.text(`Profit (${avgProfitPct.toFixed(0)}%):`, leftX, yPos);
+  doc.text(`AED ${formatCurrency(totalProfit)}`, leftX + 50, yPos);
+
+  yPos += 5;
+  if (totalDiscount > 0) {
+    doc.setTextColor(239, 68, 68); // Red color for discount
+  }
+  doc.text(`Discount (${avgDiscountPct.toFixed(0)}%):`, leftX, yPos);
+  doc.text(`${totalDiscount > 0 ? '-' : ''}AED ${formatCurrency(totalDiscount)}`, leftX + 50, yPos);
+  doc.setTextColor(0);
+
+  if (false) { // Old code removed
+    doc.text(`Discount (${estimation.discountPercentage}%):`, rightX, yPos);
+    doc.text(`- AED ${formatCurrency(discountAmount)}`, rightX + 40, yPos);
+    doc.setTextColor(0); // Reset to black
+  }
   yPos += 8;
 
   // Grand Total - Compact
@@ -603,12 +696,30 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   const doc = new jsPDF();
   let yPos = 15;
 
-  // Calculate total - CLIENT VERSION: Selling price with distributed markup
+  // Calculate total from items - CLIENT VERSION: Selling price with distributed markup
   const baseCost = estimation.materialCost + estimation.laborCost;
-  const overheadAmount = baseCost * estimation.overheadPercentage / 100;
-  const profitAmount = baseCost * estimation.profitMargin / 100;
-  const totalMarkup = overheadAmount + profitAmount;
-  const grandTotal = baseCost + totalMarkup; // Client sees same total as internal
+  let totalOverhead = 0;
+  let totalProfit = 0;
+  let totalDiscount = 0;
+
+  (estimation.boqItems || []).forEach((item) => {
+    const itemBaseCost = item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost;
+    const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
+    const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
+    const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
+    const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+
+    totalOverhead += itemOverhead;
+    totalProfit += itemProfit;
+    totalDiscount += itemDiscount;
+  });
+
+  const totalMarkup = totalOverhead + totalProfit;
+  const subtotal = baseCost + totalMarkup;
+  const grandTotal = subtotal - totalDiscount;
+
+  // Calculate average discount percentage for display
+  const avgDiscountPct = subtotal > 0 ? (totalDiscount / subtotal) * 100 : 0;
 
   // Track adjusted costs for summary
   let adjustedTotalMaterialCost = 0;
@@ -671,9 +782,9 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
     const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
     const itemBaseCost = materialTotal + item.laborCost;
 
-    // Calculate item's overhead and profit
-    const itemOverhead = itemBaseCost * estimation.overheadPercentage / 100;
-    const itemProfit = itemBaseCost * estimation.profitMargin / 100;
+    // Calculate item's overhead and profit from item-level percentages
+    const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
+    const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
     const itemTotalMarkup = itemOverhead + itemProfit;
 
     // Calculate distribution ratios
@@ -828,6 +939,15 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   doc.setFont('helvetica', 'bold');
   doc.text('Total Project Cost:', 18, yPos);
   doc.text(`AED${formatCurrency(adjustedTotalMaterialCost + adjustedTotalLaborCost)}`, 75, yPos, { align: 'right' });
+
+  yPos += 5;
+  doc.setFont('helvetica', 'normal');
+  if (totalDiscount > 0) {
+    doc.setTextColor(239, 68, 68); // Red color for discount
+  }
+  doc.text(`Discount (${avgDiscountPct.toFixed(0)}%):`, 18, yPos);
+  doc.text(`${totalDiscount > 0 ? '-' : ''} AED${formatCurrency(totalDiscount)}`, 75, yPos, { align: 'right' });
+  doc.setTextColor(0); // Reset to black
   yPos += 8;
 
   // Grand Total - Compact Green Bar
@@ -835,7 +955,7 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   doc.setFontSize(10);
   doc.setTextColor(22, 163, 74);
   doc.text('Grand Total:', 18, yPos);
-  doc.text(`AED${formatCurrency(adjustedTotalMaterialCost + adjustedTotalLaborCost)}`, 160, yPos, { align: 'right' });
+  doc.text(`AED${formatCurrency(grandTotal)}`, 160, yPos, { align: 'right' });
 
   // Save PDF
   const fileName = `BOQ_${estimation.projectName.replace(/\s+/g, '_')}_Client_${new Date().toISOString().split('T')[0]}.pdf`;
