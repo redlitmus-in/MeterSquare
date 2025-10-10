@@ -1939,8 +1939,7 @@ const EstimatorHub: React.FC = () => {
                               )}
                             </button>
                             <button
-                              className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                              style={{ backgroundColor: 'rgb(59, 130, 246)' }}
+                              className="flex-1 min-w-[80px] bg-gradient-to-r from-[#243d8a]/10 to-[#243d8a]/20 text-[#243d8a] text-[10px] sm:text-xs h-8 rounded hover:from-[#243d8a]/20 hover:to-[#243d8a]/30 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed border border-[#243d8a]/20"
                               onClick={() => handleSendToPM(project)}
                               disabled={sendingToTD}
                               title="Send to Project Manager"
