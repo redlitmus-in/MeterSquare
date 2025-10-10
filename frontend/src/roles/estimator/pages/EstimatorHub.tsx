@@ -430,16 +430,16 @@ const EstimatorHub: React.FC = () => {
 
       // Filter by tab status based on workflow - USE STATUS ONLY
       if (activeTab === 'projects') {
-        // Pending: Draft BOQs not sent to TD yet (no status or status = draft) OR client_rejected (needs revision)
+        // Pending: Draft BOQs not sent to TD/PM yet (no status or status = draft) OR client_rejected (needs revision)
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase() || '';
-          return !status || status === 'draft' || status === 'client_rejected' || (status !== 'pending' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled');
+          return !status || status === 'draft' || status === 'client_rejected' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled');
         });
       } else if (activeTab === 'sent') {
-        // Send BOQ: Sent to TD, waiting for approval (status = pending ONLY, not revisions)
+        // Send BOQ: Sent to TD or PM, waiting for approval
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
-          return status === 'pending';
+          return status === 'pending' || status === 'pending_pm_approval';
         });
       } else if (activeTab === 'revisions') {
         // Revisions: BOQs under revision OR sent to TD for revision approval OR revision approved
@@ -1046,10 +1046,10 @@ const EstimatorHub: React.FC = () => {
       ).length;
     }, [boq.history]);
 
-    // Draft: Not sent to TD yet (can edit/delete/send) - status NOT in workflow states
-    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled');
-    // Sent to TD: Waiting for TD approval
-    const isSentToTD = status === 'pending';
+    // Draft: Not sent to TD/PM yet (can edit/delete/send) - status NOT in workflow states
+    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled');
+    // Sent to TD or PM: Waiting for approval
+    const isSentToTD = status === 'pending' || status === 'pending_pm_approval';
     // Pending Revision: Revised BOQ sent to TD for approval
     const isPendingRevision = status === 'pending_revision';
     // Under Revision: BOQ edited, ready to send to TD
@@ -1459,7 +1459,7 @@ const EstimatorHub: React.FC = () => {
                     </Button>
                     {(() => {
                       const status = boq.status?.toLowerCase() || '';
-                      const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled' && status !== 'client_rejected');
+                      const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled' && status !== 'client_rejected');
                       const isPendingRevision = status === 'pending_revision';
                       const isUnderRevision = status === 'under_revision';
                       const isApprovedByTD = status === 'approved';
@@ -1706,7 +1706,7 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Sent</span>
                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
                   const status = b.status?.toLowerCase();
-                  return status === 'pending';
+                  return status === 'pending' || status === 'pending_pm_approval';
                 }).length})</span>
               </TabsTrigger>
               <TabsTrigger

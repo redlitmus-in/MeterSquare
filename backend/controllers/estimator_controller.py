@@ -371,8 +371,9 @@ def send_boq_to_project_manager():
         )
 
         if email_sent:
-            # Update BOQ status to indicate it's sent to PM
-            boq.status = 'Pending'
+            # Update BOQ status to indicate it's sent to PM for approval
+            # Use different status: "Pending" for TD, "Pending_PM_Approval" for PM
+            boq.status = 'Pending_PM_Approval'
             boq.last_modified_by = current_user_name
             boq.last_modified_at = datetime.utcnow()
             boq.email_sent = True

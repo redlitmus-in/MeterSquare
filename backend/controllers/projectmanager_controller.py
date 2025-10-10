@@ -545,6 +545,7 @@ def assign_projects():
         return jsonify({
             "error": f"Failed to assign projects: {str(e)}",
             "error_type": type(e).__name__
+        }), 500
 
 def send_boq_to_estimator():
     """Send BOQ to a specific Estimator"""
