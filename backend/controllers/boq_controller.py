@@ -732,6 +732,14 @@ def get_all_boq():
 
                 if sender_role == 'technicaldirector' and receiver_role == 'projectmanager':
                     display_status = 'Client_Confirmed'
+                elif sender_role == 'projectmanager' and receiver_role == 'siteengineer':
+                    display_status = 'Client_Confirmed'
+                elif sender_role == 'siteengineer' and receiver_role == 'projectmanager':
+                    display_status = 'Client_Confirmed'
+                elif sender_role == 'project_manager' and receiver_role == 'site_engineer':
+                    display_status = 'Client_Confirmed'
+                elif sender_role == 'site_engineer' and receiver_role == 'project_manager':
+                    display_status = 'Client_Confirmed'
             elif boq.status in ['new_purchase_create', 'new_purchase_approved', 'new_purchase_rejected', 'approved']:
                 display_status = 'Client_Confirmed'
 
@@ -1462,7 +1470,6 @@ def send_boq_email(boq_id):
                     "type": "revision_sent" if is_revision else "email_sent",
                     "sender": "estimator",
                     "receiver": "technicalDirector",
-                    "status": new_status.lower(),
                     "status": "pending",
                     "comments": comments if comments else "BOQ sent for review and approval",
                     "timestamp": datetime.utcnow().isoformat(),
