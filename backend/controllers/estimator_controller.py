@@ -306,10 +306,9 @@ def send_boq_to_project_manager():
         if not current_user:
             return jsonify({"error": "User not authenticated"}), 401
 
-        current_user_name = current_user.get('full_name', 'Technical Director')
+        current_user_name = current_user.get('full_name')
         current_user_id = current_user.get('user_id')
-        current_user_role = current_user.get('role_name', 'technical_director')
-
+        current_user_role = current_user.get('role')
         # Get BOQ
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq:
@@ -373,7 +372,7 @@ def send_boq_to_project_manager():
         if email_sent:
             # Update BOQ status to indicate it's sent to PM for approval
             # Use different status: "Pending" for TD, "Pending_PM_Approval" for PM
-            boq.status = 'Pending_PM_Approval'
+            boq.status = 'Pending'
             boq.last_modified_by = current_user_name
             boq.last_modified_at = datetime.utcnow()
             boq.email_sent = True
