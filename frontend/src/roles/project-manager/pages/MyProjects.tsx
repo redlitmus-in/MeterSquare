@@ -19,6 +19,12 @@ import { projectManagerService } from '../services/projectManagerService';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
+import RequestExtraMaterialsModal from '@/components/modals/RequestExtraMaterialsModal';
+import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
+import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
+import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
+import RejectedRequestsSection from '@/components/boq/RejectedRequestsSection';
+import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 
 interface BOQDetails {
   boq_detail_id?: number;
@@ -127,6 +133,12 @@ const MyProjects: React.FC = () => {
   const [showCreateBOQModal, setShowCreateBOQModal] = useState(false);
   const [selectedProjectForBOQ, setSelectedProjectForBOQ] = useState<Project | null>(null);
   const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [showRequestMaterialsModal, setShowRequestMaterialsModal] = useState(false);
+  const [pendingChangeRequests, setPendingChangeRequests] = useState<ChangeRequestItem[]>([]);
+  const [approvedChangeRequests, setApprovedChangeRequests] = useState<ChangeRequestItem[]>([]);
+  const [rejectedChangeRequests, setRejectedChangeRequests] = useState<ChangeRequestItem[]>([]);
+  const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
+  const [showChangeRequestModal, setShowChangeRequestModal] = useState(false);
   const [projectToComplete, setProjectToComplete] = useState<Project | null>(null);
   const [completing, setCompleting] = useState(false);
 
@@ -298,6 +310,17 @@ const MyProjects: React.FC = () => {
             p.boq_id === boqId ? { ...p, boq_details: boqDetails } : p
           )
         );
+
+        // Load change requests for this BOQ
+        const crResponse = await changeRequestService.getBOQChangeRequests(boqId);
+        if (crResponse.success) {
+          const pending = crResponse.data.filter(cr => cr.status === 'pending');
+          const approved = crResponse.data.filter(cr => cr.status === 'approved');
+          const rejected = crResponse.data.filter(cr => cr.status === 'rejected');
+          setPendingChangeRequests(pending);
+          setApprovedChangeRequests(approved);
+          setRejectedChangeRequests(rejected);
+        }
 
         setShowBOQModal(true);
       } else {
@@ -651,10 +674,15 @@ const MyProjects: React.FC = () => {
                   <p className="text-xs text-blue-600 mt-1">Working Hours: {selectedProject.area || 'N/A'}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* <button className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center gap-2">
-                    <ArrowDownTrayIcon className="w-4 h-4" />
-                    Download
-                  </button> */}
+                  {selectedProject.boq_id && (
+                    <button
+                      onClick={() => setShowRequestMaterialsModal(true)}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors flex items-center gap-2"
+                    >
+                      <DocumentTextIcon className="w-4 h-4" />
+                      Request Extra Materials
+                    </button>
+                  )}
                   <button
                     onClick={() => setShowBOQModal(false)}
                     className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
@@ -672,6 +700,133 @@ const MyProjects: React.FC = () => {
                 </div>
               ) : (
                 <>
+                  {/* Overhead Budget Overview */}
+                  {(() => {
+                    const allRequests = [...pendingChangeRequests, ...approvedChangeRequests, ...rejectedChangeRequests];
+                    const sampleRequest = allRequests.find(r => r.overhead_analysis);
+                    if (!sampleRequest?.overhead_analysis) return null;
+
+                    const totalConsumedFromApproved = approvedChangeRequests.reduce((sum, req) => sum + (req.materials_total_cost || 0), 0);
+                    const overheadAnalysis = sampleRequest.overhead_analysis;
+                    const totalAllocated = overheadAnalysis.original_allocated || 0;
+                    const availableBudget = totalAllocated - totalConsumedFromApproved;
+                    const isOverBudget = availableBudget < 0;
+
+                    return (
+                      <div className="mb-6">
+                        <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-t-lg px-4 py-3">
+                          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            Overhead Budget Overview
+                          </h3>
+                        </div>
+                        <div className="border-2 border-blue-200 rounded-b-lg p-4 bg-blue-50/30">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div className="bg-white rounded-lg p-4 border border-blue-200 shadow-sm">
+                              <p className="text-xs text-gray-600 mb-1 font-medium">Total Overhead Allocated</p>
+                              <p className="text-xl font-bold text-blue-900">
+                                AED {totalAllocated.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                ({overheadAnalysis.overhead_percentage || 0}% of base cost)
+                              </p>
+                            </div>
+                            <div className="bg-white rounded-lg p-4 border border-orange-200 shadow-sm">
+                              <p className="text-xs text-gray-600 mb-1 font-medium">Already Consumed</p>
+                              <p className="text-xl font-bold text-orange-600">
+                                AED {totalConsumedFromApproved.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                From {approvedChangeRequests.length} approved request(s)
+                              </p>
+                            </div>
+                            <div className="bg-white rounded-lg p-4 border border-green-200 shadow-sm">
+                              <p className="text-xs text-gray-600 mb-1 font-medium">Available Overhead Budget</p>
+                              <p className={`text-xl font-bold ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
+                                AED {availableBudget.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">Remaining for extra materials</p>
+                            </div>
+                            <div className={`bg-white rounded-lg p-4 border shadow-sm ${isOverBudget ? 'border-red-200' : 'border-green-200'}`}>
+                              <p className="text-xs text-gray-600 mb-1 font-medium">Budget Status</p>
+                              <p className={`text-xl font-bold ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
+                                {!isOverBudget ? '✓ Healthy' : '⚠ Over Budget'}
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {!isOverBudget ? 'Sufficient funds available' : 'Exceeds allocated budget'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-4 p-3 bg-blue-100 border border-blue-300 rounded-lg">
+                            <p className="text-xs text-blue-800">
+                              <strong>Note:</strong> The overhead budget is used to cover additional material costs for change requests.
+                              Each approved extra material request will consume from this allocated budget.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Pending Change Requests */}
+                  <PendingRequestsSection
+                    requests={pendingChangeRequests}
+                    onViewDetails={async (crId) => {
+                      const response = await changeRequestService.getChangeRequestById(crId);
+                      if (response.success && response.data) {
+                        setSelectedChangeRequest(response.data);
+                        setShowChangeRequestModal(true);
+                      } else {
+                        toast.error('Failed to load change request details');
+                      }
+                    }}
+                    onStatusUpdate={async () => {
+                      if (selectedProject?.boq_id) {
+                        await loadBOQDetails(selectedProject.boq_id);
+                      }
+                    }}
+                  />
+
+                  {/* Approved Extra Materials */}
+                  {approvedChangeRequests.length > 0 && (
+                    <ApprovedExtraMaterialsSection
+                      materials={approvedChangeRequests.flatMap(cr =>
+                        cr.materials_data.map(mat => ({
+                          id: cr.cr_id,
+                          item_name: mat.material_name,
+                          quantity: mat.quantity,
+                          unit: mat.unit,
+                          unit_price: mat.unit_price,
+                          total_price: mat.total_price,
+                          change_request_id: cr.cr_id,
+                          related_item: mat.related_item,
+                          approval_date: cr.approval_date,
+                          approved_by_name: cr.approved_by_name
+                        }))
+                      )}
+                      onViewChangeRequest={(crId) => {
+                        setSelectedChangeRequestId(crId);
+                        setShowChangeRequestModal(true);
+                      }}
+                    />
+                  )}
+
+                  {/* Rejected Requests */}
+                  <RejectedRequestsSection
+                    requests={rejectedChangeRequests}
+                    onViewDetails={async (crId) => {
+                      const response = await changeRequestService.getChangeRequestById(crId);
+                      if (response.success && response.data) {
+                        setSelectedChangeRequest(response.data);
+                        setShowChangeRequestModal(true);
+                      } else {
+                        toast.error('Failed to load change request details');
+                      }
+                    }}
+                  />
+
                   {/* Existing Purchase Section */}
                   {selectedProject.existingPurchaseItems && selectedProject.existingPurchaseItems.length > 0 && (
                     <div className="mb-8">
@@ -1622,6 +1777,91 @@ const MyProjects: React.FC = () => {
           </motion.div>
         </div>
       )}
+
+      {/* Request Extra Materials Modal */}
+      {selectedProject?.boq_id && (
+        <RequestExtraMaterialsModal
+          isOpen={showRequestMaterialsModal}
+          onClose={() => setShowRequestMaterialsModal(false)}
+          boqId={selectedProject.boq_id}
+          boqName={selectedProject.boq_name || selectedProject.project_name}
+          boqItems={[
+            ...(selectedProject.existingPurchaseItems || []).map(item => ({
+              id: item.id,
+              description: item.description || item.briefDescription || `Item ${item.id}`
+            })),
+            ...(selectedProject.newPurchaseItems || []).map(item => ({
+              id: item.id,
+              description: item.description || item.briefDescription || `Item ${item.id}`
+            }))
+          ]}
+          overheadBudget={(() => {
+            const allRequests = [...pendingChangeRequests, ...approvedChangeRequests, ...rejectedChangeRequests];
+            const sampleRequest = allRequests.find(r => r.overhead_analysis);
+            if (!sampleRequest?.overhead_analysis) return undefined;
+
+            const totalConsumedFromApproved = approvedChangeRequests.reduce((sum, req) => sum + (req.materials_total_cost || 0), 0);
+            const totalAllocated = sampleRequest.overhead_analysis.original_allocated || 0;
+            const available = totalAllocated - totalConsumedFromApproved;
+
+            return {
+              totalAllocated,
+              alreadyConsumed: totalConsumedFromApproved,
+              available
+            };
+          })()}
+          onSuccess={() => {
+            toast.success('Extra materials request submitted successfully');
+            if (selectedProject.boq_id) {
+              loadBOQDetails(selectedProject.boq_id);
+            }
+          }}
+        />
+      )}
+
+      {/* Change Request Details Modal */}
+      <ChangeRequestDetailsModal
+        isOpen={showChangeRequestModal}
+        onClose={() => {
+          setShowChangeRequestModal(false);
+          setSelectedChangeRequest(null);
+        }}
+        changeRequest={selectedChangeRequest}
+        onApprove={async () => {
+          if (selectedChangeRequest) {
+            const response = await changeRequestService.approve(selectedChangeRequest.cr_id);
+            if (response.success) {
+              toast.success('Change request approved');
+              setShowChangeRequestModal(false);
+              setSelectedChangeRequest(null);
+              if (selectedProject?.boq_id) {
+                await loadBOQDetails(selectedProject.boq_id);
+              }
+            } else {
+              toast.error(response.message || 'Failed to approve');
+            }
+          }
+        }}
+        onReject={async () => {
+          if (selectedChangeRequest) {
+            const reason = prompt('Please provide a reason for rejection:');
+            if (!reason) return;
+
+            const response = await changeRequestService.reject(selectedChangeRequest.cr_id, reason);
+            if (response.success) {
+              toast.success('Change request rejected');
+              setShowChangeRequestModal(false);
+              setSelectedChangeRequest(null);
+              if (selectedProject?.boq_id) {
+                await loadBOQDetails(selectedProject.boq_id);
+              }
+            } else {
+              toast.error(response.message || 'Failed to reject');
+            }
+          }
+        }}
+        canApprove={selectedChangeRequest?.approval_required_from === 'project_manager' && selectedChangeRequest?.status !== 'approved' && selectedChangeRequest?.status !== 'rejected'}
+      />
     </div>
   );
 };

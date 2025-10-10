@@ -47,6 +47,13 @@ def jwt_required(func):
             if not user:
                 return jsonify({"error": "User not found"}), 404
 
+            # Get role name safely
+            role_name = "user"
+            if user.role_id:
+                role = Role.query.filter_by(role_id=user.role_id, is_deleted=False).first()
+                if role:
+                    role_name = role.role
+
             # Manually create user dict since no to_dict method
             g.user = {
                 "user_id": user.user_id,
@@ -54,6 +61,8 @@ def jwt_required(func):
                 "full_name": user.full_name,
                 "phone": user.phone,
                 "role_id": user.role_id,
+                "role": role_name,
+                "role_name": role_name,
                 "department": user.department,
                 "is_active": user.is_active,
                 "user_status": user.user_status or 'offline'

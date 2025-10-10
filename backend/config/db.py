@@ -1,11 +1,13 @@
 import os
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
 db = SQLAlchemy()
+migrate = Migrate()
 
 def initialize_db(app):
     """Initialize SQLAlchemy with app config."""
@@ -15,10 +17,11 @@ def initialize_db(app):
     # ✅ Add safe connection pool settings (to avoid Supabase pooler error)
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         "pool_size": 15,       # keep small, Supabase pooler is limited
-        "max_overflow": 5,    # don’t exceed pool_size
+        "max_overflow": 5,    # don't exceed pool_size
         "pool_timeout": 30,   # wait before raising error
         "pool_recycle": 1800  # refresh stale connections
     }
-    
+
     db.init_app(app)
+    migrate.init_app(app, db)
     # return db

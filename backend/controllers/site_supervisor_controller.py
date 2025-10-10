@@ -103,13 +103,20 @@ def get_all_sitesupervisor_boqs():
                         project_status = 'assigned'
                         break
 
+            # Calculate end_date from start_date and duration_days
+            end_date = None
+            if project.start_date and project.duration_days:
+                from datetime import timedelta
+                end_date = (project.start_date + timedelta(days=project.duration_days)).isoformat()
+
             projects_list.append({
                 "project_id": project.project_id,
                 "project_name": project.project_name,
                 "client": project.client,
                 "location": project.location,
                 "start_date": project.start_date.isoformat() if project.start_date else None,
-                "end_date": project.end_date.isoformat() if project.end_date else None,
+                "end_date": end_date,
+                "duration_days": project.duration_days,
                 "status": project_status,
                 "description": project.description,
                 "created_at": project.created_at.isoformat() if project.created_at else None,

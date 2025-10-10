@@ -46,13 +46,12 @@ const TechnicalDirectorHub = lazy(() => import('@/roles/technical-director/pages
 const ProjectApprovals = lazy(() => import('@/roles/technical-director/pages/ProjectApprovals'));
 const TeamAssignment = lazy(() => import('@/roles/technical-director/pages/TeamAssignment'));
 const ProjectsOverview = lazy(() => import('@/roles/technical-director/pages/ProjectsOverview'));
-const TDChangeRequestsPage = lazy(() => import('@/roles/technical-director/pages/ChangeRequestsPage'));
-
-// Estimator Pages
-const EstimatorChangeRequestsPage = lazy(() => import('@/roles/estimator/pages/ChangeRequestsPage'));
 
 // Project Manager Pages
 const MyProjects = lazy(() => import('@/roles/project-manager/pages/MyProjects'));
+
+// Role-based Change Requests
+const RoleBasedChangeRequests = lazy(() => import('@/components/routing/RoleBasedChangeRequests'));
 
 // Site Engineer Pages
 const SiteEngineerProjects = lazy(() => import('@/roles/site-engineer/pages/MyProjects'));
@@ -418,13 +417,12 @@ function App() {
             <Route path="project-approvals" element={<ProjectApprovals />} />
             <Route path="team-assignment" element={<TeamAssignment />} />
             <Route path="projects-overview" element={<ProjectsOverview />} />
-            <Route path="change-requests" element={<TDChangeRequestsPage />} />
-
-            {/* Estimator Routes */}
-            <Route path="change-requests-estimator" element={<EstimatorChangeRequestsPage />} />
 
             {/* Project Manager specific routes */}
             <Route path="my-projects" element={<MyProjects />} />
+
+            {/* Role-based Change Requests - Single route for all roles */}
+            <Route path="change-requests" element={<RoleBasedChangeRequests />} />
 
             {/* Site Engineer specific routes - Temporarily commented out */}
             {/* <Route path="my-project" element={<MyProject />} /> */}

@@ -16,6 +16,12 @@ import { useAuthStore } from '@/store/authStore';
 import { siteEngineerService } from '../services/siteEngineerService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
+import RequestExtraMaterialsModal from '@/components/modals/RequestExtraMaterialsModal';
+import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
+import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
+import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
+import RejectedRequestsSection from '@/components/boq/RejectedRequestsSection';
+import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 
 interface BOQItem {
   id: number;
@@ -56,6 +62,8 @@ interface Project {
   created_at?: string;
   priority?: 'high' | 'medium' | 'low';
   boq_ids?: number[];
+  boq_id?: number;
+  boq_name?: string;
   boq_summary?: {
     total_cost: number;
     total_items: number;
@@ -81,6 +89,12 @@ const MyProjects: React.FC = () => {
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [projectToRequest, setProjectToRequest] = useState<Project | null>(null);
   const [requesting, setRequesting] = useState(false);
+  const [showRequestMaterialsModal, setShowRequestMaterialsModal] = useState(false);
+  const [pendingChangeRequests, setPendingChangeRequests] = useState<ChangeRequestItem[]>([]);
+  const [approvedChangeRequests, setApprovedChangeRequests] = useState<ChangeRequestItem[]>([]);
+  const [rejectedChangeRequests, setRejectedChangeRequests] = useState<ChangeRequestItem[]>([]);
+  const [selectedChangeRequestId, setSelectedChangeRequestId] = useState<number | null>(null);
+  const [showChangeRequestModal, setShowChangeRequestModal] = useState(false);
 
   useEffect(() => {
     loadProjects();
@@ -185,9 +199,22 @@ const MyProjects: React.FC = () => {
       // Update selected project
       setSelectedProject({
         ...project,
+        boq_id: boqId,
+        boq_name: details.boq_name || `BOQ-${boqId}`,
         existingPurchaseItems: existingItems,
         newPurchaseItems: newItems
       });
+
+      // Load change requests for this BOQ
+      const crResponse = await changeRequestService.getBOQChangeRequests(boqId);
+      if (crResponse.success) {
+        const pending = crResponse.data.filter(cr => cr.status === 'pending');
+        const approved = crResponse.data.filter(cr => cr.status === 'approved');
+        const rejected = crResponse.data.filter(cr => cr.status === 'rejected');
+        setPendingChangeRequests(pending);
+        setApprovedChangeRequests(approved);
+        setRejectedChangeRequests(rejected);
+      }
     } catch (error: any) {
       console.error('Error loading project details:', error);
       toast.error(error?.response?.data?.error || 'Failed to load project details');
@@ -453,10 +480,15 @@ const MyProjects: React.FC = () => {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* <button className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center gap-2">
-                    <ArrowDownTrayIcon className="w-4 h-4" />
-                    Download
-                  </button> */}
+                  {selectedProject.boq_id && (
+                    <button
+                      onClick={() => setShowRequestMaterialsModal(true)}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors flex items-center gap-2"
+                    >
+                      <DocumentTextIcon className="w-4 h-4" />
+                      Request Extra Materials
+                    </button>
+                  )}
                   <button
                     onClick={handleCloseModal}
                     className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
@@ -474,6 +506,53 @@ const MyProjects: React.FC = () => {
                 </div>
               ) : (
                 <>
+                  {/* Pending Change Requests */}
+                  <PendingRequestsSection
+                    requests={pendingChangeRequests}
+                    onViewDetails={(crId) => {
+                      setSelectedChangeRequestId(crId);
+                      setShowChangeRequestModal(true);
+                    }}
+                    onStatusUpdate={async () => {
+                      if (selectedProject) {
+                        await handleViewProject(selectedProject);
+                      }
+                    }}
+                  />
+
+                  {/* Approved Extra Materials */}
+                  {approvedChangeRequests.length > 0 && (
+                    <ApprovedExtraMaterialsSection
+                      materials={approvedChangeRequests.flatMap(cr =>
+                        cr.materials_data.map(mat => ({
+                          id: cr.cr_id,
+                          item_name: mat.material_name,
+                          quantity: mat.quantity,
+                          unit: mat.unit,
+                          unit_price: mat.unit_price,
+                          total_price: mat.total_price,
+                          change_request_id: cr.cr_id,
+                          related_item: mat.related_item,
+                          approval_date: cr.approval_date,
+                          approved_by_name: cr.approved_by_name
+                        }))
+                      )}
+                      onViewChangeRequest={(crId) => {
+                        setSelectedChangeRequestId(crId);
+                        setShowChangeRequestModal(true);
+                      }}
+                    />
+                  )}
+
+                  {/* Rejected Requests */}
+                  <RejectedRequestsSection
+                    requests={rejectedChangeRequests}
+                    onViewDetails={(crId) => {
+                      setSelectedChangeRequestId(crId);
+                      setShowChangeRequestModal(true);
+                    }}
+                  />
+
                   {/* Existing Purchase Section */}
                   {projectDetails?.existingPurchaseItems && projectDetails.existingPurchaseItems.length > 0 && (
                     <div className="mb-8">
@@ -827,6 +906,51 @@ const MyProjects: React.FC = () => {
             </div>
           </motion.div>
         </div>
+      )}
+
+      {/* Request Extra Materials Modal */}
+      {selectedProject?.boq_id && (
+        <RequestExtraMaterialsModal
+          isOpen={showRequestMaterialsModal}
+          onClose={() => setShowRequestMaterialsModal(false)}
+          boqId={selectedProject.boq_id}
+          boqName={selectedProject.boq_name || selectedProject.project_name}
+          boqItems={[
+            ...(selectedProject.existingPurchaseItems || []).map(item => ({
+              id: item.id,
+              description: item.description || item.briefDescription || `Item ${item.id}`
+            })),
+            ...(selectedProject.newPurchaseItems || []).map(item => ({
+              id: item.id,
+              description: item.description || item.briefDescription || `Item ${item.id}`
+            }))
+          ]}
+          onSuccess={() => {
+            toast.success('Extra materials request submitted successfully');
+            if (selectedProject.boq_ids && selectedProject.boq_ids[0]) {
+              handleViewProject(selectedProject);
+            }
+          }}
+        />
+      )}
+
+      {/* Change Request Details Modal */}
+      {selectedChangeRequestId && (
+        <ChangeRequestDetailsModal
+          isOpen={showChangeRequestModal}
+          onClose={() => {
+            setShowChangeRequestModal(false);
+            setSelectedChangeRequestId(null);
+          }}
+          changeRequestId={selectedChangeRequestId}
+          onStatusUpdate={async () => {
+            setShowChangeRequestModal(false);
+            setSelectedChangeRequestId(null);
+            if (selectedProject) {
+              await handleViewProject(selectedProject);
+            }
+          }}
+        />
       )}
     </div>
   );

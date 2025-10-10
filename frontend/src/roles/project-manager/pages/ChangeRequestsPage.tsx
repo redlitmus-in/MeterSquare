@@ -21,7 +21,6 @@ import {
   Eye,
   Check,
   X,
-  TrendingUp,
   AlertCircle,
   FileText,
   Package,
@@ -171,18 +170,16 @@ const ChangeRequestsPage: React.FC = () => {
     const matchesSearch = projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesTab = (
-      (activeTab === 'pending' && req.approval_required_from === 'estimator' && req.status !== 'approved' && req.status !== 'rejected') ||
-      (activeTab === 'approved' && req.status === 'approved') ||
-      (activeTab === 'escalated' && req.approval_required_from === 'technical_director' && req.status !== 'approved' && req.status !== 'rejected') ||
+      (activeTab === 'pending' && req.approval_required_from === 'project_manager' && req.status !== 'approved' && req.status !== 'rejected') ||
+      (activeTab === 'approved' && (req.status === 'approved_by_pm' || req.status === 'approved')) ||
       (activeTab === 'rejected' && req.status === 'rejected')
     );
     return matchesSearch && matchesTab;
   });
 
   const stats = {
-    pending: changeRequests.filter(r => r.approval_required_from === 'estimator' && r.status !== 'approved' && r.status !== 'rejected').length,
-    approved: changeRequests.filter(r => r.status === 'approved').length,
-    escalated: changeRequests.filter(r => r.approval_required_from === 'technical_director' && r.status !== 'approved' && r.status !== 'rejected').length,
+    pending: changeRequests.filter(r => r.approval_required_from === 'project_manager' && r.status !== 'approved' && r.status !== 'rejected').length,
+    approved: changeRequests.filter(r => r.status === 'approved_by_pm' || r.status === 'approved').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length
   };
 
@@ -332,18 +329,6 @@ const ChangeRequestsPage: React.FC = () => {
                 <span className="ml-1 sm:ml-2 text-gray-400">({stats.approved})</span>
               </TabsTrigger>
               <TabsTrigger
-                value="escalated"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
-                style={{
-                  borderBottomColor: activeTab === 'escalated' ? 'rgb(36, 61, 138)' : 'transparent',
-                  color: activeTab === 'escalated' ? 'rgb(36, 61, 138)' : ''
-                }}
-              >
-                <TrendingUp className="w-4 h-4 mr-2" />
-                Escalated
-                <span className="ml-1 sm:ml-2 text-gray-400">({stats.escalated})</span>
-              </TabsTrigger>
-              <TabsTrigger
                 value="rejected"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
@@ -435,37 +420,33 @@ const ChangeRequestsPage: React.FC = () => {
                         </div>
 
                         {/* Actions */}
-                        <div className="border-t border-gray-200 p-2 sm:p-3 grid grid-cols-3 gap-1 sm:gap-2">
+                        <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
                           <button
                             onClick={() => handleReview(request.cr_id)}
-                            className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                            className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
                             style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                           >
-                            <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                            <span className="hidden sm:inline">Review</span>
-                            <span className="sm:hidden">View</span>
+                            <Eye className="h-4 w-4" />
+                            <span>Review</span>
                           </button>
-                          {request.approval_required_from === 'estimator' && request.status !== 'approved' && request.status !== 'rejected' && (
-                            <>
-                              <button
-                                onClick={() => handleApprove(request.cr_id)}
-                                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
-                                style={{ backgroundColor: 'rgb(22, 163, 74)' }}
-                              >
-                                <Check className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                                <span className="hidden sm:inline">Approve</span>
-                                <span className="sm:hidden">Yes</span>
-                              </button>
-                              <button
-                                onClick={() => handleReject(request.cr_id)}
-                                className="bg-red-600 hover:bg-red-700 text-white text-[10px] sm:text-xs h-8 rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
-                              >
-                                <X className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                                <span className="hidden sm:inline">Reject</span>
-                                <span className="sm:hidden">No</span>
-                              </button>
-                            </>
-                          )}
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => handleApprove(request.cr_id)}
+                              className="text-white text-[10px] sm:text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 font-semibold px-1"
+                              style={{ backgroundColor: 'rgb(22, 163, 74)' }}
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              <span className="hidden sm:inline">Send to Est</span>
+                              <span className="sm:hidden">Approve</span>
+                            </button>
+                            <button
+                              onClick={() => handleReject(request.cr_id)}
+                              className="bg-red-600 hover:bg-red-700 text-white text-[10px] sm:text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold px-1"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                              <span>Reject</span>
+                            </button>
+                          </div>
                         </div>
                       </motion.div>
                     ))}
@@ -528,77 +509,6 @@ const ChangeRequestsPage: React.FC = () => {
                           <div className="flex justify-between">
                             <span className="text-gray-500">Cost Increase:</span>
                             <span className="font-semibold text-green-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
-                          </div>
-                        </div>
-
-                        <div className="border-t border-gray-200 p-2 sm:p-3">
-                          <button
-                            onClick={() => handleReview(request.cr_id)}
-                            className="w-full text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold"
-                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                          >
-                            <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                            <span>View Details</span>
-                          </button>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="escalated" className="mt-0 p-0">
-              <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Escalated to TD</h2>
-                {filteredRequests.length === 0 ? (
-                  <div className="text-center py-12">
-                    <TrendingUp className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No escalated requests found</p>
-                  </div>
-                ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
-                      <motion.div
-                        key={request.cr_id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.05 * index }}
-                        className="bg-white rounded-lg border-2 border-blue-300 shadow-sm hover:shadow-lg transition-all duration-200"
-                      >
-                        <div className="p-4">
-                          <div className="flex items-start justify-between mb-2">
-                            <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
-                            <Badge className="bg-blue-100 text-blue-800">HIGH VALUE</Badge>
-                          </div>
-
-                          <div className="space-y-1 text-sm text-gray-600">
-                            <div className="flex items-center gap-1.5">
-                              <Package className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate">By: {request.requested_by_name}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="px-4 pb-3 text-center text-sm">
-                          <span className="font-bold text-blue-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
-                        </div>
-
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Additional Cost:</span>
-                            <span className="font-bold text-blue-600">{formatCurrency(request.materials_total_cost)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Cost Increase:</span>
-                            <span className="font-semibold text-blue-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
                           </div>
                         </div>
 

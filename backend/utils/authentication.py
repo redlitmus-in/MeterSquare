@@ -492,6 +492,7 @@ def jwt_required(f):
                 'full_name': current_user.full_name,
                 'role_id': current_user.role_id,
                 'role': role_name,
+                'role_name': role_name,  # Add role_name for consistency
                 'department': current_user.department,
                 'phone': current_user.phone,
                 'is_active': current_user.is_active,

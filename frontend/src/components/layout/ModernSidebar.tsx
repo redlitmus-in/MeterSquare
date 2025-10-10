@@ -19,6 +19,7 @@ import {
   ClipboardDocumentCheckIcon,
   DocumentCheckIcon,
   DocumentPlusIcon,
+  DocumentTextIcon,
   CubeIcon,
   ExclamationTriangleIcon,
   ClockIcon
@@ -30,6 +31,7 @@ import {
   ChartBarIcon as ChartSolid,
   DocumentCheckIcon as DocumentCheckSolid,
   DocumentPlusIcon as DocumentPlusSolid,
+  DocumentTextIcon as DocumentTextSolid,
   BuildingOfficeIcon as BuildingOfficeSolid,
   ClipboardDocumentCheckIcon as ClipboardDocumentCheckSolid,
   CubeIcon as CubeSolid,
@@ -343,11 +345,18 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-blue-600'
       },
       {
+        name: 'Change Requests',
+        href: buildPath('/change-requests'),
+        icon: DocumentTextIcon,
+        iconSolid: DocumentTextSolid,
+        color: 'text-purple-600'
+      },
+      {
         name: 'Progress Tracking',
         href: buildPath('/progress'),
         icon: ChartBarIcon,
         iconSolid: ChartSolid,
-        color: 'text-purple-600'
+        color: 'text-green-600'
       }
     ];
 
@@ -362,7 +371,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       },
       {
         name: 'Change Requests',
-        href: buildPath('/change-requests-estimator'),
+        href: buildPath('/change-requests'),
         icon: DocumentPlusIcon,
         iconSolid: DocumentPlusSolid,
         color: 'text-yellow-600'

@@ -422,8 +422,11 @@ def get_boq(boq_id):
             is_new_purchase = False
 
             # Check if item is a new purchase
+            # Priority 0: Check if item has is_extra_purchase flag (from approved change requests)
+            if item.get("is_extra_purchase"):
+                is_new_purchase = True
             # Priority 1: Match by master_item_id (most reliable)
-            if master_item_id and master_item_id in new_purchase_item_ids:
+            elif master_item_id and master_item_id in new_purchase_item_ids:
                 is_new_purchase = True
             # Priority 2: Match by item_name (fallback)
             elif item_name and item_name in new_purchase_item_names:
@@ -700,6 +703,66 @@ def get_boq(boq_id):
             "profit_margin": profit_margin,
             "profit_margin_percentage": profit_margin
         }
+
+        # Add change request materials tracking (if any)
+        try:
+            from models.change_request import ChangeRequest
+
+            # Get approved change requests for this BOQ
+            approved_change_requests = ChangeRequest.query.filter_by(
+                boq_id=boq_id,
+                status='approved',
+                is_deleted=False
+            ).order_by(ChangeRequest.approval_date.desc()).all()
+
+            if approved_change_requests:
+                change_request_items = []
+                total_cr_materials_cost = 0
+                total_cr_overhead_consumed = 0
+
+                for cr in approved_change_requests:
+                    cr_materials = cr.materials_data or []
+
+                    change_request_items.append({
+                        'cr_id': cr.cr_id,
+                        'requested_by': cr.requested_by_name,
+                        'request_date': cr.created_at.isoformat() if cr.created_at else None,
+                        'approval_date': cr.approval_date.isoformat() if cr.approval_date else None,
+                        'justification': cr.justification,
+                        'materials': cr_materials,
+                        'materials_cost': cr.materials_total_cost,
+                        'overhead_consumed': cr.overhead_consumed,
+                        'is_over_budget': cr.is_over_budget
+                    })
+
+                    total_cr_materials_cost += cr.materials_total_cost or 0
+                    total_cr_overhead_consumed += cr.overhead_consumed or 0
+
+                # Calculate overhead budget tracking
+                original_overhead_allocated = (existing_total_cost * overhead_percentage) / (100 + overhead_percentage + profit_margin) * overhead_percentage if overhead_percentage > 0 else 0
+                overhead_remaining = original_overhead_allocated - total_cr_overhead_consumed
+
+                response_data['change_requests'] = {
+                    'items': change_request_items,
+                    'summary': {
+                        'total_requests': len(approved_change_requests),
+                        'total_materials_cost': round(total_cr_materials_cost, 2),
+                        'total_overhead_consumed': round(total_cr_overhead_consumed, 2)
+                    }
+                }
+
+                response_data['overhead_tracking'] = {
+                    'original_allocated': round(original_overhead_allocated, 2),
+                    'consumed_by_extra_materials': round(total_cr_overhead_consumed, 2),
+                    'remaining': round(overhead_remaining, 2),
+                    'is_over_budget': overhead_remaining < 0,
+                    'balance_type': 'negative' if overhead_remaining < 0 else 'positive',
+                    'percentage': round(overhead_percentage, 2)
+                }
+        except Exception as e:
+            log.warning(f"Could not load change request data for BOQ {boq_id}: {str(e)}")
+            # Don't fail the entire request if change request data fails
+            pass
 
         return jsonify(response_data), 200
 

@@ -128,6 +128,12 @@ def get_all_pm_boqs():
                     if se_user:
                         se_name = se_user.full_name
 
+                # Calculate end_date from start_date and duration_days
+                end_date = None
+                if boq.project.start_date and boq.project.duration_days:
+                    from datetime import timedelta
+                    end_date = (boq.project.start_date + timedelta(days=boq.project.duration_days)).isoformat()
+
                 project_details = {
                     "project_id": boq.project.project_id,
                     "project_name": boq.project.project_name,
@@ -142,7 +148,8 @@ def get_all_pm_boqs():
                     "client": boq.project.client,
                     "work_type": boq.project.work_type,
                     "start_date": boq.project.start_date.isoformat() if boq.project.start_date else None,
-                    "end_date": boq.project.end_date.isoformat() if boq.project.end_date else None,
+                    "end_date": end_date,
+                    "duration_days": boq.project.duration_days,
                     "project_status": boq.project.status,
                     "project_manager_status": pm_status,
                     "description": boq.project.description,

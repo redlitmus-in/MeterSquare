@@ -31,14 +31,16 @@ ROLE_HIERARCHY = {
         'tier': 'Operations',
         'approval_limit': 10000,
         'can_approve': [],
-        'can_initiate': ['purchase_requisition'],
+        'can_initiate': ['purchase_requisition', 'change_request'],
         'permissions': [
             'create_purchase_request',
             'view_site_materials',
             'request_materials',
             'view_task_status',
             'site_operations',
-            'material_management'
+            'material_management',
+            'create_change_request',
+            'view_own_change_requests'
         ],
         'description': 'Site Engineer - On-ground execution and material usage',
         'color': '#ea580c',
@@ -49,12 +51,14 @@ ROLE_HIERARCHY = {
         'tier': 'Operations',
         'approval_limit': 10000,
         'can_approve': [],
-        'can_initiate': ['purchase_requisition'],
+        'can_initiate': ['purchase_requisition', 'change_request'],
         'permissions': [
             'create_purchase_request',
             'view_site_materials',
             'request_materials',
-            'view_task_status'
+            'view_task_status',
+            'create_change_request',
+            'view_own_change_requests'
         ],
         'description': 'Site Supervisor - Site operations and material requisition',
         'color': '#ea580c',
@@ -81,13 +85,16 @@ ROLE_HIERARCHY = {
         'tier': 'Management',
         'approval_limit': 50000,
         'can_approve': ['purchase_request', 'project_task', 'material_request'],
+        'can_initiate': ['change_request'],
         'permissions': [
             'manage_projects',
             'approve_mid_range',
             'team_coordination',
             'pm_flag_approval',
             'qty_spec_approvals',
-            'view_cost_analysis'
+            'view_cost_analysis',
+            'create_change_request',
+            'view_own_change_requests'
         ],
         'description': 'Project Manager - Project coordination and approvals',
         'color': '#059669',
@@ -128,7 +135,7 @@ ROLE_HIERARCHY = {
         'level': 3,
         'tier': 'Technical',
         'approval_limit': 25000,
-        'can_approve': ['boq_approval'],
+        'can_approve': ['boq_approval', 'change_request_low'],
         'permissions': [
             'create_boq',
             'edit_boq',
@@ -137,7 +144,10 @@ ROLE_HIERARCHY = {
             'approve_boq',
             'send_boq',
             'view_boq_analytics',
-            'manage_boq_items'
+            'manage_boq_items',
+            'approve_change_requests',
+            'view_change_requests',
+            'reject_change_requests'
         ],
         'description': 'Estimator - BOQ management and cost estimation',
         'color': '#4f46e5',
@@ -169,7 +179,10 @@ ROLE_HIERARCHY = {
             'flag_override',
             'technical_decisions',
             'approve_high_value',
-            'strategic_planning'
+            'strategic_planning',
+            'approve_change_requests',
+            'view_all_change_requests',
+            'reject_change_requests'
         ],
         'description': 'Technical Director - Final approvals and technical decisions',
         'color': '#1e40af',
