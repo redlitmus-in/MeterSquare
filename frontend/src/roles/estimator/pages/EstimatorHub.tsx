@@ -1214,7 +1214,7 @@ const EstimatorHub: React.FC = () => {
             /* Sent to TD - waiting for approval */
             <div className="col-span-2 flex items-center justify-center text-xs text-gray-500">
               <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
-              Sent to TD (Pending Approval)
+              Sent to BOQ
             </div>
           ) : isPendingRevision ? (
             /* Revision sent to TD - waiting for approval */
@@ -1310,7 +1310,7 @@ const EstimatorHub: React.FC = () => {
             ) : (
               <div className="col-span-2 flex items-center justify-center text-xs text-green-700 font-medium">
                 <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
-                Client Approved (Awaiting PM)
+                Client Approved
               </div>
             )
           ) : isClientRejected ? (
@@ -1559,7 +1559,7 @@ const EstimatorHub: React.FC = () => {
                         ) : (
                           <span className="text-xs text-green-600 font-medium flex items-center gap-1">
                             <CheckCircle className="h-4 w-4" />
-                            Client Approved (Awaiting PM)
+                            Client Approved
                           </span>
                         );
                       } else if (isApprovedByTD || boq.status?.toLowerCase() === 'revision_approved') {

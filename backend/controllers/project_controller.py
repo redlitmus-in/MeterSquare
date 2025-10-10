@@ -29,7 +29,7 @@ def create_project():
             return jsonify({
                 "error": "Project name is required",
                 "required_fields": ["project_name"],
-                "optional_fields": ["description", "location", "client", "work_type", "start_date", "duration_days", "floor_name"]
+                "optional_fields": ["description", "location", "client", "work_type", "start_date", "duration_days", "floor_name", "end_date", " area"]
             }), 400
 
         # Validate project name length
@@ -53,6 +53,17 @@ def create_project():
             except ValueError:
                 return jsonify({"error": "Invalid start_date format. Use YYYY-MM-DD"}), 400
 
+        if data.get('end_date'):
+            try:
+                end_date = datetime.strptime(data['end_date'], '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({"error": "Invalid end_date format. Use YYYY-MM-DD"}), 400
+
+        # Validate date range if both dates provided
+        if start_date and end_date:
+            if start_date > end_date:
+                return jsonify({"error": "Start date cannot be after end date"}), 400
+
         # Validate duration_days if provided
         duration_days = None
         if data.get('duration_days'):
@@ -72,7 +83,9 @@ def create_project():
             working_hours=data.get('working_hours'),
             work_type=data.get('work_type'),
             floor_name=data.get('floor_name'),
+            area=data.get('area'),
             start_date=start_date,
+            end_date=end_date,
             duration_days=duration_days,
             status=data.get('status', 'active'),
             completion_requested=False,

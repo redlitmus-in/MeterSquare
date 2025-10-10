@@ -19,6 +19,7 @@ class Project(db.Model):
     client = db.Column(db.String(255), nullable=True)  # Optional
     work_type = db.Column(db.String(255), nullable=True)  # Optional
     start_date = db.Column(db.Date, nullable=True)  # Optional - changed from required
+    end_date = db.Column(db.Date, nullable=True)
     duration_days = db.Column(db.Integer, nullable=True)  # Project duration in days
     status = db.Column(db.String(50), nullable=False, default='active')  # Default status
     description = db.Column(db.Text, nullable=True)  # Changed to Text for longer descriptions
@@ -31,7 +32,7 @@ class Project(db.Model):
      
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-    
+
     def to_dict(self):
         """Convert to dictionary for JSON response"""
         # Calculate end_date from start_date and duration_days for backward compatibility

@@ -282,5 +282,21 @@ export const projectManagerService = {
       console.error('Error updating project:', error);
       throw error;
     }
+  },
+
+  // Send BOQ to estimator (approve or reject)
+  async sendBOQToEstimator(data: {
+    boq_id: number;
+    boq_status: 'approved' | 'rejected';
+    rejection_reason?: string;
+    comments?: string;
+  }): Promise<any> {
+    try {
+      const response = await apiClient.post('/boq/send_estimator', data);
+      return response.data;
+    } catch (error) {
+      console.error('Error sending BOQ to estimator:', error);
+      throw error;
+    }
   }
 };

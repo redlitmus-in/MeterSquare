@@ -115,7 +115,7 @@ const MyProjects: React.FC = () => {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [availableSEs, setAvailableSEs] = useState<SiteEngineer[]>([]);
   const [loadingSEs, setLoadingSEs] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<'pending' | 'assigned' | 'completed'>('pending');
+  const [filterStatus, setFilterStatus] = useState<'pending' | 'assigned' | 'completed' | 'approved' | 'rejected'>('pending');
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedSE, setSelectedSE] = useState<SiteEngineer | null>(null);
   const [assigning, setAssigning] = useState(false);
@@ -141,6 +141,12 @@ const MyProjects: React.FC = () => {
   const [showChangeRequestModal, setShowChangeRequestModal] = useState(false);
   const [projectToComplete, setProjectToComplete] = useState<Project | null>(null);
   const [completing, setCompleting] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [approvalComments, setApprovalComments] = useState('');
+  const [processingBOQ, setProcessingBOQ] = useState(false);
 
   useEffect(() => {
     loadProjects();
@@ -412,7 +418,9 @@ const MyProjects: React.FC = () => {
                               project.site_supervisor_id !== 0;
 
     if (filterStatus === 'pending') {
-      return !hasSiteSupervisor && project.status?.toLowerCase() !== 'completed';
+      return !hasSiteSupervisor && project.status?.toLowerCase() !== 'completed' &&
+             project.boq_status?.toLowerCase() !== 'approved' &&
+             project.boq_status?.toLowerCase() !== 'rejected';
     }
     if (filterStatus === 'assigned') {
       return hasSiteSupervisor && project.status?.toLowerCase() !== 'completed';
@@ -420,19 +428,29 @@ const MyProjects: React.FC = () => {
     if (filterStatus === 'completed') {
       return project.status?.toLowerCase() === 'completed';
     }
+    if (filterStatus === 'approved') {
+      return project.boq_status?.toLowerCase() === 'approved';
+    }
+    if (filterStatus === 'rejected') {
+      return project.boq_status?.toLowerCase() === 'rejected';
+    }
     return false;
   });
 
   const getTabCounts = () => ({
     pending: projects.filter(p => {
       const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
-      return !hasSS && p.status?.toLowerCase() !== 'completed';
+      return !hasSS && p.status?.toLowerCase() !== 'completed' &&
+             p.boq_status?.toLowerCase() !== 'approved' &&
+             p.boq_status?.toLowerCase() !== 'rejected';
     }).length,
     assigned: projects.filter(p => {
       const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
       return hasSS && p.status?.toLowerCase() !== 'completed';
     }).length,
-    completed: projects.filter(p => p.status?.toLowerCase() === 'completed').length
+    completed: projects.filter(p => p.status?.toLowerCase() === 'completed').length,
+    approved: projects.filter(p => p.boq_status?.toLowerCase() === 'approved').length,
+    rejected: projects.filter(p => p.boq_status?.toLowerCase() === 'rejected').length
   });
 
   const formatDate = (dateString?: string) => {
@@ -485,7 +503,7 @@ const MyProjects: React.FC = () => {
                   : 'bg-transparent text-gray-700 hover:bg-white/50'
               }`}
             >
-              Pending
+              Pending ({tabCounts.pending})
             </button>
 
             <button
@@ -496,18 +514,40 @@ const MyProjects: React.FC = () => {
                   : 'bg-transparent text-gray-700 hover:bg-white/50'
               }`}
             >
-              Assigned
+              Assigned ({tabCounts.assigned})
+            </button>
+
+            <button
+              onClick={() => setFilterStatus('approved')}
+              className={`px-5 py-2 text-sm font-medium whitespace-nowrap transition-all rounded-lg ${
+                filterStatus === 'approved'
+                  ? 'bg-white text-green-600 shadow-sm border-2 border-green-200'
+                  : 'bg-transparent text-gray-700 hover:bg-white/50'
+              }`}
+            >
+              Approved ({tabCounts.approved})
+            </button>
+
+            <button
+              onClick={() => setFilterStatus('rejected')}
+              className={`px-5 py-2 text-sm font-medium whitespace-nowrap transition-all rounded-lg ${
+                filterStatus === 'rejected'
+                  ? 'bg-white text-red-600 shadow-sm border-2 border-red-200'
+                  : 'bg-transparent text-gray-700 hover:bg-white/50'
+              }`}
+            >
+              Rejected ({tabCounts.rejected})
             </button>
 
             <button
               onClick={() => setFilterStatus('completed')}
               className={`px-5 py-2 text-sm font-medium whitespace-nowrap transition-all rounded-lg ${
                 filterStatus === 'completed'
-                  ? 'bg-white text-green-600 shadow-sm border-2 border-green-200'
+                  ? 'bg-white text-blue-600 shadow-sm border-2 border-blue-200'
                   : 'bg-transparent text-gray-700 hover:bg-white/50'
               }`}
             >
-              Completed
+              Completed ({tabCounts.completed})
             </button>
           </div>
         </div>
@@ -1113,14 +1153,42 @@ const MyProjects: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="mt-4 text-sm text-gray-600">
-                    Submitted by: Estimator on {formatDate(selectedProject.created_at)}
-                    {selectedProject.boq_status === 'Client_Confirmed' && (
-                      <span className="ml-3 text-green-600 font-medium inline-flex items-center gap-1">
-                        <CheckCircleIcon className="w-4 h-4" />
-                        Client Confirmed
-                      </span>
-                    )}
+                  <div className="mt-4 flex items-center justify-between">
+                    <div className="text-sm text-gray-600">
+                      Submitted by: Estimator on {formatDate(selectedProject.created_at)}
+                    </div>
+
+                    {/* Status Badge or Approve/Reject Buttons */}
+                    <div className="flex items-center gap-3">
+                      {selectedProject.boq_status?.toLowerCase() === 'approved' ? (
+                        <div className="px-6 py-2.5 bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-500 rounded-lg flex items-center gap-2">
+                          <CheckCircleIcon className="w-5 h-5 text-green-600" />
+                          <span className="font-semibold text-green-700">Approved</span>
+                        </div>
+                      ) : selectedProject.boq_status?.toLowerCase() === 'rejected' ? (
+                        <div className="px-6 py-2.5 bg-gradient-to-r from-red-50 to-red-100 border-2 border-red-500 rounded-lg flex items-center gap-2">
+                          <XMarkIcon className="w-5 h-5 text-red-600" />
+                          <span className="font-semibold text-red-700">Rejected</span>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => setShowRejectModal(true)}
+                            className="px-6 py-2.5 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center gap-2"
+                          >
+                            <XMarkIcon className="w-5 h-5" />
+                            Reject BOQ
+                          </button>
+                          <button
+                            onClick={() => setShowApproveModal(true)}
+                            className="px-6 py-2.5 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center gap-2"
+                          >
+                            <CheckCircleIcon className="w-5 h-5" />
+                            Approve BOQ
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </>
               )}
@@ -1862,6 +1930,445 @@ const MyProjects: React.FC = () => {
         }}
         canApprove={selectedChangeRequest?.approval_required_from === 'project_manager' && selectedChangeRequest?.status !== 'approved' && selectedChangeRequest?.status !== 'rejected'}
       />
+
+      {/* Reject BOQ Modal */}
+      {showRejectModal && selectedProject && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            <div className="bg-gradient-to-br from-red-50 to-red-100 px-6 py-4 border-b border-red-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-red-500 rounded-lg">
+                    <XMarkIcon className="w-6 h-6 text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900">Reject BOQ</h3>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowRejectModal(false);
+                    setRejectionReason('');
+                  }}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <p className="text-sm text-gray-600 mb-4">
+                Please provide a detailed reason for rejecting this BOQ. This will be sent to the estimator.
+              </p>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Rejection Reason <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  placeholder="Enter the reason for rejection..."
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                  rows={4}
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setShowRejectModal(false);
+                    setRejectionReason('');
+                  }}
+                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!rejectionReason.trim()) {
+                      toast.error('Please provide a rejection reason');
+                      return;
+                    }
+
+                    try {
+                      setProcessingBOQ(true);
+                      await projectManagerService.sendBOQToEstimator({
+                        boq_id: selectedProject.boq_id,
+                        boq_status: 'rejected',
+                        rejection_reason: rejectionReason,
+                      });
+
+                      toast.success('BOQ rejected and sent to estimator');
+                      setShowRejectModal(false);
+                      setShowBOQModal(false);
+                      setRejectionReason('');
+                      loadProjects();
+                    } catch (error: any) {
+                      toast.error(error.response?.data?.error || 'Failed to reject BOQ');
+                    } finally {
+                      setProcessingBOQ(false);
+                    }
+                  }}
+                  disabled={processingBOQ || !rejectionReason.trim()}
+                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-lg font-medium transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {processingBOQ ? 'Rejecting...' : 'Reject BOQ'}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Approve BOQ Modal */}
+      {showApproveModal && selectedProject && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            <div className="bg-gradient-to-br from-green-50 to-green-100 px-6 py-4 border-b border-green-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-green-500 rounded-lg">
+                    <CheckCircleIcon className="w-6 h-6 text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900">Approve BOQ</h3>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowApproveModal(false);
+                    setApprovalComments('');
+                  }}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <p className="text-sm text-gray-600 mb-4">
+                You are about to approve this BOQ. You can optionally add comments that will be sent to the estimator.
+              </p>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Comments (Optional)
+                </label>
+                <textarea
+                  value={approvalComments}
+                  onChange={(e) => setApprovalComments(e.target.value)}
+                  placeholder="Add any comments or notes..."
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+                  rows={4}
+                />
+              </div>
+
+              <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-blue-900 mb-2">Project Summary:</h3>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-gray-600">Total Value:</span>
+                    <span className="font-semibold ml-1">AED{(selectedProject.boq_details?.total_cost || 0).toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Materials:</span>
+                    <span className="font-semibold ml-1">AED{(selectedProject.boq_details?.total_materials || 0).toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Labour:</span>
+                    <span className="font-semibold ml-1">AED{(selectedProject.boq_details?.total_labour || 0).toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Overhead:</span>
+                    <span className="font-semibold ml-1">{selectedProject.boq_details?.overhead_percentage || 0}%</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Profit Margin:</span>
+                    <span className="font-semibold ml-1">{selectedProject.boq_details?.profit_margin_percentage || 0}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setShowApproveModal(false);
+                    setApprovalComments('');
+                  }}
+                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setShowApproveModal(false);
+                    setShowComparisonModal(true);
+                  }}
+                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center justify-center gap-2"
+                >
+                  <CheckCircleIcon className="w-5 h-5" />
+                  Continue to Comparison
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* BOQ Comparison Modal */}
+      {showComparisonModal && selectedProject && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden"
+          >
+            <div className="bg-gradient-to-br from-blue-50 to-blue-100 px-6 py-4 border-b border-blue-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">BOQ Comparison - {selectedProject.project_name}</h2>
+                  <p className="text-sm text-gray-600 mt-1">Compare what PM sees vs what Client will receive</p>
+                </div>
+                <button
+                  onClick={() => setShowComparisonModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
+              <div className="grid grid-cols-2 gap-6">
+                {/* Internal Version (What PM sees) */}
+                <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="px-3 py-1 bg-orange-500 text-white text-sm font-bold rounded-lg">INTERNAL VERSION</span>
+                    <span className="text-sm text-gray-600">(What PM sees)</span>
+                  </div>
+
+                  <div className="space-y-3 mb-4">
+                    {selectedProject.boqItems?.map((item, idx) => {
+                      const materialTotal = item.materials?.reduce((sum, m) => sum + (m.amount || 0), 0) || 0;
+                      const labourTotal = item.labour?.reduce((sum, l) => sum + (l.amount || 0), 0) || 0;
+
+                      return (
+                        <div key={idx} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                          <h4 className="font-semibold text-gray-900 mb-2">{idx + 1}. {item.description}</h4>
+
+                          <div className="ml-2">
+                            <div className="text-xs mb-2">
+                              <p className="font-medium text-gray-700 mb-1">+ RAW MATERIALS</p>
+                              <div className="ml-2 space-y-1">
+                                {item.materials?.map((mat, i) => (
+                                  <div key={i} className="flex justify-between text-gray-600">
+                                    <span>{mat.name} ({mat.quantity} {mat.unit})</span>
+                                    <span>AED{mat.amount?.toFixed(2) || '0.00'}</span>
+                                  </div>
+                                ))}
+                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                  <span>Total Materials:</span>
+                                  <span>AED{materialTotal.toFixed(2)}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-xs">
+                              <p className="font-medium text-gray-700 mb-1">+ LABOUR</p>
+                              <div className="ml-2 space-y-1">
+                                {item.labour?.map((lab, i) => (
+                                  <div key={i} className="flex justify-between text-gray-600">
+                                    <span>{lab.type} ({lab.quantity} {lab.unit})</span>
+                                    <span>AED{lab.amount?.toFixed(2) || '0.00'}</span>
+                                  </div>
+                                ))}
+                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                  <span>Total Labour:</span>
+                                  <span>AED{labourTotal.toFixed(2)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Cost Summary - Internal */}
+                  <div className="bg-white rounded-lg shadow-sm border-2 border-orange-300 p-4">
+                    <h3 className="font-bold text-gray-900 mb-3">Cost Breakdown</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Material Cost:</span>
+                        <span className="font-semibold">AED{(selectedProject.boq_details?.total_materials || 0).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Labour Cost:</span>
+                        <span className="font-semibold">AED{(selectedProject.boq_details?.total_labour || 0).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between pt-2 border-t">
+                        <span className="text-gray-600">Base Cost:</span>
+                        <span className="font-semibold">AED{((selectedProject.boq_details?.total_materials || 0) + (selectedProject.boq_details?.total_labour || 0)).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between bg-orange-50 p-2 rounded">
+                        <span className="text-orange-800 font-medium">Overhead ({selectedProject.boq_details?.overhead_percentage || 0}%):</span>
+                        <span className="font-bold text-orange-800">AED{(((selectedProject.boq_details?.total_materials || 0) + (selectedProject.boq_details?.total_labour || 0)) * (selectedProject.boq_details?.overhead_percentage || 0) / 100).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between bg-orange-50 p-2 rounded">
+                        <span className="text-orange-800 font-medium">Profit Margin ({selectedProject.boq_details?.profit_margin_percentage || 0}%):</span>
+                        <span className="font-bold text-orange-800">AED{(((selectedProject.boq_details?.total_materials || 0) + (selectedProject.boq_details?.total_labour || 0)) * (selectedProject.boq_details?.profit_margin_percentage || 0) / 100).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between pt-3 border-t-2 border-orange-300 mt-2">
+                        <span className="text-lg font-bold text-gray-900">Total:</span>
+                        <span className="text-lg font-bold text-green-600">AED{(selectedProject.boq_details?.total_cost || 0).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Client Version (What Client sees) */}
+                <div className="bg-blue-50/30 p-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="px-3 py-1 bg-blue-100 border border-blue-300 rounded-lg">
+                      <span className="text-sm font-bold text-blue-800">CLIENT VERSION</span>
+                    </div>
+                    <span className="text-xs text-gray-600">(What Client sees)</span>
+                  </div>
+
+                  {/* BOQ Items - Client */}
+                  <div className="space-y-3 mb-4">
+                    {selectedProject.boqItems?.map((item, idx) => {
+                      const materialTotal = item.materials?.reduce((sum, m) => sum + (m.amount || 0), 0) || 0;
+                      const labourTotal = item.labour?.reduce((sum, l) => sum + (l.amount || 0), 0) || 0;
+                      const itemBaseCost = materialTotal + labourTotal;
+
+                      // Calculate markup to include overhead and profit
+                      const overheadPct = selectedProject.boq_details?.overhead_percentage || 0;
+                      const profitPct = selectedProject.boq_details?.profit_margin_percentage || 0;
+                      const totalMarkupPct = overheadPct + profitPct;
+                      const itemTotal = itemBaseCost * (1 + totalMarkupPct / 100);
+
+                      return (
+                        <div key={idx} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                          <h4 className="font-semibold text-gray-900 mb-2">{idx + 1}. {item.description}</h4>
+
+                          <div className="ml-2">
+                            <div className="text-xs mb-2">
+                              <p className="font-medium text-gray-700 mb-1">+ RAW MATERIALS</p>
+                              <div className="ml-2 space-y-1">
+                                {item.materials?.map((mat, i) => {
+                                  const clientPrice = mat.amount * (1 + totalMarkupPct / 100);
+                                  return (
+                                    <div key={i} className="flex justify-between text-gray-600">
+                                      <span>{mat.name} ({mat.quantity} {mat.unit})</span>
+                                      <span>AED{clientPrice?.toFixed(2) || '0.00'}</span>
+                                    </div>
+                                  );
+                                })}
+                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                  <span>Total Materials:</span>
+                                  <span>AED{(materialTotal * (1 + totalMarkupPct / 100)).toFixed(2)}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-xs">
+                              <p className="font-medium text-gray-700 mb-1">+ LABOUR</p>
+                              <div className="ml-2 space-y-1">
+                                {item.labour?.map((lab, i) => {
+                                  const clientPrice = lab.amount * (1 + totalMarkupPct / 100);
+                                  return (
+                                    <div key={i} className="flex justify-between text-gray-600">
+                                      <span>{lab.type} ({lab.quantity} {lab.unit})</span>
+                                      <span>AED{clientPrice?.toFixed(2) || '0.00'}</span>
+                                    </div>
+                                  );
+                                })}
+                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                  <span>Total Labour:</span>
+                                  <span>AED{(labourTotal * (1 + totalMarkupPct / 100)).toFixed(2)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Cost Summary - Client */}
+                  <div className="bg-white rounded-lg shadow-sm border-2 border-blue-300 p-4">
+                    <h3 className="font-bold text-gray-900 mb-3">Cost Breakdown</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Total Material Cost:</span>
+                        <span className="font-semibold">AED{(selectedProject.boq_details?.total_materials || 0).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Total Labour Cost:</span>
+                        <span className="font-semibold">AED{(selectedProject.boq_details?.total_labour || 0).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between pt-3 border-t-2 border-blue-300 mt-2">
+                        <span className="text-lg font-bold text-gray-900">Total:</span>
+                        <span className="text-lg font-bold text-blue-600">AED{(selectedProject.boq_details?.total_cost || 0).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <p className="text-sm text-yellow-800">
+                  <strong>Key Difference:</strong> Internal version shows overhead & profit breakdown, Client version shows final price only
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+              <button
+                onClick={() => setShowComparisonModal(false)}
+                className="px-6 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    setProcessingBOQ(true);
+                    await projectManagerService.sendBOQToEstimator({
+                      boq_id: selectedProject.boq_id,
+                      boq_status: 'approved',
+                      comments: approvalComments || '',
+                    });
+
+                    toast.success('BOQ approved and sent to estimator');
+                    setShowComparisonModal(false);
+                    setShowBOQModal(false);
+                    setApprovalComments('');
+                    loadProjects();
+                  } catch (error: any) {
+                    toast.error(error.response?.data?.error || 'Failed to approve BOQ');
+                  } finally {
+                    setProcessingBOQ(false);
+                  }
+                }}
+                disabled={processingBOQ}
+                className="px-6 py-2.5 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <CheckCircleIcon className="w-5 h-5" />
+                {processingBOQ ? 'Approving...' : 'Approve'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };
