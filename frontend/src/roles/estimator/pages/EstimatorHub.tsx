@@ -81,10 +81,34 @@ const ProjectCreationForm: React.FC<{
     work_type: initialData?.work_type || '',
     working_hours: initialData?.working_hours || '',
     floor_name: initialData?.floor_name || '',
+    area: initialData?.area || '',
     start_date: initialData?.start_date || '',
     duration_days: initialData?.duration_days || '',
+    end_date: initialData?.end_date || '',
     status: initialData?.status || 'active'
   });
+
+  // Calculate end date whenever start date or duration changes
+  useEffect(() => {
+    if (formData.start_date && formData.duration_days) {
+      const startDate = new Date(formData.start_date);
+      const durationDays = parseInt(formData.duration_days);
+
+      if (!isNaN(durationDays) && durationDays > 0) {
+        const endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + durationDays);
+
+        const calculatedEndDate = endDate.toISOString().split('T')[0];
+        if (calculatedEndDate !== formData.end_date) {
+          setFormData(prev => ({ ...prev, end_date: calculatedEndDate }));
+        }
+      }
+    } else {
+      if (formData.end_date) {
+        setFormData(prev => ({ ...prev, end_date: '' }));
+      }
+    }
+  }, [formData.start_date, formData.duration_days]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,6 +188,16 @@ const ProjectCreationForm: React.FC<{
         </div>
 
         <div className="space-y-2">
+          <Label htmlFor="area">Area</Label>
+          <Input
+            id="area"
+            value={formData.area}
+            onChange={(e) => handleChange('area', e.target.value)}
+            placeholder="e.g., 1000 sq.ft."
+          />
+        </div>
+
+        <div className="space-y-2">
           <Label htmlFor="start_date">Start Date</Label>
           <DatePicker
             id="start_date"
@@ -186,6 +220,18 @@ const ProjectCreationForm: React.FC<{
             onChange={(e) => handleChange('duration_days', e.target.value)}
             placeholder="e.g., 80 days"
             min="1"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="end_date">End Date</Label>
+          <Input
+            id="end_date"
+            type="text"
+            value={formData.end_date ? format(new Date(formData.end_date), 'dd/MM/yyyy') : ''}
+            placeholder="Auto-calculated"
+            disabled
+            className="bg-gray-100 cursor-not-allowed"
           />
         </div>
       </div>
@@ -2720,6 +2766,48 @@ const EstimatorHub: React.FC = () => {
                       <Label className="text-xs font-semibold text-indigo-900">Floor Name</Label>
                     </div>
                     <p className="text-sm font-medium text-gray-900">{viewingProject.floor_name}</p>
+                  </div>
+                )}
+
+                <div className="bg-gradient-to-br from-purple-50 to-purple-100/20 rounded-lg p-3 border border-purple-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Building2 className="h-3.5 w-3.5 text-purple-600" />
+                    <Label className="text-xs font-semibold text-purple-900">Area</Label>
+                  </div>
+                  <p className="text-sm font-medium text-gray-900">{viewingProject.area || 'Not specified'}</p>
+                </div>
+
+                {viewingProject.start_date && (
+                  <div className="bg-gradient-to-br from-teal-50 to-teal-100/20 rounded-lg p-3 border border-teal-200">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Calendar className="h-3.5 w-3.5 text-teal-600" />
+                      <Label className="text-xs font-semibold text-teal-900">Start Date</Label>
+                    </div>
+                    <p className="text-sm font-medium text-gray-900">
+                      {format(new Date(viewingProject.start_date), 'dd MMM yyyy')}
+                    </p>
+                  </div>
+                )}
+
+                {viewingProject.duration_days && (
+                  <div className="bg-gradient-to-br from-amber-50 to-amber-100/20 rounded-lg p-3 border border-amber-200">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Clock className="h-3.5 w-3.5 text-amber-600" />
+                      <Label className="text-xs font-semibold text-amber-900">Duration</Label>
+                    </div>
+                    <p className="text-sm font-medium text-gray-900">{viewingProject.duration_days} days</p>
+                  </div>
+                )}
+
+                {viewingProject.end_date && (
+                  <div className="bg-gradient-to-br from-rose-50 to-rose-100/20 rounded-lg p-3 border border-rose-200">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Calendar className="h-3.5 w-3.5 text-rose-600" />
+                      <Label className="text-xs font-semibold text-rose-900">End Date</Label>
+                    </div>
+                    <p className="text-sm font-medium text-gray-900">
+                      {format(new Date(viewingProject.end_date), 'dd MMM yyyy')}
+                    </p>
                   </div>
                 )}
 

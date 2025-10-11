@@ -53,17 +53,6 @@ def create_project():
             except ValueError:
                 return jsonify({"error": "Invalid start_date format. Use YYYY-MM-DD"}), 400
 
-        if data.get('end_date'):
-            try:
-                end_date = datetime.strptime(data['end_date'], '%Y-%m-%d').date()
-            except ValueError:
-                return jsonify({"error": "Invalid end_date format. Use YYYY-MM-DD"}), 400
-
-        # Validate date range if both dates provided
-        if start_date and end_date:
-            if start_date > end_date:
-                return jsonify({"error": "Start date cannot be after end date"}), 400
-
         # Validate duration_days if provided
         duration_days = None
         if data.get('duration_days'):
@@ -73,6 +62,12 @@ def create_project():
                     return jsonify({"error": "Duration days must be greater than 0"}), 400
             except (ValueError, TypeError):
                 return jsonify({"error": "Invalid duration_days. Must be a positive integer"}), 400
+
+        # Calculate end_date if start_date and duration_days are provided
+        end_date = None
+        if start_date and duration_days:
+            from datetime import timedelta
+            end_date = start_date + timedelta(days=duration_days)
 
         # Create new project
         new_project = Project(
@@ -270,6 +265,13 @@ def update_project(project_id):
                     return jsonify({"error": "Invalid duration_days. Must be a positive integer"}), 400
             else:
                 project.duration_days = None
+
+        # Recalculate end_date if start_date and duration_days are both present
+        if project.start_date and project.duration_days:
+            from datetime import timedelta
+            project.end_date = project.start_date + timedelta(days=project.duration_days)
+        elif not project.duration_days:
+            project.end_date = None
 
         # Update modification info
         project.last_modified_at = datetime.utcnow()

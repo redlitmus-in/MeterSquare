@@ -57,6 +57,13 @@ export interface BOQCreatePayload {
   status?: string;
   created_by?: string;
   discount_percentage?: number;
+  preliminaries?: {
+    items: {
+      description: string;
+      isCustom: boolean;
+    }[];
+    notes: string;
+  };
   items: {
     item_name: string;
     description?: string;

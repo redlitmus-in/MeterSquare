@@ -1458,6 +1458,53 @@ const ProjectApprovals: React.FC = () => {
                   </div>
                 ) : (
                   <>
+                    {/* Preliminaries & Approval Works */}
+                    {(selectedEstimation as any).preliminaries &&
+                     (((selectedEstimation as any).preliminaries.items?.length > 0) ||
+                      (selectedEstimation as any).preliminaries.notes) && (
+                      <div className="mb-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 border border-purple-200 shadow-sm">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="p-2 bg-purple-500 rounded-lg">
+                            <DocumentTextIcon className="w-5 h-5 text-white" />
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-bold text-gray-900">Preliminaries & Approval Works</h3>
+                            <p className="text-xs text-gray-600">Selected conditions and terms</p>
+                          </div>
+                        </div>
+
+                        {(selectedEstimation as any).preliminaries.items &&
+                         (selectedEstimation as any).preliminaries.items.length > 0 && (
+                          <div className="space-y-2 mb-4">
+                            {(selectedEstimation as any).preliminaries.items.map((item: any, index: number) => (
+                              <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
+                                <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
+                                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </div>
+                                <div className="flex-1 text-sm text-gray-700">
+                                  {item.description}
+                                  {item.isCustom && (
+                                    <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {(selectedEstimation as any).preliminaries.notes && (
+                          <div className="bg-white rounded-lg p-4 border border-purple-200">
+                            <h4 className="text-sm font-semibold text-gray-900 mb-2">Additional Notes</h4>
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                              {(selectedEstimation as any).preliminaries.notes}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Existing BOQ Items */}
                     {selectedEstimation.existingItems && selectedEstimation.existingItems.length > 0 && (
                       <div className="mb-8">
@@ -1713,42 +1760,61 @@ const ProjectApprovals: React.FC = () => {
                       const grandTotal = selectedEstimation.totalValue ||
                         selectedEstimation.boqItems?.reduce((sum, item) => sum + (item.estimatedSellingPrice || 0), 0) || 0;
 
+                      // Calculate VAT from items
+                      const totalVAT = selectedEstimation.boqItems?.reduce((sum, item) => {
+                        const itemVAT = (item as any).vat_amount || 0;
+                        return sum + itemVAT;
+                      }, 0) || 0;
+
+                      // Calculate discount from items
+                      const totalDiscountFromItems = selectedEstimation.boqItems?.reduce((sum, item) => {
+                        const itemDiscount = (item as any).discount_amount || 0;
+                        return sum + itemDiscount;
+                      }, 0) || 0;
+
                       const baseCost = totalMaterialCost + totalLaborCost;
                       const overheadAmount = baseCost * selectedEstimation.overheadPercentage / 100;
                       const profitAmount = baseCost * selectedEstimation.profitMargin / 100;
                       const subtotal = baseCost + overheadAmount + profitAmount;
-                      const discountAmount = subtotal * (selectedEstimation.discountPercentage || 0) / 100;
-                      const finalTotal = subtotal - discountAmount;
+                      const discountAmount = totalDiscountFromItems || (subtotal * (selectedEstimation.discountPercentage || 0) / 100);
+                      const afterDiscount = subtotal - discountAmount;
+                      const finalTotal = afterDiscount + totalVAT;
 
                       return (
                         <>
                           <div className="flex justify-between text-sm">
                             <span className="text-gray-600">Total Material Cost:</span>
-                            <span className="font-semibold">AED{totalMaterialCost.toLocaleString()}</span>
+                            <span className="font-semibold">AED {totalMaterialCost.toLocaleString()}</span>
                           </div>
                           <div className="flex justify-between text-sm">
                             <span className="text-gray-600">Total Labor Cost:</span>
-                            <span className="font-semibold">AED{totalLaborCost.toLocaleString()}</span>
+                            <span className="font-semibold">AED {totalLaborCost.toLocaleString()}</span>
                           </div>
                           <div className="flex justify-between text-sm">
                             <span className="text-gray-600">Overhead ({selectedEstimation.overheadPercentage}%):</span>
-                            <span className="font-semibold">AED{overheadAmount.toLocaleString()}</span>
+                            <span className="font-semibold">AED {overheadAmount.toLocaleString()}</span>
                           </div>
                           <div className="flex justify-between text-sm">
                             <span className="text-gray-600">Profit ({selectedEstimation.profitMargin}%):</span>
-                            <span className="font-semibold">AED{profitAmount.toLocaleString()}</span>
+                            <span className="font-semibold">AED {profitAmount.toLocaleString()}</span>
                           </div>
-                          {(selectedEstimation.discountPercentage || 0) > 0 && (
-                            <div className="flex justify-between text-sm">
-                              <span className="text-red-600">Discount ({selectedEstimation.discountPercentage}%):</span>
-                              <span className="font-semibold text-red-600">- AED{discountAmount.toLocaleString()}</span>
+                          {discountAmount > 0 && (
+                            <div className="flex justify-between text-sm text-red-600">
+                              <span>Total Discount{selectedEstimation.discountPercentage ? ` (${selectedEstimation.discountPercentage}%)` : ''}:</span>
+                              <span className="font-semibold">- AED {discountAmount.toLocaleString()}</span>
+                            </div>
+                          )}
+                          {totalVAT > 0 && (
+                            <div className="flex justify-between text-sm text-blue-600">
+                              <span>Total VAT:</span>
+                              <span className="font-semibold">+ AED {totalVAT.toLocaleString()}</span>
                             </div>
                           )}
                           <div className="border-t border-blue-300 pt-2 mt-2">
                             <div className="flex justify-between">
                               <span className="font-bold text-gray-900">Grand Total:</span>
                               <span className="font-bold text-lg text-green-600">
-                                AED{(grandTotal || finalTotal).toLocaleString()}
+                                AED {(grandTotal || finalTotal).toLocaleString()}
                               </span>
                             </div>
                           </div>
