@@ -259,6 +259,7 @@ const ProjectApprovals: React.FC = () => {
       emailSent: boq.email_sent || false,
       projectId: boq.project_id,
       pmAssigned: !!boq.user_id, // Convert to boolean - user_id indicates PM is assigned to project
+      preliminaries: boq.preliminaries || {},
       // Support both old format (items) and new format (existing_purchase/new_purchase)
       existingItems: (boq.existing_purchase?.items || boq.items)?.map((item: any) => {
         const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
@@ -275,10 +276,12 @@ const ProjectApprovals: React.FC = () => {
           amount: sellingPrice,
           materials: item.materials?.map((mat: any) => ({
             name: mat.material_name,
+            description: mat.description || '',
             quantity: mat.quantity,
             unit: mat.unit,
             rate: mat.unit_price,
-            amount: mat.total_price
+            amount: mat.total_price,
+            vat_percentage: mat.vat_percentage || 0
           })) || [],
           labour: item.labour?.map((lab: any) => ({
             type: lab.labour_role,
@@ -292,6 +295,9 @@ const ProjectApprovals: React.FC = () => {
           overheadPercentage: item.overhead_percentage || 0,
           profitMarginPercentage: item.profit_margin_percentage || 0,
           discountPercentage: item.discount_percentage || 0,
+          discount_amount: item.discount_amount || 0,
+          vat_percentage: item.vat_percentage || 0,
+          vat_amount: item.vat_amount || 0,
           isNew: false // Mark as existing item
         };
       }) || [],
@@ -310,10 +316,12 @@ const ProjectApprovals: React.FC = () => {
           amount: sellingPrice,
           materials: item.materials?.map((mat: any) => ({
             name: mat.material_name,
+            description: mat.description || '',
             quantity: mat.quantity,
             unit: mat.unit,
             rate: mat.unit_price,
-            amount: mat.total_price
+            amount: mat.total_price,
+            vat_percentage: mat.vat_percentage || 0
           })) || [],
           labour: item.labour?.map((lab: any) => ({
             type: lab.labour_role,
@@ -327,6 +335,9 @@ const ProjectApprovals: React.FC = () => {
           overheadPercentage: item.overhead_percentage || 0,
           profitMarginPercentage: item.profit_margin_percentage || 0,
           discountPercentage: item.discount_percentage || 0,
+          discount_amount: item.discount_amount || 0,
+          vat_percentage: item.vat_percentage || 0,
+          vat_amount: item.vat_amount || 0,
           isNew: true // Mark as new item
         };
       }) || [],
@@ -347,10 +358,12 @@ const ProjectApprovals: React.FC = () => {
             amount: sellingPrice,
             materials: item.materials?.map((mat: any) => ({
               name: mat.material_name,
+              description: mat.description || '',
               quantity: mat.quantity,
               unit: mat.unit,
               rate: mat.unit_price,
-              amount: mat.total_price
+              amount: mat.total_price,
+              vat_percentage: mat.vat_percentage || 0
             })) || [],
             labour: item.labour?.map((lab: any) => ({
               type: lab.labour_role,
@@ -364,6 +377,9 @@ const ProjectApprovals: React.FC = () => {
             overheadPercentage: item.overhead_percentage || 0,
             profitMarginPercentage: item.profit_margin_percentage || 0,
             discountPercentage: item.discount_percentage || 0,
+            discount_amount: item.discount_amount || 0,
+            vat_percentage: item.vat_percentage || 0,
+            vat_amount: item.vat_amount || 0,
             isNew: false
           };
         }) || []),
@@ -382,10 +398,12 @@ const ProjectApprovals: React.FC = () => {
             amount: sellingPrice,
             materials: item.materials?.map((mat: any) => ({
               name: mat.material_name,
+              description: mat.description || '',
               quantity: mat.quantity,
               unit: mat.unit,
               rate: mat.unit_price,
-              amount: mat.total_price
+              amount: mat.total_price,
+              vat_percentage: mat.vat_percentage || 0
             })) || [],
             labour: item.labour?.map((lab: any) => ({
               type: lab.labour_role,
@@ -399,6 +417,9 @@ const ProjectApprovals: React.FC = () => {
             overheadPercentage: item.overhead_percentage || 0,
             profitMarginPercentage: item.profit_margin_percentage || 0,
             discountPercentage: item.discount_percentage || 0,
+            discount_amount: item.discount_amount || 0,
+            vat_percentage: item.vat_percentage || 0,
+            vat_amount: item.vat_amount || 0,
             isNew: true
           };
         }) || [])
@@ -1537,13 +1558,21 @@ const ProjectApprovals: React.FC = () => {
                           <p className="text-sm font-semibold text-blue-900 mb-2">+ Raw Materials</p>
                           <div className="space-y-1">
                             {item.materials.map((material, mIndex) => (
-                              <div key={mIndex} className="flex items-center justify-between text-sm">
-                                <span className="text-gray-700">
-                                  {material.name} ({material.quantity} {material.unit})
-                                </span>
-                                <span className="font-medium text-gray-900">
-                                  Est. Cost: AED{material.amount.toLocaleString()}
-                                </span>
+                              <div key={mIndex} className="text-sm">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-gray-700">
+                                    {material.name} ({material.quantity} {material.unit})
+                                  </span>
+                                  <span className="font-medium text-gray-900">
+                                    Est. Cost: AED{material.amount.toLocaleString()}
+                                  </span>
+                                </div>
+                                {(material as any).description && (
+                                  <p className="text-xs text-gray-500 ml-4 mt-0.5">{(material as any).description}</p>
+                                )}
+                                {((material as any).vat_percentage || 0) > 0 && (
+                                  <p className="text-xs text-blue-600 ml-4 mt-0.5">VAT: {(material as any).vat_percentage}%</p>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -1578,9 +1607,9 @@ const ProjectApprovals: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Overhead, Profit & Discount */}
+                        {/* Overhead, Profit, Discount & VAT */}
                         <div className="bg-orange-50 rounded-lg p-3 mb-3">
-                          <p className="text-sm font-semibold text-orange-900 mb-2">+ Overheads, Profit & Discount</p>
+                          <p className="text-sm font-semibold text-orange-900 mb-2">+ Overheads, Profit, Discount & VAT</p>
                           <div className="space-y-1 text-sm">
                             <div className="flex justify-between">
                               <span className="text-gray-700">Overhead ({item.overheadPercentage || 0}%)</span>
@@ -1590,16 +1619,18 @@ const ProjectApprovals: React.FC = () => {
                               <span className="text-gray-700">Profit Margin ({item.profitMarginPercentage || 0}%)</span>
                               <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * (item.profitMarginPercentage || 0) / 100).toLocaleString()}</span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className={`${(item.discountPercentage || 0) > 0 ? 'text-red-600' : 'text-gray-700'}`}>Discount ({item.discountPercentage || 0}%)</span>
-                              <span className={`${(item.discountPercentage || 0) > 0 ? 'text-red-600' : 'text-gray-900'}`}>{(item.discountPercentage || 0) > 0 ? '- ' : ''}AED{((() => {
-                                const baseCost = item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost;
-                                const overhead = baseCost * (item.overheadPercentage || 0) / 100;
-                                const profit = baseCost * (item.profitMarginPercentage || 0) / 100;
-                                const subtotal = baseCost + overhead + profit;
-                                return (subtotal * (item.discountPercentage || 0) / 100).toLocaleString();
-                              })())}</span>
-                            </div>
+                            {((item as any).discount_amount || 0) > 0 && (
+                              <div className="flex justify-between text-red-600">
+                                <span>Discount ({item.discountPercentage || 0}%)</span>
+                                <span className="font-medium">- AED{((item as any).discount_amount || 0).toLocaleString()}</span>
+                              </div>
+                            )}
+                            {((item as any).vat_amount || 0) > 0 && (
+                              <div className="flex justify-between text-blue-600">
+                                <span>VAT ({(item as any).vat_percentage || 0}%)</span>
+                                <span className="font-medium">+ AED{((item as any).vat_amount || 0).toLocaleString()}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -1760,10 +1791,25 @@ const ProjectApprovals: React.FC = () => {
                       const grandTotal = selectedEstimation.totalValue ||
                         selectedEstimation.boqItems?.reduce((sum, item) => sum + (item.estimatedSellingPrice || 0), 0) || 0;
 
-                      // Calculate VAT from items
+                      // Calculate VAT from items (both item-level and per-material VAT)
                       const totalVAT = selectedEstimation.boqItems?.reduce((sum, item) => {
+                        // Get item-level VAT amount
                         const itemVAT = (item as any).vat_amount || 0;
-                        return sum + itemVAT;
+
+                        // Also calculate per-material VAT if materials exist
+                        let materialVAT = 0;
+                        if (item.materials) {
+                          materialVAT = item.materials.reduce((matSum, mat) => {
+                            const matVatPct = (mat as any).vat_percentage || 0;
+                            if (matVatPct > 0) {
+                              return matSum + (mat.amount * matVatPct / 100);
+                            }
+                            return matSum;
+                          }, 0);
+                        }
+
+                        // Sum both item-level and per-material VAT
+                        return sum + itemVAT + materialVAT;
                       }, 0) || 0;
 
                       // Calculate discount from items
@@ -2433,6 +2479,8 @@ const ProjectApprovals: React.FC = () => {
                         let totalProfit = 0;
                         let totalDiscount = 0;
 
+                        let totalVAT = 0;
+
                         (selectedEstimation.boqItems || []).forEach((item: any) => {
                           const itemBaseCost = item.materials.reduce((sum: number, m: any) => sum + m.amount, 0) + item.laborCost;
                           const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
@@ -2440,13 +2488,28 @@ const ProjectApprovals: React.FC = () => {
                           const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
                           const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
 
+                          // Calculate VAT (item-level or per-material)
+                          const itemVAT = (item as any).vat_amount || 0;
+                          let materialVAT = 0;
+                          if (item.materials) {
+                            materialVAT = item.materials.reduce((matSum: number, mat: any) => {
+                              const matVatPct = mat.vat_percentage || 0;
+                              if (matVatPct > 0) {
+                                return matSum + (mat.amount * matVatPct / 100);
+                              }
+                              return matSum;
+                            }, 0);
+                          }
+
                           totalOverhead += itemOverhead;
                           totalProfit += itemProfit;
                           totalDiscount += itemDiscount;
+                          totalVAT += itemVAT + materialVAT;
                         });
 
                         const subtotalBeforeDiscount = baseCost + totalOverhead + totalProfit;
-                        const finalTotal = subtotalBeforeDiscount - totalDiscount;
+                        const afterDiscount = subtotalBeforeDiscount - totalDiscount;
+                        const finalTotal = afterDiscount + totalVAT;
 
                         // Calculate average percentages for display
                         const avgOverheadPct = baseCost > 0 ? (totalOverhead / baseCost) * 100 : 0;
@@ -2479,6 +2542,12 @@ const ProjectApprovals: React.FC = () => {
                               <span className={`${totalDiscount > 0 ? 'text-red-600' : 'text-gray-700'}`}>Discount ({avgDiscountPct.toFixed(0)}%):</span>
                               <span className={`font-semibold ${totalDiscount > 0 ? 'text-red-600' : 'text-gray-900'}`}>{totalDiscount > 0 ? '- ' : ''}AED{formatCurrency(totalDiscount)}</span>
                             </div>
+                            {totalVAT > 0 && (
+                              <div className="flex justify-between">
+                                <span className="text-blue-600">VAT:</span>
+                                <span className="font-semibold text-blue-600">+ AED{formatCurrency(totalVAT)}</span>
+                              </div>
+                            )}
                             <div className="flex justify-between pt-3 border-t-2 border-orange-300 mt-2">
                               <span className="text-lg font-bold text-gray-900">Total:</span>
                               <span className="text-lg font-bold text-green-600">AED{formatCurrency(finalTotal)}</span>
@@ -2581,6 +2650,8 @@ const ProjectApprovals: React.FC = () => {
                         let totalProfit = 0;
                         let totalDiscount = 0;
 
+                        let totalVAT = 0;
+
                         (selectedEstimation.boqItems || []).forEach((item: any) => {
                           const itemBaseCost = item.materials.reduce((sum: number, m: any) => sum + m.amount, 0) + item.laborCost;
                           const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
@@ -2588,14 +2659,29 @@ const ProjectApprovals: React.FC = () => {
                           const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
                           const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
 
+                          // Calculate VAT (item-level or per-material)
+                          const itemVAT = (item as any).vat_amount || 0;
+                          let materialVAT = 0;
+                          if (item.materials) {
+                            materialVAT = item.materials.reduce((matSum: number, mat: any) => {
+                              const matVatPct = mat.vat_percentage || 0;
+                              if (matVatPct > 0) {
+                                return matSum + (mat.amount * matVatPct / 100);
+                              }
+                              return matSum;
+                            }, 0);
+                          }
+
                           totalOverhead += itemOverhead;
                           totalProfit += itemProfit;
                           totalDiscount += itemDiscount;
+                          totalVAT += itemVAT + materialVAT;
                         });
 
                         const totalMarkup = totalOverhead + totalProfit;
                         const subtotalBeforeDiscount = baseCost + totalMarkup;
-                        const finalTotal = subtotalBeforeDiscount - totalDiscount;
+                        const afterDiscount = subtotalBeforeDiscount - totalDiscount;
+                        const finalTotal = afterDiscount + totalVAT;
 
                         // Calculate average discount percentage for display
                         const avgDiscountPct = subtotalBeforeDiscount > 0 ? (totalDiscount / subtotalBeforeDiscount) * 100 : 0;
@@ -2630,6 +2716,12 @@ const ProjectApprovals: React.FC = () => {
                               <span className={`${totalDiscount > 0 ? 'text-red-600' : 'text-gray-700'}`}>Discount ({avgDiscountPct.toFixed(0)}%):</span>
                               <span className={`font-semibold ${totalDiscount > 0 ? 'text-red-600' : 'text-gray-900'}`}>{totalDiscount > 0 ? '- ' : ''}AED{formatCurrency(totalDiscount)}</span>
                             </div>
+                            {totalVAT > 0 && (
+                              <div className="flex justify-between">
+                                <span className="text-blue-600">VAT:</span>
+                                <span className="font-semibold text-blue-600">+ AED{formatCurrency(totalVAT)}</span>
+                              </div>
+                            )}
                             <div className="flex justify-between pt-3 border-t-2 border-blue-300 mt-2">
                               <span className="text-lg font-bold text-gray-900">Total:</span>
                               <span className="text-lg font-bold text-green-600">AED{formatCurrency(finalTotal)}</span>

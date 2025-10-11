@@ -274,14 +274,17 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
             overhead_percentage: item.overhead_percentage || 8,
             profit_margin_percentage: item.profit_margin_percentage || 12,
             discount_percentage: (item as any).discount_percentage || 0,
+            vat_percentage: (item as any).vat_percentage || 0,
             status: 'Active',
             materials: (item.materials || []).map(mat => ({
               material_id: mat.master_material_id,
               material_name: mat.material_name,
+              description: mat.description || '',
               quantity: mat.quantity,
               unit: mat.unit,
               unit_price: mat.unit_price,
-              total_price: mat.total_price || (mat.quantity * mat.unit_price)
+              total_price: mat.total_price || (mat.quantity * mat.unit_price),
+              vat_percentage: mat.vat_percentage || 0
             })),
             labour: (item.labour || []).map(lab => ({
               labour_id: lab.master_labour_id,
@@ -302,6 +305,15 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
           initialSearchTerms[index] = item.item_name;
         });
         setItemSearchTerms(initialSearchTerms);
+
+        // Initialize useMaterialVAT based on whether materials have VAT percentages
+        const initialVATMode: Record<number, boolean> = {};
+        editableBoq.items.forEach((item, index) => {
+          // Check if any material has a VAT percentage > 0
+          const hasMaterialVAT = item.materials?.some(mat => (mat as any).vat_percentage > 0);
+          initialVATMode[index] = hasMaterialVAT || false;
+        });
+        setUseMaterialVAT(initialVATMode);
 
         // Expand first item by default
         if (editableBoq.items.length > 0) {
