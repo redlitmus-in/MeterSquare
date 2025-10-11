@@ -22,7 +22,8 @@ import {
   DocumentTextIcon,
   CubeIcon,
   ExclamationTriangleIcon,
-  ClockIcon
+  ClockIcon,
+  Cog6ToothIcon as Settings
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -35,7 +36,9 @@ import {
   BuildingOfficeIcon as BuildingOfficeSolid,
   ClipboardDocumentCheckIcon as ClipboardDocumentCheckSolid,
   CubeIcon as CubeSolid,
-  ExclamationTriangleIcon as ExclamationTriangleSolid
+  ExclamationTriangleIcon as ExclamationTriangleSolid,
+  UserIcon as UserCheck,
+  CheckCircleIcon as CheckCircleSolid
 } from '@heroicons/react/24/solid';
 import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
@@ -389,6 +392,45 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       }
     ];
 
+    // Admin specific navigation items
+    const adminItems: NavigationItem[] = [
+      {
+        name: 'User Management',
+        href: buildPath('/user-management'),
+        icon: UsersIcon,
+        iconSolid: UsersSolid,
+        color: 'text-[#243d8a]'
+      },
+      {
+        name: 'BOQ Management',
+        href: buildPath('/boq-management'),
+        icon: DocumentTextIcon,
+        iconSolid: DocumentTextSolid,
+        color: 'text-green-600'
+      },
+      {
+        name: 'Project Approvals',
+        href: buildPath('/project-approvals'),
+        icon: CheckCircleIcon,
+        iconSolid: CheckCircleSolid,
+        color: 'text-emerald-600'
+      },
+      {
+        name: 'Roles',
+        href: buildPath('/roles'),
+        icon: UserCheck,
+        iconSolid: UserCheck,
+        color: 'text-indigo-600'
+      },
+      {
+        name: 'Settings',
+        href: buildPath('/settings'),
+        icon: Settings,
+        iconSolid: Settings,
+        color: 'text-gray-600'
+      }
+    ];
+
 
     // For other roles, keep procurement and vendor management
     const procurementItem: NavigationItem = {
@@ -450,7 +492,17 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         currentRole === UserRole.SITE_ENGINEER ||
         getRoleDisplayName(roleId || '') === 'Site Engineer';
 
-    if (isTechnicalDirector) {
+    // Check for Admin with multiple format variations
+    const isAdmin = roleId === 'admin' ||
+        roleIdLower === 'admin' ||
+        currentRole === 'admin' ||
+        getRoleDisplayName(roleId || '') === 'Admin' ||
+        user?.role === 'admin';
+
+    if (isAdmin) {
+      // Admin gets specialized admin menu items
+      navigation.push(...adminItems);
+    } else if (isTechnicalDirector) {
       // Technical Director gets specialized menu items
       navigation.push(...technicalDirectorItems);
     } else if (isEstimator) {

@@ -1,10 +1,128 @@
+"""
+Admin Routes - Comprehensive system administration endpoints
+"""
+
 from flask import Blueprint
 from controllers.admin_controller import *
-from utils.authentication import *
+from controllers.settings_controller import get_settings, update_settings
+from controllers.auth_controller import jwt_required
+from controllers.admin_controller import get_all_boqs_admin, approve_boq_admin
 
-admin_routes = Blueprint("admin_routes", __name__, url_prefix='/api')
+admin_routes = Blueprint("admin_routes", __name__, url_prefix='/api/admin')
 
-# Public routes (no authentication required)
+# ============================================
+# USER MANAGEMENT ROUTES
+# ============================================
+
+@admin_routes.route('/users', methods=['GET'])
+@jwt_required
+def get_users_route():
+    """Get all users with filtering and pagination"""
+    return get_all_users()
+
+@admin_routes.route('/users', methods=['POST'])
+@jwt_required
+def create_user_route():
+    """Create a new user"""
+    return create_user()
+
+@admin_routes.route('/users/<int:user_id>', methods=['PUT'])
+@jwt_required
+def update_user_route(user_id):
+    """Update user information"""
+    return update_user(user_id)
+
+@admin_routes.route('/users/<int:user_id>', methods=['DELETE'])
+@jwt_required
+def delete_user_route(user_id):
+    """Delete user (soft delete)"""
+    return delete_user(user_id)
+
+@admin_routes.route('/users/<int:user_id>/status', methods=['POST'])
+@jwt_required
+def toggle_user_status_route(user_id):
+    """Activate/Deactivate user"""
+    return toggle_user_status(user_id)
+
+# ============================================
+# ROLE MANAGEMENT ROUTES
+# ============================================
+
+@admin_routes.route('/roles', methods=['GET'])
+@jwt_required
+def get_roles_route():
+    """Get all roles"""
+    return get_all_roles()
+
+# ============================================
+# PROJECT MANAGEMENT ROUTES (Admin Override)
+# ============================================
+
+@admin_routes.route('/projects', methods=['GET'])
+@jwt_required
+def get_projects_admin_route():
+    """Get all projects (admin view - no restrictions)"""
+    return get_all_projects_admin()
+
+@admin_routes.route('/projects/<int:project_id>/assign-pm', methods=['POST'])
+@jwt_required
+def assign_pm_route(project_id):
+    """Assign/reassign project manager"""
+    return assign_project_manager(project_id)
+
+# ============================================
+# SYSTEM STATISTICS & DASHBOARD ROUTES
+# ============================================
+
+@admin_routes.route('/stats', methods=['GET'])
+@jwt_required
+def get_stats_route():
+    """Get system statistics"""
+    return get_system_stats()
+
+@admin_routes.route('/activity', methods=['GET'])
+@jwt_required
+def get_activity_route():
+    """Get recent system activity"""
+    return get_recent_activity()
+
+# ============================================
+# SETTINGS MANAGEMENT ROUTES
+# ============================================
+
+@admin_routes.route('/settings', methods=['GET'])
+@jwt_required
+def get_settings_route():
+    """Get system settings"""
+    return get_settings()
+
+@admin_routes.route('/settings', methods=['PUT'])
+@jwt_required
+def update_settings_route():
+    """Update system settings"""
+    return update_settings()
+
+# ============================================
+# BOQ MANAGEMENT ROUTES
+# ============================================
+
+@admin_routes.route('/boqs', methods=['GET'])
+@jwt_required
+def get_boqs_route():
+    """Get all BOQs with filtering"""
+    return get_all_boqs_admin()
+
+@admin_routes.route('/boqs/<int:boq_id>/approve', methods=['POST'])
+@jwt_required
+def approve_boq_route(boq_id):
+    """Approve/Reject BOQ"""
+    return approve_boq_admin(boq_id)
+
+# ============================================
+# LEGACY ROUTES (for backward compatibility)
+# ============================================
+
 @admin_routes.route('/all_ss', methods=['GET'])
 def get_all_sitesupervisor_route():
+    """Legacy route - Get all site engineers"""
     return get_all_sitesupervisor()

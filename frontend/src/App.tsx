@@ -56,6 +56,13 @@ const RoleBasedChangeRequests = lazy(() => import('@/components/routing/RoleBase
 // Site Engineer Pages
 const SiteEngineerProjects = lazy(() => import('@/roles/site-engineer/pages/MyProjects'));
 
+// Admin Pages
+const AdminUserManagement = lazy(() => import('@/pages/admin/UserManagement'));
+const AdminRoleManagement = lazy(() => import('@/pages/admin/RoleManagement'));
+const AdminBOQManagement = lazy(() => import('@/pages/admin/BOQManagement'));
+const AdminProjectApprovals = lazy(() => import('@/pages/admin/ProjectApprovals'));
+const AdminSettings = lazy(() => import('@/pages/admin/Settings'));
+
 // Lazy load workflow pages
 const MaterialDispatchProductionPage = lazy(() => import('@/pages/workflows/MaterialDispatchProductionPage'));
 const MaterialDispatchSitePage = lazy(() => import('@/pages/workflows/MaterialDispatchSitePage'));
@@ -423,6 +430,13 @@ function App() {
 
             {/* Role-based Change Requests - Single route for all roles */}
             <Route path="change-requests" element={<RoleBasedChangeRequests />} />
+
+            {/* Admin Routes */}
+            <Route path="user-management" element={<AdminUserManagement />} />
+            <Route path="roles" element={<AdminRoleManagement />} />
+            <Route path="boq-management" element={<AdminBOQManagement />} />
+            <Route path="project-approvals" element={<AdminProjectApprovals />} />
+            <Route path="settings" element={<AdminSettings />} />
 
             {/* Site Engineer specific routes - Temporarily commented out */}
             {/* <Route path="my-project" element={<MyProject />} /> */}

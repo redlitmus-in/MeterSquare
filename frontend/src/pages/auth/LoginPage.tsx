@@ -56,7 +56,7 @@ const loginSchema = z.object({
 
 // Available roles - matching README requirements
 const availableRoles = [
-  // { value: 'admin', label: 'Admin', icon: Shield },
+  { value: 'admin', label: 'Admin', icon: Shield },
   { value: 'technicalDirector', label: 'Technical Director', icon: Briefcase },
   { value: 'estimator', label: 'Estimator', icon: FileText },
   { value: 'projectManager', label: 'Project Manager', icon: Users },
