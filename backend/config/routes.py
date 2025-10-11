@@ -1,3 +1,4 @@
+from routes.admin_route import admin_routes
 from routes.auth_route import auth_routes
 from routes.project_routes import project_routes
 from routes.boq_routes import boq_routes
@@ -7,6 +8,7 @@ from routes.sitesupervisor_routes import sitesupervisor_routes
 from routes.estimator_routes import estimator_routes
 from routes.purchase_route import purchase_routes
 from routes.change_request_routes import change_request_routes
+# from routes.boq_tracking_routes import boq_tracking_routes
 
 # Import and register the routes from the route blueprints
 
@@ -20,3 +22,5 @@ def initialize_routes(app):
     app.register_blueprint(estimator_routes)
     app.register_blueprint(purchase_routes)
     app.register_blueprint(change_request_routes)
+    app.register_blueprint(admin_routes)
+    # app.register_blueprint(boq_tracking_routes)
