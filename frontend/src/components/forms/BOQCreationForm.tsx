@@ -10,11 +10,13 @@ import {
   Users,
   Calculator,
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   Upload,
   Loader2,
   Search,
-  PlusCircle
+  PlusCircle,
+  Info
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
@@ -32,12 +34,15 @@ interface BOQItemForm {
   overhead_percentage: number;
   profit_margin_percentage: number;
   discount_percentage: number;
+  vat_percentage: number;
   master_item_id?: number; // Track if this is an existing item
   is_new?: boolean; // Track if this is a new item
 }
 
 interface BOQMaterialForm extends Omit<BOQMaterial, 'material_id' | 'total_price'> {
   id: string;
+  description?: string; // Material description
+  vat_percentage?: number; // VAT percentage for this specific material (optional, when using per-material VAT)
   master_material_id?: number; // Track if this is an existing material
   is_new?: boolean; // Track if this is a new material
   is_from_master?: boolean; // Track if selected from dropdown
@@ -49,6 +54,14 @@ interface BOQLabourForm extends Omit<BOQLabour, 'labour_id' | 'total_cost'> {
   is_new?: boolean; // Track if this is a new labour
   is_from_master?: boolean; // Track if selected from dropdown
   work_type?: 'piece_rate' | 'contract' | 'daily_wages'; // Labour-specific work type
+}
+
+// Preliminaries interface
+interface PreliminaryItem {
+  id: string;
+  description: string;
+  checked: boolean;
+  isCustom?: boolean; // Track if this is a custom added item
 }
 
 interface BOQCreationFormProps {
@@ -74,6 +87,7 @@ interface MasterItem {
 interface MasterMaterial {
   material_id: number;
   material_name: string;
+  description?: string;
   current_market_price: number;
   default_unit: string;
 }
@@ -88,27 +102,42 @@ interface MasterLabour {
 // Unit options for materials
 const UNIT_OPTIONS = [
   { value: 'nos', label: 'Nos' },
-  { value: 'kg', label: 'Kg' },
+  { value: 'kgs', label: 'Kgs' },
   { value: 'ltr', label: 'Ltr' },
-  { value: 'mtr', label: 'Mtr' },
-  { value: 'sqm', label: 'Sqm' },
-  { value: 'cum', label: 'Cum' },
+  { value: 'mtrs', label: 'Mtrs' },
+  { value: 'sq.m', label: 'Sq.m' },
+  { value: 'cu.m', label: 'Cu.m' },
   { value: 'box', label: 'Box' },
   { value: 'bag', label: 'Bag' },
   { value: 'pcs', label: 'Pcs' },
   { value: 'bundle', label: 'Bundle' },
   { value: 'roll', label: 'Roll' },
   { value: 'sheet', label: 'Sheet' },
-  { value: 'ton', label: 'Ton' },
-  { value: 'gm', label: 'Gm' },
+  { value: 'tons', label: 'Tons' },
+  { value: 'gms', label: 'Gms' },
   { value: 'ml', label: 'Ml' },
   { value: 'ft', label: 'Ft' },
-  { value: 'sqft', label: 'Sqft' },
+  { value: 'sq.ft', label: 'Sq.ft' },
   { value: 'set', label: 'Set' },
   { value: 'pair', label: 'Pair' },
   { value: 'carton', label: 'Carton' },
   { value: 'drum', label: 'Drum' },
   { value: 'can', label: 'Can' }
+];
+
+// Predefined Preliminaries & Approval Works
+const DEFAULT_PRELIMINARIES: Omit<PreliminaryItem, 'id' | 'checked'>[] = [
+  { description: 'Providing the necessary Health & Safety protection as per site requirements' },
+  { description: 'Appointing Consultant for ALAIN Municipality and Civil defense' },
+  { description: 'Obtaining authority approval (Al Ain Municipality, AACD, TAQA) with necessary submission drawings, Preparing AMC with base build fire Contractor' },
+  { description: 'TAQA temporary power application through TAQA approved contractor' },
+  { description: 'CAR Insurance: Complete Fit-out Insurance' },
+  { description: 'Mobilization: Mobilization of necessary personnel required for works' },
+  { description: 'Coordination: Allow for the comprehensive coordination of all services with other contractors, client, building maintenance team, security' },
+  { description: 'Submission of sample board 3D MOOD board for client and Landlord approval' },
+  { description: 'Scaffolding: Necessary scaffolding to carry out the works' },
+  { description: 'Delay & Stop drawing preparation, rebuilt drawing and project managements of the project' },
+  { description: 'Preliminaries cleaning on handover' }
 ];
 
 const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
@@ -148,11 +177,29 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [materialSearchTerms, setMaterialSearchTerms] = useState<Record<string, string>>({});
   const [labourSearchTerms, setLabourSearchTerms] = useState<Record<string, string>>({});
 
+  // VAT mode state - tracks which items use per-material VAT
+  const [useMaterialVAT, setUseMaterialVAT] = useState<Record<string, boolean>>({});
+
+  // Preliminaries state
+  const [preliminaries, setPreliminaries] = useState<PreliminaryItem[]>([]);
+  const [preliminariesExpanded, setPreliminariesExpanded] = useState(false);
+  const [preliminaryNotes, setPreliminaryNotes] = useState('Note: All authority charges & deposit are excluded (Approximate cost 10,000/-)');
+
   // Load projects and master items on mount
   useEffect(() => {
     if (isOpen) {
       loadProjects();
       loadMasterItems();
+      // Initialize preliminaries with default items
+      if (preliminaries.length === 0) {
+        const initialPreliminaries = DEFAULT_PRELIMINARIES.map((item, index) => ({
+          id: `prelim-${index}`,
+          description: item.description,
+          checked: false,
+          isCustom: false
+        }));
+        setPreliminaries(initialPreliminaries);
+      }
     }
   }, [isOpen]);
 
@@ -261,6 +308,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       overhead_percentage: overallOverhead,
       profit_margin_percentage: overallProfit,
       discount_percentage: 0,
+      vat_percentage: 0,
       is_new: true
     };
     setItems(prevItems => [...prevItems, newItem]); // Add new item at the end
@@ -381,6 +429,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       quantity: 1,
       unit: 'nos',
       unit_price: 0,
+      vat_percentage: 0,
       is_new: true
     };
 
@@ -400,6 +449,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             mat.id === materialId ? {
               ...mat,
               material_name: masterMaterial.material_name,
+              description: masterMaterial.description,
               unit: masterMaterial.default_unit,
               unit_price: masterMaterial.current_market_price,
               master_material_id: masterMaterial.material_id,
@@ -515,7 +565,23 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     const profitAmount = baseCost * (item.profit_margin_percentage / 100);
     const subtotal = totalCost + profitAmount;
     const discountAmount = subtotal * (item.discount_percentage / 100);
-    const sellingPrice = subtotal - discountAmount;
+    const afterDiscount = subtotal - discountAmount;
+
+    // Calculate VAT based on mode
+    let vatAmount = 0;
+    if (useMaterialVAT[item.id]) {
+      // Per-material VAT mode: Calculate VAT for each material separately
+      vatAmount = item.materials.reduce((sum, m) => {
+        const materialTotal = m.quantity * m.unit_price;
+        const materialVAT = materialTotal * ((m.vat_percentage || 0) / 100);
+        return sum + materialVAT;
+      }, 0);
+    } else {
+      // Item-level VAT mode: Apply single VAT to after-discount amount
+      vatAmount = afterDiscount * (item.vat_percentage / 100);
+    }
+
+    const sellingPrice = afterDiscount + vatAmount;
     return {
       baseCost,
       materialCost,
@@ -524,12 +590,40 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       totalCost,
       profitAmount,
       discountAmount,
+      vatAmount,
       sellingPrice
     };
   };
 
   const calculateTotalCost = () => {
     return items.reduce((sum, item) => sum + calculateItemCost(item).sellingPrice, 0);
+  };
+
+  // Preliminary helper functions
+  const togglePreliminary = (id: string) => {
+    setPreliminaries(preliminaries.map(item =>
+      item.id === id ? { ...item, checked: !item.checked } : item
+    ));
+  };
+
+  const addCustomPreliminary = () => {
+    const newId = `prelim-custom-${Date.now()}`;
+    setPreliminaries([...preliminaries, {
+      id: newId,
+      description: '',
+      checked: false,
+      isCustom: true
+    }]);
+  };
+
+  const updatePreliminaryDescription = (id: string, description: string) => {
+    setPreliminaries(preliminaries.map(item =>
+      item.id === id ? { ...item, description } : item
+    ));
+  };
+
+  const removePreliminary = (id: string) => {
+    setPreliminaries(preliminaries.filter(item => item.id !== id));
   };
 
   const handleDownloadTemplate = async () => {
@@ -705,11 +799,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             overhead_percentage: item.overhead_percentage,
             profit_margin_percentage: item.profit_margin_percentage,
             discount_percentage: item.discount_percentage,
+            vat_percentage: item.vat_percentage,
             materials: item.materials.map(material => ({
               material_name: material.material_name,
               quantity: material.quantity,
               unit: material.unit,
-              unit_price: material.unit_price
+              unit_price: material.unit_price,
+              description: material.description,
+              vat_percentage: material.vat_percentage
             })),
             labour: item.labour.map(labour => ({
               labour_role: labour.labour_role,
@@ -747,6 +844,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           boq_name: boqName,
           status: 'Draft',
           created_by: 'Estimator',
+          preliminaries: {
+            items: preliminaries.filter(p => p.checked).map(p => ({
+              description: p.description,
+              isCustom: p.isCustom || false
+            })),
+            notes: preliminaryNotes
+          },
           items: items.map(item => ({
             item_name: item.item_name,
             description: item.description || undefined,
@@ -754,11 +858,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             overhead_percentage: item.overhead_percentage,
             profit_margin_percentage: item.profit_margin_percentage,
             discount_percentage: item.discount_percentage,
+            vat_percentage: item.vat_percentage,
             materials: item.materials.map(material => ({
               material_name: material.material_name,
               quantity: material.quantity,
               unit: material.unit,
-              unit_price: material.unit_price
+              unit_price: material.unit_price,
+              description: material.description,
+              vat_percentage: material.vat_percentage
             })),
             labour: item.labour.map(labour => ({
               labour_role: labour.labour_role,
@@ -895,6 +1002,108 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   })()
                   }
                 </div>
+              )}
+            </div>
+
+            {/* Preliminaries & Approval Works */}
+            <div className="mb-6">
+              <div
+                className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-50 to-purple-100 rounded-lg cursor-pointer hover:from-purple-100 hover:to-purple-200 transition-all"
+                onClick={() => setPreliminariesExpanded(!preliminariesExpanded)}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-500 rounded-lg">
+                    <FileText className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">Preliminaries & Approval Works</h3>
+                    <p className="text-xs text-gray-600">Select applicable conditions and terms</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="px-3 py-1 text-xs bg-purple-500 text-white rounded-full font-medium">
+                    {preliminaries.filter(p => p.checked).length} / {preliminaries.length} selected
+                  </span>
+                  {preliminariesExpanded ? (
+                    <ChevronUp className="w-5 h-5 text-gray-500" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-gray-500" />
+                  )}
+                </div>
+              </div>
+
+              {preliminariesExpanded && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mt-4 p-6 bg-white rounded-lg border border-purple-200 shadow-sm"
+                >
+                  {/* Checklist Items */}
+                  <div className="space-y-3 mb-4">
+                    {preliminaries.map((item) => (
+                      <div key={item.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg hover:bg-purple-50 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={item.checked}
+                          onChange={() => togglePreliminary(item.id)}
+                          className="mt-1 w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                          disabled={isSubmitting}
+                        />
+                        {item.isCustom ? (
+                          <div className="flex-1 flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={item.description}
+                              onChange={(e) => updatePreliminaryDescription(item.id, e.target.value)}
+                              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              placeholder="Enter custom preliminary item..."
+                              disabled={isSubmitting}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removePreliminary(item.id)}
+                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              disabled={isSubmitting}
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <label className="flex-1 text-sm text-gray-700 cursor-pointer">
+                            {item.description}
+                          </label>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Add Custom Item Button */}
+                  <button
+                    type="button"
+                    onClick={addCustomPreliminary}
+                    className="flex items-center gap-2 px-4 py-2 mb-4 text-purple-600 border border-purple-300 rounded-lg hover:bg-purple-50 transition-all font-medium"
+                    disabled={isSubmitting}
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Custom Item
+                  </button>
+
+                  {/* Notes Section */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Additional Notes
+                    </label>
+                    <textarea
+                      value={preliminaryNotes}
+                      onChange={(e) => setPreliminaryNotes(e.target.value)}
+                      rows={3}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+                      placeholder="Add any special conditions or notes..."
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                </motion.div>
               )}
             </div>
 
@@ -1083,13 +1292,53 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               + Add Material
                             </button>
                           </div>
+
+                          {/* VAT Mode Toggle */}
+                          <div className="mb-3 pb-3 border-b border-blue-200">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={useMaterialVAT[item.id] || false}
+                                onChange={(e) => {
+                                  setUseMaterialVAT(prev => ({
+                                    ...prev,
+                                    [item.id]: e.target.checked
+                                  }));
+                                  // Initialize VAT to 0 for all materials when enabling
+                                  if (e.target.checked) {
+                                    setItems(items.map(itm =>
+                                      itm.id === item.id
+                                        ? {
+                                            ...itm,
+                                            materials: itm.materials.map(m => ({
+                                              ...m,
+                                              vat_percentage: m.vat_percentage || 0
+                                            }))
+                                          }
+                                        : itm
+                                    ));
+                                  }
+                                }}
+                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                disabled={isSubmitting}
+                              />
+                              <span className="text-xs text-blue-900 font-medium">
+                                Different VAT rates for materials
+                              </span>
+                              <span className="text-xs text-blue-600 italic">
+                                (Check this if materials have different VAT percentages)
+                              </span>
+                            </label>
+                          </div>
+
                           <div className="space-y-2">
                             {item.materials.map((material) => {
                               const availableMaterials = getAvailableMaterials(item.id);
                               const materialDropdownId = `${item.id}-${material.id}`;
 
                               return (
-                                <div key={material.id} className="flex items-center gap-2">
+                                <div key={material.id} className="space-y-1">
+                                <div className="flex items-center gap-2">
                                   <div className="flex-1 relative">
                                     <input
                                       type="text"
@@ -1282,6 +1531,40 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                   <X className="w-3 h-3" />
                                 </button>
                               </div>
+
+                              {/* Description and VAT fields below material row */}
+                              <div className="ml-0 mt-1 flex gap-2">
+                                <input
+                                  type="text"
+                                  value={material.description || ''}
+                                  onChange={(e) => updateMaterial(item.id, material.id, 'description', e.target.value)}
+                                  className="flex-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-gray-50"
+                                  placeholder="Description (optional)"
+                                  disabled={isSubmitting}
+                                />
+
+                                {/* Show VAT input only when per-material VAT is enabled */}
+                                {useMaterialVAT[item.id] && (
+                                  <div className="flex items-center gap-1 w-32">
+                                    <span className="text-xs text-gray-600">VAT</span>
+                                    <input
+                                      type="number"
+                                      value={material.vat_percentage === 0 ? '' : material.vat_percentage || ''}
+                                      onChange={(e) => {
+                                        const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                        updateMaterial(item.id, material.id, 'vat_percentage', value);
+                                      }}
+                                      className="w-16 px-2 py-1.5 text-xs border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white"
+                                      placeholder="0"
+                                      min="0"
+                                      step="0.1"
+                                      disabled={isSubmitting}
+                                    />
+                                    <span className="text-xs text-gray-600">%</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                               );
                             })}
                           </div>
@@ -1521,7 +1804,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             </div>
                             Overheads, Profit & Discount
                           </h5>
-                          <div className="grid grid-cols-3 gap-4">
+                          <div className={`grid gap-4 ${useMaterialVAT[item.id] ? 'grid-cols-3' : 'grid-cols-4'}`}>
                           <div>
                             <label htmlFor={`overhead-${item.id}`} className="block text-xs text-gray-600 mb-1">Overhead %</label>
                             <div className="flex items-center gap-2">
@@ -1583,6 +1866,29 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               <span className="text-sm text-gray-500">%</span>
                             </div>
                           </div>
+                          {/* Show item-level VAT only when per-material VAT is disabled */}
+                          {!useMaterialVAT[item.id] && (
+                            <div>
+                              <label htmlFor={`vat-${item.id}`} className="block text-xs text-gray-600 mb-1">VAT %</label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  id={`vat-${item.id}`}
+                                  type="number"
+                                  value={item.vat_percentage === 0 ? '' : item.vat_percentage}
+                                  onChange={(e) => {
+                                    const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                    updateItem(item.id, 'vat_percentage', value);
+                                  }}
+                                  className="flex-1 px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+                                  min="0"
+                                  step="0.1"
+                                  disabled={isSubmitting}
+                                  placeholder="5"
+                                />
+                                <span className="text-sm text-gray-500">%</span>
+                              </div>
+                            </div>
+                          )}
                           </div>
                         </div>
 
@@ -1615,8 +1921,19 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     <span className="font-semibold text-red-600">- AED {costs.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                   </div>
                                 )}
+                                {costs.vatAmount > 0 && (
+                                  <div className="flex justify-between py-1">
+                                    <span className="text-gray-600">
+                                      {useMaterialVAT[item.id]
+                                        ? 'VAT (Per Material):'
+                                        : `VAT (${item.vat_percentage}%):`
+                                      }
+                                    </span>
+                                    <span className="font-semibold text-gray-900">AED {costs.vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                )}
                                 <div className="flex justify-between font-bold border-t border-gray-300 pt-2 mt-2">
-                                  <span className="text-gray-900">Selling Price:</span>
+                                  <span className="text-gray-900">Total Price:</span>
                                   <span className="text-gray-900">AED {costs.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                               </div>

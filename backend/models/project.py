@@ -35,9 +35,11 @@ class Project(db.Model):
 
     def to_dict(self):
         """Convert to dictionary for JSON response"""
-        # Calculate end_date from start_date and duration_days for backward compatibility
+        # Use stored end_date, or calculate from start_date and duration_days if not stored
         end_date = None
-        if self.start_date and self.duration_days:
+        if self.end_date:
+            end_date = self.end_date.isoformat()
+        elif self.start_date and self.duration_days:
             from datetime import timedelta
             end_date = (self.start_date + timedelta(days=self.duration_days)).isoformat()
 
@@ -54,7 +56,7 @@ class Project(db.Model):
             'work_type': self.work_type,
             'start_date': self.start_date.isoformat() if self.start_date else None,
             'duration_days': self.duration_days,
-            'end_date': end_date,  # Calculated for backward compatibility
+            'end_date': end_date,
             'status': self.status,
             'description': self.description,
             'completion_requested': self.completion_requested,

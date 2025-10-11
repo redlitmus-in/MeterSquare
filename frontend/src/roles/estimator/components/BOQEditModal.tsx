@@ -57,22 +57,22 @@ interface BOQEditModalProps {
 // Unit options for materials
 const UNIT_OPTIONS = [
   { value: 'nos', label: 'Nos' },
-  { value: 'kg', label: 'Kg' },
+  { value: 'kgs', label: 'Kgs' },
   { value: 'ltr', label: 'Ltr' },
-  { value: 'mtr', label: 'Mtr' },
-  { value: 'sqm', label: 'Sqm' },
-  { value: 'cum', label: 'Cum' },
+  { value: 'mtrs', label: 'Mtrs' },
+  { value: 'sq.m', label: 'Sq.m' },
+  { value: 'cu.m', label: 'Cu.m' },
   { value: 'box', label: 'Box' },
   { value: 'bag', label: 'Bag' },
   { value: 'pcs', label: 'Pcs' },
   { value: 'bundle', label: 'Bundle' },
   { value: 'roll', label: 'Roll' },
   { value: 'sheet', label: 'Sheet' },
-  { value: 'ton', label: 'Ton' },
-  { value: 'gm', label: 'Gm' },
+  { value: 'tons', label: 'Tons' },
+  { value: 'gms', label: 'Gms' },
   { value: 'ml', label: 'Ml' },
   { value: 'ft', label: 'Ft' },
-  { value: 'sqft', label: 'Sqft' },
+  { value: 'sq.ft', label: 'Sq.ft' },
   { value: 'set', label: 'Set' },
   { value: 'pair', label: 'Pair' },
   { value: 'carton', label: 'Carton' },
@@ -93,6 +93,9 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'items' | 'summary'>('items');
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
+
+  // VAT mode state - tracks which items use per-material VAT
+  const [useMaterialVAT, setUseMaterialVAT] = useState<Record<number, boolean>>({});
 
   // Master data states
   const [masterItems, setMasterItems] = useState<MasterItem[]>([]);
@@ -271,14 +274,17 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
             overhead_percentage: item.overhead_percentage || 8,
             profit_margin_percentage: item.profit_margin_percentage || 12,
             discount_percentage: (item as any).discount_percentage || 0,
+            vat_percentage: (item as any).vat_percentage || 0,
             status: 'Active',
             materials: (item.materials || []).map(mat => ({
               material_id: mat.master_material_id,
               material_name: mat.material_name,
+              description: mat.description || '',
               quantity: mat.quantity,
               unit: mat.unit,
               unit_price: mat.unit_price,
-              total_price: mat.total_price || (mat.quantity * mat.unit_price)
+              total_price: mat.total_price || (mat.quantity * mat.unit_price),
+              vat_percentage: mat.vat_percentage || 0
             })),
             labour: (item.labour || []).map(lab => ({
               labour_id: lab.master_labour_id,
@@ -299,6 +305,15 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
           initialSearchTerms[index] = item.item_name;
         });
         setItemSearchTerms(initialSearchTerms);
+
+        // Initialize useMaterialVAT based on whether materials have VAT percentages
+        const initialVATMode: Record<number, boolean> = {};
+        editableBoq.items.forEach((item, index) => {
+          // Check if any material has a VAT percentage > 0
+          const hasMaterialVAT = item.materials?.some(mat => (mat as any).vat_percentage > 0);
+          initialVATMode[index] = hasMaterialVAT || false;
+        });
+        setUseMaterialVAT(initialVATMode);
 
         // Expand first item by default
         if (editableBoq.items.length > 0) {
@@ -521,7 +536,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
     });
   };
 
-  const calculateItemTotals = (item: any) => {
+  const calculateItemTotals = (item: any, itemIndex?: number) => {
     const materialTotal = item.materials.reduce((sum: number, mat: any) => sum + (mat.total_price || 0), 0);
     const labourTotal = item.labour.reduce((sum: number, lab: any) => sum + (lab.total_cost || 0), 0);
     const baseTotal = materialTotal + labourTotal;
@@ -529,7 +544,25 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
     const profitAmount = baseTotal * (item.profit_margin_percentage || 0) / 100;
     const subtotal = baseTotal + overheadAmount + profitAmount;
     const discountAmount = subtotal * (item.discount_percentage || 0) / 100;
-    const sellingPrice = subtotal - discountAmount;
+    const afterDiscount = subtotal - discountAmount;
+
+    // Calculate VAT based on mode
+    let vatAmount = 0;
+    const itemIdx = itemIndex !== undefined ? itemIndex : editedBoq?.items.findIndex(i => i === item) ?? -1;
+
+    if (itemIdx >= 0 && useMaterialVAT[itemIdx]) {
+      // Per-material VAT mode: Calculate VAT for each material separately
+      vatAmount = item.materials.reduce((sum: number, mat: any) => {
+        const materialTotalPrice = mat.total_price || 0;
+        const materialVAT = materialTotalPrice * ((mat.vat_percentage || 0) / 100);
+        return sum + materialVAT;
+      }, 0);
+    } else {
+      // Item-level VAT mode: Apply single VAT to after-discount amount
+      vatAmount = afterDiscount * (item.vat_percentage || 0) / 100;
+    }
+
+    const sellingPrice = afterDiscount + vatAmount;
 
     return {
       materialTotal,
@@ -538,13 +571,14 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       overheadAmount,
       profitAmount,
       discountAmount,
+      vatAmount,
       sellingPrice
     };
   };
 
   const calculateGrandTotal = () => {
-    return editedBoq.items.reduce((total, item) => {
-      const itemTotals = calculateItemTotals(item);
+    return editedBoq.items.reduce((total, item, index) => {
+      const itemTotals = calculateItemTotals(item, index);
       return total + itemTotals.sellingPrice;
     }, 0);
   };
@@ -685,7 +719,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                   <div className="space-y-4">
 
                     {editedBoq.items.map((item, itemIndex) => {
-                      const totals = calculateItemTotals(item);
+                      const totals = calculateItemTotals(item, itemIndex);
                       const isExpanded = expandedItems.has(itemIndex);
 
                       return (
@@ -839,6 +873,30 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                   </button>
                                 </div>
 
+                                {/* VAT Mode Toggle */}
+                                <div className="mb-3 pb-3 border-b border-blue-200">
+                                  <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={useMaterialVAT[itemIndex] || false}
+                                      onChange={(e) => {
+                                        setUseMaterialVAT(prev => ({
+                                          ...prev,
+                                          [itemIndex]: e.target.checked
+                                        }));
+                                      }}
+                                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                      disabled={isSaving}
+                                    />
+                                    <span className="text-xs text-blue-900 font-medium">
+                                      Different VAT rates for materials
+                                    </span>
+                                    <span className="text-xs text-blue-600 italic">
+                                      (Check this if materials have different VAT percentages)
+                                    </span>
+                                  </label>
+                                </div>
+
                                 {item.materials.length === 0 ? (
                                   <div className="text-center py-4 text-blue-700 bg-blue-50 rounded-lg border border-blue-200">
                                     No materials added yet
@@ -873,6 +931,32 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                                 placeholder="Material name"
                                                 title={material.is_from_master ? 'Material from master data cannot be edited' : ''}
                                               />
+                                              <input
+                                                type="text"
+                                                value={(material as any).description || ''}
+                                                onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'description', e.target.value)}
+                                                className="w-full px-3 py-1.5 mt-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                                placeholder="Description (optional)"
+                                              />
+                                              {useMaterialVAT[itemIndex] && (
+                                                <div className="flex items-center gap-1 mt-1">
+                                                  <span className="text-xs text-blue-700 font-medium">VAT:</span>
+                                                  <input
+                                                    type="number"
+                                                    value={(material as any).vat_percentage === 0 ? '' : (material as any).vat_percentage || ''}
+                                                    onChange={(e) => {
+                                                      const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                                      handleMaterialChange(itemIndex, matIndex, 'vat_percentage', value);
+                                                    }}
+                                                    className="w-16 px-2 py-1 text-xs border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white"
+                                                    placeholder="0"
+                                                    min="0"
+                                                    step="0.1"
+                                                    disabled={isSaving}
+                                                  />
+                                                  <span className="text-xs text-gray-600">%</span>
+                                                </div>
+                                              )}
                                             </td>
                                             <td className="p-2">
                                               <div className="relative">
@@ -1121,12 +1205,12 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                   <div className="p-1.5 bg-white rounded shadow-sm">
                                     <Calculator className="w-4 h-4 text-green-600" />
                                   </div>
-                                  Overheads, Profit & Discount
+                                  Overheads, Profit, Discount & VAT
                                 </h5>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${useMaterialVAT[itemIndex] ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
                                   <div>
                                     <label className="block text-xs font-semibold text-green-900 mb-2">
-                                      Overhead Percentage (%)
+                                      Overhead (%)
                                     </label>
                                     <div className="flex items-center gap-2">
                                       <input
@@ -1143,7 +1227,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                   </div>
                                   <div>
                                     <label className="block text-xs font-semibold text-green-900 mb-2">
-                                      Profit Margin (%)
+                                      Profit (%)
                                     </label>
                                     <div className="flex items-center gap-2">
                                       <input
@@ -1177,6 +1261,26 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                       <span className="text-sm text-gray-500">%</span>
                                     </div>
                                   </div>
+                                  {!useMaterialVAT[itemIndex] && (
+                                    <div>
+                                      <label className="block text-xs font-semibold text-green-900 mb-2">
+                                        VAT (%)
+                                      </label>
+                                      <div className="flex items-center gap-2">
+                                        <input
+                                          type="number"
+                                          value={(item as any).vat_percentage || 0}
+                                          onChange={(e) => handleItemChange(itemIndex, 'vat_percentage', Number(e.target.value))}
+                                          className="flex-1 px-3 py-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+                                          step="0.1"
+                                          disabled={isSaving}
+                                          placeholder="5"
+                                          min="0"
+                                        />
+                                        <span className="text-sm text-gray-500">%</span>
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
 
@@ -1204,6 +1308,12 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                     <div className="flex justify-between py-1">
                                       <span className="text-red-600">Discount ({item.discount_percentage}%):</span>
                                       <span className="font-semibold text-red-600">- AED {totals.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                    </div>
+                                  )}
+                                  {((item as any).vat_percentage || 0) > 0 && (
+                                    <div className="flex justify-between py-1">
+                                      <span className="text-blue-600">VAT ({(item as any).vat_percentage}%):</span>
+                                      <span className="font-semibold text-blue-600">+ AED {totals.vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                     </div>
                                   )}
                                   <div className="flex justify-between font-bold border-t border-gray-300 pt-2 mt-2">

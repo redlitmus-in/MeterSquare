@@ -186,11 +186,32 @@ def create_boq():
             # Handle discount (can be null or a value)
             discount_percentage = item_data.get("discount_percentage")
             discount_amount = 0.0
-            final_selling_price = selling_price_before_discount
+            after_discount = selling_price_before_discount
 
             if discount_percentage is not None and discount_percentage > 0:
                 discount_amount = (selling_price_before_discount * float(discount_percentage)) / 100
-                final_selling_price = selling_price_before_discount - discount_amount
+                after_discount = selling_price_before_discount - discount_amount
+
+            # Handle VAT - check if using per-material VAT or item-level VAT
+            vat_percentage = item_data.get("vat_percentage", 0.0)
+            vat_amount = 0.0
+            final_selling_price = after_discount
+
+            # Check if any material has VAT percentage defined (per-material mode)
+            has_material_vat = any(mat.get("vat_percentage") is not None and mat.get("vat_percentage", 0) > 0 for mat in materials_data)
+
+            if has_material_vat:
+                # Per-material VAT mode: Calculate VAT for each material
+                for mat_data in materials_data:
+                    mat_vat_pct = mat_data.get("vat_percentage", 0.0)
+                    if mat_vat_pct and mat_vat_pct > 0:
+                        mat_total = mat_data.get("quantity", 0) * mat_data.get("unit_price", 0)
+                        vat_amount += (mat_total * float(mat_vat_pct)) / 100
+                final_selling_price = after_discount + vat_amount
+            elif vat_percentage is not None and vat_percentage > 0:
+                # Item-level VAT mode: Apply single VAT to after-discount amount
+                vat_amount = (after_discount * float(vat_percentage)) / 100
+                final_selling_price = after_discount + vat_amount
 
             # Now add to master tables with calculated values
             master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
@@ -212,14 +233,17 @@ def create_boq():
                 quantity = mat_data.get("quantity", 1.0)
                 unit_price = mat_data.get("unit_price", 0.0)
                 total_price = quantity * unit_price
+                vat_pct = mat_data.get("vat_percentage", 0.0)
 
                 item_materials.append({
                     "master_material_id": master_material_ids[i] if i < len(master_material_ids) else None,
                     "material_name": mat_data.get("material_name"),
+                    "description": mat_data.get("description", ""),
                     "quantity": quantity,
                     "unit": mat_data.get("unit", "nos"),
                     "unit_price": unit_price,
-                    "total_price": total_price
+                    "total_price": total_price,
+                    "vat_percentage": vat_pct if vat_pct else 0.0
                 })
 
             # Process labour for BOQ details
@@ -250,13 +274,15 @@ def create_boq():
                 "profit_margin_amount": profit_margin_amount,
                 "discount_percentage": discount_percentage if discount_percentage is not None else 0.0,
                 "discount_amount": discount_amount,
+                "vat_percentage": vat_percentage if vat_percentage is not None else 0.0,
+                "vat_amount": vat_amount,
                 "total_cost": total_cost,
-                "selling_price": final_selling_price,  # Use final_selling_price after discount
+                "selling_price": final_selling_price,  # Use final_selling_price after discount and VAT
                 "selling_price_before_discount": selling_price_before_discount,  # Selling price before discount
                 "totalMaterialCost": materials_cost,
                 "totalLabourCost": labour_cost,
                 "actualItemCost": base_cost,
-                "estimatedSellingPrice": final_selling_price,  # Use final_selling_price after discount
+                "estimatedSellingPrice": final_selling_price,  # Use final_selling_price after discount and VAT
                 "materials": item_materials,
                 "labour": item_labour
             }
@@ -266,9 +292,13 @@ def create_boq():
             total_materials += len(item_materials)
             total_labour += len(item_labour)
 
+        # Get preliminaries from request data
+        preliminaries = data.get("preliminaries", {})
+
         # Create BOQ details JSON
         boq_details_json = {
             "boq_id": boq.boq_id,
+            "preliminaries": preliminaries,
             "items": boq_items,
             "summary": {
                 "total_items": len(boq_items),
@@ -636,6 +666,9 @@ def get_boq(boq_id):
         if boq.status == "new_purchase_approved" and user_role in ['technicaldirector', 'technical_director']:
             display_status = "approved"
 
+        # Get preliminaries from boq_details
+        preliminaries = boq_details.boq_details.get("preliminaries", {}) if boq_details.boq_details else {}
+
         # Build response with project details
         response_data = {
             "boq_id": boq.boq_id,
@@ -646,6 +679,7 @@ def get_boq(boq_id):
             "created_at": boq.created_at.isoformat() if boq.created_at else None,
             "created_by": boq.created_by,
             "user_id": project.user_id if project else None,
+            "preliminaries": preliminaries,
             "project_details": {
                 "project_name": project.project_name if project else None,
                 "location": project.location if project else None,
@@ -1010,11 +1044,32 @@ def update_boq(boq_id):
                 # Handle discount (can be null or a value)
                 discount_percentage = item_data.get("discount_percentage")
                 discount_amount = 0.0
-                final_selling_price = selling_price
+                after_discount = selling_price
 
                 if discount_percentage is not None and discount_percentage > 0:
                     discount_amount = (selling_price * float(discount_percentage)) / 100
-                    final_selling_price = selling_price - discount_amount
+                    after_discount = selling_price - discount_amount
+
+                # Handle VAT - check if using per-material VAT or item-level VAT
+                vat_percentage = item_data.get("vat_percentage", 0.0)
+                vat_amount = 0.0
+                final_selling_price = after_discount
+
+                # Check if any material has VAT percentage defined (per-material mode)
+                has_material_vat = any(mat.get("vat_percentage") is not None and mat.get("vat_percentage", 0) > 0 for mat in materials_data)
+
+                if has_material_vat:
+                    # Per-material VAT mode: Calculate VAT for each material
+                    for mat_data in materials_data:
+                        mat_vat_pct = mat_data.get("vat_percentage", 0.0)
+                        if mat_vat_pct and mat_vat_pct > 0:
+                            mat_total = mat_data.get("quantity", 0) * mat_data.get("unit_price", 0)
+                            vat_amount += (mat_total * float(mat_vat_pct)) / 100
+                    final_selling_price = after_discount + vat_amount
+                elif vat_percentage is not None and vat_percentage > 0:
+                    # Item-level VAT mode: Apply single VAT to after-discount amount
+                    vat_amount = (after_discount * float(vat_percentage)) / 100
+                    final_selling_price = after_discount + vat_amount
 
                 # Add new items/materials/labour to master tables with calculated values
                 master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
@@ -1036,14 +1091,17 @@ def update_boq(boq_id):
                     quantity = mat_data.get("quantity", 1.0)
                     unit_price = mat_data.get("unit_price", 0.0)
                     total_price = quantity * unit_price
+                    vat_pct = mat_data.get("vat_percentage", 0.0)
 
                     processed_materials.append({
                         "master_material_id": master_material_ids[i] if i < len(master_material_ids) else None,
                         "material_name": mat_data.get("material_name"),
+                        "description": mat_data.get("description", ""),
                         "quantity": quantity,
                         "unit": mat_data.get("unit", "nos"),
                         "unit_price": unit_price,
-                        "total_price": total_price
+                        "total_price": total_price,
+                        "vat_percentage": vat_pct if vat_pct else 0.0
                     })
 
                 # Process labour with master IDs
@@ -1074,13 +1132,15 @@ def update_boq(boq_id):
                     "profit_margin_amount": profit_margin_amount,
                     "discount_percentage": discount_percentage if discount_percentage is not None else 0.0,
                     "discount_amount": discount_amount,
+                    "vat_percentage": vat_percentage if vat_percentage is not None else 0.0,
+                    "vat_amount": vat_amount,
                     "total_cost": total_cost,
-                    "selling_price": final_selling_price,  # Use final_selling_price after discount
+                    "selling_price": final_selling_price,  # Use final_selling_price after discount and VAT
                     "selling_price_before_discount": selling_price,  # Original selling price
                     "totalMaterialCost": materials_cost,
                     "totalLabourCost": labour_cost,
                     "actualItemCost": base_cost,
-                    "estimatedSellingPrice": final_selling_price,  # Use final_selling_price after discount
+                    "estimatedSellingPrice": final_selling_price,  # Use final_selling_price after discount and VAT
                     "materials": processed_materials,
                     "labour": processed_labour
                 }
@@ -1090,9 +1150,13 @@ def update_boq(boq_id):
                 total_materials += len(materials_data)
                 total_labour += len(labour_data)
 
+            # Get preliminaries from request data
+            preliminaries = data.get("preliminaries", {})
+
             # Update JSON structure
             updated_json = {
                 "boq_id": boq.boq_id,
+                "preliminaries": preliminaries,
                 "items": boq_items,
                 "summary": {
                     "total_items": len(boq_items),
