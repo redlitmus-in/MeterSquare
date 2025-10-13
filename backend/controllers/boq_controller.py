@@ -933,6 +933,13 @@ def update_boq(boq_id):
     """Update BOQ using JSON storage approach"""
     try:
         data = request.get_json()
+
+        # Get current logged-in user
+        current_user = getattr(g, 'user', None)
+        user_id = current_user.get('user_id') if current_user else None
+        user_role = current_user.get('role', '').lower() if current_user else ''
+        user_name = current_user.get('full_name') or current_user.get('username') or 'Unknown' if current_user else 'Unknown'
+
         boq = BOQ.query.filter_by(boq_id=boq_id).first()
 
         if not boq:
@@ -961,39 +968,27 @@ def update_boq(boq_id):
         else:
             boq.status = "draft"
 
-        # Get current logged-in user from Flask-Login or session
-        current_user = getattr(g, 'user', None)
-        if current_user:
-            boq.last_modified_by = current_user.get('username') or current_user.get('name') or current_user.get('user_id', 'Unknown')
-        else:
-            boq.last_modified_by = data.get("modified_by", "Admin")
+        # Update last modified by
+        boq.last_modified_by = user_name
 
         # Get existing BOQ details
         boq_details = BOQDetails.query.filter_by(boq_id=boq_id).first()
         if not boq_details:
             return jsonify({"error": "BOQ details not found"}), 404
 
-        # Save current BOQ details to history before updating
-        # Get the latest version number for this BOQ detail
-        latest_history = BOQDetailsHistory.query.filter_by(
-            boq_detail_id=boq_details.boq_detail_id
-        ).order_by(BOQDetailsHistory.version.desc()).first()
+        # Store old values before updating (for change tracking)
+        old_boq_name = boq.boq_name
+        old_status = boq.status
+        old_total_cost = boq_details.total_cost
+        old_total_items = boq_details.total_items
+        old_boq_details_json = boq_details.boq_details
 
-        next_version = 1 if not latest_history else latest_history.version + 1
+        # Update last modified timestamp
+        boq.last_modified_at = datetime.utcnow()
 
-        # Create history entry with current BOQ details
-        boq_detail_history = BOQDetailsHistory(
-            boq_detail_id=boq_details.boq_detail_id,
-            boq_id=boq_id,
-            version=next_version,
-            boq_details=boq_details.boq_details,  # Save current state
-            total_cost=boq_details.total_cost,
-            total_items=boq_details.total_items,
-            total_materials=boq_details.total_materials,
-            total_labour=boq_details.total_labour,
-            created_by=boq_details.last_modified_by or boq_details.created_by
-        )
-        db.session.add(boq_detail_history)
+        # Note: BOQDetailsHistory is NOT stored in update_boq
+        # History is only stored in revision_boq function
+        next_version = 1
 
         # If items are provided, update the JSON structure
         if "items" in data:
@@ -1179,30 +1174,138 @@ def update_boq(boq_id):
             boq_details.total_labour = total_labour
             boq_details.last_modified_by = created_by
 
-        # Log the update action in BOQ history
-        current_user = getattr(g, 'user', None)
-        user_name = "Admin"
-        user_id = None
+        # Track detailed changes
+        detailed_changes = {}
 
-        if current_user:
-            user_name = current_user.get('username') or current_user.get('full_name') or current_user.get('user_id', 'Admin')
-            user_id = current_user.get('user_id')
+        # Check BOQ name change
+        if old_boq_name != boq.boq_name:
+            detailed_changes["boq_name"] = {
+                "old": old_boq_name,
+                "new": boq.boq_name
+            }
 
-        # Create action for BOQ history
+        # Check total cost change
+        new_total_cost = total_boq_cost if "items" in data else boq_details.total_cost
+        if old_total_cost != new_total_cost:
+            detailed_changes["total_cost"] = {
+                "old": float(old_total_cost) if old_total_cost else 0,
+                "new": float(new_total_cost) if new_total_cost else 0,
+                "difference": float(new_total_cost - old_total_cost) if old_total_cost and new_total_cost else 0
+            }
+
+        # Check total items change
+        new_total_items = len(boq_items) if "items" in data else boq_details.total_items
+        if old_total_items != new_total_items:
+            detailed_changes["total_items"] = {
+                "old": old_total_items,
+                "new": new_total_items,
+                "difference": new_total_items - old_total_items if old_total_items and new_total_items else 0
+            }
+
+        # Track item-level changes (if items were updated)
+        if "items" in data and old_boq_details_json and "items" in old_boq_details_json:
+            items_changes = []
+            old_items = old_boq_details_json.get("items", [])
+            new_items = boq_items
+
+            # Create dictionaries for easier lookup
+            old_items_dict = {item.get("master_item_id"): item for item in old_items if item.get("master_item_id")}
+            new_items_dict = {item.get("master_item_id"): item for item in new_items if item.get("master_item_id")}
+
+            # Check for modified items
+            for item_id, new_item in new_items_dict.items():
+                if item_id in old_items_dict:
+                    old_item = old_items_dict[item_id]
+                    item_change = {"item_name": new_item.get("item_name"), "master_item_id": item_id}
+
+                    # Check specific field changes
+                    if old_item.get("base_cost") != new_item.get("base_cost"):
+                        item_change["base_cost"] = {
+                            "old": float(old_item.get("base_cost", 0)),
+                            "new": float(new_item.get("base_cost", 0))
+                        }
+
+                    if old_item.get("selling_price") != new_item.get("selling_price"):
+                        item_change["selling_price"] = {
+                            "old": float(old_item.get("selling_price", 0)),
+                            "new": float(new_item.get("selling_price", 0))
+                        }
+
+                    if old_item.get("overhead_percentage") != new_item.get("overhead_percentage"):
+                        item_change["overhead_percentage"] = {
+                            "old": float(old_item.get("overhead_percentage", 0)),
+                            "new": float(new_item.get("overhead_percentage", 0))
+                        }
+
+                    if old_item.get("profit_margin_percentage") != new_item.get("profit_margin_percentage"):
+                        item_change["profit_margin_percentage"] = {
+                            "old": float(old_item.get("profit_margin_percentage", 0)),
+                            "new": float(new_item.get("profit_margin_percentage", 0))
+                        }
+
+                    # Check material changes
+                    old_materials_count = len(old_item.get("materials", []))
+                    new_materials_count = len(new_item.get("materials", []))
+                    if old_materials_count != new_materials_count:
+                        item_change["materials_count"] = {
+                            "old": old_materials_count,
+                            "new": new_materials_count
+                        }
+
+                    # Check labour changes
+                    old_labour_count = len(old_item.get("labour", []))
+                    new_labour_count = len(new_item.get("labour", []))
+                    if old_labour_count != new_labour_count:
+                        item_change["labour_count"] = {
+                            "old": old_labour_count,
+                            "new": new_labour_count
+                        }
+
+                    if len(item_change) > 2:  # More than just item_name and master_item_id
+                        items_changes.append(item_change)
+
+            # Check for added items
+            for item_id, new_item in new_items_dict.items():
+                if item_id not in old_items_dict:
+                    items_changes.append({
+                        "type": "added",
+                        "item_name": new_item.get("item_name"),
+                        "master_item_id": item_id,
+                        "selling_price": float(new_item.get("selling_price", 0))
+                    })
+
+            # Check for removed items
+            for item_id, old_item in old_items_dict.items():
+                if item_id not in new_items_dict:
+                    items_changes.append({
+                        "type": "removed",
+                        "item_name": old_item.get("item_name"),
+                        "master_item_id": item_id,
+                        "selling_price": float(old_item.get("selling_price", 0))
+                    })
+
+            if items_changes:
+                detailed_changes["items"] = items_changes
+
+        # Create action for BOQ history with current user role and name
         update_action = {
             "type": "boq_updated",
-            "role": current_user.get('role', 'unknown') if current_user else 'unknown',
+            "role": user_role if user_role else 'system',
+            "user_name": user_name,
+            "user_id": user_id,
             "status": boq.status,
-            "version": next_version,
             "timestamp": datetime.utcnow().isoformat(),
             "updated_by": user_name,
             "updated_by_user_id": user_id,
             "boq_name": boq.boq_name,
             "total_items": len(boq_items) if "items" in data else boq_details.total_items,
             "total_cost": total_boq_cost if "items" in data else boq_details.total_cost,
-            "changes": {
-                "boq_name_changed": "boq_name" in data,
-                "items_updated": "items" in data
+            "changes": detailed_changes,
+            "change_summary": {
+                "boq_name_changed": bool(detailed_changes.get("boq_name")),
+                "cost_changed": bool(detailed_changes.get("total_cost")),
+                "items_changed": bool(detailed_changes.get("items")),
+                "items_count_changed": bool(detailed_changes.get("total_items"))
             }
         }
 
@@ -1229,7 +1332,7 @@ def update_boq(boq_id):
 
             existing_history.action_by = user_name
             existing_history.boq_status = boq.status
-            existing_history.comments = f"BOQ updated - Version {next_version}"
+            existing_history.comments = f"BOQ updated - Version {next_version} by {user_name}"
             existing_history.action_date = datetime.utcnow()
             existing_history.last_modified_by = user_name
             existing_history.last_modified_at = datetime.utcnow()
@@ -1240,7 +1343,7 @@ def update_boq(boq_id):
                 action=[update_action],
                 action_by=user_name,
                 boq_status=boq.status,
-                comments=f"BOQ updated - Version {next_version}",
+                comments=f"BOQ updated - Version {next_version} by {user_name}",
                 action_date=datetime.utcnow(),
                 created_by=user_name
             )
@@ -1248,11 +1351,15 @@ def update_boq(boq_id):
 
         db.session.commit()
 
+        log.info(f"✓ BOQ Update completed - BOQ ID: {boq_id}, Version: {next_version}, User: {user_name}, Role: {user_role}")
+
         # Return updated BOQ
         return jsonify({
             "message": "BOQ Updated successfully",
+            "boq_id": boq_id,
             "version": next_version,
-            "boq_id": boq_id
+            "status": boq.status,
+            "updated_by": user_name
         }), 200
         # return get_boq(boq_id)
 
@@ -1261,6 +1368,478 @@ def update_boq(boq_id):
         log.error(f"Error updating BOQ: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+def revision_boq(boq_id):
+    """Create a revision of BOQ - stores history and increments revision number"""
+    try:
+        data = request.get_json()
+
+        # Get current logged-in user
+        current_user = getattr(g, 'user', None)
+        user_id = current_user.get('user_id') if current_user else None
+        user_role = current_user.get('role', '').lower() if current_user else ''
+        user_name = current_user.get('full_name') or current_user.get('username') or 'Unknown' if current_user else 'Unknown'
+
+        log.info(f"BOQ Revision Request - User role: {user_role}, User name: {user_name}, User ID: {user_id}, BOQ ID: {boq_id}")
+
+        boq = BOQ.query.filter_by(boq_id=boq_id).first()
+
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Get existing BOQ details BEFORE any updates
+        boq_details = BOQDetails.query.filter_by(boq_id=boq_id).first()
+        if not boq_details:
+            return jsonify({"error": "BOQ details not found"}), 404
+
+        # Store old values before updating (for change tracking)
+        old_boq_name = boq.boq_name
+        old_status = boq.status
+        old_revision_number = boq.revision_number or 0
+        old_total_cost = boq_details.total_cost
+        old_total_items = boq_details.total_items
+        old_boq_details_json = boq_details.boq_details
+
+        # Update BOQ basic details
+        if "boq_name" in data:
+            boq.boq_name = data["boq_name"]
+
+        # Check if this is a revision edit (from Revisions button)
+        is_revision = data.get("is_revision", False)
+
+        # Increment revision number
+        boq.revision_number = (boq.revision_number or 0) + 1
+        new_revision_number = boq.revision_number
+
+        # Set status based on current status and revision mode
+        current_status = old_status
+        if is_revision:
+            # If this is a revision edit, always set to Under_Revision
+            boq.status = "Under_Revision"
+        elif current_status == "Client_Rejected":
+            boq.status = "Under_Revision"
+        elif current_status == "Rejected":
+            # If TD rejected, keep as Under_Revision when editing
+            boq.status = "Under_Revision"
+        elif current_status in ["Sent_for_Confirmation", "Pending_Revision", "Pending", "Approved", "Client_Confirmed", "Under_Revision"]:
+            # Keep the current status (don't change workflow statuses)
+            pass
+        else:
+            boq.status = "draft"
+
+        # Update last modified by and timestamp
+        boq.last_modified_by = user_name
+        boq.last_modified_at = datetime.utcnow()
+
+        # Store BOQ details history ONLY if user is admin
+        next_version = 1
+        if user_role == 'admin':
+            # Get the latest version number for this BOQ detail
+            latest_history = BOQDetailsHistory.query.filter_by(
+                boq_detail_id=boq_details.boq_detail_id
+            ).order_by(BOQDetailsHistory.version.desc()).first()
+
+            next_version = 1 if not latest_history else latest_history.version + 1
+
+            # Create history entry with current BOQ details BEFORE updating
+            boq_detail_history = BOQDetailsHistory(
+                boq_detail_id=boq_details.boq_detail_id,
+                boq_id=boq_id,
+                version=next_version,
+                boq_details=old_boq_details_json,  # Save OLD state before updating
+                total_cost=old_total_cost,
+                total_items=old_total_items,
+                total_materials=boq_details.total_materials,
+                total_labour=boq_details.total_labour,
+                created_by=user_name
+            )
+            db.session.add(boq_detail_history)
+        else:
+            log.info(f"✗ BOQ details history NOT created - User '{user_name}' (Role: {user_role}, ID: {user_id}) is not admin")
+        # If items are provided, update the JSON structure
+        if "items" in data:
+            # Use the same current user logic for BOQ details
+            current_user = getattr(g, 'user', None)
+            if current_user:
+                created_by = current_user.get('username') or current_user.get('full_name') or current_user.get('user_id', 'Admin')
+            else:
+                created_by = data.get("modified_by", "Admin")
+
+            # Process updated items
+            boq_items = []
+            total_boq_cost = 0
+            total_materials = 0
+            total_labour = 0
+
+            for item_data in data["items"]:
+                materials_data = item_data.get("materials", [])
+                labour_data = item_data.get("labour", [])
+
+                # Calculate costs first to get overhead and profit amounts
+                materials_cost = 0
+                labour_cost = 0
+
+                # Calculate material and labour costs
+                for mat_data in materials_data:
+                    quantity = mat_data.get("quantity", 1.0)
+                    unit_price = mat_data.get("unit_price", 0.0)
+                    materials_cost += quantity * unit_price
+
+                for labour_data_item in labour_data:
+                    hours = labour_data_item.get("hours", 0.0)
+                    rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
+                    labour_cost += hours * rate_per_hour
+
+                # Calculate item costs
+                base_cost = materials_cost + labour_cost
+
+                # Use provided percentages, default to 10% overhead and 15% profit if not provided
+                overhead_percentage = item_data.get("overhead_percentage", 10.0)
+                profit_margin_percentage = item_data.get("profit_margin_percentage", 15.0)
+
+                # Calculate amounts based on percentages
+                overhead_amount = (base_cost * overhead_percentage) / 100
+                profit_margin_amount = (base_cost * profit_margin_percentage) / 100
+                total_cost = base_cost + overhead_amount
+                selling_price = total_cost + profit_margin_amount
+
+                # Handle discount (can be null or a value)
+                discount_percentage = item_data.get("discount_percentage")
+                discount_amount = 0.0
+                after_discount = selling_price
+
+                if discount_percentage is not None and discount_percentage > 0:
+                    discount_amount = (selling_price * float(discount_percentage)) / 100
+                    after_discount = selling_price - discount_amount
+
+                # Handle VAT - check if using per-material VAT or item-level VAT
+                vat_percentage = item_data.get("vat_percentage", 0.0)
+                vat_amount = 0.0
+                final_selling_price = after_discount
+
+                # Check if any material has VAT percentage defined (per-material mode)
+                has_material_vat = any(mat.get("vat_percentage") is not None and mat.get("vat_percentage", 0) > 0 for mat in materials_data)
+
+                if has_material_vat:
+                    # Per-material VAT mode: Calculate VAT for each material
+                    for mat_data in materials_data:
+                        mat_vat_pct = mat_data.get("vat_percentage", 0.0)
+                        if mat_vat_pct and mat_vat_pct > 0:
+                            mat_total = mat_data.get("quantity", 0) * mat_data.get("unit_price", 0)
+                            vat_amount += (mat_total * float(mat_vat_pct)) / 100
+                    final_selling_price = after_discount + vat_amount
+                elif vat_percentage is not None and vat_percentage > 0:
+                    # Item-level VAT mode: Apply single VAT to after-discount amount
+                    vat_amount = (after_discount * float(vat_percentage)) / 100
+                    final_selling_price = after_discount + vat_amount
+
+                # Add new items/materials/labour to master tables with calculated values
+                master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
+                    item_data.get("item_name"),
+                    item_data.get("description"),
+                    item_data.get("work_type", "contract"),
+                    materials_data,
+                    labour_data,
+                    created_by,
+                    overhead_percentage,
+                    overhead_amount,
+                    profit_margin_percentage,
+                    profit_margin_amount
+                )
+
+                # Process materials with master IDs
+                processed_materials = []
+                for i, mat_data in enumerate(materials_data):
+                    quantity = mat_data.get("quantity", 1.0)
+                    unit_price = mat_data.get("unit_price", 0.0)
+                    total_price = quantity * unit_price
+                    vat_pct = mat_data.get("vat_percentage", 0.0)
+
+                    processed_materials.append({
+                        "master_material_id": master_material_ids[i] if i < len(master_material_ids) else None,
+                        "material_name": mat_data.get("material_name"),
+                        "description": mat_data.get("description", ""),
+                        "quantity": quantity,
+                        "unit": mat_data.get("unit", "nos"),
+                        "unit_price": unit_price,
+                        "total_price": total_price,
+                        "vat_percentage": vat_pct if vat_pct else 0.0
+                    })
+
+                # Process labour with master IDs
+                processed_labour = []
+                for i, labour_data_item in enumerate(labour_data):
+                    hours = labour_data_item.get("hours", 0.0)
+                    rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
+                    total_cost_labour = hours * rate_per_hour
+
+                    processed_labour.append({
+                        "master_labour_id": master_labour_ids[i] if i < len(master_labour_ids) else None,
+                        "labour_role": labour_data_item.get("labour_role"),
+                        "hours": hours,
+                        "rate_per_hour": rate_per_hour,
+                        "total_cost": total_cost_labour
+                    })
+
+                # Build updated item JSON
+                item_json = {
+                    "master_item_id": master_item_id,
+                    "item_name": item_data.get("item_name"),
+                    "description": item_data.get("description"),
+                    "work_type": item_data.get("work_type"),
+                    "base_cost": base_cost,
+                    "overhead_percentage": overhead_percentage,
+                    "overhead_amount": overhead_amount,
+                    "profit_margin_percentage": profit_margin_percentage,
+                    "profit_margin_amount": profit_margin_amount,
+                    "discount_percentage": discount_percentage if discount_percentage is not None else 0.0,
+                    "discount_amount": discount_amount,
+                    "vat_percentage": vat_percentage if vat_percentage is not None else 0.0,
+                    "vat_amount": vat_amount,
+                    "total_cost": total_cost,
+                    "selling_price": final_selling_price,  # Use final_selling_price after discount and VAT
+                    "selling_price_before_discount": selling_price,  # Original selling price
+                    "totalMaterialCost": materials_cost,
+                    "totalLabourCost": labour_cost,
+                    "actualItemCost": base_cost,
+                    "estimatedSellingPrice": final_selling_price,  # Use final_selling_price after discount and VAT
+                    "materials": processed_materials,
+                    "labour": processed_labour
+                }
+
+                boq_items.append(item_json)
+                total_boq_cost += final_selling_price  # Add final price after discount to total
+                total_materials += len(materials_data)
+                total_labour += len(labour_data)
+
+            # Get preliminaries from request data
+            preliminaries = data.get("preliminaries", {})
+
+            # Update JSON structure
+            updated_json = {
+                "boq_id": boq.boq_id,
+                "preliminaries": preliminaries,
+                "items": boq_items,
+                "summary": {
+                    "total_items": len(boq_items),
+                    "total_materials": total_materials,
+                    "total_labour": total_labour,
+                    "total_material_cost": sum(item["totalMaterialCost"] for item in boq_items),
+                    "total_labour_cost": sum(item["totalLabourCost"] for item in boq_items),
+                    "total_cost": total_boq_cost,
+                    "selling_price": total_boq_cost,
+                    "estimatedSellingPrice": total_boq_cost
+                }
+            }
+
+            # Update BOQ details
+            boq_details.boq_details = updated_json
+            boq_details.total_cost = total_boq_cost
+            boq_details.total_items = len(boq_items)
+            boq_details.total_materials = total_materials
+            boq_details.total_labour = total_labour
+            boq_details.last_modified_by = created_by
+
+        # Track detailed changes
+        detailed_changes = {}
+
+        # Check BOQ name change
+        if old_boq_name != boq.boq_name:
+            detailed_changes["boq_name"] = {
+                "old": old_boq_name,
+                "new": boq.boq_name
+            }
+
+        # Check total cost change
+        new_total_cost = total_boq_cost if "items" in data else boq_details.total_cost
+        if old_total_cost != new_total_cost:
+            detailed_changes["total_cost"] = {
+                "old": float(old_total_cost) if old_total_cost else 0,
+                "new": float(new_total_cost) if new_total_cost else 0,
+                "difference": float(new_total_cost - old_total_cost) if old_total_cost and new_total_cost else 0
+            }
+
+        # Check total items change
+        new_total_items = len(boq_items) if "items" in data else boq_details.total_items
+        if old_total_items != new_total_items:
+            detailed_changes["total_items"] = {
+                "old": old_total_items,
+                "new": new_total_items,
+                "difference": new_total_items - old_total_items if old_total_items and new_total_items else 0
+            }
+
+        # Track item-level changes (if items were updated)
+        if "items" in data and old_boq_details_json and "items" in old_boq_details_json:
+            items_changes = []
+            old_items = old_boq_details_json.get("items", [])
+            new_items = boq_items
+
+            # Create dictionaries for easier lookup
+            old_items_dict = {item.get("master_item_id"): item for item in old_items if item.get("master_item_id")}
+            new_items_dict = {item.get("master_item_id"): item for item in new_items if item.get("master_item_id")}
+
+            # Check for modified items
+            for item_id, new_item in new_items_dict.items():
+                if item_id in old_items_dict:
+                    old_item = old_items_dict[item_id]
+                    item_change = {"item_name": new_item.get("item_name"), "master_item_id": item_id}
+
+                    # Check specific field changes
+                    if old_item.get("base_cost") != new_item.get("base_cost"):
+                        item_change["base_cost"] = {
+                            "old": float(old_item.get("base_cost", 0)),
+                            "new": float(new_item.get("base_cost", 0))
+                        }
+
+                    if old_item.get("selling_price") != new_item.get("selling_price"):
+                        item_change["selling_price"] = {
+                            "old": float(old_item.get("selling_price", 0)),
+                            "new": float(new_item.get("selling_price", 0))
+                        }
+
+                    if old_item.get("overhead_percentage") != new_item.get("overhead_percentage"):
+                        item_change["overhead_percentage"] = {
+                            "old": float(old_item.get("overhead_percentage", 0)),
+                            "new": float(new_item.get("overhead_percentage", 0))
+                        }
+
+                    if old_item.get("profit_margin_percentage") != new_item.get("profit_margin_percentage"):
+                        item_change["profit_margin_percentage"] = {
+                            "old": float(old_item.get("profit_margin_percentage", 0)),
+                            "new": float(new_item.get("profit_margin_percentage", 0))
+                        }
+
+                    # Check material changes
+                    old_materials_count = len(old_item.get("materials", []))
+                    new_materials_count = len(new_item.get("materials", []))
+                    if old_materials_count != new_materials_count:
+                        item_change["materials_count"] = {
+                            "old": old_materials_count,
+                            "new": new_materials_count
+                        }
+
+                    # Check labour changes
+                    old_labour_count = len(old_item.get("labour", []))
+                    new_labour_count = len(new_item.get("labour", []))
+                    if old_labour_count != new_labour_count:
+                        item_change["labour_count"] = {
+                            "old": old_labour_count,
+                            "new": new_labour_count
+                        }
+
+                    if len(item_change) > 2:  # More than just item_name and master_item_id
+                        items_changes.append(item_change)
+
+            # Check for added items
+            for item_id, new_item in new_items_dict.items():
+                if item_id not in old_items_dict:
+                    items_changes.append({
+                        "type": "added",
+                        "item_name": new_item.get("item_name"),
+                        "master_item_id": item_id,
+                        "selling_price": float(new_item.get("selling_price", 0))
+                    })
+
+            # Check for removed items
+            for item_id, old_item in old_items_dict.items():
+                if item_id not in new_items_dict:
+                    items_changes.append({
+                        "type": "removed",
+                        "item_name": old_item.get("item_name"),
+                        "master_item_id": item_id,
+                        "selling_price": float(old_item.get("selling_price", 0))
+                    })
+
+            if items_changes:
+                detailed_changes["items"] = items_changes
+
+        # Create action for BOQ history with current user role and name
+        update_action = {
+            "type": "boq_revision",
+            "role": user_role if user_role else 'system',
+            "user_name": user_name,
+            "user_id": user_id,
+            "status": boq.status,
+            "old_status": old_status,
+            "revision_number": new_revision_number,
+            "old_revision_number": old_revision_number,
+            "version": next_version,
+            "timestamp": datetime.utcnow().isoformat(),
+            "updated_by": user_name,
+            "updated_by_user_id": user_id,
+            "boq_name": boq.boq_name,
+            "old_boq_name": old_boq_name,
+            "total_items": len(boq_items) if "items" in data else boq_details.total_items,
+            "total_cost": total_boq_cost if "items" in data else boq_details.total_cost,
+            "changes": detailed_changes,
+            "change_summary": {
+                "boq_name_changed": bool(detailed_changes.get("boq_name")),
+                "cost_changed": bool(detailed_changes.get("total_cost")),
+                "items_changed": bool(detailed_changes.get("items")),
+                "items_count_changed": bool(detailed_changes.get("total_items")),
+                "status_changed": old_status != boq.status,
+                "revision_created": True
+            }
+        }
+
+        # Check if history entry exists for this BOQ
+        existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        if existing_history:
+            # Append to existing action array
+            if existing_history.action is None:
+                current_actions = []
+            elif isinstance(existing_history.action, list):
+                current_actions = existing_history.action
+            elif isinstance(existing_history.action, dict):
+                current_actions = [existing_history.action]
+            else:
+                current_actions = []
+
+            current_actions.append(update_action)
+            existing_history.action = current_actions
+
+            # Mark JSONB field as modified for SQLAlchemy
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(existing_history, "action")
+
+            existing_history.action_by = user_name
+            existing_history.boq_status = boq.status
+            existing_history.comments = f"BOQ Revision {new_revision_number} - Version {next_version} by {user_name}"
+            existing_history.action_date = datetime.utcnow()
+            existing_history.last_modified_by = user_name
+            existing_history.last_modified_at = datetime.utcnow()
+        else:
+            # Create new history entry
+            boq_history = BOQHistory(
+                boq_id=boq_id,
+                action=[update_action],
+                action_by=user_name,
+                boq_status=boq.status,
+                comments=f"BOQ Revision {new_revision_number} - Version {next_version} by {user_name}",
+                action_date=datetime.utcnow(),
+                created_by=user_name
+            )
+            db.session.add(boq_history)
+
+        db.session.commit()
+
+        log.info(f"✓ BOQ Revision completed successfully - BOQ ID: {boq_id}, Revision: {new_revision_number}, Version: {next_version}, User: {user_name}")
+
+        # Return updated BOQ
+        return jsonify({
+            "message": "BOQ Revision created successfully",
+            "boq_id": boq_id,
+            "revision_number": new_revision_number,
+            "version": next_version,
+            "status": boq.status,
+            "updated_by": user_name
+        }), 200
+        # return get_boq(boq_id)
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error updating BOQ: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 def delete_boq(boq_id):
     """Delete BOQ and its details (soft delete could be implemented)"""

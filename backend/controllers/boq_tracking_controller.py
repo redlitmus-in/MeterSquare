@@ -36,19 +36,10 @@ def get_boq_planned_vs_actual(boq_id):
             boq_id=boq_id, is_deleted=False
         ).all()
 
-        log.info(f"=== BOQ {boq_id} Tracking Data ===")
-        log.info(f"Found {len(actual_materials)} material purchase records")
-        for mat in actual_materials:
-            log.info(f"  Material: {mat.material_name} (mat_id: {mat.master_material_id}, item_id: {mat.master_item_id})")
-            log.info(f"    Qty: {mat.total_quantity_purchased}, Price: {mat.latest_unit_price}")
-            log.info(f"    Purchase history type: {type(mat.purchase_history)}")
-
         # Get actual labour tracking from LabourTracking
         actual_labour = LabourTracking.query.filter_by(
             boq_id=boq_id, is_deleted=False
         ).all()
-
-        log.info(f"Found {len(actual_labour)} labour tracking records")
 
         # Build comparison
         comparison = {
@@ -71,8 +62,6 @@ def get_boq_planned_vs_actual(boq_id):
                 master_material_id = planned_mat.get('master_material_id')
                 material_name = planned_mat.get('material_name')
 
-                log.info(f"  Looking for material: {material_name} (mat_id: {master_material_id}, item_id: {master_item_id})")
-
                 actual_mat = None
                 matched_material_id = master_material_id
 
@@ -92,8 +81,6 @@ def get_boq_planned_vs_actual(boq_id):
                          if am.master_material_id == master_material_id),
                         None
                     )
-                    if actual_mat:
-                        log.warning(f"    Using fallback match: found mat_id {master_material_id} with item_id {actual_mat.master_item_id} (expected {master_item_id})")
 
                 # Strategy 3: Search inside purchase_history.materials array for matching master_material_id
                 if not actual_mat and master_material_id:
@@ -104,7 +91,6 @@ def get_boq_planned_vs_actual(boq_id):
                                     if mat_entry.get('master_material_id') == master_material_id:
                                         actual_mat = am
                                         matched_material_id = master_material_id
-                                        log.info(f"    Found material {master_material_id} inside purchase_history of tracking record {am.purchase_tracking_id}")
                                         break
                         if actual_mat:
                             break
@@ -118,7 +104,6 @@ def get_boq_planned_vs_actual(boq_id):
                     )
                     if actual_mat:
                         matched_material_id = actual_mat.master_material_id
-                        log.warning(f"    Matched by name: '{material_name}' -> mat_id {matched_material_id}")
 
                 # Strategy 5: Search by material name inside purchase_history
                 if not actual_mat and material_name:
@@ -130,7 +115,6 @@ def get_boq_planned_vs_actual(boq_id):
                                     if mat_entry_name.lower().strip() == material_name.lower().strip():
                                         actual_mat = am
                                         matched_material_id = mat_entry.get('master_material_id')
-                                        log.info(f"    Matched by name in purchase_history: '{material_name}' -> mat_id {matched_material_id}")
                                         break
                         if actual_mat:
                             break
@@ -151,8 +135,6 @@ def get_boq_planned_vs_actual(boq_id):
 
                     # Handle dictionary structure: {"materials": [...], "new_material": {...}, ...}
                     if isinstance(purchase_data, dict):
-                        log.info(f"    Found dictionary structure with keys: {list(purchase_data.keys())}")
-
                         # Collect all material entries from the dictionary
                         all_material_entries = []
 
@@ -166,8 +148,6 @@ def get_boq_planned_vs_actual(boq_id):
                                 # Check if this dict has material fields
                                 if 'material_name' in value or 'master_material_id' in value:
                                     all_material_entries.append(value)
-
-                        log.info(f"    Found {len(all_material_entries)} material entries in purchase_history")
 
                         # Process all material entries
                         for mat_entry in all_material_entries:
@@ -198,11 +178,8 @@ def get_boq_planned_vs_actual(boq_id):
                                     "purchased_by": actual_mat.created_by or "Unknown"
                                 })
 
-                                log.info(f"    Extracted: qty={purchase_qty}, unit={mat_entry.get('unit')}, price={purchase_price}, total={purchase_total}")
-
                     # Handle new structure: [{...}, {...}]
                     elif isinstance(purchase_data, list):
-                        log.info(f"    Found new structure (array)")
                         for purchase in purchase_data:
                             purchase_qty = Decimal(str(purchase.get('quantity', 0)))
                             purchase_price = Decimal(str(purchase.get('unit_price', 0)))
@@ -221,8 +198,6 @@ def get_boq_planned_vs_actual(boq_id):
 
                     if actual_quantity > 0:
                         actual_avg_unit_price = actual_total / actual_quantity
-
-                    log.info(f"    Actual: qty={actual_quantity}, total={actual_total}")
 
                 planned_materials_total += planned_total
 
@@ -348,8 +323,6 @@ def get_boq_planned_vs_actual(boq_id):
                                         processed_material_ids.add(entry_mat_id)
                                     if entry_mat_name:
                                         processed_material_names.add(entry_mat_name)
-
-                                    log.warning(f"    Found UNPLANNED material: {mat_entry.get('material_name')} (mat_id: {entry_mat_id})")
 
                                     materials_comparison.append({
                                         "material_name": mat_entry.get('material_name'),
@@ -521,8 +494,6 @@ def get_boq_planned_vs_actual(boq_id):
                     if lab_variance > 0:
                         extra_costs += lab_variance
 
-            log.info(f"  Extra costs (overruns + unplanned): {extra_costs}")
-
             # 2. Start with planned overhead and profit (these are our buffers)
             remaining_overhead = planned_overhead
             remaining_profit = planned_profit
@@ -548,9 +519,8 @@ def get_boq_planned_vs_actual(boq_id):
             actual_overhead = remaining_overhead
             actual_profit = remaining_profit
 
-            # 4. Calculate actual total cost (base + remaining overhead)
-            actual_total_cost = actual_base + actual_overhead
-            actual_total = actual_total_cost
+            # 4. Calculate actual total cost (base + remaining overhead + remaining profit)
+            actual_total = actual_base + actual_overhead + actual_profit
 
             # 5. Calculate variances
             base_cost_variance = actual_base - planned_base  # For reporting
@@ -569,9 +539,10 @@ def get_boq_planned_vs_actual(boq_id):
             completed_labour = len([l for l in labour_comparison if l['status'] == 'completed'])
             unplanned_materials = len([m for m in materials_comparison if m['status'] == 'unplanned'])
 
+            # Count unplanned materials as "completed" since they were purchased
             completion_percentage = 0
             if (total_materials + total_labour) > 0:
-                completion_percentage = ((completed_materials + completed_labour) / (total_materials + total_labour)) * 100
+                completion_percentage = ((completed_materials + completed_labour + unplanned_materials) / (total_materials + total_labour)) * 100
 
             item_comparison = {
                 "item_name": planned_item.get('item_name'),
@@ -656,15 +627,28 @@ def get_boq_planned_vs_actual(boq_id):
             comparison['items'].append(item_comparison)
 
         # Calculate overall summary
-        total_planned = sum(item['planned']['total'] for item in comparison['items'])
-        total_actual = sum(item['actual']['total'] for item in comparison['items'])
+        total_planned = sum(float(item['planned']['total']) for item in comparison['items'])
+        total_actual = sum(float(item['actual']['total']) for item in comparison['items'])
+        total_planned_profit = sum(float(item['planned']['profit_amount']) for item in comparison['items'])
+        total_actual_profit = sum(float(item['actual']['profit_amount']) for item in comparison['items'])
+        total_planned_overhead = sum(float(item['planned']['overhead_amount']) for item in comparison['items'])
+        total_actual_overhead = sum(float(item['actual']['overhead_amount']) for item in comparison['items'])
 
         comparison['summary'] = {
-            "planned_total": total_planned,
-            "actual_total": total_actual,
-            "variance": abs(total_actual - total_planned),  # Always positive number
-            "variance_percentage": abs((total_actual - total_planned) / total_planned * 100) if total_planned > 0 else 0,
-            "status": "under_budget" if total_actual < total_planned else "over_budget" if total_actual > total_planned else "on_budget"
+            "planned_total": float(total_planned),
+            "actual_total": float(total_actual),
+            "variance": float(abs(total_actual - total_planned)),  # Always positive number
+            "variance_percentage": float(abs((total_actual - total_planned) / total_planned * 100)) if total_planned > 0 else 0,
+            "status": "under_budget" if total_actual < total_planned else "over_budget" if total_actual > total_planned else "on_budget",
+            "total_planned_overhead": float(total_planned_overhead),
+            "total_actual_overhead": float(total_actual_overhead),
+            "overhead_variance": float(abs(total_actual_overhead - total_planned_overhead)),
+            "total_planned_profit": float(total_planned_profit),
+            "total_actual_profit": float(total_actual_profit),
+            "profit_variance": float(abs(total_actual_profit - total_planned_profit)),
+            "profit_status": "reduced" if total_actual_profit < total_planned_profit else "maintained" if total_actual_profit == total_planned_profit else "increased",
+            "total_overhead_plus_profit": float(total_actual_overhead + total_actual_profit),
+            "planned_overhead_plus_profit": float(total_planned_overhead + total_planned_profit)
         }
 
         return jsonify(comparison), 200

@@ -96,14 +96,14 @@ const PlannedVsActualComparison: React.FC<PlannedVsActualProps> = ({ boqId, proj
 
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-white rounded-lg p-4">
-            <p className="text-sm text-gray-600 mb-1">Planned Total</p>
+            <p className="text-sm text-gray-600 mb-1">Revenue Cost</p>
             <p className="text-2xl font-bold text-blue-600">
               {formatCurrency(comparison.summary.planned_total)}
             </p>
           </div>
 
           <div className="bg-white rounded-lg p-4">
-            <p className="text-sm text-gray-600 mb-1">Actual Total</p>
+            <p className="text-sm text-gray-600 mb-1">Actual Total Cost</p>
             <p className="text-2xl font-bold text-purple-600">
               {formatCurrency(comparison.summary.actual_total)}
             </p>

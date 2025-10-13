@@ -31,6 +31,11 @@ def get_boq_route(boq_id):
 def update_boq_route(boq_id):
     return update_boq(boq_id)
 
+@boq_routes.route('/revision_boq/<int:boq_id>', methods=['PUT'])
+@jwt_required
+def revision_boq_route(boq_id):
+    return revision_boq(boq_id)
+
 @boq_routes.route('/delete_boq/<int:boq_id>', methods=['DELETE'])
 @jwt_required
 def delete_boq_route(boq_id):

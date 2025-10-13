@@ -37,19 +37,19 @@ export default function RecordMaterialPurchase() {
 
       console.log('All BOQs extracted:', allBOQs);
 
-      // Filter for completed BOQs with more flexible status checking
-      const completedBOQs = allBOQs.filter((boq: any) => {
+      // Filter for all BOQs except rejected ones
+      const filteredBOQs = allBOQs.filter((boq: any) => {
         const status = (boq.status || boq.boq_status || boq.completion_status || '').toLowerCase();
-        const isCompleted = status === 'completed' || status === 'complete';
-        console.log(`BOQ ${boq.boq_id || boq.id}: status="${status}", isCompleted=${isCompleted}`);
-        return isCompleted;
+        const isRejected = status === 'rejected';
+        console.log(`BOQ ${boq.boq_id || boq.id}: status="${status}", isRejected=${isRejected}`);
+        return !isRejected;
       });
 
-      console.log('Completed BOQs:', completedBOQs);
-      setBOQList(completedBOQs);
+      console.log('Filtered BOQs (excluding rejected):', filteredBOQs);
+      setBOQList(filteredBOQs);
 
-      if (completedBOQs.length === 0) {
-        toast.info('No completed BOQs found');
+      if (filteredBOQs.length === 0) {
+        toast.info('No BOQs found');
       }
     } catch (error) {
       console.error('Error fetching BOQs:', error);
@@ -296,7 +296,7 @@ export default function RecordMaterialPurchase() {
                     <span className="font-semibold">AED{(plannedBoqData.summary?.total_labour_cost || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between pt-2 border-t">
-                    <span className="text-gray-600 font-semibold">Planned Total:</span>
+                    <span className="text-gray-600 font-semibold">Revenue Cost:</span>
                     <span className="font-bold text-blue-600">AED{(
                       plannedBoqData.items?.reduce((sum: number, item: any) =>
                         sum + (parseFloat(item.selling_price_before_discount || item.total_cost || item.selling_price) || 0), 0) ||
@@ -401,13 +401,13 @@ export default function RecordMaterialPurchase() {
               {/* Comparison Summary */}
               <div className="bg-white rounded-xl shadow-md p-6">
                 <h3 className="font-bold text-gray-800 mb-4">Overall Summary</h3>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-3 gap-4 mb-4">
                   <div>
-                    <p className="text-xs text-gray-600">Planned Total</p>
+                    <p className="text-xs text-gray-600">Revenue Cost</p>
                     <p className="text-lg font-bold text-blue-600">AED{(comparisonData.summary?.planned_total || 0).toFixed(2)}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-600">Actual Total</p>
+                    <p className="text-xs text-gray-600">Actual Total Cost</p>
                     <p className="text-lg font-bold text-green-600">AED{(comparisonData.summary?.actual_total || 0).toFixed(2)}</p>
                   </div>
                   <div>
@@ -417,6 +417,64 @@ export default function RecordMaterialPurchase() {
                     }`}>
                       AED{(comparisonData.summary?.variance || 0).toFixed(2)}
                     </p>
+                  </div>
+                </div>
+
+                {/* Financial Breakdown - 3 Cards */}
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  {/* Total Overhead Card */}
+                  <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-4 border-2 border-orange-300">
+                    <p className="text-xs text-gray-600 mb-1">Total Overhead</p>
+                    <p className="text-xl font-bold text-orange-700">
+                      AED{(comparisonData.summary?.total_actual_overhead || 0).toFixed(2)}
+                    </p>
+                    <p className="text-[10px] text-gray-600 mt-1">
+                      Planned: AED{(comparisonData.summary?.total_planned_overhead || 0).toFixed(2)}
+                    </p>
+                  </div>
+
+                  {/* Total Profit Card */}
+                  <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4 border-2 border-green-300">
+                    <p className="text-xs text-gray-600 mb-1">Total Profit</p>
+                    <p className="text-xl font-bold text-green-700">
+                      AED{(comparisonData.summary?.total_actual_profit || 0).toFixed(2)}
+                    </p>
+                    <p className="text-[10px] text-gray-600 mt-1">
+                      Planned: AED{(comparisonData.summary?.total_planned_profit || 0).toFixed(2)}
+                    </p>
+                  </div>
+
+                  {/* Combined (Overhead + Profit) Card */}
+                  <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-4 border-2 border-purple-300">
+                    <p className="text-xs text-gray-600 mb-1">Overhead + Profit</p>
+                    <p className="text-xl font-bold text-purple-700">
+                      AED{(
+                        (comparisonData.summary?.total_actual_overhead || 0) +
+                        (comparisonData.summary?.total_actual_profit || 0)
+                      ).toFixed(2)}
+                    </p>
+                    <p className="text-[10px] text-gray-600 mt-1">
+                      Planned: AED{(
+                        (comparisonData.summary?.total_planned_overhead || 0) +
+                        (comparisonData.summary?.total_planned_profit || 0)
+                      ).toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Profit Status Badge */}
+                <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-semibold text-gray-700">Profit Status:</span>
+                    <span className={`text-sm font-bold ${
+                      comparisonData.summary?.profit_status === 'reduced' ? 'text-red-600' :
+                      comparisonData.summary?.profit_status === 'increased' ? 'text-green-600' :
+                      'text-blue-600'
+                    }`}>
+                      {comparisonData.summary?.profit_status === 'reduced' ? '↓ Reduced' :
+                       comparisonData.summary?.profit_status === 'increased' ? '↑ Increased' :
+                       '✓ Maintained'}
+                    </span>
                   </div>
                 </div>
                 <div className="mt-4 p-3 bg-gray-50 rounded">
@@ -717,7 +775,7 @@ export default function RecordMaterialPurchase() {
                     <span className="font-bold">AED{(selectedItemDetail.planned?.total || selectedItemDetail.planned?.total_cost || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between bg-green-100 p-2 rounded mt-2">
-                    <span className="text-green-700 font-bold">Planned Profit:</span>
+                    <span className="text-green-700 font-bold">Planned Profit ({selectedItemDetail.planned?.profit_percentage || 0}%):</span>
                     <span className="text-green-700 font-bold">AED{(selectedItemDetail.planned?.profit_amount || 0).toFixed(2)}</span>
                   </div>
                 </div>
@@ -755,7 +813,7 @@ export default function RecordMaterialPurchase() {
                     <span className={`font-bold ${
                       (selectedItemDetail.actual?.profit_amount || 0) < 0 ? 'text-red-700' : 'text-green-700'
                     }`}>
-                      Actual {(selectedItemDetail.actual?.profit_amount || 0) < 0 ? 'Loss' : 'Profit'}:
+                      Actual {(selectedItemDetail.actual?.profit_amount || 0) < 0 ? 'Loss' : 'Profit'} ({(selectedItemDetail.actual?.profit_percentage || 0).toFixed(2)}%):
                     </span>
                     <span className={`font-bold ${
                       (selectedItemDetail.actual?.profit_amount || 0) < 0 ? 'text-red-700' : 'text-green-700'
