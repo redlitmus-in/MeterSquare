@@ -370,30 +370,23 @@ def get_assigned_projects():
         user_id = current_user.get('user_id')
         user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
 
-        log.info(f"get_assigned_projects called for user_id: {user_id}, role: {user_role}")
-
-        # Query projects based on role - ONLY show projects with status 'assigned'
-        if user_role in ['siteengineer', 'sitesupervisor']:
+        # Query projects based on role - Show active/assigned projects (not completed)
+        if user_role in ['siteengineer', 'sitesupervisor', 'sitesupervisor']:
             # Get projects where user is assigned as site engineer/supervisor
             projects = Project.query.filter(
                 Project.site_supervisor_id == user_id,
                 Project.is_deleted == False,
-                Project.status == 'completed'  # ONLY 'assigned' status
+                Project.status != 'completed'  # Exclude completed projects
             ).all()
 
-            log.info(f"Found {len(projects)} assigned projects for SE user {user_id}")
-
-        elif user_role == ['projectmanager']:
+        elif user_role in ['projectmanager']:
             # Get projects where user is assigned as project manager
             projects = Project.query.filter(
                 Project.user_id == user_id,
                 Project.is_deleted == False,
-                Project.status == 'assigned'  # ONLY 'assigned' status
+                Project.status != 'completed'  # Exclude completed projects
             ).all()
-
-            log.info(f"Found {len(projects)} assigned projects for PM user {user_id}")
         else:
-            # For other roles, return empty list
             return jsonify({"projects": []}), 200
 
         # Build response with BOQ structure
@@ -402,6 +395,7 @@ def get_assigned_projects():
             project_info = {
                 "project_id": project.project_id,
                 "project_name": project.project_name,
+                "project_status" : project.status,
                 "areas": []
             }
 
