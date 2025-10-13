@@ -26,8 +26,16 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({ boqId }) => {
         const historyList = result.data.history || [];
         const currentVersion = result.data.current_version;
 
-        // Add current version to the beginning for comparison
-        const allVersions = currentVersion ? [currentVersion, ...historyList] : historyList;
+        // Only show revisions that have meaningful data (items and cost)
+        const filteredHistory = historyList.filter((v: any) => {
+          const hasItems = (v.total_items && v.total_items > 0);
+          const hasCost = v.total_cost && v.total_cost > 0;
+          const hasBoqDetails = v.boq_details && v.boq_details.items && v.boq_details.items.length > 0;
+          return (hasItems || hasBoqDetails) && hasCost;
+        });
+
+        // Always show all revisions - don't hide baseline
+        const allVersions = currentVersion ? [currentVersion, ...filteredHistory] : filteredHistory;
         setHistory(allVersions);
       }
     } catch (error) {
@@ -91,6 +99,10 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({ boqId }) => {
             matChanges.total_price = { old: prevMat.total_price, new: mat.total_price };
             hasChanges = true;
           }
+          if ((mat.vat_percentage || 0) !== (prevMat.vat_percentage || 0)) {
+            matChanges.vat_percentage = { old: prevMat.vat_percentage || 0, new: mat.vat_percentage || 0 };
+            hasChanges = true;
+          }
           if (Object.keys(matChanges).length > 1) {
             itemChanges.materials.push(matChanges);
           }
@@ -137,6 +149,22 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({ boqId }) => {
           field: 'Profit %',
           old: prevItem.profit_margin_percentage,
           new: currentItem.profit_margin_percentage
+        });
+        hasChanges = true;
+      }
+      if (currentItem.discount_percentage !== prevItem.discount_percentage) {
+        itemChanges.costs.push({
+          field: 'Discount %',
+          old: prevItem.discount_percentage || 0,
+          new: currentItem.discount_percentage || 0
+        });
+        hasChanges = true;
+      }
+      if (currentItem.vat_percentage !== prevItem.vat_percentage) {
+        itemChanges.costs.push({
+          field: 'VAT %',
+          old: prevItem.vat_percentage || 0,
+          new: currentItem.vat_percentage || 0
         });
         hasChanges = true;
       }
@@ -218,7 +246,7 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({ boqId }) => {
       <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-4 border border-purple-200">
         <h3 className="text-lg font-bold text-purple-900 flex items-center gap-2">
           <Clock className="w-5 h-5" />
-          Revision Timeline ({history.length} Versions)
+          Revision Timeline ({history.length} {history.length === 1 ? 'Version' : 'Versions'})
         </h3>
       </div>
 
@@ -245,7 +273,7 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({ boqId }) => {
                   <div className="flex-1">
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="font-semibold text-sm flex items-center gap-2">
-                        Version {version.version}
+                        {version.version === 'current' ? 'Current Revision' : `Revision ${version.version}`}
                         {isExpanded ? (
                           <ChevronDown className="w-4 h-4" />
                         ) : (
@@ -289,16 +317,106 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({ boqId }) => {
                   exit={{ opacity: 0, height: 0 }}
                   className="border-t border-current/20 bg-white/50 p-4"
                 >
-                  {!changes ? (
+                  {version.version === 'current' && !previousVersion ? (
                     <div className="text-center py-8 text-gray-500">
-                      <p className="text-sm">No changes to display</p>
-                      <p className="text-xs mt-1">This is the first version</p>
+                      <p className="text-sm font-medium text-gray-700">📌 This is the current/latest version</p>
+                      <p className="text-xs mt-1">This is the only version - no revisions yet</p>
+                    </div>
+                  ) : version.version === 'current' && previousVersion && !changes ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <p className="text-sm font-medium text-gray-700">📌 This is the current/latest version</p>
+                      <p className="text-xs mt-1">No changes from previous revision</p>
+                    </div>
+                  ) : !changes ? (
+                    // Show BOQ details for first revision instead of "no changes"
+                    <div className="space-y-3">
+                      <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                        <h5 className="font-semibold text-sm mb-2 text-blue-900">📋 BOQ Details (Initial Version)</h5>
+                        <p className="text-xs text-blue-700">This is the baseline revision</p>
+                      </div>
+
+                      {version.boq_details?.items?.map((item: any, itemIdx: number) => (
+                        <div key={itemIdx} className="bg-white rounded-lg p-3 border border-gray-200">
+                          <div className="mb-3">
+                            <h6 className="font-semibold text-sm text-gray-900">{item.item_name}</h6>
+                            {item.description && (
+                              <p className="text-xs text-gray-600">{item.description}</p>
+                            )}
+                          </div>
+
+                          {/* Materials */}
+                          {item.materials && item.materials.length > 0 && (
+                            <div className="mb-3">
+                              <p className="text-xs font-semibold text-blue-900 mb-2">📦 Materials:</p>
+                              <div className="space-y-1">
+                                {item.materials.map((mat: any, matIdx: number) => (
+                                  <div key={matIdx} className="bg-blue-50 rounded p-2 text-xs">
+                                    <p className="font-semibold text-blue-900">{mat.material_name}</p>
+                                    <div className="grid grid-cols-2 gap-2 mt-1 text-gray-700">
+                                      <div>Quantity: {mat.quantity} {mat.unit}</div>
+                                      <div>Unit Price: AED {mat.unit_price}</div>
+                                      <div>VAT: {mat.vat_percentage || 0}%</div>
+                                      <div className="font-semibold">Total: AED {mat.total_price}</div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Labour */}
+                          {item.labour && item.labour.length > 0 && (
+                            <div className="mb-3">
+                              <p className="text-xs font-semibold text-orange-900 mb-2">👷 Labour:</p>
+                              <div className="space-y-1">
+                                {item.labour.map((lab: any, labIdx: number) => (
+                                  <div key={labIdx} className="bg-orange-50 rounded p-2 text-xs">
+                                    <p className="font-semibold text-orange-900">{lab.labour_role}</p>
+                                    <div className="grid grid-cols-2 gap-2 mt-1 text-gray-700">
+                                      <div>Hours: {lab.hours}h</div>
+                                      <div>Rate: AED {lab.rate_per_hour}/hr</div>
+                                      <div className="font-semibold col-span-2">Total: AED {lab.total_cost}</div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Cost Breakdown */}
+                          <div className="bg-gray-50 rounded p-2">
+                            <p className="text-xs font-semibold text-gray-900 mb-2">💰 Cost Breakdown:</p>
+                            <div className="space-y-1 text-xs text-gray-700">
+                              <div className="flex justify-between">
+                                <span>Overhead:</span>
+                                <span>{item.overhead_percentage || 0}% (AED {item.overhead_amount || 0})</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Profit Margin:</span>
+                                <span>{item.profit_margin_percentage || 0}% (AED {item.profit_margin_amount || 0})</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Discount:</span>
+                                <span>{item.discount_percentage || 0}% (AED {item.discount_amount || 0})</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>VAT:</span>
+                                <span>{item.vat_percentage || 0}% (AED {item.vat_amount || 0})</span>
+                              </div>
+                              <div className="flex justify-between font-bold text-gray-900 pt-1 border-t border-gray-300">
+                                <span>Selling Price:</span>
+                                <span>AED {item.selling_price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   ) : (
                     <>
                       <h5 className="font-semibold text-sm mb-3 flex items-center gap-2">
                         <span className="text-orange-600">📝</span>
-                        Changes from Version {previousVersion.version}
+                        Changes from {previousVersion.version === 'current' ? 'Current Version' : `Revision ${previousVersion.version}`}
                       </h5>
                       <div className="space-y-3">
                         {changes.items.map((itemChange: any, itemIdx: number) => (
@@ -339,6 +457,16 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({ boqId }) => {
                                                 <span className="line-through text-red-600">AED {mat.unit_price.old}</span>
                                                 <span className="mx-1">→</span>
                                                 <span className="text-green-700 font-semibold">AED {mat.unit_price.new}</span>
+                                              </span>
+                                            </div>
+                                          )}
+                                          {mat.vat_percentage && (
+                                            <div className="flex justify-between">
+                                              <span className="text-gray-600">VAT %:</span>
+                                              <span>
+                                                <span className="line-through text-red-600">{mat.vat_percentage.old}%</span>
+                                                <span className="mx-1">→</span>
+                                                <span className="text-green-700 font-semibold">{mat.vat_percentage.new}%</span>
                                               </span>
                                             </div>
                                           )}

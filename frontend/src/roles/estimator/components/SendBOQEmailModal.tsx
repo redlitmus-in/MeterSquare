@@ -68,6 +68,9 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
               location: boq.location || boq.project_details?.location || boq.project?.location || 'N/A',
               floor: boq.floor || boq.floor_name || boq.project_details?.floor || boq.project?.floor_name || 'N/A',
               workingHours: boq.hours || boq.working_hours || boq.project_details?.hours || boq.project?.working_hours || 'N/A',
+              preliminaries: boq.preliminaries || {},
+              totalVatAmount: boq.total_vat_amount || boq.totalVatAmount || 0,
+              overallVatPercentage: boq.overall_vat_percentage || boq.overallVatPercentage || 0,
               boqItems: items.map((item: any) => {
                 const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
                 const sellingPrice = item.selling_price || 0;
@@ -85,7 +88,8 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                     quantity: mat.quantity,
                     unit: mat.unit,
                     rate: mat.unit_price || mat.rate_per_unit,
-                    amount: mat.total_price
+                    amount: mat.total_price,
+                    vat_percentage: mat.vat_percentage || 0
                   })) || [],
                   labour: item.labour?.map((lab: any) => ({
                     type: lab.labour_role,
@@ -98,7 +102,9 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                   estimatedSellingPrice: sellingPrice,
                   overheadPercentage: item.overhead_percentage || 0,
                   profitMarginPercentage: item.profit_margin_percentage || 0,
-                  discountPercentage: item.discount_percentage || 0
+                  discountPercentage: item.discount_percentage || 0,
+                  vat_percentage: item.vat_percentage || 0,
+                  vat_amount: item.vat_amount || 0
                 };
               })
             };

@@ -25,6 +25,7 @@ interface BOQItem {
     unit: string;
     rate: number;
     amount: number;
+    vat_percentage?: number;
   }[];
   labour: {
     type: string;
@@ -38,6 +39,8 @@ interface BOQItem {
   overheadPercentage?: number;
   profitMarginPercentage?: number;
   discountPercentage?: number;
+  vat_percentage?: number;
+  vat_amount?: number;
 }
 
 interface BOQEstimation {
@@ -57,6 +60,11 @@ interface BOQEstimation {
   floor: string;
   workingHours: string;
   boqItems?: BOQItem[];
+  preliminaries?: {
+    [key: string]: number;
+  };
+  totalVatAmount?: number;
+  overallVatPercentage?: number;
 }
 
 const formatDate = (date: string | Date) => {
@@ -80,6 +88,7 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
   let totalOverhead = 0;
   let totalProfit = 0;
   let totalDiscount = 0;
+  let totalVat = 0;
 
   (estimation.boqItems || []).forEach((item) => {
     const itemBaseCost = item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost;
@@ -87,14 +96,25 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
     const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
     const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
     const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+    const itemAfterDiscount = itemSubtotal - itemDiscount;
+    // Use vat_amount if available, otherwise calculate from percentage
+    const itemVat = item.vat_amount || (itemAfterDiscount * (item.vat_percentage || 0) / 100);
 
     totalOverhead += itemOverhead;
     totalProfit += itemProfit;
     totalDiscount += itemDiscount;
+    totalVat += itemVat;
   });
 
+  // Use totalVatAmount from estimation if available (includes overall VAT + item-level VAT)
+  if (estimation.totalVatAmount !== undefined && estimation.totalVatAmount > 0) {
+    totalVat = estimation.totalVatAmount;
+  }
+
   const subtotal = baseCost + totalOverhead + totalProfit;
-  const grandTotal = subtotal - totalDiscount;
+  const afterDiscount = subtotal - totalDiscount;
+  const afterVat = afterDiscount + totalVat;
+  const grandTotal = afterVat;
 
   // Calculate average percentages for display
   const avgOverheadPct = baseCost > 0 ? (totalOverhead / baseCost) * 100 : 0;
@@ -176,15 +196,21 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
       allData.push([]);
     }
 
-    // Overhead, Profit & Discount
-    allData.push(['+ OVERHEADS, PROFIT & DISCOUNT', '', '', '']);
+    // Overhead, Profit, Discount & VAT
+    const itemAfterDiscount = itemSubtotal - discount;
+    const itemVat = itemAfterDiscount * (item.vat_percentage || 0) / 100;
+    const itemFinalPrice = itemAfterDiscount + itemVat;
+
+    allData.push(['+ OVERHEADS, PROFIT, DISCOUNT & VAT', '', '', '']);
     allData.push([`Overhead (${item.overheadPercentage || 0}%)`, '', '', '', formatCurrency(overhead)]);
     allData.push([`Profit Margin (${item.profitMarginPercentage || 0}%)`, '', '', '', formatCurrency(profit)]);
     allData.push([`Discount (${item.discountPercentage || 0}%)`, '', '', '', discount > 0 ? `-${formatCurrency(discount)}` : formatCurrency(0)]);
+    allData.push(['Subtotal (After Discount):', '', '', '', formatCurrency(itemAfterDiscount)]);
+    allData.push([`VAT (${item.vat_percentage || 0}%)`, '', '', '', formatCurrency(itemVat)]);
     allData.push([]);
 
     // Item Total
-    allData.push(['ESTIMATED SELLING PRICE:', '', '', '', formatCurrency(item.estimatedSellingPrice)]);
+    allData.push(['ESTIMATED SELLING PRICE:', '', '', '', formatCurrency(itemFinalPrice)]);
     allData.push([]);
     allData.push([]);
   });
@@ -199,8 +225,35 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
   allData.push([`Overhead (${avgOverheadPct.toFixed(0)}%):`, formatCurrency(totalOverhead)]);
   allData.push([`Profit Margin (${avgProfitPct.toFixed(0)}%):`, formatCurrency(totalProfit)]);
   allData.push([`Discount (${avgDiscountPct.toFixed(0)}%):`, totalDiscount > 0 ? `-${formatCurrency(totalDiscount)}` : formatCurrency(0)]);
+  allData.push(['Subtotal (After Discount):', formatCurrency(afterDiscount)]);
+
+  // Add VAT
+  const avgVatPct = afterDiscount > 0 ? (totalVat / afterDiscount) * 100 : 0;
+  allData.push([`VAT (${avgVatPct.toFixed(1)}%):`, formatCurrency(totalVat)]);
+
   allData.push([]);
   allData.push(['GRAND TOTAL:', formatCurrency(grandTotal)]);
+
+  // Add Preliminaries & Approval Works Section (separate from grand total)
+  if (estimation.preliminaries && (estimation.preliminaries.items?.length > 0 || estimation.preliminaries.notes)) {
+    allData.push([]);
+    allData.push([]);
+    allData.push(['PRELIMINARIES & APPROVAL WORKS']);
+    allData.push(['Selected conditions and terms']);
+    allData.push([]);
+
+    if (estimation.preliminaries.items && estimation.preliminaries.items.length > 0) {
+      estimation.preliminaries.items.forEach((item: any) => {
+        allData.push([`✓ ${item.description || item}`]);
+      });
+    }
+
+    if (estimation.preliminaries.notes) {
+      allData.push([]);
+      allData.push(['Additional Notes']);
+      allData.push([estimation.preliminaries.notes]);
+    }
+  }
 
   const ws = XLSX.utils.aoa_to_sheet(allData);
   ws['!cols'] = [
@@ -233,6 +286,7 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
   let totalOverhead = 0;
   let totalProfit = 0;
   let totalDiscount = 0;
+  let totalVat = 0;
 
   (estimation.boqItems || []).forEach((item) => {
     const itemBaseCost = item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost;
@@ -240,15 +294,26 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
     const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
     const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
     const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+    const itemAfterDiscount = itemSubtotal - itemDiscount;
+    // Use vat_amount if available, otherwise calculate from percentage
+    const itemVat = item.vat_amount || (itemAfterDiscount * (item.vat_percentage || 0) / 100);
 
     totalOverhead += itemOverhead;
     totalProfit += itemProfit;
     totalDiscount += itemDiscount;
+    totalVat += itemVat;
   });
+
+  // Use totalVatAmount from estimation if available (includes overall VAT + item-level VAT)
+  if (estimation.totalVatAmount !== undefined && estimation.totalVatAmount > 0) {
+    totalVat = estimation.totalVatAmount;
+  }
 
   const totalMarkup = totalOverhead + totalProfit;
   const subtotal = baseCost + totalMarkup;
-  const grandTotal = subtotal - totalDiscount;
+  const afterDiscount = subtotal - totalDiscount;
+  const afterVat = afterDiscount + totalVat;
+  const grandTotal = afterVat;
 
   // Calculate average discount percentage for display
   const avgDiscountPct = subtotal > 0 ? (totalDiscount / subtotal) * 100 : 0;
@@ -367,8 +432,38 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
   allData.push(['Total Labor Cost:', formatCurrency(adjustedTotalLaborCost)]);
   allData.push(['Total Project Cost:', formatCurrency(adjustedTotalMaterialCost + adjustedTotalLaborCost)]);
   allData.push([`Discount (${avgDiscountPct.toFixed(0)}%):`, totalDiscount > 0 ? `-${formatCurrency(totalDiscount)}` : formatCurrency(0)]);
+
+  // Calculate discount-adjusted base before VAT
+  const clientAfterDiscount = (adjustedTotalMaterialCost + adjustedTotalLaborCost) - totalDiscount;
+  allData.push(['Subtotal (After Discount):', formatCurrency(clientAfterDiscount)]);
+
+  // Add VAT
+  const avgVatPct = clientAfterDiscount > 0 ? (totalVat / clientAfterDiscount) * 100 : 0;
+  allData.push([`VAT (${avgVatPct.toFixed(1)}%):`, formatCurrency(totalVat)]);
+
   allData.push([]);
   allData.push(['TOTAL PROJECT VALUE:', formatCurrency(grandTotal)]);
+
+  // Add Preliminaries & Approval Works Section (separate from grand total)
+  if (estimation.preliminaries && (estimation.preliminaries.items?.length > 0 || estimation.preliminaries.notes)) {
+    allData.push([]);
+    allData.push([]);
+    allData.push(['PRELIMINARIES & APPROVAL WORKS']);
+    allData.push(['Selected conditions and terms']);
+    allData.push([]);
+
+    if (estimation.preliminaries.items && estimation.preliminaries.items.length > 0) {
+      estimation.preliminaries.items.forEach((item: any) => {
+        allData.push([`✓ ${item.description || item}`]);
+      });
+    }
+
+    if (estimation.preliminaries.notes) {
+      allData.push([]);
+      allData.push(['Additional Notes']);
+      allData.push([estimation.preliminaries.notes]);
+    }
+  }
 
   const ws = XLSX.utils.aoa_to_sheet(allData);
   ws['!cols'] = [
@@ -404,6 +499,7 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
   let totalOverhead = 0;
   let totalProfit = 0;
   let totalDiscount = 0;
+  let totalVat = 0;
 
   (estimation.boqItems || []).forEach((item) => {
     const itemBaseCost = item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost;
@@ -411,14 +507,25 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
     const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
     const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
     const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+    const itemAfterDiscount = itemSubtotal - itemDiscount;
+    // Use vat_amount if available, otherwise calculate from percentage
+    const itemVat = item.vat_amount || (itemAfterDiscount * (item.vat_percentage || 0) / 100);
 
     totalOverhead += itemOverhead;
     totalProfit += itemProfit;
     totalDiscount += itemDiscount;
+    totalVat += itemVat;
   });
 
+  // Use totalVatAmount from estimation if available (includes overall VAT + item-level VAT)
+  if (estimation.totalVatAmount !== undefined && estimation.totalVatAmount > 0) {
+    totalVat = estimation.totalVatAmount;
+  }
+
   const subtotal = baseCost + totalOverhead + totalProfit;
-  const grandTotal = subtotal - totalDiscount;
+  const afterDiscount = subtotal - totalDiscount;
+  const afterVat = afterDiscount + totalVat;
+  const grandTotal = afterVat;
 
   // Calculate average percentages for display
   const avgOverheadPct = baseCost > 0 ? (totalOverhead / baseCost) * 100 : 0;
@@ -486,6 +593,9 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
     const profit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
     const itemSubtotal = itemBaseCost + overhead + profit;
     const discount = itemSubtotal * (item.discountPercentage || 0) / 100;
+    const itemAfterDiscount = itemSubtotal - discount;
+    const itemVat = itemAfterDiscount * (item.vat_percentage || 0) / 100;
+    const itemFinalPrice = itemAfterDiscount + itemVat;
 
     // Item Header
     doc.setFillColor(230, 240, 255);
@@ -577,7 +687,7 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
     doc.rect(16, yPos - 2, 178, 6, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.text('+ Overheads, Profit & Discount', 18, yPos + 2);
+    doc.text('+ Overheads, Profit, Discount & VAT', 18, yPos + 2);
     yPos += 8;
 
     doc.setFont('helvetica', 'normal');
@@ -596,6 +706,14 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
     doc.text(`Discount (${item.discountPercentage || 0}%)`, 20, yPos);
     doc.text(`${discount > 0 ? '-' : ''}AED ${formatCurrency(discount)}`, 170, yPos, { align: 'right' });
     doc.setTextColor(0);
+    yPos += 5;
+
+    doc.text('Subtotal (After Discount):', 20, yPos);
+    doc.text(`AED ${formatCurrency(itemAfterDiscount)}`, 170, yPos, { align: 'right' });
+    yPos += 5;
+
+    doc.text(`VAT (${item.vat_percentage || 0}%)`, 20, yPos);
+    doc.text(`AED ${formatCurrency(itemVat)}`, 170, yPos, { align: 'right' });
     yPos += 7;
 
     // Item Total
@@ -605,7 +723,7 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
     doc.setFontSize(10);
     doc.setTextColor(22, 163, 74);
     doc.text('Estimated Selling Price:', 18, yPos + 3);
-    doc.text(`AED ${formatCurrency(item.estimatedSellingPrice)}`, 170, yPos + 3, { align: 'right' });
+    doc.text(`AED ${formatCurrency(itemFinalPrice)}`, 170, yPos + 3, { align: 'right' });
     doc.setTextColor(0);
     yPos += 12;
   });
@@ -620,7 +738,8 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
   doc.setDrawColor(22, 163, 74);
   doc.setLineWidth(0.5);
   doc.setFillColor(240, 255, 245);
-  doc.roundedRect(14, yPos, 182, 32, 2, 2, 'FD');
+  // Box height for VAT (without preliminaries)
+  doc.roundedRect(14, yPos, 182, 50, 2, 2, 'FD');
 
   yPos += 6;
   doc.setFont('helvetica', 'bold');
@@ -661,12 +780,19 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
   doc.text(`Discount (${avgDiscountPct.toFixed(0)}%):`, leftX, yPos);
   doc.text(`${totalDiscount > 0 ? '-' : ''}AED ${formatCurrency(totalDiscount)}`, leftX + 50, yPos);
   doc.setTextColor(0);
+  yPos += 5;
 
-  if (false) { // Old code removed
-    doc.text(`Discount (${estimation.discountPercentage}%):`, rightX, yPos);
-    doc.text(`- AED ${formatCurrency(discountAmount)}`, rightX + 40, yPos);
-    doc.setTextColor(0); // Reset to black
-  }
+  // Subtotal after discount
+  doc.setFont('helvetica', 'bold');
+  doc.text('Subtotal:', leftX, yPos);
+  doc.text(`AED ${formatCurrency(afterDiscount)}`, leftX + 50, yPos);
+  doc.setFont('helvetica', 'normal');
+  yPos += 5;
+
+  // VAT
+  const avgVatPct = afterDiscount > 0 ? (totalVat / afterDiscount) * 100 : 0;
+  doc.text(`VAT (${avgVatPct.toFixed(1)}%):`, leftX, yPos);
+  doc.text(`AED ${formatCurrency(totalVat)}`, leftX + 50, yPos);
   yPos += 8;
 
   // Grand Total - Compact
@@ -679,6 +805,102 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
   doc.setTextColor(255, 255, 255);
   doc.text('GRAND TOTAL:', 60, yPos + 4);
   doc.text(`AED ${formatCurrency(grandTotal)}`, 140, yPos + 4);
+
+  // Preliminaries & Approval Works Section
+  if (estimation.preliminaries && (estimation.preliminaries.items?.length > 0 || estimation.preliminaries.notes)) {
+    yPos += 20;
+
+    // Add new page if needed
+    if (yPos > 240) {
+      doc.addPage();
+      yPos = 20;
+    }
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 60, 200);
+    doc.text('PRELIMINARIES & APPROVAL WORKS', 14, yPos);
+    yPos += 7;
+
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    doc.setFont('helvetica', 'italic');
+    doc.text('Selected conditions and terms', 14, yPos);
+    yPos += 8;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(0);
+
+    if (estimation.preliminaries.items && estimation.preliminaries.items.length > 0) {
+      estimation.preliminaries.items.forEach((item: any) => {
+        const description = item.description || item;
+        // Check if we need a new page
+        if (yPos > 270) {
+          doc.addPage();
+          yPos = 20;
+        }
+        doc.text('✓', 16, yPos);
+        const splitText = doc.splitTextToSize(description, 175);
+        doc.text(splitText, 22, yPos);
+        yPos += (splitText.length * 5) + 2;
+      });
+    }
+
+    if (estimation.preliminaries.notes) {
+      yPos += 5;
+      if (yPos > 265) {
+        doc.addPage();
+        yPos = 20;
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.text('Additional Notes:', 14, yPos);
+      yPos += 5;
+      doc.setFont('helvetica', 'normal');
+      const splitNotes = doc.splitTextToSize(estimation.preliminaries.notes, 180);
+      doc.text(splitNotes, 14, yPos);
+      yPos += (splitNotes.length * 5);
+    }
+  }
+
+  // Signature Section
+  yPos += 20;
+  if (yPos > 240) {
+    doc.addPage();
+    yPos = 20;
+  }
+
+  doc.setDrawColor(150);
+  doc.setLineWidth(0.3);
+  doc.line(14, yPos, 196, yPos);
+  yPos += 10;
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0);
+
+  // Estimator Signature
+  doc.text('Prepared By:', 20, yPos);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  yPos += 15;
+  doc.line(20, yPos, 80, yPos);
+  yPos += 5;
+  doc.text('Estimator Signature', 20, yPos);
+  doc.text(`Date: __________`, 20, yPos + 5);
+
+  // Approved By Signature
+  yPos -= 20;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('Approved By:', 120, yPos);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  yPos += 15;
+  doc.line(120, yPos, 180, yPos);
+  yPos += 5;
+  doc.text('Technical Director Signature', 120, yPos);
+  doc.text(`Date: __________`, 120, yPos + 5);
 
   // Save PDF
   const fileName = `BOQ_${estimation.projectName.replace(/\s+/g, '_')}_Internal_${new Date().toISOString().split('T')[0]}.pdf`;
@@ -701,6 +923,7 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   let totalOverhead = 0;
   let totalProfit = 0;
   let totalDiscount = 0;
+  let totalVat = 0;
 
   (estimation.boqItems || []).forEach((item) => {
     const itemBaseCost = item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost;
@@ -708,15 +931,26 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
     const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
     const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
     const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+    const itemAfterDiscount = itemSubtotal - itemDiscount;
+    // Use vat_amount if available, otherwise calculate from percentage
+    const itemVat = item.vat_amount || (itemAfterDiscount * (item.vat_percentage || 0) / 100);
 
     totalOverhead += itemOverhead;
     totalProfit += itemProfit;
     totalDiscount += itemDiscount;
+    totalVat += itemVat;
   });
+
+  // Use totalVatAmount from estimation if available (includes overall VAT + item-level VAT)
+  if (estimation.totalVatAmount !== undefined && estimation.totalVatAmount > 0) {
+    totalVat = estimation.totalVatAmount;
+  }
 
   const totalMarkup = totalOverhead + totalProfit;
   const subtotal = baseCost + totalMarkup;
-  const grandTotal = subtotal - totalDiscount;
+  const afterDiscount = subtotal - totalDiscount;
+  const afterVat = afterDiscount + totalVat;
+  const grandTotal = afterVat;
 
   // Calculate average discount percentage for display
   const avgDiscountPct = subtotal > 0 ? (totalDiscount / subtotal) * 100 : 0;
@@ -904,8 +1138,8 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   });
 
   // Add Cost Overview at the END (NO Overhead/Profit shown) - Compact like UI
-  // Only add new page if there's really not enough space (less than 45 units left)
-  if (yPos > 250) {
+  // Only add new page if there's really not enough space
+  if (yPos > 220) {
     doc.addPage();
     yPos = 20;
   }
@@ -914,7 +1148,8 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   doc.setDrawColor(200, 220, 240);
   doc.setLineWidth(0.5);
   doc.setFillColor(240, 247, 255);
-  doc.roundedRect(14, yPos, 182, 28, 2, 2, 'FD');
+  // Box height for VAT (without preliminaries)
+  doc.roundedRect(14, yPos, 182, 45, 2, 2, 'FD');
 
   yPos += 7;
   doc.setFont('helvetica', 'bold');
@@ -948,6 +1183,18 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   doc.text(`Discount (${avgDiscountPct.toFixed(0)}%):`, 18, yPos);
   doc.text(`${totalDiscount > 0 ? '-' : ''} AED${formatCurrency(totalDiscount)}`, 75, yPos, { align: 'right' });
   doc.setTextColor(0); // Reset to black
+  yPos += 5;
+
+  // Subtotal after discount
+  const clientAfterDiscount = (adjustedTotalMaterialCost + adjustedTotalLaborCost) - totalDiscount;
+  doc.text('Subtotal (After Discount):', 18, yPos);
+  doc.text(`AED${formatCurrency(clientAfterDiscount)}`, 75, yPos, { align: 'right' });
+  yPos += 5;
+
+  // VAT
+  const avgVatPct = clientAfterDiscount > 0 ? (totalVat / clientAfterDiscount) * 100 : 0;
+  doc.text(`VAT (${avgVatPct.toFixed(1)}%):`, 18, yPos);
+  doc.text(`AED${formatCurrency(totalVat)}`, 75, yPos, { align: 'right' });
   yPos += 8;
 
   // Grand Total - Compact Green Bar
@@ -956,6 +1203,102 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   doc.setTextColor(22, 163, 74);
   doc.text('Grand Total:', 18, yPos);
   doc.text(`AED${formatCurrency(grandTotal)}`, 160, yPos, { align: 'right' });
+
+  // Preliminaries & Approval Works Section
+  if (estimation.preliminaries && (estimation.preliminaries.items?.length > 0 || estimation.preliminaries.notes)) {
+    yPos += 20;
+
+    // Add new page if needed
+    if (yPos > 240) {
+      doc.addPage();
+      yPos = 20;
+    }
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 60, 200);
+    doc.text('PRELIMINARIES & APPROVAL WORKS', 14, yPos);
+    yPos += 7;
+
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    doc.setFont('helvetica', 'italic');
+    doc.text('Selected conditions and terms', 14, yPos);
+    yPos += 8;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(0);
+
+    if (estimation.preliminaries.items && estimation.preliminaries.items.length > 0) {
+      estimation.preliminaries.items.forEach((item: any) => {
+        const description = item.description || item;
+        // Check if we need a new page
+        if (yPos > 270) {
+          doc.addPage();
+          yPos = 20;
+        }
+        doc.text('✓', 16, yPos);
+        const splitText = doc.splitTextToSize(description, 175);
+        doc.text(splitText, 22, yPos);
+        yPos += (splitText.length * 5) + 2;
+      });
+    }
+
+    if (estimation.preliminaries.notes) {
+      yPos += 5;
+      if (yPos > 265) {
+        doc.addPage();
+        yPos = 20;
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.text('Additional Notes:', 14, yPos);
+      yPos += 5;
+      doc.setFont('helvetica', 'normal');
+      const splitNotes = doc.splitTextToSize(estimation.preliminaries.notes, 180);
+      doc.text(splitNotes, 14, yPos);
+      yPos += (splitNotes.length * 5);
+    }
+  }
+
+  // Signature Section
+  yPos += 20;
+  if (yPos > 240) {
+    doc.addPage();
+    yPos = 20;
+  }
+
+  doc.setDrawColor(150);
+  doc.setLineWidth(0.3);
+  doc.line(14, yPos, 196, yPos);
+  yPos += 10;
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0);
+
+  // Company Signature
+  doc.text('For MeterSquare:', 20, yPos);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  yPos += 15;
+  doc.line(20, yPos, 80, yPos);
+  yPos += 5;
+  doc.text('Authorized Signature', 20, yPos);
+  doc.text(`Date: __________`, 20, yPos + 5);
+
+  // Client Signature
+  yPos -= 20;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('Client Acceptance:', 120, yPos);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  yPos += 15;
+  doc.line(120, yPos, 180, yPos);
+  yPos += 5;
+  doc.text('Client Signature', 120, yPos);
+  doc.text(`Date: __________`, 120, yPos + 5);
 
   // Save PDF
   const fileName = `BOQ_${estimation.projectName.replace(/\s+/g, '_')}_Client_${new Date().toISOString().split('T')[0]}.pdf`;

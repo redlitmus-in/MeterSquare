@@ -76,6 +76,7 @@ def get_all_td_boqs():
                 "project_status" : boq.project.status if boq.project else None,
                 "email_sent": boq.email_sent,
                 "user_id": boq.project.user_id if boq.project else None,  # PM assignment indicator
+                "revision_number": boq.revision_number if hasattr(boq, 'revision_number') else 0,  # Revision tracking
                 "items_count": boq_details.total_items if boq_details else 0,
                 "material_count": boq_details.total_materials if boq_details else 0,
                 "labour_count": boq_details.total_labour if boq_details else 0,
@@ -245,6 +246,12 @@ def td_mail_send():
             # Check if this is a revision approval (status was Pending_Revision)
             is_revision_approval = boq.status.lower() == 'pending_revision'
             new_status = "Revision_Approved" if is_revision_approval else "Approved"
+
+            # Increment revision_number if this is a revision approval
+            if is_revision_approval:
+                current_revision = getattr(boq, 'revision_number', 0) or 0
+                boq.revision_number = current_revision + 1
+                log.info(f"BOQ {boq_id} revision incremented from {current_revision} to {boq.revision_number}")
 
             if not estimator or not estimator_email:
                 return jsonify({

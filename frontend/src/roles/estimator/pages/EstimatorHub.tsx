@@ -311,6 +311,17 @@ const EstimatorHub: React.FC = () => {
   const [isRevisionEdit, setIsRevisionEdit] = useState(false);
   const [isSendingToTD, setIsSendingToTD] = useState(false);
 
+  // Dynamic Revision Tabs States
+  const [revisionTabs, setRevisionTabs] = useState<Array<{
+    revision_number: number;
+    project_count: number;
+    alert_level: 'normal' | 'warning' | 'critical';
+  }>>([]);
+  const [selectedRevisionTab, setSelectedRevisionTab] = useState<number | 'all'>('all');
+  const [revisionProjects, setRevisionProjects] = useState<any[]>([]);
+  const [loadingRevisionTabs, setLoadingRevisionTabs] = useState(false);
+  const [loadingRevisionProjects, setLoadingRevisionProjects] = useState(false);
+
   // PM Selection Modal States
   const [showPMSelectionModal, setShowPMSelectionModal] = useState(false);
   const [projectToSendToPM, setProjectToSendToPM] = useState<any>(null);
@@ -378,6 +389,7 @@ const EstimatorHub: React.FC = () => {
           },
           total_cost: boq.selling_price || boq.estimatedSellingPrice || boq.total_cost || 0,
           status: boq.status || 'draft',
+          revision_number: boq.revision_number || 0,
           client_rejection_reason: boq.client_rejection_reason,
           created_at: boq.created_at,
           email_sent: boq.email_sent || false,
@@ -417,6 +429,58 @@ const EstimatorHub: React.FC = () => {
       console.error('Error loading projects:', error);
     }
   };
+
+  // Load Dynamic Revision Tabs
+  const loadRevisionTabs = async () => {
+    try {
+      setLoadingRevisionTabs(true);
+      const response = await estimatorService.getRevisionTabs();
+      if (response.success && response.data) {
+        setRevisionTabs(response.data);
+      } else {
+        setRevisionTabs([]);
+      }
+    } catch (error) {
+      console.error('Error loading revision tabs:', error);
+      setRevisionTabs([]);
+    } finally {
+      setLoadingRevisionTabs(false);
+    }
+  };
+
+  // Load Projects by Revision Number
+  const loadRevisionProjects = async (revisionNumber: number | 'all') => {
+    try {
+      setLoadingRevisionProjects(true);
+      const response = await estimatorService.getProjectsByRevision(revisionNumber);
+      if (response.success && response.data) {
+        setRevisionProjects(response.data);
+      } else {
+        setRevisionProjects([]);
+      }
+    } catch (error) {
+      console.error('Error loading revision projects:', error);
+      setRevisionProjects([]);
+    } finally {
+      setLoadingRevisionProjects(false);
+    }
+  };
+
+  // Load revision tabs when Revisions tab is active
+  useEffect(() => {
+    if (activeTab === 'revisions') {
+      loadRevisionTabs();
+      loadRevisionProjects(selectedRevisionTab);
+    }
+  }, [activeTab]);
+
+  // Reload projects when revision tab changes
+  useEffect(() => {
+    if (activeTab === 'revisions' && selectedRevisionTab) {
+      loadRevisionProjects(selectedRevisionTab);
+      setBoqCurrentPage(1); // Reset to page 1 when switching revision tabs
+    }
+  }, [selectedRevisionTab]);
 
   const handleCreateProject = async (projectData: any) => {
     try {
@@ -488,15 +552,32 @@ const EstimatorHub: React.FC = () => {
           return status === 'pending' || status === 'pending_pm_approval';
         });
       } else if (activeTab === 'revisions') {
-        // Revisions: BOQs under revision OR sent to TD for revision approval OR revision approved
+        // Revisions: BOQs that have gone through revision cycle OR are in revision state
+        // Once a BOQ enters revision cycle (revision_number > 0), it STAYS in Revisions tab forever
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
+          const revisionNumber = boq.revision_number || 0;
+
+          // If revision_number > 0, this BOQ has been through revision - keep it in Revisions tab
+          if (revisionNumber > 0) {
+            return true;
+          }
+
+          // For revision_number = 0, only show if in active revision states
           return status === 'under_revision' || status === 'pending_revision' || status === 'revision_approved';
         });
       } else if (activeTab === 'approved') {
         // Approved: TD approved (includes all stages after TD approval until PM assignment)
+        // EXCLUDE projects with revision_number > 0 (those stay in Revisions tab)
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
+          const revisionNumber = boq.revision_number || 0;
+
+          // If this BOQ has gone through revisions, it belongs in Revisions tab, not here
+          if (revisionNumber > 0) {
+            return false;
+          }
+
           // Show if approved, sent to client, or client confirmed (but not yet PM assigned/completed)
           return (status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed') && !boq.pm_assigned;
         });
@@ -842,6 +923,9 @@ const EstimatorHub: React.FC = () => {
         location: boqData.location || boqData.project_details?.location || 'N/A',
         floor: boqData.floor_name || boqData.project_details?.floor || 'N/A',
         workingHours: boqData.working_hours || boqData.project_details?.hours || 'N/A',
+        preliminaries: boqData.preliminaries || {},
+        totalVatAmount: boqData.total_vat_amount || boqData.totalVatAmount || 0,
+        overallVatPercentage: boqData.overall_vat_percentage || boqData.overallVatPercentage || 0,
         boqItems: items.map((item: any) => {
           const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
           const sellingPrice = item.selling_price || 0;
@@ -859,7 +943,8 @@ const EstimatorHub: React.FC = () => {
               quantity: mat.quantity,
               unit: mat.unit,
               rate: mat.unit_price,
-              amount: mat.total_price
+              amount: mat.total_price,
+              vat_percentage: mat.vat_percentage || 0
             })) || [],
             labour: item.labour?.map((lab: any) => ({
               type: lab.labour_role,
@@ -872,7 +957,9 @@ const EstimatorHub: React.FC = () => {
             estimatedSellingPrice: item.selling_price || 0,
             overheadPercentage: item.overhead_percentage || 0,
             profitMarginPercentage: item.profit_margin_percentage || 0,
-            discountPercentage: item.discount_percentage || 0
+            discountPercentage: item.discount_percentage || 0,
+            vat_percentage: item.vat_percentage || 0,
+            vat_amount: item.vat_amount || 0
           };
         }) || []
       };
@@ -1082,15 +1169,8 @@ const EstimatorHub: React.FC = () => {
     // Check BOQ workflow status - Use status field as PRIMARY indicator
     const status = boq.status?.toLowerCase() || '';
 
-    // Count revisions from history
-    const revisionCount = React.useMemo(() => {
-      if (!boq.history || !Array.isArray(boq.history)) return 0;
-      return boq.history.filter((action: any) =>
-        action.type === 'revision_sent' ||
-        action.type === 'revision_approved' ||
-        action.is_revision === true
-      ).length;
-    }, [boq.history]);
+    // Get revision number from database
+    const revisionNumber = boq.revision_number || 0;
 
     // Draft: Not sent to TD/PM yet (can edit/delete/send) - status NOT in workflow states
     const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled');
@@ -1128,9 +1208,9 @@ const EstimatorHub: React.FC = () => {
           <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-2 flex-1">
               <h3 className="font-semibold text-gray-900 text-base">{boq.title}</h3>
-              {revisionCount > 0 && (
+              {revisionNumber > 0 && (
                 <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full">
-                  Rev {revisionCount}
+                  Rev {revisionNumber}
                 </span>
               )}
             </div>
@@ -1473,7 +1553,16 @@ const EstimatorHub: React.FC = () => {
           ) : (
             boqList.map((boq) => (
               <TableRow key={boq.boq_id} className="border-gray-200 hover:bg-gray-50/50">
-                <TableCell className="font-medium">{boq.title}</TableCell>
+                <TableCell className="font-medium">
+                  <div className="flex items-center gap-2">
+                    <span>{boq.title}</span>
+                    {(boq.revision_number || 0) > 0 && (
+                      <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full">
+                        Rev {boq.revision_number}
+                      </span>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell className="text-gray-600">{boq.project.name}</TableCell>
                 <TableCell className="text-gray-600">{boq.project.client}</TableCell>
                 <TableCell className="text-gray-600">
@@ -2389,18 +2478,73 @@ const EstimatorHub: React.FC = () => {
 
             <TabsContent value="revisions" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
+                {/* Dynamic Revision Tabs */}
+                <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-gray-200">
+                  {loadingRevisionTabs ? (
+                    <div className="text-sm text-gray-500">Loading revision tabs...</div>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setSelectedRevisionTab('all')}
+                        className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                          selectedRevisionTab === 'all'
+                            ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-500'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        All {filteredBOQs.length > 0 && `(${filteredBOQs.length})`}
+                      </button>
+                      {/* Reverse order: highest revision first, Initial Review last */}
+                      {[...revisionTabs].reverse().map((tab) => (
+                        <button
+                          key={tab.revision_number}
+                          onClick={() => setSelectedRevisionTab(tab.revision_number)}
+                          className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                            selectedRevisionTab === tab.revision_number
+                              ? tab.alert_level === 'critical'
+                                ? 'bg-red-100 text-red-700 ring-2 ring-red-500'
+                                : tab.alert_level === 'warning'
+                                ? 'bg-orange-100 text-orange-700 ring-2 ring-orange-500'
+                                : 'bg-green-100 text-green-700 ring-2 ring-green-500'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        >
+                          {tab.revision_number === 0 ? 'Initial Review' : `Rev ${tab.revision_number}`} ({tab.project_count})
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+
+                {/* BOQ List */}
                 {(() => {
-                  const totalBoqPages = Math.ceil(filteredBOQs.length / itemsPerPage);
+                  // Filter BOQs by selected revision tab
+                  let displayBOQs = filteredBOQs;
+                  if (selectedRevisionTab !== 'all') {
+                    displayBOQs = filteredBOQs.filter(boq => {
+                      const revisionNumber = boq.revision_number || 0;
+                      return revisionNumber === selectedRevisionTab;
+                    });
+                  }
+
+                  const totalBoqPages = Math.ceil(displayBOQs.length / itemsPerPage);
                   const startIndex = (boqCurrentPage - 1) * itemsPerPage;
                   const endIndex = startIndex + itemsPerPage;
-                  const paginatedBOQs = filteredBOQs.slice(startIndex, endIndex);
+                  const paginatedBOQs = displayBOQs.slice(startIndex, endIndex);
 
                   return (
                     <>
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <h2 className="text-lg sm:text-xl font-bold text-gray-900">BOQs Under Revision</h2>
+                        <h2 className="text-lg sm:text-xl font-bold text-gray-900">
+                          {selectedRevisionTab === 'all'
+                            ? 'All BOQs in Revision'
+                            : selectedRevisionTab === 0
+                            ? 'Initial Review - First Time Revisions'
+                            : `Revision ${selectedRevisionTab} - Projects`
+                          }
+                        </h2>
                         <div className="text-xs sm:text-sm text-gray-600">
-                          {filteredBOQs.length} BOQ{filteredBOQs.length !== 1 ? 's' : ''} edited and ready to send to TD
+                          {displayBOQs.length} BOQ{displayBOQs.length !== 1 ? 's' : ''}
                         </div>
                       </div>
                       {viewMode === 'cards' ? (

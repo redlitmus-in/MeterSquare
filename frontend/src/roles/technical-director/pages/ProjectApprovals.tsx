@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   DocumentCheckIcon,
@@ -123,6 +123,20 @@ const ProjectApprovals: React.FC = () => {
   const [selectedProjectPM, setSelectedProjectPM] = useState<any>(null);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
+  // Dynamic Revision Tabs States
+  const [revisionTabs, setRevisionTabs] = useState<Array<{
+    revision_number: number;
+    project_count: number;
+    alert_level: 'normal' | 'warning' | 'critical';
+  }>>([]);
+  const [selectedRevisionNumber, setSelectedRevisionNumber] = useState<number | 'all'>('all');
+  const [revisionProjects, setRevisionProjects] = useState<any[]>([]);
+  const [loadingRevisionTabs, setLoadingRevisionTabs] = useState(false);
+  const [loadingRevisionProjects, setLoadingRevisionProjects] = useState(false);
+
+  // Ref to track previous BOQs data for comparison
+  const prevBOQsRef = useRef<string>('');
+
   // Format currency for display
   const formatCurrency = (amount: number): string => {
     if (amount >= 100000) {
@@ -138,15 +152,33 @@ const ProjectApprovals: React.FC = () => {
     loadBOQs(); // Initial load with spinner
     loadPMs(); // Load PMs for assigned tab
 
-    // Poll for new BOQs every 5 seconds (background refresh, no spinner)
+    // Poll for new BOQs every 10 seconds (reduced frequency to minimize flickering)
     const intervalId = setInterval(() => {
       loadBOQs(false); // Auto-refresh without showing loading spinner
+      if (filterStatus === 'revisions') {
+        loadRevisionTabs(); // Refresh revision tabs when on revisions view
+      }
       loadPMs(); // Also refresh PM data
-    }, 5000); // 5 seconds for faster updates
+    }, 10000); // 10 seconds to reduce flickering
 
     // Cleanup interval on unmount
     return () => clearInterval(intervalId);
-  }, []);
+  }, [filterStatus]);
+
+  // Load revision tabs when revisions filter is active
+  useEffect(() => {
+    if (filterStatus === 'revisions') {
+      loadRevisionTabs();
+      loadRevisionProjects(selectedRevisionNumber);
+    }
+  }, [filterStatus]);
+
+  // Reload projects when revision tab changes
+  useEffect(() => {
+    if (filterStatus === 'revisions' && selectedRevisionNumber) {
+      loadRevisionProjects(selectedRevisionNumber);
+    }
+  }, [selectedRevisionNumber]);
 
   const loadBOQs = async (showLoadingSpinner = true) => {
     if (showLoadingSpinner) {
@@ -155,7 +187,12 @@ const ProjectApprovals: React.FC = () => {
     try {
       const response = await tdService.getAllTDBOQs();
       if (response.success && response.data) {
-        setBOQs(response.data);
+        // Only update state if data actually changed (prevents unnecessary re-renders)
+        const newDataString = JSON.stringify(response.data);
+        if (prevBOQsRef.current !== newDataString) {
+          prevBOQsRef.current = newDataString;
+          setBOQs(response.data);
+        }
       } else {
         console.error('Failed to load BOQs:', response.message);
         // Only show error toast on initial load, not during auto-refresh
@@ -173,6 +210,42 @@ const ProjectApprovals: React.FC = () => {
       if (showLoadingSpinner) {
         setLoading(false);
       }
+    }
+  };
+
+  // Load Dynamic Revision Tabs
+  const loadRevisionTabs = async () => {
+    try {
+      setLoadingRevisionTabs(true);
+      const response = await tdService.getRevisionTabs();
+      if (response.success && response.data) {
+        setRevisionTabs(response.data);
+      } else {
+        setRevisionTabs([]);
+      }
+    } catch (error) {
+      console.error('Error loading revision tabs:', error);
+      setRevisionTabs([]);
+    } finally {
+      setLoadingRevisionTabs(false);
+    }
+  };
+
+  // Load Projects by Revision Number (for TD)
+  const loadRevisionProjects = async (revisionNumber: number | 'all') => {
+    try {
+      setLoadingRevisionProjects(true);
+      const response = await tdService.getProjectsByRevision(revisionNumber);
+      if (response.success && response.data) {
+        setRevisionProjects(response.data);
+      } else {
+        setRevisionProjects([]);
+      }
+    } catch (error) {
+      console.error('Error loading revision projects:', error);
+      setRevisionProjects([]);
+    } finally {
+      setLoadingRevisionProjects(false);
     }
   };
 
@@ -259,7 +332,10 @@ const ProjectApprovals: React.FC = () => {
       emailSent: boq.email_sent || false,
       projectId: boq.project_id,
       pmAssigned: !!boq.user_id, // Convert to boolean - user_id indicates PM is assigned to project
+      revision_number: boq.revision_number || 0,
       preliminaries: boq.preliminaries || {},
+      totalVatAmount: boq.total_vat_amount || boq.totalVatAmount || 0,
+      overallVatPercentage: boq.overall_vat_percentage || boq.overallVatPercentage || 0,
       // Support both old format (items) and new format (existing_purchase/new_purchase)
       existingItems: (boq.existing_purchase?.items || boq.items)?.map((item: any) => {
         const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
@@ -482,28 +558,36 @@ const ProjectApprovals: React.FC = () => {
     return 'pending';
   };
 
-  // Transform BOQs to estimations
-  const estimations = boqs.map(transformBOQToEstimation);
+  // Transform BOQs to estimations (memoized to prevent recalculation on every render)
+  const estimations = useMemo(() => boqs.map(transformBOQToEstimation), [boqs]);
 
-  // Sort by submittedDate - most recent first
-  const sortedEstimations = estimations.sort((a, b) => {
-    const dateA = new Date(a.submittedDate || 0).getTime();
-    const dateB = new Date(b.submittedDate || 0).getTime();
-    return dateB - dateA; // Descending order (newest first)
-  });
+  // Sort by submittedDate - most recent first (memoized)
+  const sortedEstimations = useMemo(() => {
+    return [...estimations].sort((a, b) => {
+      const dateA = new Date(a.submittedDate || 0).getTime();
+      const dateB = new Date(b.submittedDate || 0).getTime();
+      return dateB - dateA; // Descending order (newest first)
+    });
+  }, [estimations]);
 
-  const filteredEstimations = sortedEstimations.filter(est => {
+  const filteredEstimations = useMemo(() => sortedEstimations.filter(est => {
     if (filterStatus === 'pending') {
       // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
       return est.status === 'pending' && !est.pmAssigned;
     } else if (filterStatus === 'revisions') {
-      // Revisions: Has sub-tabs for pending_approval and revision_approved
-      if (revisionSubTab === 'pending_approval') {
-        return est.status === 'pending_revision' && !est.pmAssigned;
-      } else if (revisionSubTab === 'revision_approved') {
-        return est.status === 'revision_approved' && !est.pmAssigned;
+      // Revisions: Show ALL revision projects (both pending_revision and revision_approved)
+      // Filter only by selectedRevisionNumber (revision cycle)
+      const isRevisionStatus = (est.status === 'pending_revision' || est.status === 'revision_approved') && !est.pmAssigned;
+
+      if (!isRevisionStatus) return false;
+
+      // Filter by revision number if specific revision is selected
+      if (selectedRevisionNumber !== 'all') {
+        const revisionNumber = (est as any).revision_number || 0;
+        return revisionNumber === selectedRevisionNumber;
       }
-      return false;
+
+      return true;
     } else if (filterStatus === 'approved') {
       // Approved: TD approved internally, includes both "approved" and "sent_for_confirmation" (waiting for client)
       return (est.status === 'approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned;
@@ -524,7 +608,7 @@ const ProjectApprovals: React.FC = () => {
       return est.status === 'cancelled';
     }
     return false;
-  });
+  }), [sortedEstimations, filterStatus, selectedRevisionNumber]);
 
   const handleApproval = async (id: number, approved: boolean, notes?: string) => {
     try {
@@ -537,17 +621,35 @@ const ProjectApprovals: React.FC = () => {
           toast.error('Please provide a rejection reason');
           return;
         }
+
+        // Optimistic update: immediately update UI before API call
+        const optimisticBOQs = boqs.map(boq =>
+          boq.boq_id === id
+            ? { ...boq, status: 'rejected' }
+            : boq
+        );
+        setBOQs(optimisticBOQs);
+
         const response = await tdService.rejectBOQ(id, notes);
         if (response.success) {
           toast.success('BOQ rejected successfully');
           setShowBOQModal(false); // Close BOQ details modal
-          await loadBOQs(); // Reload data
+
+          // Refresh data silently in background
+          loadBOQs(false);
+          if (filterStatus === 'revisions') {
+            loadRevisionTabs();
+          }
         } else {
           toast.error(response.message || 'Failed to reject BOQ');
+          // Revert optimistic update on error
+          await loadBOQs(false);
         }
       }
     } catch (error) {
       toast.error('An error occurred while processing the request');
+      // Revert optimistic update on error
+      await loadBOQs(false);
     }
     setShowRejectionModal(false);
     setApprovalNotes('');
@@ -560,6 +662,14 @@ const ProjectApprovals: React.FC = () => {
 
     setIsApproving(true);
     try {
+      // Optimistic update: immediately update UI before API call
+      const optimisticBOQs = boqs.map(boq =>
+        boq.boq_id === selectedEstimation.id
+          ? { ...boq, status: 'Revision_Approved' }
+          : boq
+      );
+      setBOQs(optimisticBOQs);
+
       const response = await tdService.approveBOQ(selectedEstimation.id, approvalNotes);
       if (response.success) {
         toast.success('BOQ approved successfully');
@@ -567,13 +677,22 @@ const ProjectApprovals: React.FC = () => {
         setShowBOQModal(false); // Close BOQ details modal
         setSelectedEstimation(null); // Clear selection
         setApprovalNotes(''); // Clear notes
-        await loadBOQs(); // Reload data
+
+        // Refresh data silently in background
+        loadBOQs(false);
+        if (filterStatus === 'revisions') {
+          loadRevisionTabs();
+        }
       } else {
         toast.error(response.message || 'Failed to approve BOQ');
+        // Revert optimistic update on error
+        await loadBOQs(false);
       }
     } catch (error) {
       console.error('Approval error:', error);
       toast.error('Failed to approve BOQ');
+      // Revert optimistic update on error
+      await loadBOQs(false);
     } finally {
       setIsApproving(false);
     }
@@ -826,29 +945,45 @@ const ProjectApprovals: React.FC = () => {
           </div>
         </div>
 
-        {/* Revision Sub-Tabs - Only show when Revisions tab is active */}
+        {/* Dynamic Revision Tabs - Exactly like Estimator */}
         {filterStatus === 'revisions' && (
-          <div className="mb-6 bg-white rounded-xl shadow-sm border border-gray-100 p-1 inline-flex gap-1">
-            <button
-              onClick={() => setRevisionSubTab('pending_approval')}
-              className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                revisionSubTab === 'pending_approval'
-                  ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 border border-red-200 shadow-md'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-              }`}
-            >
-              Pending Approval ({filteredEstimations.filter(est => est.status === 'pending_revision').length})
-            </button>
-            <button
-              onClick={() => setRevisionSubTab('revision_approved')}
-              className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                revisionSubTab === 'revision_approved'
-                  ? 'bg-gradient-to-r from-green-50 to-green-100 text-green-900 border border-green-200 shadow-md'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-              }`}
-            >
-              Approved ({sortedEstimations.filter(est => est.status === 'revision_approved' && !est.pmAssigned).length})
-            </button>
+          <div className="mb-6">
+            <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-gray-200">
+              {loadingRevisionTabs ? (
+                <div className="text-sm text-gray-500">Loading revision tabs...</div>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setSelectedRevisionNumber('all')}
+                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                      selectedRevisionNumber === 'all'
+                        ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-500'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    All {filteredEstimations.length > 0 && `(${filteredEstimations.length})`}
+                  </button>
+                  {/* Reverse order: highest revision first, Initial Review last */}
+                  {[...revisionTabs].reverse().map((tab) => (
+                    <button
+                      key={tab.revision_number}
+                      onClick={() => setSelectedRevisionNumber(tab.revision_number)}
+                      className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                        selectedRevisionNumber === tab.revision_number
+                          ? tab.alert_level === 'critical'
+                            ? 'bg-red-100 text-red-700 ring-2 ring-red-500'
+                            : tab.alert_level === 'warning'
+                            ? 'bg-orange-100 text-orange-700 ring-2 ring-orange-500'
+                            : 'bg-green-100 text-green-700 ring-2 ring-green-500'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {tab.revision_number === 0 ? 'Initial Review' : `Rev ${tab.revision_number}`} ({tab.project_count})
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
           </div>
         )}
 

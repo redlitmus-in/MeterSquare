@@ -287,6 +287,70 @@ class TDService {
       };
     }
   }
+
+  // Get Revision Tabs (Dynamic)
+  async getRevisionTabs(): Promise<{
+    success: boolean;
+    data?: Array<{
+      revision_number: number;
+      project_count: number;
+      alert_level: 'normal' | 'warning' | 'critical';
+    }>;
+    message?: string;
+  }> {
+    try {
+      const response = await apiClient.get('/boq/revision-tabs');
+
+      if (response.data) {
+        return {
+          success: true,
+          data: response.data
+        };
+      }
+
+      return {
+        success: true,
+        data: []
+      };
+    } catch (error: any) {
+      console.error('Error fetching revision tabs:', error);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to fetch revision tabs'
+      };
+    }
+  }
+
+  // Get Projects by Revision Number
+  async getProjectsByRevision(revisionNumber: number | 'all'): Promise<{
+    success: boolean;
+    data?: any[];
+    message?: string;
+  }> {
+    try {
+      const response = await apiClient.get(`/boq/revisions/${revisionNumber}`);
+
+      if (response.data) {
+        return {
+          success: true,
+          data: response.data
+        };
+      }
+
+      return {
+        success: true,
+        data: []
+      };
+    } catch (error: any) {
+      console.error('Error fetching projects by revision:', error);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to fetch projects'
+      };
+    }
+  }
 }
 
 export const tdService = new TDService();

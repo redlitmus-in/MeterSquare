@@ -10,6 +10,7 @@ class BOQ(db.Model):
     project_id = db.Column(db.Integer, db.ForeignKey("project.project_id"), nullable=False)
     boq_name = db.Column(db.String(255), nullable=False)
     status = db.Column(db.String(50), default="Draft")
+    revision_number = db.Column(db.Integer, default=0, nullable=False)  # 0 = original, 1+ = revision cycles
     client_rejection_reason = db.Column(db.Text, nullable=True)  # For client rejection/cancellation reasons
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)

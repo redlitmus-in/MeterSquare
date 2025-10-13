@@ -848,6 +848,103 @@ class EstimatorService {
     }
   }
 
+  // Get Revision Tabs (Dynamic)
+  async getRevisionTabs(): Promise<{
+    success: boolean;
+    data?: Array<{
+      revision_number: number;
+      project_count: number;
+      alert_level: 'normal' | 'warning' | 'critical';
+    }>;
+    message?: string;
+  }> {
+    try {
+      const response = await apiClient.get('/boq/revision-tabs');
+
+      if (response.data) {
+        return {
+          success: true,
+          data: response.data
+        };
+      }
+
+      return {
+        success: true,
+        data: []
+      };
+    } catch (error: any) {
+      console.error('Error fetching revision tabs:', error);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to fetch revision tabs'
+      };
+    }
+  }
+
+  // Get Projects by Revision Number
+  async getProjectsByRevision(revisionNumber: number | 'all'): Promise<{
+    success: boolean;
+    data?: any[];
+    message?: string;
+  }> {
+    try {
+      const response = await apiClient.get(`/boq/revisions/${revisionNumber}`);
+
+      if (response.data) {
+        return {
+          success: true,
+          data: response.data
+        };
+      }
+
+      return {
+        success: true,
+        data: []
+      };
+    } catch (error: any) {
+      console.error('Error fetching projects by revision:', error);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to fetch projects'
+      };
+    }
+  }
+
+  // Get Revision Statistics
+  async getRevisionStatistics(): Promise<{
+    success: boolean;
+    data?: {
+      total_in_revision: number;
+      by_level: Record<string, number>;
+      critical_count: number;
+    };
+    message?: string;
+  }> {
+    try {
+      const response = await apiClient.get('/boq/revision-statistics');
+
+      if (response.data) {
+        return {
+          success: true,
+          data: response.data
+        };
+      }
+
+      return {
+        success: false,
+        message: 'No data received'
+      };
+    } catch (error: any) {
+      console.error('Error fetching revision statistics:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to fetch statistics'
+      };
+    }
+  }
+
   // Dropdown Data Fetching
   async getProjects(): Promise<{ id: string; name: string; client: string; location?: string }[]> {
     try {

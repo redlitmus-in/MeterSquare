@@ -92,12 +92,12 @@ def send_boq_to_client():
 
         if 'excel' in formats:
             excel_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.xlsx"
-            excel_data = generate_client_excel(project, items, total_material_cost, total_labour_cost, grand_total)
+            excel_data = generate_client_excel(project, items, total_material_cost, total_labour_cost, grand_total, boq_json)
             excel_file = (excel_filename, excel_data)
 
         if 'pdf' in formats:
             pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
-            pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total)
+            pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json)
             pdf_file = (pdf_filename, pdf_data)
 
         # Send email - Pass selling price (overhead/profit distributed)
@@ -225,11 +225,14 @@ def send_boq_to_client():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-def generate_client_excel(project, items, total_material_cost, total_labour_cost, client_base_cost):
+def generate_client_excel(project, items, total_material_cost, total_labour_cost, client_base_cost, boq_json=None):
     """Generate Client Excel file from JSON data - Overhead & Profit distributed into materials and labor"""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Complete BOQ Client"
+
+    if boq_json is None:
+        boq_json = {}
 
     header_font = Font(bold=True, size=14, color="1F4788")
     sub_header_font = Font(bold=True, size=11)
@@ -379,7 +382,7 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
         ws[f'A{row}'].font = Font(bold=True, color="10B981")
         row += 3
 
-    # Cost Overview
+    # Cost Overview with VAT and Discount
     row += 1
     ws[f'A{row}'] = "COST OVERVIEW"
     ws[f'A{row}'].font = Font(bold=True, size=12)
@@ -392,10 +395,64 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     row += 1
     ws[f'A{row}'] = "Total Project Cost:"
     ws[f'B{row}'] = round(adjusted_total_material_cost + adjusted_total_labour_cost, 2)
-    row += 2
+    row += 1
+
+    # Calculate discount from items (if any)
+    total_discount = sum([item.get('discount_amount', 0) for item in items])
+    if total_discount > 0:
+        subtotal_before_discount = adjusted_total_material_cost + adjusted_total_labour_cost
+        discount_pct = (total_discount / subtotal_before_discount * 100) if subtotal_before_discount > 0 else 0
+        ws[f'A{row}'] = f"Discount ({discount_pct:.1f}%):"
+        ws[f'B{row}'] = f"-{round(total_discount, 2)}"
+        ws[f'B{row}'].font = Font(color="EF4444")
+        row += 1
+        ws[f'A{row}'] = "Subtotal (After Discount):"
+        ws[f'B{row}'] = round((adjusted_total_material_cost + adjusted_total_labour_cost) - total_discount, 2)
+        ws[f'A{row}'].font = Font(bold=True)
+        row += 1
+
+    # Calculate VAT from items
+    total_vat = sum([item.get('vat_amount', 0) for item in items])
+    subtotal_after_discount = (adjusted_total_material_cost + adjusted_total_labour_cost) - total_discount
+    if total_vat > 0 or subtotal_after_discount > 0:  # Always show VAT line
+        vat_pct = (total_vat / subtotal_after_discount * 100) if subtotal_after_discount > 0 else 0
+        ws[f'A{row}'] = f"VAT ({vat_pct:.1f}%):"
+        ws[f'B{row}'] = round(total_vat, 2)
+        row += 1
+
+    grand_total_with_vat = subtotal_after_discount + total_vat
+
+    row += 1
     ws[f'A{row}'] = "TOTAL PROJECT VALUE:"
-    ws[f'B{row}'] = round(adjusted_total_material_cost + adjusted_total_labour_cost, 2)
+    ws[f'B{row}'] = round(grand_total_with_vat, 2)
     ws[f'A{row}'].font = Font(bold=True, size=12, color="10B981")
+
+    # Add Preliminaries Section (if exists in boq_json)
+    preliminaries = boq_json.get('preliminaries', {})
+    prelim_items = preliminaries.get('items', [])
+    prelim_notes = preliminaries.get('notes', '')
+
+    if prelim_items or prelim_notes:
+        row += 3
+        ws[f'A{row}'] = "PRELIMINARIES & APPROVAL WORKS"
+        ws[f'A{row}'].font = Font(bold=True, size=12, color="643CCA")
+        row += 1
+        ws[f'A{row}'] = "Selected conditions and terms"
+        ws[f'A{row}'].font = Font(italic=True, color="666666")
+        row += 2
+
+        for prelim_item in prelim_items:
+            desc = prelim_item.get('description', prelim_item) if isinstance(prelim_item, dict) else str(prelim_item)
+            ws[f'A{row}'] = f"✓ {desc}"
+            row += 1
+
+        if prelim_notes:
+            row += 1
+            ws[f'A{row}'] = "Additional Notes:"
+            ws[f'A{row}'].font = Font(bold=True)
+            row += 1
+            ws[f'A{row}'] = prelim_notes
+            ws[f'A{row}'].font = Font(italic=True)
 
     # Column widths
     ws.column_dimensions['A'].width = 40
@@ -411,12 +468,15 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     return excel_buffer.read()
 
 
-def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total):
+def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None):
     """Generate Client PDF file from JSON data - Overhead & Profit distributed into materials and labor"""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=30, bottomMargin=30)
     elements = []
     styles = getSampleStyleSheet()
+
+    if boq_json is None:
+        boq_json = {}
 
     # Company Logo (if exists)
     logo_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'logo.png')
@@ -615,7 +675,7 @@ def generate_client_pdf(project, items, total_material_cost, total_labour_cost, 
         elements.append(Paragraph(f"<b>Total Item Cost: AED {item_total_with_markup:,.2f}</b>", cost_summary_style))
         elements.append(Spacer(1, 15))
 
-    # Final Summary Section
+    # Final Summary Section with VAT and Discount
     elements.append(Spacer(1, 10))
     summary_header_style = ParagraphStyle(
         'SummaryHeader',
@@ -627,26 +687,101 @@ def generate_client_pdf(project, items, total_material_cost, total_labour_cost, 
     elements.append(Paragraph("<b>PROJECT COST SUMMARY</b>", summary_header_style))
     elements.append(Spacer(1, 8))
 
+    # Calculate discount and VAT
+    total_discount = sum([item.get('discount_amount', 0) for item in items])
+    total_vat = sum([item.get('vat_amount', 0) for item in items])
+    subtotal_before_discount = adjusted_total_material_cost + adjusted_total_labour_cost
+    subtotal_after_discount = subtotal_before_discount - total_discount
+    grand_total_with_vat = subtotal_after_discount + total_vat
+
     summary_data = [
         ['Total Material Cost:', f'AED {adjusted_total_material_cost:,.2f}'],
         ['Total Labour Cost:', f'AED {adjusted_total_labour_cost:,.2f}'],
-        ['', ''],
-        ['TOTAL PROJECT VALUE:', f'AED {(adjusted_total_material_cost + adjusted_total_labour_cost):,.2f}']
     ]
+
+    # Add discount if exists
+    if total_discount > 0:
+        discount_pct = (total_discount / subtotal_before_discount * 100) if subtotal_before_discount > 0 else 0
+        summary_data.append([f'Discount ({discount_pct:.1f}%):', f'-AED {total_discount:,.2f}'])
+        summary_data.append(['Subtotal (After Discount):', f'AED {subtotal_after_discount:,.2f}'])
+
+    # Add VAT
+    if total_vat > 0 or subtotal_after_discount > 0:
+        vat_pct = (total_vat / subtotal_after_discount * 100) if subtotal_after_discount > 0 else 0
+        summary_data.append([f'VAT ({vat_pct:.1f}%):', f'AED {total_vat:,.2f}'])
+
+    summary_data.append(['', ''])
+    summary_data.append(['TOTAL PROJECT VALUE:', f'AED {grand_total_with_vat:,.2f}'])
+
     summary_table = Table(summary_data, colWidths=[3.5*inch, 2.5*inch])
     summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 1), colors.HexColor('#DBEAFE')),
-        ('BACKGROUND', (0, 3), (-1, 3), colors.HexColor('#10B981')),
-        ('TEXTCOLOR', (0, 3), (-1, 3), colors.white),
-        ('FONTNAME', (0, 3), (-1, 3), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 3), (-1, 3), 14),
-        ('FONTSIZE', (0, 0), (-1, 1), 11),
+        ('BACKGROUND', (0, 0), (-1, -3), colors.HexColor('#DBEAFE')),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#10B981')),
+        ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, -1), (-1, -1), 14),
+        ('FONTSIZE', (0, 0), (-1, -2), 11),
         ('ALIGN', (0, 0), (0, -1), 'LEFT'),
         ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
     ]))
     elements.append(summary_table)
+
+    # Add Preliminaries Section (if exists)
+    preliminaries = boq_json.get('preliminaries', {})
+    prelim_items = preliminaries.get('items', [])
+    prelim_notes = preliminaries.get('notes', '')
+
+    if prelim_items or prelim_notes:
+        elements.append(Spacer(1, 20))
+        prelim_header_style = ParagraphStyle(
+            'PrelimHeader',
+            parent=styles['Heading2'],
+            fontSize=12,
+            textColor=colors.HexColor('#643CCA'),
+            spaceAfter=6
+        )
+        elements.append(Paragraph("<b>PRELIMINARIES & APPROVAL WORKS</b>", prelim_header_style))
+        prelim_subtitle_style = ParagraphStyle(
+            'PrelimSubtitle',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.grey,
+            fontName='Helvetica-Oblique',
+            spaceAfter=10
+        )
+        elements.append(Paragraph("Selected conditions and terms", prelim_subtitle_style))
+
+        for prelim_item in prelim_items:
+            desc = prelim_item.get('description', prelim_item) if isinstance(prelim_item, dict) else str(prelim_item)
+            prelim_text = f"✓ {desc}"
+            prelim_style = ParagraphStyle('PrelimItem', parent=styles['Normal'], fontSize=9, leftIndent=10, spaceAfter=4)
+            elements.append(Paragraph(prelim_text, prelim_style))
+
+        if prelim_notes:
+            elements.append(Spacer(1, 8))
+            notes_header = Paragraph("<b>Additional Notes:</b>", styles['Normal'])
+            elements.append(notes_header)
+            notes_text = Paragraph(prelim_notes, ParagraphStyle('Notes', parent=styles['Normal'], fontSize=9, fontName='Helvetica-Oblique'))
+            elements.append(notes_text)
+
+    # Add Signature Section
+    elements.append(Spacer(1, 30))
+    from reportlab.platypus import HRFlowable
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.grey, spaceBefore=10, spaceAfter=15))
+
+    sig_style = ParagraphStyle('Signature', parent=styles['Normal'], fontSize=10, spaceAfter=40)
+    elements.append(Paragraph("<b>For MeterSquare:</b>", sig_style))
+    elements.append(HRFlowable(width="40%", thickness=0.5, color=colors.black, spaceBefore=1, spaceAfter=5))
+    elements.append(Paragraph("Authorized Signature", styles['Normal']))
+    elements.append(Paragraph("Date: __________", styles['Normal']))
+
+    elements.append(Spacer(1, 20))
+    elements.append(Paragraph("<b>Client Acceptance:</b>", sig_style))
+    elements.append(HRFlowable(width="40%", thickness=0.5, color=colors.black, spaceBefore=1, spaceAfter=5))
+    elements.append(Paragraph("Client Signature", styles['Normal']))
+    elements.append(Paragraph("Date: __________", styles['Normal']))
 
     doc.build(elements)
     buffer.seek(0)

@@ -449,14 +449,15 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: UserCheck,
         iconSolid: UserCheck,
         color: 'text-indigo-600'
-      },
-      {
-        name: 'Settings',
-        href: buildPath('/settings'),
-        icon: Settings,
-        iconSolid: Settings,
-        color: 'text-gray-600'
       }
+      // Temporarily hidden - Settings
+      // {
+      //   name: 'Settings',
+      //   href: buildPath('/settings'),
+      //   icon: Settings,
+      //   iconSolid: Settings,
+      //   color: 'text-gray-600'
+      // }
     ];
 
 

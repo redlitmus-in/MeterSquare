@@ -6,6 +6,7 @@ from utils.authentication import jwt_required
 from controllers.boq_controller import *
 from controllers.boq_upload_controller import *
 from controllers.boq_bulk_controller import bulk_upload_boq
+from controllers.boq_revisions import get_revision_tabs, get_projects_by_revision, get_revision_statistics
 
 boq_routes = Blueprint('boq_routes', __name__, url_prefix='/api')
 
@@ -77,4 +78,20 @@ def get_estimator_dashboard_route():
 @jwt_required
 def bulk_upload_boq_route():
     return bulk_upload_boq()
+
+# BOQ Revisions - Dynamic Tabs
+@boq_routes.route('/boq/revision-tabs', methods=['GET'])
+@jwt_required
+def get_revision_tabs_route():
+    return get_revision_tabs()
+
+@boq_routes.route('/boq/revisions/<revision_number>', methods=['GET'])
+@jwt_required
+def get_projects_by_revision_route(revision_number):
+    return get_projects_by_revision(revision_number)
+
+@boq_routes.route('/boq/revision-statistics', methods=['GET'])
+@jwt_required
+def get_revision_statistics_route():
+    return get_revision_statistics()
 

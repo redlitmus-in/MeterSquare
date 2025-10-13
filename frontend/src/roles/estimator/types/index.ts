@@ -146,6 +146,7 @@ export interface BOQ {
   boq_name?: string; // Backend uses boq_name
   raised_by?: string;
   status: BOQStatus;
+  revision_number?: number; // 0 = original, 1+ = revision cycles
   sections: BOQSection[];
   summary: BOQSummary;
   terms?: BOQTerms;
