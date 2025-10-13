@@ -116,3 +116,49 @@ def get_boq_change_requests_route(boq_id):
     Used by PM/SE to view their submitted requests in BOQ modal
     """
     return get_boq_change_requests(boq_id)
+
+
+# Get item overhead snapshot
+@change_request_routes.route('/boq/<int:boq_id>/item-overhead/<string:item_id>', methods=['GET'])
+@jwt_required
+def get_item_overhead_route(boq_id, item_id):
+    """
+    Get overhead snapshot for a specific BOQ item
+    Used for live calculations before creating change request
+    """
+    from controllers.change_request_controller import get_item_overhead
+    return get_item_overhead(boq_id, item_id)
+
+
+# Extra Material Endpoints - Separate from main BOQ view
+@change_request_routes.route('/change_request/extra_materials', methods=['GET'])
+@jwt_required
+def get_extra_materials_route():
+    """
+    Get extra material requests (separate from BOQ view)
+    Filters: project_id, area_id, status
+    """
+    from controllers.change_request_controller import get_extra_materials
+    return get_extra_materials()
+
+
+@change_request_routes.route('/change_request/extra_materials/create', methods=['POST'])
+@jwt_required
+def create_extra_material_route():
+    """
+    Create extra material request with proper routing
+    Routes: PM → Purchase → TD (>40%) or PM → Estimator (≤40%)
+    """
+    from controllers.change_request_controller import create_extra_material
+    return create_extra_material()
+
+
+@change_request_routes.route('/change_request/extra_materials/approve/<int:id>', methods=['PATCH'])
+@jwt_required
+def approve_extra_material_route(id):
+    """
+    Approve extra material request
+    Roles allowed: PM, Purchase, Estimator, TD
+    """
+    from controllers.change_request_controller import approve_extra_material
+    return approve_extra_material(id)

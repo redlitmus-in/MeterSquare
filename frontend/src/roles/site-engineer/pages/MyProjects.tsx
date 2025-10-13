@@ -16,7 +16,6 @@ import { useAuthStore } from '@/store/authStore';
 import { siteEngineerService } from '../services/siteEngineerService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
-import RequestExtraMaterialsModal from '@/components/modals/RequestExtraMaterialsModal';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
 import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
@@ -89,7 +88,7 @@ const MyProjects: React.FC = () => {
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [projectToRequest, setProjectToRequest] = useState<Project | null>(null);
   const [requesting, setRequesting] = useState(false);
-  const [showRequestMaterialsModal, setShowRequestMaterialsModal] = useState(false);
+  // const [showRequestMaterialsModal, setShowRequestMaterialsModal] = useState(false); // Removed - use Change Requests page
   const [pendingChangeRequests, setPendingChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [approvedChangeRequests, setApprovedChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [rejectedChangeRequests, setRejectedChangeRequests] = useState<ChangeRequestItem[]>([]);
@@ -482,11 +481,11 @@ const MyProjects: React.FC = () => {
                 <div className="flex items-center gap-2">
                   {selectedProject.boq_id && (
                     <button
-                      onClick={() => setShowRequestMaterialsModal(true)}
+                      onClick={() => window.location.href = '/site-engineer/extra-material'}
                       className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors flex items-center gap-2"
                     >
                       <DocumentTextIcon className="w-4 h-4" />
-                      Request Extra Materials
+                      Request Extra Sub-Items
                     </button>
                   )}
                   <button
@@ -908,31 +907,10 @@ const MyProjects: React.FC = () => {
         </div>
       )}
 
-      {/* Request Extra Materials Modal */}
-      {selectedProject?.boq_id && (
-        <RequestExtraMaterialsModal
-          isOpen={showRequestMaterialsModal}
-          onClose={() => setShowRequestMaterialsModal(false)}
-          boqId={selectedProject.boq_id}
-          boqName={selectedProject.boq_name || selectedProject.project_name}
-          boqItems={[
-            ...(selectedProject.existingPurchaseItems || []).map(item => ({
-              id: item.id,
-              description: item.description || item.briefDescription || `Item ${item.id}`
-            })),
-            ...(selectedProject.newPurchaseItems || []).map(item => ({
-              id: item.id,
-              description: item.description || item.briefDescription || `Item ${item.id}`
-            }))
-          ]}
-          onSuccess={() => {
-            toast.success('Extra materials request submitted successfully');
-            if (selectedProject.boq_ids && selectedProject.boq_ids[0]) {
-              handleViewProject(selectedProject);
-            }
-          }}
-        />
-      )}
+      {/* Request Extra Materials Modal - Removed, use Change Requests page instead */}
+      {/* Note: The RequestExtraMaterialsModal has been removed.
+          Users should now use the Change Requests page from the navigation menu
+          to request extra sub-items for BOQ items. */}
 
       {/* Change Request Details Modal */}
       {selectedChangeRequestId && (

@@ -84,9 +84,11 @@ class ChangeRequestWorkflow:
             raise ValueError(f"Invalid role for sending request: {requester_role}. Only Site Engineers and Project Managers can create change requests.")
 
     @staticmethod
-    def determine_next_approver_after_pm(change_request) -> Tuple[str, str]:
+    def determine_approval_route_by_percentage(change_request) -> Tuple[str, str]:
         """
-        Determine next approver after PM approval
+        Determine approval route based on 40% threshold of ITEM overhead
+        >40% → TD required
+        ≤40% → Estimator only
 
         Args:
             change_request: ChangeRequest model instance
@@ -94,9 +96,29 @@ class ChangeRequestWorkflow:
         Returns:
             tuple: (approval_required_from, next_approver_display_name)
         """
-        next_role = ChangeRequestWorkflow.check_budget_threshold(change_request)
-        next_approver = "Technical Director" if next_role == CR_CONFIG.ROLE_TECHNICAL_DIRECTOR else "Estimator"
-        return next_role, next_approver
+        percentage = change_request.percentage_of_item_overhead or 0
+
+        if percentage > 40:
+            log.info(f"CR {change_request.cr_id}: {percentage}% > 40% → Requires TD approval")
+            return CR_CONFIG.ROLE_TECHNICAL_DIRECTOR, "Technical Director"
+        else:
+            log.info(f"CR {change_request.cr_id}: {percentage}% ≤ 40% → Estimator approval only")
+            return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
+
+    @staticmethod
+    def determine_next_approver_after_pm(change_request) -> Tuple[str, str]:
+        """
+        Determine next approver after PM approval
+        Routes based on 40% threshold of item overhead
+
+        Args:
+            change_request: ChangeRequest model instance
+
+        Returns:
+            tuple: (approval_required_from, next_approver_display_name)
+        """
+        # Route based on percentage threshold (40%)
+        return ChangeRequestWorkflow.determine_approval_route_by_percentage(change_request)
 
     @staticmethod
     def determine_next_approver_after_td() -> Tuple[str, str]:

@@ -29,3 +29,9 @@ def update_project_route(project_id):
 @jwt_required
 def delete_project_route(project_id):
     return delete_project(project_id)
+
+@project_routes.route('/projects/assigned-to-me', methods=['GET'])
+@jwt_required
+def get_assigned_projects_route():
+    """Get projects assigned to the current user with BOQ structure"""
+    return get_assigned_projects()

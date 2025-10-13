@@ -354,3 +354,155 @@ def restore_project(project_id):
         db.session.rollback()
         log.error(f"Error restoring project {project_id}: {str(e)}")
         return jsonify({"error": f"Failed to restore project: {str(e)}"}), 500
+
+
+def get_assigned_projects():
+    """
+    Get projects assigned to the current user with areas and BOQ structure (items + sub-items)
+    Used for Change Requests dropdown flow
+    """
+    try:
+        current_user = g.get("user")
+        if not current_user:
+            log.error("No user in g context")
+            return jsonify({"error": "Authentication required"}), 401
+
+        user_id = current_user.get('user_id')
+        user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
+
+        log.info(f"get_assigned_projects called for user_id: {user_id}, role: {user_role}")
+
+        # Query projects based on role - ONLY show projects with status 'assigned'
+        if user_role in ['siteengineer', 'sitesupervisor']:
+            # Get projects where user is assigned as site engineer/supervisor
+            projects = Project.query.filter(
+                Project.site_supervisor_id == user_id,
+                Project.is_deleted == False,
+                Project.status == 'completed'  # ONLY 'assigned' status
+            ).all()
+
+            log.info(f"Found {len(projects)} assigned projects for SE user {user_id}")
+
+        elif user_role == ['projectmanager']:
+            # Get projects where user is assigned as project manager
+            projects = Project.query.filter(
+                Project.user_id == user_id,
+                Project.is_deleted == False,
+                Project.status == 'assigned'  # ONLY 'assigned' status
+            ).all()
+
+            log.info(f"Found {len(projects)} assigned projects for PM user {user_id}")
+        else:
+            # For other roles, return empty list
+            return jsonify({"projects": []}), 200
+
+        # Build response with BOQ structure
+        projects_data = []
+        for project in projects:
+            project_info = {
+                "project_id": project.project_id,
+                "project_name": project.project_name,
+                "areas": []
+            }
+
+            # Get areas for this project (using floor_name as area)
+            # In a real implementation, you would have an Areas table
+            # For now, using floor_name from project
+            area_info = {
+                "area_id": 1,  # Placeholder
+                "area_name": project.floor_name or "Main Area",
+                "boqs": []
+            }
+
+            # Get BOQs for this project
+            from models.boq import BOQ, BOQDetails
+            boqs = BOQ.query.filter_by(
+                project_id=project.project_id,
+                is_deleted=False
+            ).all()
+
+            for boq in boqs:
+                boq_info = {
+                    "boq_id": boq.boq_id,
+                    "boq_name": boq.boq_name or f"BOQ-{boq.boq_id}",
+                    "items": []
+                }
+
+                # Get BOQ details from related table
+                boq_detail = BOQDetails.query.filter_by(
+                    boq_id=boq.boq_id,
+                    is_deleted=False
+                ).first()
+
+                # Parse BOQ details to get items and sub-items
+                boq_details = boq_detail.boq_details if boq_detail else {}
+
+                # Handle case where boq_details might be a string (JSON) instead of dict
+                if isinstance(boq_details, str):
+                    import json
+                    try:
+                        boq_details = json.loads(boq_details)
+                    except json.JSONDecodeError:
+                        log.warning(f"Failed to parse boq_details for BOQ {boq.boq_id}")
+                        boq_details = {}
+
+                items = boq_details.get('items', [])
+
+                for item in items:
+                    # Calculate item overhead
+                    item_overhead = item.get('overhead', 0)
+                    if item_overhead == 0:
+                        # Calculate from percentage if not stored
+                        overhead_percentage = item.get('overhead_percentage', 10)
+                        total_cost = item.get('total_cost', 0)
+                        item_overhead = (total_cost * overhead_percentage) / 100
+
+                    item_info = {
+                        "item_id": item.get('id', ''),
+                        "item_name": item.get('name', ''),
+                        "overhead_allocated": round(item_overhead, 2),
+                        "overhead_consumed": 0.0,  # TODO: Calculate from approved change requests
+                        "overhead_available": round(item_overhead, 2),
+                        "sub_items": []
+                    }
+
+                    # Add sub-items
+                    sub_items = item.get('sub_items', [])
+                    for sub_item in sub_items:
+                        sub_item_info = {
+                            "sub_item_id": sub_item.get('id', ''),
+                            "name": sub_item.get('name', ''),
+                            "unit": sub_item.get('unit', ''),
+                            "unit_price": sub_item.get('unit_price', 0),
+                            "default_qty": sub_item.get('quantity', 0)
+                        }
+                        item_info["sub_items"].append(sub_item_info)
+
+                    boq_info["items"].append(item_info)
+
+                area_info["boqs"].append(boq_info)
+
+            if area_info["boqs"]:  # Only add area if it has BOQs
+                project_info["areas"].append(area_info)
+
+            if project_info["areas"]:  # Only add project if it has areas with BOQs
+                projects_data.append(project_info)
+
+        return jsonify({"projects": projects_data}), 200
+
+    except AttributeError as e:
+        log.error(f"Attribute error in get_assigned_projects: {str(e)}")
+        if 'project_name' in str(e):
+            return jsonify({
+                "error": "Project reference configuration error. Please contact support.",
+                "details": "BOQ model does not have direct project_name field"
+            }), 500
+        return jsonify({"error": f"Data access error: {str(e)}"}), 500
+    except Exception as e:
+        log.error(f"Error getting assigned projects: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": "Failed to get assigned projects",
+            "details": str(e) if g.get('debug_mode') else "An internal error occurred"
+        }), 500

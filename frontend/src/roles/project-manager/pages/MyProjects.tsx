@@ -19,7 +19,6 @@ import { projectManagerService } from '../services/projectManagerService';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
-import RequestExtraMaterialsModal from '@/components/modals/RequestExtraMaterialsModal';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
 import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
@@ -133,7 +132,7 @@ const MyProjects: React.FC = () => {
   const [showCreateBOQModal, setShowCreateBOQModal] = useState(false);
   const [selectedProjectForBOQ, setSelectedProjectForBOQ] = useState<Project | null>(null);
   const [showCompleteModal, setShowCompleteModal] = useState(false);
-  const [showRequestMaterialsModal, setShowRequestMaterialsModal] = useState(false);
+  // const [showRequestMaterialsModal, setShowRequestMaterialsModal] = useState(false); // Removed - use Change Requests page
   const [pendingChangeRequests, setPendingChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [approvedChangeRequests, setApprovedChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [rejectedChangeRequests, setRejectedChangeRequests] = useState<ChangeRequestItem[]>([]);
@@ -716,11 +715,11 @@ const MyProjects: React.FC = () => {
                 <div className="flex items-center gap-2">
                   {selectedProject.boq_id && (
                     <button
-                      onClick={() => setShowRequestMaterialsModal(true)}
+                      onClick={() => window.location.href = '/project-manager/extra-material'}
                       className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors flex items-center gap-2"
                     >
                       <DocumentTextIcon className="w-4 h-4" />
-                      Request Extra Materials
+                      Request Extra Sub-Items
                     </button>
                   )}
                   <button
@@ -1846,46 +1845,10 @@ const MyProjects: React.FC = () => {
         </div>
       )}
 
-      {/* Request Extra Materials Modal */}
-      {selectedProject?.boq_id && (
-        <RequestExtraMaterialsModal
-          isOpen={showRequestMaterialsModal}
-          onClose={() => setShowRequestMaterialsModal(false)}
-          boqId={selectedProject.boq_id}
-          boqName={selectedProject.boq_name || selectedProject.project_name}
-          boqItems={[
-            ...(selectedProject.existingPurchaseItems || []).map(item => ({
-              id: item.id,
-              description: item.description || item.briefDescription || `Item ${item.id}`
-            })),
-            ...(selectedProject.newPurchaseItems || []).map(item => ({
-              id: item.id,
-              description: item.description || item.briefDescription || `Item ${item.id}`
-            }))
-          ]}
-          overheadBudget={(() => {
-            const allRequests = [...pendingChangeRequests, ...approvedChangeRequests, ...rejectedChangeRequests];
-            const sampleRequest = allRequests.find(r => r.overhead_analysis);
-            if (!sampleRequest?.overhead_analysis) return undefined;
-
-            const totalConsumedFromApproved = approvedChangeRequests.reduce((sum, req) => sum + (req.materials_total_cost || 0), 0);
-            const totalAllocated = sampleRequest.overhead_analysis.original_allocated || 0;
-            const available = totalAllocated - totalConsumedFromApproved;
-
-            return {
-              totalAllocated,
-              alreadyConsumed: totalConsumedFromApproved,
-              available
-            };
-          })()}
-          onSuccess={() => {
-            toast.success('Extra materials request submitted successfully');
-            if (selectedProject.boq_id) {
-              loadBOQDetails(selectedProject.boq_id);
-            }
-          }}
-        />
-      )}
+      {/* Request Extra Materials Modal - Removed, use Change Requests page instead */}
+      {/* Note: The RequestExtraMaterialsModal has been removed.
+          Users should now use the Change Requests page from the navigation menu
+          to request extra sub-items for BOQ items. */}
 
       {/* Change Request Details Modal */}
       <ChangeRequestDetailsModal

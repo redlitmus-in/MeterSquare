@@ -25,21 +25,41 @@ class ChangeRequest(db.Model):
     status = db.Column(db.String(50), default="pending")  # pending, under_review, approved_by_pm, approved_by_td, approved, rejected
     current_approver_role = db.Column(db.String(50), nullable=True)  # Tracks who should act next
 
-    # Materials requested (stored as JSONB array)
-    materials_data = db.Column(JSONB, nullable=False)
+    # BOQ Item Reference (which item these sub-items belong to)
+    item_id = db.Column(db.String(255), nullable=True)  # e.g., "item_1"
+    item_name = db.Column(db.String(255), nullable=True)  # e.g., "Concrete Work"
+
+    # Item Overhead Tracking (snapshot at request time)
+    item_overhead_allocated = db.Column(db.Float, default=0.0)  # Total overhead for this item
+    item_overhead_consumed_before = db.Column(db.Float, default=0.0)  # Already consumed
+    item_overhead_available = db.Column(db.Float, default=0.0)  # Available before this request
+
+    # Sub-Items requested (stored as JSONB array)
+    sub_items_data = db.Column(JSONB, nullable=False)
     """
     Example structure:
     [
         {
-            "material_name": "Cement",
+            "sub_item_name": "Cement",
             "quantity": 10,
             "unit": "bags",
             "unit_price": 400,
             "total_price": 4000,
-            "master_material_id": 123  # Optional, for linking to master
+            "is_new": false,  # True if this is a new sub-item not in original BOQ
+            "reason": "Required due to design change"  # Only if is_new=true
         }
     ]
     """
+
+    # New Sub-Item Tracking
+    has_new_sub_items = db.Column(db.Boolean, default=False)  # Flag if adding new sub-items
+    new_sub_item_reason = db.Column(db.Text, nullable=True)  # Overall reason for new sub-items
+
+    # Percentage Calculation (for routing logic)
+    percentage_of_item_overhead = db.Column(db.Float, default=0.0)  # % of item overhead consumed
+
+    # Legacy field for backward compatibility (renamed from materials_data)
+    materials_data = db.Column(JSONB, nullable=True)  # Keep for old records
 
     # Financial tracking - Request impact
     materials_total_cost = db.Column(db.Float, default=0.0)  # Sum of all materials
@@ -118,7 +138,24 @@ class ChangeRequest(db.Model):
             'justification': self.justification,
             'status': self.status,
 
-            # Materials
+            # BOQ Item Reference
+            'item_id': self.item_id,
+            'item_name': self.item_name,
+
+            # Item Overhead
+            'item_overhead': {
+                'allocated': round(self.item_overhead_allocated, 2) if self.item_overhead_allocated else 0,
+                'consumed_before': round(self.item_overhead_consumed_before, 2) if self.item_overhead_consumed_before else 0,
+                'available': round(self.item_overhead_available, 2) if self.item_overhead_available else 0
+            },
+
+            # Sub-Items
+            'sub_items_data': self.sub_items_data,
+            'has_new_sub_items': self.has_new_sub_items,
+            'new_sub_item_reason': self.new_sub_item_reason,
+            'percentage_of_item_overhead': round(self.percentage_of_item_overhead, 2) if self.percentage_of_item_overhead else 0,
+
+            # Legacy Materials (backward compatibility)
             'materials_data': self.materials_data,
             'materials_total_cost': round(self.materials_total_cost, 2) if self.materials_total_cost else 0,
 

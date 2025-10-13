@@ -153,6 +153,48 @@ class OverheadCalculator:
         }
 
     @staticmethod
+    def calculate_item_overhead_impact(
+        item_overhead_allocated: float,
+        item_overhead_consumed_before: float,
+        new_sub_items_cost: float
+    ) -> Dict:
+        """
+        Calculate overhead impact for a specific BOQ item (not overall BOQ)
+
+        Args:
+            item_overhead_allocated: Total overhead allocated for this specific item
+            item_overhead_consumed_before: Already consumed overhead for this item
+            new_sub_items_cost: Cost of new sub-items being requested
+
+        Returns:
+            dict: Item-specific overhead analysis with 40% threshold check
+        """
+        try:
+            item_overhead_available = item_overhead_allocated - item_overhead_consumed_before
+            new_overhead_consumed = new_sub_items_cost
+            remaining_after = item_overhead_available - new_overhead_consumed
+            is_over_budget = remaining_after < 0
+
+            # Calculate percentage of item overhead consumed (for 40% threshold)
+            percentage = (new_sub_items_cost / item_overhead_allocated * 100) if item_overhead_allocated > 0 else 0
+            exceeds_40_percent = percentage > 40
+
+            return {
+                'item_overhead_allocated': round(item_overhead_allocated, 2),
+                'item_overhead_consumed_before': round(item_overhead_consumed_before, 2),
+                'item_overhead_available': round(item_overhead_available, 2),
+                'sub_items_cost': round(new_sub_items_cost, 2),
+                'new_overhead_consumed': round(new_overhead_consumed, 2),
+                'remaining_after': round(remaining_after, 2),
+                'is_over_budget': is_over_budget,
+                'percentage_of_item': round(percentage, 2),
+                'exceeds_40_percent': exceeds_40_percent
+            }
+        except Exception as e:
+            log.error(f"Error calculating item overhead impact: {str(e)}")
+            return None
+
+    @staticmethod
     def format_budget_impact(overhead_data: Dict) -> Dict:
         """
         Format budget impact for API response

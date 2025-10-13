@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
@@ -28,16 +29,21 @@ import {
   Calendar,
   FolderOpen,
   LayoutGrid,
-  List
+  List,
+  Plus,
+  Cube
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
+import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 
 const ChangeRequestsPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('pending');
+  const location = useLocation();
+  const isExtraMaterial = location.pathname.includes('extra-material');
+  const [activeTab, setActiveTab] = useState(isExtraMaterial ? 'requested' : 'pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [changeRequests, setChangeRequests] = useState<ChangeRequestItem[]>([]);
@@ -47,6 +53,7 @@ const ChangeRequestsPage: React.FC = () => {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
+  const [showExtraForm, setShowExtraForm] = useState(false);
 
   // Fetch change requests from backend
   useEffect(() => {
@@ -169,11 +176,23 @@ const ChangeRequestsPage: React.FC = () => {
     const projectName = req.project_name || req.boq_name || '';
     const matchesSearch = projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesTab = (
-      (activeTab === 'pending' && req.approval_required_from === 'project_manager' && req.status !== 'approved' && req.status !== 'rejected') ||
-      (activeTab === 'approved' && (req.status === 'approved_by_pm' || req.status === 'approved')) ||
-      (activeTab === 'rejected' && req.status === 'rejected')
-    );
+
+    let matchesTab = false;
+    if (isExtraMaterial) {
+      // Extra Material tab filtering
+      matchesTab = (
+        (activeTab === 'requested' && req.requested_by_role === 'site_engineer' && req.status === 'pending') ||
+        (activeTab === 'under_review' && req.status === 'under_review') ||
+        (activeTab === 'approved' && (req.status === 'approved' || req.status === 'approved_by_pm'))
+      );
+    } else {
+      // Change Requests tab filtering
+      matchesTab = (
+        (activeTab === 'pending' && req.approval_required_from === 'project_manager' && req.status !== 'approved' && req.status !== 'rejected') ||
+        (activeTab === 'approved' && (req.status === 'approved_by_pm' || req.status === 'approved')) ||
+        (activeTab === 'rejected' && req.status === 'rejected')
+      );
+    }
     return matchesSearch && matchesTab;
   });
 
@@ -250,19 +269,46 @@ const ChangeRequestsPage: React.FC = () => {
     </div>
   );
 
+  // Conditional rendering for Extra Material Form
+  if (isExtraMaterial && showExtraForm) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
+        <div className="max-w-4xl mx-auto p-6">
+          <ExtraMaterialForm onClose={() => {
+            setShowExtraForm(false);
+            loadChangeRequests();
+          }} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Header - Purple theme for Change Requests */}
-      <div className="bg-gradient-to-r from-purple-500/5 to-purple-600/10 shadow-sm border-b-2 border-purple-200">
+      {/* Header - Conditional theme */}
+      <div className={isExtraMaterial ? "bg-gradient-to-r from-orange-500/5 to-orange-600/10 shadow-sm border-b-2 border-orange-200" : "bg-gradient-to-r from-purple-500/5 to-purple-600/10 shadow-sm border-b-2 border-purple-200"}>
         <div className="max-w-7xl mx-auto px-6 py-5">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg">
-              <FileText className="w-6 h-6 text-purple-600" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-lg ${isExtraMaterial ? "bg-gradient-to-br from-orange-50 to-orange-100" : "bg-gradient-to-br from-purple-50 to-purple-100"}`}>
+                {isExtraMaterial ? <Cube className="w-6 h-6 text-orange-600" /> : <FileText className="w-6 h-6 text-purple-600" />}
+              </div>
+              <div>
+                <h1 className={`text-2xl font-bold ${isExtraMaterial ? "text-orange-700" : "text-purple-700"}`}>{isExtraMaterial ? "Extra Material" : "Change Requests"}</h1>
+                <p className={`text-sm ${isExtraMaterial ? "text-orange-600" : "text-purple-600"}`}>
+                  {isExtraMaterial ? "Manage extra sub-items for approved BOQs" : "Material additions to existing approved projects"}
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-purple-700">Change Requests</h1>
-              <p className="text-sm text-purple-600">Material additions to existing approved projects</p>
-            </div>
+            {isExtraMaterial && activeTab === 'requested' && (
+              <Button
+                onClick={() => setShowExtraForm(true)}
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Extra Sub Item
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -308,34 +354,65 @@ const ChangeRequestsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Content Tabs - Match EstimatorHub Style */}
+        {/* Content Tabs - Conditional based on Extra Material */}
         <div className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200 mb-6">
-              <TabsTrigger
-                value="pending"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-yellow-500 data-[state=active]:text-yellow-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
-              >
-                <Clock className="w-4 h-4 mr-2" />
-                Pending
-                <span className="ml-1 sm:ml-2 text-gray-400">({stats.pending})</span>
-              </TabsTrigger>
-              <TabsTrigger
-                value="approved"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
-              >
-                <CheckCircle className="w-4 h-4 mr-2" />
-                Approved
-                <span className="ml-1 sm:ml-2 text-gray-400">({stats.approved})</span>
-              </TabsTrigger>
-              <TabsTrigger
-                value="rejected"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
-              >
-                <XCircle className="w-4 h-4 mr-2" />
-                Rejected
-                <span className="ml-1 sm:ml-2 text-gray-400">({stats.rejected})</span>
-              </TabsTrigger>
+              {isExtraMaterial ? (
+                <>
+                  <TabsTrigger
+                    value="requested"
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                  >
+                    <FileText className="w-4 h-4 mr-2" />
+                    Requested
+                    <span className="ml-1 sm:ml-2 text-gray-400">({changeRequests.filter(r => r.requested_by_role === 'site_engineer').length})</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="under_review"
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-yellow-500 data-[state=active]:text-yellow-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                  >
+                    <Clock className="w-4 h-4 mr-2" />
+                    Under Review
+                    <span className="ml-1 sm:ml-2 text-gray-400">({changeRequests.filter(r => r.status === 'under_review').length})</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="approved"
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                  >
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Approved
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.approved})</span>
+                  </TabsTrigger>
+                </>
+              ) : (
+                <>
+                  <TabsTrigger
+                    value="pending"
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-yellow-500 data-[state=active]:text-yellow-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                  >
+                    <Clock className="w-4 h-4 mr-2" />
+                    Pending
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.pending})</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="approved"
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                  >
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Approved
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.approved})</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="rejected"
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                  >
+                    <XCircle className="w-4 h-4 mr-2" />
+                    Rejected
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.rejected})</span>
+                  </TabsTrigger>
+                </>
+              )}
             </TabsList>
 
             <TabsContent value="pending" className="mt-0 p-0">
@@ -528,6 +605,122 @@ const ChangeRequestsPage: React.FC = () => {
                 )}
               </div>
             </TabsContent>
+
+            {/* Extra Material Tab Contents */}
+            {isExtraMaterial && (
+              <TabsContent value="requested" className="mt-0 p-0">
+                <div className="space-y-4 sm:space-y-6">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Requested by Site Engineers</h2>
+                  {filteredRequests.length === 0 ? (
+                    <div className="text-center py-12">
+                      <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                      <p className="text-gray-500 text-lg">No requests found</p>
+                    </div>
+                  ) : viewMode === 'table' ? (
+                    <RequestsTable requests={filteredRequests} />
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                      {filteredRequests.map((request, index) => (
+                        <motion.div
+                          key={request.cr_id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.05 * index }}
+                          className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                        >
+                          {/* Card content similar to pending */}
+                          <div className="p-4">
+                            <div className="flex items-start justify-between mb-2">
+                              <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
+                              <Badge className={getStatusColor(request.status)}>
+                                {request.status.replace('_', ' ').toUpperCase()}
+                              </Badge>
+                            </div>
+
+                            <div className="space-y-1 text-sm text-gray-600">
+                              <div className="flex items-center gap-1.5">
+                                <Package className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate">By: {request.requested_by_name}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="px-4 pb-3 text-center text-sm">
+                            <span className="font-bold text-blue-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
+                            <span className="text-gray-600 ml-1">Sub-Item{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                          </div>
+
+                          <div className="px-4 pb-3 space-y-1.5 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Additional Cost:</span>
+                              <span className="font-bold text-blue-600">{formatCurrency(request.materials_total_cost)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">% of Item Overhead:</span>
+                              <span className={`font-semibold ${getPercentageColor(request.percentage_of_item_overhead || 0)}`}>
+                                {(request.percentage_of_item_overhead || 0).toFixed(1)}%
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
+                            <button
+                              onClick={() => handleReview(request.cr_id)}
+                              className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                            >
+                              <Eye className="h-4 w-4" />
+                              <span>Review</span>
+                            </button>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => handleApprove(request.cr_id)}
+                                className="text-white text-[10px] sm:text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 font-semibold px-1"
+                                style={{ backgroundColor: 'rgb(22, 163, 74)' }}
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                                <span>Approve</span>
+                              </button>
+                              <button
+                                onClick={() => handleReject(request.cr_id)}
+                                className="bg-red-600 hover:bg-red-700 text-white text-[10px] sm:text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold px-1"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                                <span>Reject</span>
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            )}
+
+            {isExtraMaterial && (
+              <TabsContent value="under_review" className="mt-0 p-0">
+                <div className="space-y-4 sm:space-y-6">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Under Review</h2>
+                  {filteredRequests.length === 0 ? (
+                    <div className="text-center py-12">
+                      <Clock className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                      <p className="text-gray-500 text-lg">No requests under review</p>
+                    </div>
+                  ) : viewMode === 'table' ? (
+                    <RequestsTable requests={filteredRequests} />
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                      {/* Similar card structure for under review items */}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            )}
 
             <TabsContent value="rejected" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">

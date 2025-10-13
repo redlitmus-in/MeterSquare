@@ -714,3 +714,214 @@ def reject_change_request(cr_id):
 # Use send_for_review() instead
 # This function has been removed as the endpoint is no longer available
 # The send_for_review() function provides better workflow control
+
+
+def get_item_overhead(boq_id, item_id):
+    """
+    Get overhead snapshot for a specific BOQ item
+    Used for live calculations before creating change request
+    GET /api/boq/{boq_id}/item-overhead/{item_id}
+    """
+    try:
+        # Get BOQ details
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Get BOQ details
+        boq_details = BOQDetails.query.filter_by(boq_id=boq_id).first()
+        if not boq_details:
+            return jsonify({"error": "BOQ details not found"}), 404
+
+        # Find the specific item
+        boq_json = boq_details.boq_details or {}
+        items = boq_json.get('items', [])
+
+        item = None
+        for itm in items:
+            if itm.get('id') == item_id:
+                item = itm
+                break
+
+        if not item:
+            return jsonify({"error": f"Item {item_id} not found in BOQ"}), 404
+
+        # Calculate item overhead
+        item_overhead = item.get('overhead', 0)
+        if item_overhead == 0:
+            # Calculate from percentage if not stored
+            overhead_percentage = item.get('overhead_percentage', 10)
+            total_cost = item.get('total_cost', 0)
+            item_overhead = (total_cost * overhead_percentage) / 100
+
+        # Calculate consumed overhead from approved change requests
+        approved_crs = ChangeRequest.query.filter_by(
+            boq_id=boq_id,
+            item_id=item_id,
+            status='approved',
+            is_deleted=False
+        ).all()
+
+        consumed = 0.0
+        for cr in approved_crs:
+            consumed += cr.overhead_consumed or 0
+
+        available = item_overhead - consumed
+
+        return jsonify({
+            "item_id": item_id,
+            "item_name": item.get('name', ''),
+            "overhead_allocated": round(item_overhead, 2),
+            "overhead_consumed": round(consumed, 2),
+            "overhead_available": round(available, 2)
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error getting item overhead: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+def get_extra_materials():
+    """
+    Get extra material requests (separate from BOQ view)
+    Filters: project_id, area_id, status
+    GET /api/change_request/extra_materials
+    """
+    try:
+        current_user = g.get("user")
+        user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
+        user_id = current_user.get('user_id')
+
+        # Build query
+        query = ChangeRequest.query.filter_by(
+            request_type='EXTRA_MATERIALS',
+            is_deleted=False
+        )
+
+        # Apply filters from query params
+        project_id = request.args.get('project_id')
+        area_id = request.args.get('area_id')
+        status = request.args.get('status')
+
+        if project_id:
+            query = query.filter_by(project_id=int(project_id))
+        if status:
+            query = query.filter_by(status=status)
+
+        # Role-based filtering
+        if user_role in ['siteengineer', 'sitesupervisor']:
+            query = query.filter_by(requested_by_user_id=user_id)
+        elif user_role == 'projectmanager':
+            # Get projects assigned to PM
+            projects = Project.query.filter_by(pm_id=user_id, is_deleted=False).all()
+            project_ids = [p.project_id for p in projects]
+            query = query.filter(ChangeRequest.project_id.in_(project_ids))
+
+        extra_materials = query.order_by(ChangeRequest.created_at.desc()).all()
+
+        # Format response
+        result = []
+        for em in extra_materials:
+            # Get project and area info
+            project = Project.query.get(em.project_id)
+
+            # Parse sub_items_data for display
+            sub_items = em.sub_items_data or []
+            for sub_item in sub_items:
+                result.append({
+                    'id': em.cr_id,
+                    'project_id': em.project_id,
+                    'project_name': project.project_name if project else 'Unknown',
+                    'area_id': 1,  # Placeholder - would come from area table
+                    'area_name': project.floor_name if project else 'Main Area',
+                    'boq_item_id': em.item_id,
+                    'boq_item_name': em.item_name,
+                    'sub_item_id': sub_item.get('sub_item_id'),
+                    'sub_item_name': sub_item.get('name') or sub_item.get('sub_item_name'),
+                    'quantity': sub_item.get('qty') or sub_item.get('quantity'),
+                    'unit_rate': sub_item.get('unit_price'),
+                    'total_cost': (sub_item.get('qty', 0) or sub_item.get('quantity', 0)) * sub_item.get('unit_price', 0),
+                    'reason_for_new_sub_item': sub_item.get('new_reason'),
+                    'requested_by': em.requested_by_name,
+                    'overhead_percent': em.percentage_of_item_overhead,
+                    'status': em.status,
+                    'created_at': em.created_at.isoformat() if em.created_at else None,
+                    'remarks': em.justification
+                })
+
+        return jsonify({"extra_materials": result}), 200
+
+    except Exception as e:
+        log.error(f"Error getting extra materials: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+def create_extra_material():
+    """
+    Create extra material request with proper routing
+    Routes: PM → Purchase → TD (>40%) or PM → Estimator (≤40%)
+    POST /api/change_request/extra_materials/create
+    """
+    try:
+        data = request.get_json()
+        current_user = g.get("user")
+
+        # Create sub_items array with proper structure
+        sub_items = [{
+            'sub_item_id': data.get('sub_item_id'),
+            'name': data.get('sub_item_name'),
+            'qty': data.get('quantity'),
+            'unit': data.get('unit'),
+            'unit_price': data.get('unit_rate'),
+            'is_new': data.get('sub_item_id') is None,
+            'new_reason': data.get('reason')
+        }]
+
+        # Create change request using existing logic
+        cr_data = {
+            'boq_id': data.get('boq_item_id'),  # May need to map from item_id to boq_id
+            'project_id': data.get('project_id'),
+            'area_id': data.get('area_id'),
+            'item_id': data.get('boq_item_id'),
+            'item_name': data.get('boq_item_name', ''),
+            'sub_items': sub_items,
+            'justification': data.get('remarks', ''),
+            'requester_id': current_user.get('user_id')
+        }
+
+        # Use existing create_change_request logic
+        request._cached_json = (cr_data, cr_data)  # Hack to pass data through
+        response = create_change_request()
+
+        # Extract response data
+        response_data, status_code = response
+
+        if status_code == 200 or status_code == 201:
+            return jsonify({"success": True, "message": "Extra material request created"}), 200
+        else:
+            return response_data, status_code
+
+    except Exception as e:
+        log.error(f"Error creating extra material: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+def approve_extra_material(id):
+    """
+    Approve extra material request
+    Roles allowed: PM, Purchase, Estimator, TD
+    PATCH /api/change_request/extra_materials/approve/:id
+    """
+    try:
+        # Use existing approval logic
+        return approve_change_request(id)
+
+    except Exception as e:
+        log.error(f"Error approving extra material: {str(e)}")
+        return jsonify({"error": str(e)}), 500

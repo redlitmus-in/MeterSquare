@@ -438,6 +438,9 @@ function App() {
             <Route path="project-approvals" element={<AdminProjectApprovals />} />
             <Route path="settings" element={<AdminSettings />} />
 
+            {/* Extra Material Management - For SE and PM roles */}
+            <Route path="extra-material" element={<RoleBasedChangeRequests />} />
+
             {/* Site Engineer specific routes - Temporarily commented out */}
             {/* <Route path="my-project" element={<MyProject />} /> */}
             {/* <Route path="task-execution" element={<TaskExecution />} /> */}
