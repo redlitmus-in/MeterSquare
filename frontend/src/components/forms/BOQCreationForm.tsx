@@ -1390,7 +1390,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             >
                                               <div className="font-medium text-gray-900">{masterMaterial.material_name}</div>
                                               <div className="text-xs text-gray-500">
-                                                ₹{masterMaterial.current_market_price}/{masterMaterial.default_unit}
+                                                AED{masterMaterial.current_market_price}/{masterMaterial.default_unit}
                                               </div>
                                             </button>
                                           ))
@@ -1646,7 +1646,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             >
                                               <div className="font-medium text-gray-900">{masterLabour.labour_role}</div>
                                               <div className="text-xs text-gray-500">
-                                                ₹{masterLabour.amount} ({masterLabour.work_type})
+                                                AED{masterLabour.amount} ({masterLabour.work_type})
                                               </div>
                                             </button>
                                           ))}

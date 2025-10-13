@@ -294,7 +294,7 @@ const ExtraMaterialPage: React.FC = () => {
                             {request.quantity}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            ₹{request.total_cost.toLocaleString()}
+                            AED{request.total_cost.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {getStatusBadge(request.status)}
@@ -434,7 +434,7 @@ const ExtraMaterialPage: React.FC = () => {
                             {request.quantity}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            ₹{request.total_cost.toLocaleString()}
+                            AED{request.total_cost.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {new Date(request.created_at).toLocaleDateString()}

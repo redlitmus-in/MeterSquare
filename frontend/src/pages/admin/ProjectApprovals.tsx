@@ -222,7 +222,7 @@ const AdminProjectApprovals: React.FC = () => {
                       <div>
                         <p className="text-xs text-gray-500">Estimated Budget</p>
                         <p className="text-sm font-medium text-[#243d8a]">
-                          ₹{(project.estimated_budget / 100000).toFixed(2)}L
+                          AED{(project.estimated_budget / 100000).toFixed(2)}L
                         </p>
                       </div>
                     </div>

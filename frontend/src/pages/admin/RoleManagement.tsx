@@ -156,7 +156,7 @@ const RoleManagement: React.FC = () => {
                           <span className="text-xs text-gray-600">Approval</span>
                         </div>
                         <p className="text-xl font-bold text-green-600">
-                          {role.approval_limit === -1 ? '∞' : `₹${role.approval_limit / 100000}L`}
+                          {role.approval_limit === -1 ? '∞' : `AED${role.approval_limit / 100000}L`}
                         </p>
                       </div>
                     )}

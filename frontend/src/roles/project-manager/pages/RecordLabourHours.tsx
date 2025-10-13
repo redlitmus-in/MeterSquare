@@ -233,7 +233,7 @@ export default function RecordLabourHours() {
                   <option value="">-- Select Labour --</option>
                   {labours.map((labour: any) => (
                     <option key={labour.master_labour_id} value={labour.master_labour_id}>
-                      {labour.labour_role} (Planned: {labour.hours} hrs @ ₹{labour.rate_per_hour}/hr)
+                      {labour.labour_role} (Planned: {labour.hours} hrs @ AED{labour.rate_per_hour}/hr)
                     </option>
                   ))}
                 </select>
@@ -251,11 +251,11 @@ export default function RecordLabourHours() {
                   </div>
                   <div>
                     <span className="text-gray-600">Labour Rate:</span>
-                    <p className="font-semibold">₹{(selectedLabour.rate_per_hour || 0).toFixed(2)}/hr</p>
+                    <p className="font-semibold">AED{(selectedLabour.rate_per_hour || 0).toFixed(2)}/hr</p>
                   </div>
                   <div>
                     <span className="text-gray-600">Labour Cost:</span>
-                    <p className="font-semibold">₹{(selectedLabour.total_cost || 0).toFixed(2)}</p>
+                    <p className="font-semibold">AED{(selectedLabour.total_cost || 0).toFixed(2)}</p>
                   </div>
                 </div>
               </div>
@@ -281,7 +281,7 @@ export default function RecordLabourHours() {
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Actual Labour Rate (₹/hr) *
+                    Actual Labour Rate (AED/hr) *
                   </label>
                   <input
                     type="number"
@@ -341,12 +341,12 @@ export default function RecordLabourHours() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="text-gray-600">Actual Labour Cost:</span>
-                    <p className="font-semibold text-lg">₹{calculateActualCost().toFixed(2)}</p>
+                    <p className="font-semibold text-lg">AED{calculateActualCost().toFixed(2)}</p>
                   </div>
                   <div>
                     <span className="text-gray-600">Cost Variance:</span>
                     <p className={`font-semibold text-lg ${variance.cost > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {variance.cost > 0 ? '+' : ''}₹{variance.cost.toFixed(2)}
+                      {variance.cost > 0 ? '+' : ''}AED{variance.cost.toFixed(2)}
                     </p>
                   </div>
                 </div>
@@ -361,7 +361,7 @@ export default function RecordLabourHours() {
                   <div>
                     <span className="text-gray-600">Rate Variance:</span>
                     <p className={`font-semibold ${variance.rate > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {variance.rate > 0 ? '+' : ''}₹{variance.rate.toFixed(2)}/hr
+                      {variance.rate > 0 ? '+' : ''}AED{variance.rate.toFixed(2)}/hr
                     </p>
                   </div>
                 </div>

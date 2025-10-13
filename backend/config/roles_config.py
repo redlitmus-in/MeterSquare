@@ -193,15 +193,15 @@ ROLE_HIERARCHY = {
 # Approval workflow chains
 APPROVAL_CHAINS = {
     'purchase_request': {
-        'small': {  # Under ₹10,000
+        'small': {  # Under AED10,000
             'amount_limit': 10000,
             'approvers': ['purchaseTeam', 'projectManager']
         },
-        'medium': {  # ₹10,000 - ₹50,000
+        'medium': {  # AED10,000 - AED50,000
             'amount_limit': 50000,
             'approvers': ['projectManager']
         },
-        'large': {  # Above ₹50,000
+        'large': {  # Above AED50,000
             'amount_limit': None,
             'approvers': ['projectManager', 'businessOwner']
         }

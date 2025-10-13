@@ -228,7 +228,7 @@ const ChangeRequestsPage: React.FC = () => {
                           {request.item_name}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                          ₹{request.materials_total_cost.toLocaleString()}
+                          AED{request.materials_total_cost.toLocaleString()}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <span className={`font-medium ${

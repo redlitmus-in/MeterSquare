@@ -384,15 +384,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           <div className="grid grid-cols-3 gap-4 text-sm">
             <div>
               <p className="text-gray-600">Total Allocated</p>
-              <p className="font-semibold text-gray-900">₹{itemOverhead.allocated.toLocaleString()}</p>
+              <p className="font-semibold text-gray-900">AED{itemOverhead.allocated.toLocaleString()}</p>
             </div>
             <div>
               <p className="text-gray-600">Consumed</p>
-              <p className="font-semibold text-gray-900">₹{itemOverhead.consumed.toLocaleString()}</p>
+              <p className="font-semibold text-gray-900">AED{itemOverhead.consumed.toLocaleString()}</p>
             </div>
             <div>
               <p className="text-gray-600">Available</p>
-              <p className="font-semibold text-green-600">₹{itemOverhead.available.toLocaleString()}</p>
+              <p className="font-semibold text-green-600">AED{itemOverhead.available.toLocaleString()}</p>
             </div>
           </div>
         </motion.div>
@@ -506,7 +506,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Unit Rate (₹) <span className="text-red-500">*</span>
+                Unit Rate (AED) <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -548,7 +548,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <p className="text-gray-600">Total Cost</p>
-              <p className="font-semibold text-gray-900">₹{calculations.totalCost.toLocaleString()}</p>
+              <p className="font-semibold text-gray-900">AED{calculations.totalCost.toLocaleString()}</p>
             </div>
             <div>
               <p className="text-gray-600">Overhead Percentage</p>
@@ -559,7 +559,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             <div>
               <p className="text-gray-600">Available After</p>
               <p className={`font-semibold ${calculations.availableAfter < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                ₹{calculations.availableAfter.toLocaleString()}
+                AED{calculations.availableAfter.toLocaleString()}
               </p>
             </div>
             <div>

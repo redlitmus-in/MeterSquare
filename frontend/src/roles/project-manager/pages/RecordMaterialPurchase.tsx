@@ -280,7 +280,7 @@ export default function RecordMaterialPurchase() {
                     <span className="font-semibold">{plannedBoqData.summary?.total_items || 0}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Total Materials:</span>
+                    <span className="text-gray-600">Total Sub Items:</span>
                     <span className="font-semibold">{plannedBoqData.summary?.total_materials || 0}</span>
                   </div>
                   <div className="flex justify-between">
@@ -288,16 +288,16 @@ export default function RecordMaterialPurchase() {
                     <span className="font-semibold">{plannedBoqData.summary?.total_labour || 0}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Material Cost:</span>
-                    <span className="font-semibold">₹{(plannedBoqData.summary?.total_material_cost || 0).toFixed(2)}</span>
+                    <span className="text-gray-600">Sub Item Cost:</span>
+                    <span className="font-semibold">AED{(plannedBoqData.summary?.total_material_cost || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Labour Cost:</span>
-                    <span className="font-semibold">₹{(plannedBoqData.summary?.total_labour_cost || 0).toFixed(2)}</span>
+                    <span className="font-semibold">AED{(plannedBoqData.summary?.total_labour_cost || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between pt-2 border-t">
                     <span className="text-gray-600 font-semibold">Planned Total:</span>
-                    <span className="font-bold text-blue-600">₹{(
+                    <span className="font-bold text-blue-600">AED{(
                       plannedBoqData.items?.reduce((sum: number, item: any) =>
                         sum + (parseFloat(item.selling_price_before_discount || item.total_cost || item.selling_price) || 0), 0) ||
                       plannedBoqData.summary?.total_cost || 0
@@ -305,7 +305,7 @@ export default function RecordMaterialPurchase() {
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Selling Price (after discount):</span>
-                    <span className="text-gray-700">₹{(plannedBoqData.summary?.selling_price || 0).toFixed(2)}</span>
+                    <span className="text-gray-700">AED{(plannedBoqData.summary?.selling_price || 0).toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -318,11 +318,11 @@ export default function RecordMaterialPurchase() {
                   {/* Materials */}
                   {item.materials?.length > 0 && (
                     <div className="mb-4">
-                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Materials</h4>
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Sub Items</h4>
                       <table className="w-full text-sm">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-3 py-2 text-left text-xs">Material</th>
+                            <th className="px-3 py-2 text-left text-xs">Sub Item</th>
                             <th className="px-3 py-2 text-right text-xs">Qty</th>
                             <th className="px-3 py-2 text-right text-xs">Price</th>
                           </tr>
@@ -330,9 +330,9 @@ export default function RecordMaterialPurchase() {
                         <tbody>
                           {item.materials.map((mat: any, mIdx: number) => (
                             <tr key={mIdx} className="border-t">
-                              <td className="px-3 py-2">{mat.material_name}</td>
+                              <td className="px-3 py-2">{mat.sub_item_name || mat.material_name}</td>
                               <td className="px-3 py-2 text-right">{mat.quantity} {mat.unit}</td>
-                              <td className="px-3 py-2 text-right">₹{(mat.total_price || 0).toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right">AED{(mat.total_price || 0).toFixed(2)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -357,7 +357,7 @@ export default function RecordMaterialPurchase() {
                             <tr key={lIdx} className="border-t">
                               <td className="px-3 py-2">{lab.labour_role}</td>
                               <td className="px-3 py-2 text-right">{lab.hours} hrs</td>
-                              <td className="px-3 py-2 text-right">₹{(lab.total_cost || 0).toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right">AED{(lab.total_cost || 0).toFixed(2)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -369,19 +369,19 @@ export default function RecordMaterialPurchase() {
                   <div className="pt-3 border-t text-sm space-y-1">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Base Cost:</span>
-                      <span className="font-semibold">₹{(item.base_cost || 0).toFixed(2)}</span>
+                      <span className="font-semibold">AED{(item.base_cost || 0).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Overhead ({item.overhead_percentage}%):</span>
-                      <span className="font-semibold">₹{(item.overhead_amount || 0).toFixed(2)}</span>
+                      <span className="font-semibold">AED{(item.overhead_amount || 0).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Profit ({item.profit_margin_percentage}%):</span>
-                      <span className="font-semibold">₹{(item.profit_margin_amount || 0).toFixed(2)}</span>
+                      <span className="font-semibold">AED{(item.profit_margin_amount || 0).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between pt-2 border-t">
                       <span className="font-semibold">Selling Price:</span>
-                      <span className="font-bold text-blue-600">₹{(item.selling_price || 0).toFixed(2)}</span>
+                      <span className="font-bold text-blue-600">AED{(item.selling_price || 0).toFixed(2)}</span>
                     </div>
                   </div>
                 </div>
@@ -404,18 +404,18 @@ export default function RecordMaterialPurchase() {
                 <div className="grid grid-cols-3 gap-4">
                   <div>
                     <p className="text-xs text-gray-600">Planned Total</p>
-                    <p className="text-lg font-bold text-blue-600">₹{(comparisonData.summary?.planned_total || 0).toFixed(2)}</p>
+                    <p className="text-lg font-bold text-blue-600">AED{(comparisonData.summary?.planned_total || 0).toFixed(2)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-600">Actual Total</p>
-                    <p className="text-lg font-bold text-green-600">₹{(comparisonData.summary?.actual_total || 0).toFixed(2)}</p>
+                    <p className="text-lg font-bold text-green-600">AED{(comparisonData.summary?.actual_total || 0).toFixed(2)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-600">Variance</p>
                     <p className={`text-lg font-bold ${
-                      (comparisonData.summary?.variance || 0) > 0 ? 'text-red-600' : 'text-green-600'
+                      comparisonData.summary?.status === 'under_budget' ? 'text-green-600' : 'text-red-600'
                     }`}>
-                      {(comparisonData.summary?.variance || 0) > 0 ? '+' : ''}₹{(comparisonData.summary?.variance || 0).toFixed(2)}
+                      AED{(comparisonData.summary?.variance || 0).toFixed(2)}
                     </p>
                   </div>
                 </div>
@@ -434,39 +434,53 @@ export default function RecordMaterialPurchase() {
                   {/* Materials Comparison */}
                   {item.materials?.length > 0 && (
                     <div className="mb-4">
-                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Materials</h4>
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Sub Items</h4>
                       <table className="w-full text-xs">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-2 py-1 text-left">Material</th>
+                            <th className="px-2 py-1 text-left">Sub Item</th>
                             <th className="px-2 py-1 text-right">Planned</th>
                             <th className="px-2 py-1 text-right">Actual</th>
-                            <th className="px-2 py-1 text-center">Status</th>
+                            <th className="px-2 py-1 text-left">Reason</th>
                           </tr>
                         </thead>
                         <tbody>
                           {item.materials.map((mat: any, mIdx: number) => (
                             <tr key={mIdx} className={`border-t ${mat.status === 'unplanned' ? 'bg-yellow-50' : ''}`}>
                               <td className="px-2 py-2">
-                                {mat.material_name}
+                                {mat.sub_item_name || mat.material_name}
                                 {mat.status === 'unplanned' && (
                                   <span className="ml-1 text-[10px] bg-yellow-200 px-1 rounded">Unplanned</span>
                                 )}
                               </td>
                               <td className="px-2 py-2 text-right">
-                                {mat.planned ? `₹${mat.planned.total.toFixed(2)}` : '-'}
+                                {mat.planned ? `AED${mat.planned.total.toFixed(2)}` : '-'}
                               </td>
                               <td className="px-2 py-2 text-right">
-                                ₹{(mat.actual?.total || 0).toFixed(2)}
-                              </td>
-                              <td className="px-2 py-2 text-center">
-                                {mat.status === 'completed' ? (
-                                  <CheckCircleIcon className="w-4 h-4 text-green-500 mx-auto" />
-                                ) : mat.status === 'unplanned' ? (
-                                  <span className="text-orange-600">⚠️</span>
+                                {mat.status === 'pending' ? (
+                                  <span className="text-gray-500 italic">AED{mat.planned?.total.toFixed(2) || '0.00'}</span>
                                 ) : (
-                                  <XCircleIcon className="w-4 h-4 text-gray-400 mx-auto" />
+                                  `AED${(mat.actual?.total || 0).toFixed(2)}`
                                 )}
+                              </td>
+                              <td className="px-2 py-2 text-left text-[11px]">
+                                {(mat.variance_reason || mat.variance?.reason) ? (
+                                  <div>
+                                    <div className={`${
+                                      mat.variance?.status === 'overrun' ? 'text-red-600' :
+                                      mat.variance?.status === 'saved' ? 'text-green-600' :
+                                      mat.variance?.status === 'unplanned' ? 'text-orange-600' :
+                                      'text-gray-600'
+                                    }`}>
+                                      {mat.variance_reason || mat.variance?.reason}
+                                    </div>
+                                    {mat.variance_response && (
+                                      <div className="text-blue-600 mt-1 italic">
+                                        Response: {mat.variance_response}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : '-'}
                               </td>
                             </tr>
                           ))}
@@ -485,21 +499,38 @@ export default function RecordMaterialPurchase() {
                             <th className="px-2 py-1 text-left">Role</th>
                             <th className="px-2 py-1 text-right">Planned</th>
                             <th className="px-2 py-1 text-right">Actual</th>
-                            <th className="px-2 py-1 text-center">Status</th>
+                            <th className="px-2 py-1 text-left">Reason</th>
                           </tr>
                         </thead>
                         <tbody>
                           {item.labour.map((lab: any, lIdx: number) => (
                             <tr key={lIdx} className="border-t">
                               <td className="px-2 py-2">{lab.labour_role}</td>
-                              <td className="px-2 py-2 text-right">₹{(lab.planned?.total || 0).toFixed(2)}</td>
-                              <td className="px-2 py-2 text-right">₹{(lab.actual?.total || 0).toFixed(2)}</td>
-                              <td className="px-2 py-2 text-center">
-                                {lab.status === 'completed' ? (
-                                  <CheckCircleIcon className="w-4 h-4 text-green-500 mx-auto" />
+                              <td className="px-2 py-2 text-right">AED{(lab.planned?.total || 0).toFixed(2)}</td>
+                              <td className="px-2 py-2 text-right">
+                                {lab.status === 'pending' ? (
+                                  <span className="text-gray-500 italic">AED{(lab.planned?.total || 0).toFixed(2)}</span>
                                 ) : (
-                                  <XCircleIcon className="w-4 h-4 text-gray-400 mx-auto" />
+                                  `AED${(lab.actual?.total || 0).toFixed(2)}`
                                 )}
+                              </td>
+                              <td className="px-2 py-2 text-left text-[11px]">
+                                {lab.variance_reason ? (
+                                  <div>
+                                    <div className={`${
+                                      lab.variance?.status === 'overrun' ? 'text-red-600' :
+                                      lab.variance?.status === 'saved' ? 'text-green-600' :
+                                      'text-gray-600'
+                                    }`}>
+                                      {lab.variance_reason}
+                                    </div>
+                                    {lab.variance_response && (
+                                      <div className="text-blue-600 mt-1 italic">
+                                        Response: {lab.variance_response}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : '-'}
                               </td>
                             </tr>
                           ))}
@@ -510,32 +541,53 @@ export default function RecordMaterialPurchase() {
 
                   {/* Financial Summary */}
                   <div className="space-y-3">
-                    {/* Overhead */}
-                    <div className="bg-orange-50 p-3 rounded">
-                      <p className="text-xs text-gray-600 mb-2">Overhead</p>
-                      <div className="space-y-1 text-xs">
+                    {/* Overhead Card */}
+                    <div className="bg-orange-50 rounded-lg p-4 border border-orange-200">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-bold text-gray-800">Overhead ({item.planned?.overhead_percentage || 10}%)</h4>
+                        {(item.consumption_flow?.overhead_consumed || 0) >= (item.planned?.overhead_amount || 0) && (
+                          <span className="text-[10px] text-red-700 bg-red-200 px-2 py-1 rounded font-semibold">
+                            Fully Used
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-2 text-xs">
                         <div className="flex justify-between">
-                          <span>Planned:</span>
-                          <span>₹{(item.planned?.overhead_amount || 0).toFixed(2)}</span>
+                          <span className="text-gray-600">Allocated:</span>
+                          <span className="font-semibold">AED{(item.planned?.overhead_amount || 0).toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between">
-                          <span>Actual:</span>
-                          <span>₹{(item.actual?.overhead_amount || 0).toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between font-semibold border-t pt-1">
-                          <span>Diff:</span>
-                          <span className={
-                            (item.variance?.overhead?.difference || 0) < 0 ? 'text-red-600' : 'text-green-600'
-                          }>
-                            {(item.variance?.overhead?.difference || 0) > 0 ? '+' : ''}₹{Math.abs(item.variance?.overhead?.difference || 0).toFixed(2)}
+                        {(item.consumption_flow?.extra_costs || 0) > 0 && (
+                          <div className="flex justify-between text-orange-700">
+                            <span>Extra Costs:</span>
+                            <span className="font-semibold">AED{(item.consumption_flow?.extra_costs || 0).toFixed(2)}</span>
+                          </div>
+                        )}
+                        {(item.consumption_flow?.overhead_consumed || 0) > 0 && (
+                          <div className="flex justify-between text-red-600">
+                            <span>Consumed:</span>
+                            <span className="font-bold">AED{(item.consumption_flow?.overhead_consumed || 0).toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between border-t border-orange-300 pt-2 mt-2">
+                          <span className="font-bold text-gray-800">Balance:</span>
+                          <span className={`font-bold text-lg ${
+                            (item.actual?.overhead_amount || 0) === 0 ? 'text-red-600' : 'text-green-600'
+                          }`}>
+                            AED{(item.actual?.overhead_amount || 0).toFixed(2)}
                           </span>
                         </div>
                       </div>
+                      {(item.consumption_flow?.overhead_consumed || 0) >= (item.planned?.overhead_amount || 0) && (
+                        <div className="mt-3 text-[10px] text-red-700 bg-red-100 px-2 py-1 rounded flex items-center gap-1">
+                          <span>⚠️</span>
+                          <span>Overhead fully consumed - Excess flows to Profit</span>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Profit/Loss - Prominent Display */}
+                    {/* Profit/Loss Card */}
                     <div
-                      className={`p-4 rounded-lg cursor-pointer hover:shadow-xl transition-all border-2 ${
+                      className={`rounded-lg p-4 cursor-pointer hover:shadow-xl transition-all border-2 ${
                         (item.actual?.profit_amount || 0) < 0
                           ? 'bg-gradient-to-br from-red-50 to-red-100 border-red-300 hover:border-red-400'
                           : 'bg-gradient-to-br from-green-50 to-green-100 border-green-300 hover:border-green-400'
@@ -546,28 +598,40 @@ export default function RecordMaterialPurchase() {
                       }}
                     >
                       <div className="flex items-center justify-between mb-3">
-                        <p className="text-sm font-semibold text-gray-700">
+                        <h4 className="text-sm font-bold text-gray-800">
                           {(item.actual?.profit_amount || 0) < 0 ? '⚠️ Loss' : '✓ Profit'}
-                        </p>
+                        </h4>
                         <span className="text-[10px] text-gray-500 bg-white px-2 py-1 rounded">Click for details</span>
                       </div>
-                      <div className={`text-3xl font-bold text-center mb-2 ${
+                      <div className={`text-3xl font-bold text-center mb-3 ${
                         (item.actual?.profit_amount || 0) < 0 ? 'text-red-600' : 'text-green-600'
                       }`}>
-                        ₹{Math.abs(item.actual?.profit_amount || 0).toFixed(2)}
+                        AED{Math.abs(item.actual?.profit_amount || 0).toFixed(2)}
                       </div>
-                      <div className="flex justify-between items-center text-xs border-t pt-2 mt-2">
-                        <div className="text-center flex-1">
-                          <p className="text-gray-500">Planned</p>
-                          <p className="font-semibold">₹{(item.planned?.profit_amount || 0).toFixed(2)}</p>
+                      <div className="text-xs border-t pt-2 space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Allocated:</span>
+                          <span className="font-semibold">AED{(item.planned?.profit_amount || 0).toFixed(2)}</span>
                         </div>
-                        <div className="text-center flex-1">
-                          <p className="text-gray-500">Variance</p>
-                          <p className={`font-semibold ${
-                            (item.variance?.profit?.difference || 0) < 0 ? 'text-red-600' : 'text-green-600'
+                        {(item.consumption_flow?.profit_consumed || 0) > 0 && (
+                          <>
+                            <div className="flex justify-between text-orange-700">
+                              <span>Overflow from Overhead:</span>
+                              <span className="font-semibold">AED{(item.consumption_flow?.profit_consumed || 0).toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-red-600">
+                              <span>Consumed:</span>
+                              <span className="font-bold">AED{(item.consumption_flow?.profit_consumed || 0).toFixed(2)}</span>
+                            </div>
+                          </>
+                        )}
+                        <div className="flex justify-between border-t border-green-300 pt-2 mt-2">
+                          <span className="font-bold text-gray-800">Balance:</span>
+                          <span className={`font-bold text-lg ${
+                            (item.actual?.profit_amount || 0) < (item.planned?.profit_amount || 0) ? 'text-red-600' : 'text-green-600'
                           }`}>
-                            {(item.variance?.profit?.difference || 0) > 0 ? '+' : ''}₹{(item.variance?.profit?.difference || 0).toFixed(2)}
-                          </p>
+                            AED{(item.actual?.profit_amount || 0).toFixed(2)}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -581,7 +645,7 @@ export default function RecordMaterialPurchase() {
                         <span className="font-semibold">{item.completion_status.percentage}%</span>
                       </div>
                       <div className="text-gray-600">
-                        Materials: {item.completion_status.materials_completed} |
+                        Sub Items: {item.completion_status.materials_completed} |
                         Labour: {item.completion_status.labour_completed}
                         {item.completion_status.unplanned_materials > 0 && (
                           <span className="ml-1 text-orange-600">
@@ -633,32 +697,28 @@ export default function RecordMaterialPurchase() {
                 <h3 className="font-bold text-gray-800 mb-3">Planned Financial Breakdown</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Material Cost:</span>
-                    <span className="font-semibold">₹{(selectedItemDetail.planned?.material_cost || 0).toFixed(2)}</span>
+                    <span className="text-gray-600">Sub Item Cost:</span>
+                    <span className="font-semibold">AED{(selectedItemDetail.planned?.materials_total || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Labour Cost:</span>
-                    <span className="font-semibold">₹{(selectedItemDetail.planned?.labour_cost || 0).toFixed(2)}</span>
+                    <span className="font-semibold">AED{(selectedItemDetail.planned?.labour_total || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
                     <span className="text-gray-700 font-semibold">Base Cost:</span>
-                    <span className="font-bold">₹{(selectedItemDetail.planned?.base_cost || 0).toFixed(2)}</span>
+                    <span className="font-bold">AED{(selectedItemDetail.planned?.base_cost || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Overhead ({selectedItemDetail.planned?.overhead_percentage || 0}%):</span>
-                    <span className="font-semibold">₹{(selectedItemDetail.planned?.overhead_amount || 0).toFixed(2)}</span>
+                    <span className="font-semibold">AED{(selectedItemDetail.planned?.overhead_amount || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
                     <span className="text-gray-700 font-semibold">Total Cost:</span>
-                    <span className="font-bold">₹{(selectedItemDetail.planned?.total_cost || 0).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Selling Price:</span>
-                    <span className="font-semibold">₹{(selectedItemDetail.planned?.selling_price || 0).toFixed(2)}</span>
+                    <span className="font-bold">AED{(selectedItemDetail.planned?.total || selectedItemDetail.planned?.total_cost || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between bg-green-100 p-2 rounded mt-2">
                     <span className="text-green-700 font-bold">Planned Profit:</span>
-                    <span className="text-green-700 font-bold">₹{(selectedItemDetail.planned?.profit_amount || 0).toFixed(2)}</span>
+                    <span className="text-green-700 font-bold">AED{(selectedItemDetail.planned?.profit_amount || 0).toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -668,30 +728,26 @@ export default function RecordMaterialPurchase() {
                 <h3 className="font-bold text-gray-800 mb-3">Actual Financial Breakdown</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Material Cost:</span>
-                    <span className="font-semibold">₹{(selectedItemDetail.actual?.material_cost || 0).toFixed(2)}</span>
+                    <span className="text-gray-600">Sub Item Cost:</span>
+                    <span className="font-semibold">AED{(selectedItemDetail.actual?.materials_total || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Labour Cost:</span>
-                    <span className="font-semibold">₹{(selectedItemDetail.actual?.labour_cost || 0).toFixed(2)}</span>
+                    <span className="font-semibold">AED{(selectedItemDetail.actual?.labour_total || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
                     <span className="text-gray-700 font-semibold">Base Cost:</span>
-                    <span className="font-bold">₹{(selectedItemDetail.actual?.base_cost || 0).toFixed(2)}</span>
+                    <span className="font-bold">AED{(selectedItemDetail.actual?.base_cost || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">
                       Overhead ({selectedItemDetail.planned?.overhead_percentage || 0}% on actual base):
                     </span>
-                    <span className="font-semibold">₹{(selectedItemDetail.actual?.overhead_amount || 0).toFixed(2)}</span>
+                    <span className="font-semibold">AED{(selectedItemDetail.actual?.overhead_amount || 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
                     <span className="text-gray-700 font-semibold">Total Cost:</span>
-                    <span className="font-bold">₹{(selectedItemDetail.actual?.total_cost || 0).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Selling Price (Fixed):</span>
-                    <span className="font-semibold">₹{(selectedItemDetail.actual?.selling_price || 0).toFixed(2)}</span>
+                    <span className="font-bold">AED{(selectedItemDetail.actual?.total || selectedItemDetail.actual?.total_cost || 0).toFixed(2)}</span>
                   </div>
                   <div className={`flex justify-between p-2 rounded mt-2 ${
                     (selectedItemDetail.actual?.profit_amount || 0) < 0 ? 'bg-red-100' : 'bg-green-100'
@@ -704,7 +760,7 @@ export default function RecordMaterialPurchase() {
                     <span className={`font-bold ${
                       (selectedItemDetail.actual?.profit_amount || 0) < 0 ? 'text-red-700' : 'text-green-700'
                     }`}>
-                      ₹{(selectedItemDetail.actual?.profit_amount || 0).toFixed(2)}
+                      AED{(selectedItemDetail.actual?.profit_amount || 0).toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -715,25 +771,23 @@ export default function RecordMaterialPurchase() {
                 <h3 className="font-bold text-gray-800 mb-3">Variance Analysis</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Material Cost Variance:</span>
+                    <span className="text-gray-600">Sub Item Cost Variance:</span>
                     <span className={
-                      ((selectedItemDetail.actual?.material_cost || 0) - (selectedItemDetail.planned?.material_cost || 0)) > 0
+                      ((selectedItemDetail.actual?.materials_total || 0) - (selectedItemDetail.planned?.materials_total || 0)) > 0
                         ? 'text-red-600 font-semibold'
                         : 'text-green-600 font-semibold'
                     }>
-                      {((selectedItemDetail.actual?.material_cost || 0) - (selectedItemDetail.planned?.material_cost || 0)) > 0 ? '+' : ''}
-                      ₹{((selectedItemDetail.actual?.material_cost || 0) - (selectedItemDetail.planned?.material_cost || 0)).toFixed(2)}
+                      {((selectedItemDetail.actual?.materials_total || 0) - (selectedItemDetail.planned?.materials_total || 0)).toFixed(2)}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Labour Cost Variance:</span>
                     <span className={
-                      ((selectedItemDetail.actual?.labour_cost || 0) - (selectedItemDetail.planned?.labour_cost || 0)) > 0
+                      ((selectedItemDetail.actual?.labour_total || 0) - (selectedItemDetail.planned?.labour_total || 0)) > 0
                         ? 'text-red-600 font-semibold'
                         : 'text-green-600 font-semibold'
                     }>
-                      {((selectedItemDetail.actual?.labour_cost || 0) - (selectedItemDetail.planned?.labour_cost || 0)) > 0 ? '+' : ''}
-                      ₹{((selectedItemDetail.actual?.labour_cost || 0) - (selectedItemDetail.planned?.labour_cost || 0)).toFixed(2)}
+                      {((selectedItemDetail.actual?.labour_total || 0) - (selectedItemDetail.planned?.labour_total || 0)).toFixed(2)}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -743,8 +797,7 @@ export default function RecordMaterialPurchase() {
                         ? 'text-red-600 font-semibold'
                         : 'text-green-600 font-semibold'
                     }>
-                      {((selectedItemDetail.actual?.overhead_amount || 0) - (selectedItemDetail.planned?.overhead_amount || 0)) > 0 ? '+' : ''}
-                      ₹{((selectedItemDetail.actual?.overhead_amount || 0) - (selectedItemDetail.planned?.overhead_amount || 0)).toFixed(2)}
+                      {((selectedItemDetail.actual?.overhead_amount || 0) - (selectedItemDetail.planned?.overhead_amount || 0)).toFixed(2)}
                     </span>
                   </div>
                   <div className="flex justify-between border-t pt-2 mt-2">
@@ -754,8 +807,7 @@ export default function RecordMaterialPurchase() {
                         ? 'text-red-600 font-bold'
                         : 'text-green-600 font-bold'
                     }>
-                      {(selectedItemDetail.variance?.profit?.difference || 0) > 0 ? '+' : ''}
-                      ₹{(selectedItemDetail.variance?.profit?.difference || 0).toFixed(2)}
+                      {(selectedItemDetail.variance?.profit?.difference || 0).toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -767,13 +819,24 @@ export default function RecordMaterialPurchase() {
                   <span className="text-yellow-600 mr-2">💡</span>
                   Calculation Formula
                 </h3>
-                <div className="text-xs text-gray-700 space-y-1">
-                  <p><strong>Planned Profit</strong> = Selling Price - (Base Cost + Overhead)</p>
-                  <p><strong>Actual Overhead</strong> = Actual Base Cost × (Overhead % ÷ 100)</p>
-                  <p><strong>Actual Profit</strong> = Selling Price - (Actual Base Cost + Actual Overhead)</p>
-                  <p className="pt-2 border-t mt-2">
-                    <strong>Note:</strong> Selling price is fixed. When actual costs increase, overhead also increases (as it's a % of base cost), reducing profit margin.
-                  </p>
+                <div className="text-xs text-gray-700 space-y-2">
+                  <div>
+                    <p className="font-semibold mb-1">Base Calculations:</p>
+                    <p><strong>Planned Cost</strong> = Materials + Labour</p>
+                    <p><strong>Overhead Allocated</strong> = Planned Cost × (Overhead % ÷ 100)</p>
+                    <p><strong>Profit Allocated</strong> = Selling Price - (Planned Cost + Overhead Allocated)</p>
+                  </div>
+
+                  <div className="border-t pt-2">
+                    <p className="font-semibold mb-1">Consumption Model:</p>
+                    <p><strong>Extra Costs</strong> = (Overruns on Planned Items) + (Unplanned Purchases)</p>
+                    <p className="mt-1">1. Extra costs <strong>consume Overhead first</strong> (up to allocated amount)</p>
+                    <p>2. If extra costs exceed overhead, then <strong>consume Profit</strong></p>
+                  </div>
+
+                  <div className="border-t pt-2 text-red-700 font-semibold">
+                    <p><strong>Note:</strong> Total price is fixed. Pending materials use planned costs in calculations.</p>
+                  </div>
                 </div>
               </div>
             </div>

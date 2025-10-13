@@ -2,8 +2,8 @@
 
 export type ChangeRequestStatus =
   | 'pending'           // Waiting for approval
-  | 'approved_estimator' // Approved by estimator (≤ ₹50,000)
-  | 'approved_td'        // Approved by TD (> ₹50,000)
+  | 'approved_estimator' // Approved by estimator (≤ AED50,000)
+  | 'approved_td'        // Approved by TD (> AED50,000)
   | 'rejected'           // Rejected
   | 'client_pending';    // Waiting for client approval
 

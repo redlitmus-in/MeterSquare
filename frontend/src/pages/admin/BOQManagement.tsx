@@ -214,7 +214,7 @@ const BOQManagement: React.FC = () => {
                       </div>
                       <div>
                         <p className="text-gray-500 mb-1">Total Amount</p>
-                        <p className="font-medium text-[#243d8a]">₹{(boq.total_amount / 100000).toFixed(2)}L</p>
+                        <p className="font-medium text-[#243d8a]">AED{(boq.total_amount / 100000).toFixed(2)}L</p>
                       </div>
                     </div>
 

@@ -225,7 +225,13 @@ def get_boq_planned_vs_actual(boq_id):
                     log.info(f"    Actual: qty={actual_quantity}, total={actual_total}")
 
                 planned_materials_total += planned_total
-                actual_materials_total += actual_total
+
+                # For actual total: use actual if purchased, otherwise use planned (for pending items)
+                if actual_total > 0:
+                    actual_materials_total += actual_total
+                else:
+                    # Material is pending - assume planned cost
+                    actual_materials_total += planned_total
 
                 # Calculate variances
                 quantity_variance = actual_quantity - planned_quantity
@@ -237,8 +243,28 @@ def get_boq_planned_vs_actual(boq_id):
                 if actual_mat and actual_quantity > 0:
                     material_status = "completed"
 
+                # Generate reason based on variance
+                variance_reason = None
+                variance_response = None
+
+                if actual_mat and actual_quantity > 0:
+                    if total_variance > 0:
+                        variance_reason = f"Cost overrun: AED{float(total_variance):.2f} over budget"
+                        if price_variance > 0:
+                            variance_reason += f" (Price increased by AED{float(price_variance):.2f})"
+                        if quantity_variance > 0:
+                            variance_reason += f" (Quantity increased by {float(quantity_variance):.2f} {planned_mat.get('unit', '')})"
+                    elif total_variance < 0:
+                        variance_reason = f"Cost saved: AED{abs(float(total_variance)):.2f} under budget"
+                    else:
+                        variance_reason = "On budget"
+
+                    # Response placeholder - can be updated later from tracking data
+                    variance_response = actual_mat.variance_response if hasattr(actual_mat, 'variance_response') else None
+
                 materials_comparison.append({
                     "material_name": material_name,
+                    "sub_item_name": planned_mat.get('sub_item_name', material_name),  # Sub item name from BOQ
                     "master_material_id": matched_material_id,  # Use the matched ID (could be from purchase_history)
                     "planned": {
                         "quantity": float(planned_quantity),
@@ -261,7 +287,9 @@ def get_boq_planned_vs_actual(boq_id):
                         "percentage": (float(total_variance) / float(planned_total) * 100) if planned_total > 0 else 0,
                         "status": "overrun" if total_variance > 0 else "saved" if total_variance < 0 else "on_budget"
                     } if actual_mat and actual_quantity > 0 else None,
-                    "status": material_status
+                    "status": material_status,
+                    "variance_reason": variance_reason,
+                    "variance_response": variance_response
                 })
 
             # Check for unplanned materials (purchased but not in BOQ)
@@ -347,7 +375,8 @@ def get_boq_planned_vs_actual(boq_id):
                                             "price": float(purchase_price),
                                             "total": float(purchase_total),
                                             "percentage": 0,  # No baseline to compare
-                                            "status": "unplanned"
+                                            "status": "unplanned",
+                                            "reason": mat_entry.get('reason'),
                                         },
                                         "status": "unplanned",
                                         "note": "This material was purchased but was not in the original BOQ plan"
@@ -410,7 +439,13 @@ def get_boq_planned_vs_actual(boq_id):
                         actual_avg_rate = actual_total / actual_hours
 
                 planned_labour_total += planned_total
-                actual_labour_total += actual_total
+
+                # For actual total: use actual if recorded, otherwise use planned (for pending items)
+                if actual_total > 0:
+                    actual_labour_total += actual_total
+                else:
+                    # Labour is pending - assume planned cost
+                    actual_labour_total += planned_total
 
                 # Calculate variances
                 hours_variance = actual_hours - planned_hours
@@ -460,28 +495,74 @@ def get_boq_planned_vs_actual(boq_id):
             # The selling price is FIXED - this is what we're selling to the client
             selling_price = Decimal(str(planned_item.get('selling_price', 0)))
 
-            # Calculate actual overhead and profit
-            # Overhead is calculated as a percentage of actual base cost
-            actual_overhead = actual_base * (overhead_pct / 100)
+            # CONSUMPTION MODEL CALCULATION:
+            # Calculate ONLY the extra costs (overspend on planned items + unplanned items)
+            # These extra costs consume overhead and profit buffers
 
-            # Total cost including overhead
+            # 1. Calculate extra costs from material/labour overruns and unplanned items
+            extra_costs = Decimal('0')
+
+            # Add overspend from planned materials (only positive variances)
+            for mat_comp in materials_comparison:
+                if mat_comp.get('status') == 'completed' and mat_comp.get('variance'):
+                    # Only count if we overspent (positive variance)
+                    mat_variance = Decimal(str(mat_comp['variance'].get('total', 0)))
+                    if mat_variance > 0:
+                        extra_costs += mat_variance
+                elif mat_comp.get('status') == 'unplanned' and mat_comp.get('actual'):
+                    # Add full cost of unplanned materials
+                    unplanned_cost = Decimal(str(mat_comp['actual'].get('total', 0)))
+                    extra_costs += unplanned_cost
+
+            # Add overspend from labour (only positive variances)
+            for lab_comp in labour_comparison:
+                if lab_comp.get('status') == 'completed' and lab_comp.get('variance'):
+                    lab_variance = Decimal(str(lab_comp['variance'].get('total', 0)))
+                    if lab_variance > 0:
+                        extra_costs += lab_variance
+
+            log.info(f"  Extra costs (overruns + unplanned): {extra_costs}")
+
+            # 2. Start with planned overhead and profit (these are our buffers)
+            remaining_overhead = planned_overhead
+            remaining_profit = planned_profit
+            overhead_consumed = Decimal('0')
+            profit_consumed = Decimal('0')
+
+            if extra_costs > 0:
+                # We have extra costs - consume overhead first
+                overhead_consumed = min(extra_costs, planned_overhead)
+                remaining_overhead = planned_overhead - overhead_consumed
+
+                # If extra costs exceed overhead, consume profit
+                if extra_costs > planned_overhead:
+                    excess_costs = extra_costs - planned_overhead
+                    profit_consumed = min(excess_costs, planned_profit)
+                    remaining_profit = planned_profit - profit_consumed
+            else:
+                # No extra costs - keep full overhead and profit
+                remaining_overhead = planned_overhead
+                remaining_profit = planned_profit
+
+            # 3. Calculate actual overhead and profit (what remains after consumption)
+            actual_overhead = remaining_overhead
+            actual_profit = remaining_profit
+
+            # 4. Calculate actual total cost (base + remaining overhead)
             actual_total_cost = actual_base + actual_overhead
+            actual_total = actual_total_cost
 
-            # Profit/Loss = Selling Price - Actual Total Cost
-            actual_profit = selling_price - actual_total_cost
+            # 5. Calculate variances
+            base_cost_variance = actual_base - planned_base  # For reporting
+            overhead_variance = actual_overhead - planned_overhead
+            profit_variance = actual_profit - planned_profit
 
-            # Actual total spent (for internal tracking)
-            actual_total = actual_base + actual_overhead
+            # Calculate savings/overrun (use absolute values for display)
+            cost_savings = abs(planned_base - actual_base)  # Always positive
+            overhead_diff = abs(planned_overhead - actual_overhead)  # Always positive
+            profit_diff = abs(planned_profit - actual_profit)  # Always positive
 
-            # Calculate savings/overrun
-            cost_savings = planned_base - actual_base
-            overhead_diff = planned_overhead - actual_overhead
-            profit_diff = actual_profit - planned_profit
-
-            log.info(f"  Item '{planned_item.get('item_name')}' - Planned base: {planned_base}, Actual base: {actual_base}")
-            log.info(f"    Cost savings: {cost_savings}, Actual overhead: {actual_overhead}, Actual profit: {actual_profit}")
-
-            # Calculate completion percentage
+           # Calculate completion percentage
             total_materials = len(planned_item.get('materials', []))
             total_labour = len(planned_item.get('labour', []))
             completed_materials = len([m for m in materials_comparison if m['status'] == 'completed'])
@@ -528,35 +609,46 @@ def get_boq_planned_vs_actual(boq_id):
                     "total": float(actual_total),
                     "selling_price": float(selling_price)
                 },
+                "consumption_flow": {
+                    "extra_costs": float(extra_costs),
+                    "base_cost_variance": float(base_cost_variance),
+                    "variance_status": "overspent" if extra_costs > 0 else "saved",
+                    "overhead_variance": float(overhead_variance),
+                    "profit_variance": float(profit_variance),
+                    "overhead_consumed": float(overhead_consumed),
+                    "overhead_remaining": float(remaining_overhead),
+                    "profit_consumed": float(profit_consumed),
+                    "profit_remaining": float(remaining_profit),
+                    "explanation": "Extra costs (overruns + unplanned items) consume overhead first, then profit. Incomplete purchases don't affect consumption."
+                },
                 "savings_breakdown": {
                     "total_cost_savings": float(cost_savings),
                     "overhead_difference": float(overhead_diff),
                     "profit_difference": float(profit_diff),
-                    "explanation": "Overhead is calculated on actual base cost. Profit = Selling Price - (Actual Base + Overhead)",
-                    "note": "Profit calculation is based on actual spending. Incomplete items show projected profit."
+                    "note": "All values shown as absolute (positive) amounts for clarity"
                 },
                 "variance": {
                     "materials": {
-                        "amount": float(actual_materials_total - planned_materials_total),
+                        "amount": float(abs(actual_materials_total - planned_materials_total)),
                         "status": "saved" if (planned_materials_total - actual_materials_total) > 0 else "overrun"
                     },
                     "labour": {
-                        "amount": float(actual_labour_total - planned_labour_total),
+                        "amount": float(abs(actual_labour_total - planned_labour_total)),
                         "status": "saved" if (planned_labour_total - actual_labour_total) > 0 else "overrun"
                     },
                     "base_cost": {
-                        "amount": float(actual_base - planned_base),
+                        "amount": float(abs(actual_base - planned_base)),
                         "status": "saved" if (planned_base - actual_base) > 0 else "overrun"
                     },
                     "overhead": {
                         "planned": float(planned_overhead),
                         "actual": float(actual_overhead),
-                        "difference": float(overhead_diff)
+                        "difference": float(abs(overhead_diff))
                     },
                     "profit": {
                         "planned": float(planned_profit),
                         "actual": float(actual_profit),
-                        "difference": float(profit_diff)
+                        "difference": float(abs(profit_diff))
                     }
                 }
             }
@@ -570,8 +662,8 @@ def get_boq_planned_vs_actual(boq_id):
         comparison['summary'] = {
             "planned_total": total_planned,
             "actual_total": total_actual,
-            "variance": total_actual - total_planned,
-            "variance_percentage": ((total_actual - total_planned) / total_planned * 100) if total_planned > 0 else 0,
+            "variance": abs(total_actual - total_planned),  # Always positive number
+            "variance_percentage": abs((total_actual - total_planned) / total_planned * 100) if total_planned > 0 else 0,
             "status": "under_budget" if total_actual < total_planned else "over_budget" if total_actual > total_planned else "on_budget"
         }
 

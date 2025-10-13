@@ -173,7 +173,7 @@ const PurchaseApprovalsPage: React.FC = () => {
                 <label className="text-sm font-medium text-gray-500">Estimated Cost</label>
                 <div className="flex items-center gap-2 mt-1">
                   <CurrencyDollarIcon className="w-5 h-5 text-green-600" />
-                  <p className="font-medium text-gray-900">₹{purchase.estimated_cost.toLocaleString()}</p>
+                  <p className="font-medium text-gray-900">AED{purchase.estimated_cost.toLocaleString()}</p>
                 </div>
               </div>
 

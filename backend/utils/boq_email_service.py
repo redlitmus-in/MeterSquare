@@ -147,12 +147,12 @@ class BOQEmailService:
                 <tr>
                     <td>{idx}</td>
                     <td>{item_name}</td>
-                    <td>₹ {base_cost:,.2f}</td>
+                    <td>AED {base_cost:,.2f}</td>
                     <td>{overhead_percentage}%</td>
-                    <td>₹ {overhead_amount:,.2f}</td>
+                    <td>AED {overhead_amount:,.2f}</td>
                     <td>{profit_margin_percentage}%</td>
-                    <td>₹ {profit_margin_amount:,.2f}</td>
-                    <td><strong>₹ {selling_price:,.2f}</strong></td>
+                    <td>AED {profit_margin_amount:,.2f}</td>
+                    <td><strong>AED {selling_price:,.2f}</strong></td>
                 </tr>
             """
 
@@ -200,14 +200,14 @@ class BOQEmailService:
                     <p><span class="label">Total Items:</span> <span class="value">{total_items}</span></p>
                     <p><span class="label">Total Materials:</span> <span class="value">{total_materials}</span></p>
                     <p><span class="label">Total Labour:</span> <span class="value">{total_labour}</span></p>
-                    <p><span class="label">Material Cost:</span> <span class="value">₹ {total_material_cost:,.2f}</span></p>
-                    <p><span class="label">Labour Cost:</span> <span class="value">₹ {total_labour_cost:,.2f}</span></p>
-                    <p><span class="label">Base Cost:</span> <span class="value">₹ {(total_material_cost + total_labour_cost):,.2f}</span></p>
+                    <p><span class="label">Material Cost:</span> <span class="value">AED {total_material_cost:,.2f}</span></p>
+                    <p><span class="label">Labour Cost:</span> <span class="value">AED {total_labour_cost:,.2f}</span></p>
+                    <p><span class="label">Base Cost:</span> <span class="value">AED {(total_material_cost + total_labour_cost):,.2f}</span></p>
                 </div>
 
                 <div class="total-cost">
                     <span class="label">Estimated Selling Price:</span>
-                    <span class="amount">₹ {estimated_selling_price:,.2f}</span>
+                    <span class="amount">AED {estimated_selling_price:,.2f}</span>
                 </div>
 
                 <!-- Items Breakdown -->
@@ -352,7 +352,7 @@ class BOQEmailService:
                 <!-- Cost Summary -->
                 <div class="total-cost" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981;">
                     <span class="label">Approved Budget:</span>
-                    <span class="amount" style="color: #065f46;">₹ {estimated_selling_price:,.2f}</span>
+                    <span class="amount" style="color: #065f46;">AED {estimated_selling_price:,.2f}</span>
                 </div>
 
                 <!-- TD Comments -->
@@ -1047,7 +1047,7 @@ class BOQEmailService:
                     <td><strong>{item_name}</strong></td>
                     <td>{materials_count}</td>
                     <td>{labour_count}</td>
-                    <td><strong>₹ {selling_price:,.2f}</strong></td>
+                    <td><strong>AED {selling_price:,.2f}</strong></td>
                 </tr>
             """
 
@@ -1110,7 +1110,7 @@ class BOQEmailService:
                 <!-- Total Value -->
                 <div class="total-cost">
                     <span class="label">Total Value Added:</span>
-                    <span class="amount">₹ {total_value_added:,.2f}</span>
+                    <span class="amount">AED {total_value_added:,.2f}</span>
                 </div>
 
                 <div class="divider"></div>
@@ -1233,7 +1233,7 @@ class BOQEmailService:
                     <td><strong>{item_name}</strong></td>
                     <td>{materials_count}</td>
                     <td>{labour_count}</td>
-                    <td><strong>₹ {selling_price:,.2f}</strong></td>
+                    <td><strong>AED {selling_price:,.2f}</strong></td>
                 </tr>
             """
 
@@ -1296,7 +1296,7 @@ class BOQEmailService:
                 <!-- Total Amount -->
                 <div class="total-cost" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981;">
                     <span class="label">Total Approved Amount:</span>
-                    <span class="amount" style="color: #065f46;">₹ {total_amount:,.2f}</span>
+                    <span class="amount" style="color: #065f46;">AED {total_amount:,.2f}</span>
                 </div>
 
                 <div class="divider"></div>
@@ -1371,7 +1371,7 @@ class BOQEmailService:
                     <td><strong>{item_name}</strong></td>
                     <td>{materials_count}</td>
                     <td>{labour_count}</td>
-                    <td><strong>₹ {selling_price:,.2f}</strong></td>
+                    <td><strong>AED {selling_price:,.2f}</strong></td>
                 </tr>
             """
 
@@ -1440,7 +1440,7 @@ class BOQEmailService:
                 <!-- Total Amount -->
                 <div class="total-cost" style="background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); border-left: 4px solid #ef4444;">
                     <span class="label">Total Rejected Amount:</span>
-                    <span class="amount" style="color: #991b1b;">₹ {total_amount:,.2f}</span>
+                    <span class="amount" style="color: #991b1b;">AED {total_amount:,.2f}</span>
                 </div>
 
                 <div class="divider"></div>

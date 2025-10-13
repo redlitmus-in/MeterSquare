@@ -389,15 +389,15 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
           <div className="grid grid-cols-3 gap-4 text-sm">
             <div>
               <p className="text-gray-600">Allocated</p>
-              <p className="font-semibold text-gray-900">₹{itemOverhead.overhead_allocated.toLocaleString()}</p>
+              <p className="font-semibold text-gray-900">AED{itemOverhead.overhead_allocated.toLocaleString()}</p>
             </div>
             <div>
               <p className="text-gray-600">Consumed</p>
-              <p className="font-semibold text-gray-900">₹{itemOverhead.overhead_consumed.toLocaleString()}</p>
+              <p className="font-semibold text-gray-900">AED{itemOverhead.overhead_consumed.toLocaleString()}</p>
             </div>
             <div>
               <p className="text-gray-600">Available</p>
-              <p className="font-semibold text-green-600">₹{itemOverhead.overhead_available.toLocaleString()}</p>
+              <p className="font-semibold text-green-600">AED{itemOverhead.overhead_available.toLocaleString()}</p>
             </div>
           </div>
         </motion.div>
@@ -542,7 +542,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
                     {/* Unit Price */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Unit Price (₹) <span className="text-red-500">*</span>
+                        Unit Price (AED) <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="number"
@@ -559,7 +559,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
                     {/* Total */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Total (₹)
+                        Total (AED)
                       </label>
                       <input
                         type="text"
@@ -607,7 +607,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <p className="text-gray-600">Total Cost</p>
-              <p className="font-semibold text-gray-900">₹{calculations.totalCost.toLocaleString()}</p>
+              <p className="font-semibold text-gray-900">AED{calculations.totalCost.toLocaleString()}</p>
             </div>
             <div>
               <p className="text-gray-600">% of Item Overhead</p>
@@ -618,7 +618,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
             <div>
               <p className="text-gray-600">Remaining After</p>
               <p className={`font-semibold ${calculations.remainingAfter < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                ₹{calculations.remainingAfter.toLocaleString()}
+                AED{calculations.remainingAfter.toLocaleString()}
               </p>
             </div>
             <div>

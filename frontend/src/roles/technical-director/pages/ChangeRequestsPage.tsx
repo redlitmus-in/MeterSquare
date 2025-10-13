@@ -351,7 +351,7 @@ const ChangeRequestsPage: React.FC = () => {
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-500 data-[state=active]:text-red-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
                 <AlertTriangle className="w-4 h-4 mr-2" />
-                High Value (&gt;₹50K)
+                High Value (&gt;AED50K)
                 <span className="ml-1 sm:ml-2 text-gray-400">({stats.high_value})</span>
               </TabsTrigger>
               <TabsTrigger
@@ -391,10 +391,10 @@ const ChangeRequestsPage: React.FC = () => {
                   <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="text-sm font-medium text-blue-900">
-                      You can see all change requests including those approved by the Estimator (≤₹50,000).
+                      You can see all change requests including those approved by the Estimator (≤AED50,000).
                     </p>
                     <p className="text-xs text-blue-700 mt-1">
-                      Requests with green badges were handled by Estimator. High-value requests (&gt;₹50,000) require your approval.
+                      Requests with green badges were handled by Estimator. High-value requests (&gt;AED50,000) require your approval.
                     </p>
                   </div>
                 </div>
