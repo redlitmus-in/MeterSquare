@@ -463,9 +463,19 @@ def jwt_required(f):
             return jsonify({'message': 'Token is missing'}), 401
         
         try:
+            # Log token for debugging (first/last 10 chars only for security)
+            if token:
+                log.debug(f"Token received: {token[:10]}...{token[-10:]} (length: {len(token)})")
+
+            # Check if SECRET_KEY is set
+            if not SECRET_KEY:
+                log.error("SECRET_KEY is not set in environment variables!")
+                return jsonify({'message': 'Server configuration error'}), 500
+
             # Decode the token
             data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-            
+            log.debug(f"Token decoded successfully for user_id: {data.get('user_id')}")
+
             # Get the user from the database
             current_user = User.query.filter_by(
                 user_id=data['user_id'],
@@ -474,6 +484,7 @@ def jwt_required(f):
             ).first()
 
             if not current_user:
+                log.warning(f"User not found or inactive for user_id: {data.get('user_id')}")
                 return jsonify({'message': 'User not found or inactive'}), 401
 
             # Get role name safely
@@ -498,13 +509,17 @@ def jwt_required(f):
                 'is_active': current_user.is_active,
                 'user_status': getattr(current_user, 'user_status', None)
             }
-            
+
         except jwt.ExpiredSignatureError:
+            log.warning(f"Token has expired for token ending with: ...{token[-10:] if token else 'N/A'}")
             return jsonify({'message': 'Token has expired'}), 401
-        except jwt.InvalidTokenError:
+        except jwt.InvalidTokenError as e:
+            log.error(f"Invalid token error: {str(e)} - Token: {token[:20] if token else 'N/A'}...{token[-10:] if token and len(token) > 30 else ''}")
             return jsonify({'message': 'Invalid token'}), 401
         except Exception as e:
             log.error(f"JWT verification error: {str(e)}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
             return jsonify({'message': 'Token verification failed'}), 401
         
         return f(*args, **kwargs)

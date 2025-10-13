@@ -179,3 +179,37 @@ class MaterialPurchaseTracking(db.Model):
 
     boq = db.relationship("BOQ", backref=db.backref("material_tracking", lazy=True))
     material = db.relationship("MasterMaterial", backref=db.backref("purchase_tracking", lazy=True))
+
+# Labour Tracking Table - Tracks labour hours with history
+class LabourTracking(db.Model):
+    __tablename__ = "labour_tracking"
+
+    labour_tracking_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id"), nullable=False)
+    project_id = db.Column(db.Integer, db.ForeignKey("project.project_id"), nullable=False)
+    master_item_id = db.Column(db.Integer, nullable=True)
+    item_name = db.Column(db.String(255), nullable=False)
+    master_labour_id = db.Column(db.Integer, db.ForeignKey("boq_labours.labour_id"), nullable=True)
+    labour_role = db.Column(db.String(255), nullable=False)
+
+    # Labour history stored as JSONB array
+    # Each entry: {work_date, hours, rate_per_hour, total_cost, worker_name, notes}
+    labour_history = db.Column(JSONB, nullable=False, default=[])
+
+    # Current totals (aggregated from history)
+    total_hours_worked = db.Column(db.Float, default=0.0)
+    total_cost = db.Column(db.Float, default=0.0)
+
+    # Latest info
+    latest_rate_per_hour = db.Column(db.Float, nullable=True)
+    latest_work_date = db.Column(db.DateTime, nullable=True)
+
+    # Metadata
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
+    last_modified_by = db.Column(db.String(255), nullable=True)
+    is_deleted = db.Column(db.Boolean, default=False)
+
+    boq = db.relationship("BOQ", backref=db.backref("labour_tracking", lazy=True))
+    labour = db.relationship("MasterLabour", backref=db.backref("labour_tracking", lazy=True))

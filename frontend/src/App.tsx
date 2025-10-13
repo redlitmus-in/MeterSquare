@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
+import { UserRole } from '@/types';
 import { validateSupabaseConnection } from '@/utils/environment';
 import { setupCacheValidator } from '@/utils/clearCache';
 import { queryClient } from '@/lib/queryClient';
@@ -49,6 +50,8 @@ const ProjectsOverview = lazy(() => import('@/roles/technical-director/pages/Pro
 
 // Project Manager Pages
 const MyProjects = lazy(() => import('@/roles/project-manager/pages/MyProjects'));
+const RecordMaterialPurchase = lazy(() => import('@/roles/project-manager/pages/RecordMaterialPurchase'));
+const RecordLabourHours = lazy(() => import('@/roles/project-manager/pages/RecordLabourHours'));
 
 // Role-based Change Requests
 const RoleBasedChangeRequests = lazy(() => import('@/components/routing/RoleBasedChangeRequests'));
@@ -229,6 +232,48 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   }
 
   return <>{children}</>
+};
+
+// Project Manager, Technical Director, and Admin Route Component
+const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuthStore();
+
+  // Get role from user object (backend sends 'role' field with role name)
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+
+  // Also check role_id for compatibility
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  // Allow Project Manager, Technical Director, and Admin (check multiple format variations)
+  const isProjectManager = userRole === 'Project Manager' ||
+                          userRoleLower === 'project manager' ||
+                          userRoleLower === 'project_manager' ||
+                          userRoleLower === 'projectmanager' ||
+                          roleId === UserRole.PROJECT_MANAGER ||
+                          roleId === 'projectManager' ||
+                          roleIdLower === 'project_manager';
+
+  const isTechnicalDirector = userRole === 'Technical Director' ||
+                             userRoleLower === 'technical director' ||
+                             userRoleLower === 'technical_director' ||
+                             userRoleLower === 'technicaldirector' ||
+                             roleId === UserRole.TECHNICAL_DIRECTOR ||
+                             roleId === 'technicalDirector' ||
+                             roleIdLower === 'technical_director';
+
+  const isAdmin = userRole === 'Admin' ||
+                 userRoleLower === 'admin' ||
+                 roleId === 'admin' ||
+                 roleIdLower === 'admin';
+
+  if (!isProjectManager && !isTechnicalDirector && !isAdmin) {
+    console.log('Access denied. User role:', userRole, 'role_id:', roleId);
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
 };
 
 function App() {
@@ -426,7 +471,21 @@ function App() {
             <Route path="projects-overview" element={<ProjectsOverview />} />
 
             {/* Project Manager specific routes */}
-            <Route path="my-projects" element={<MyProjects />} />
+            <Route path="my-projects" element={
+              <ProjectManagerRoute>
+                <MyProjects />
+              </ProjectManagerRoute>
+            } />
+            <Route path="record-material" element={
+              <ProjectManagerRoute>
+                <RecordMaterialPurchase />
+              </ProjectManagerRoute>
+            } />
+            <Route path="record-labour" element={
+              <ProjectManagerRoute>
+                <RecordLabourHours />
+              </ProjectManagerRoute>
+            } />
 
             {/* Role-based Change Requests - Single route for all roles */}
             <Route path="change-requests" element={<RoleBasedChangeRequests />} />
