@@ -7,7 +7,7 @@ from flask import jsonify, request, g
 from models import db
 from models.system_settings import SystemSettings
 from models.user import User
-from middleware.auth_middleware import jwt_required
+from utils.authentication import jwt_required
 import logging
 from datetime import datetime
 

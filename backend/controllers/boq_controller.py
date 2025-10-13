@@ -1436,9 +1436,10 @@ def send_boq_email(boq_id):
                 is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved"]
                 new_status = "Pending_Revision" if is_revision else "Pending"
 
+                log.info(f"BOQ {boq_id} - Current status before email: {boq.status}, is_revision: {is_revision}, new_status: {new_status}")
+
                 boq.email_sent = True
-                # boq.status = new_status
-                boq.status = "Pending"
+                boq.status = new_status
                 boq.last_modified_by = boq.created_by
                 boq.last_modified_at = datetime.utcnow()
 
@@ -1583,8 +1584,11 @@ def send_boq_email(boq_id):
                 # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, or Revision_Approved) or a new submission
                 is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved"]
                 new_status = "Pending_Revision" if is_revision else "Pending"
+
+                log.info(f"BOQ {boq_id} (alternative method) - Current status before email: {boq.status}, is_revision: {is_revision}, new_status: {new_status}")
+
                 boq.email_sent = True
-                boq.status = "Pending"
+                boq.status = new_status
                 boq.last_modified_by = boq.created_by
                 boq.last_modified_at = datetime.utcnow()
 
@@ -1597,7 +1601,7 @@ def send_boq_email(boq_id):
                     "type": "revision_sent" if is_revision else "email_sent",
                     "sender": "estimator",
                     "receiver": "technicalDirector",
-                    "status": "pending",
+                    "status": new_status.lower(),
                     "comments": comments if comments else "BOQ sent for review and approval",
                     "timestamp": datetime.utcnow().isoformat(),
                     "decided_by": boq.created_by,
