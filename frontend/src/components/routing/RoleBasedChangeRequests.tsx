@@ -7,7 +7,6 @@ const TDChangeRequestsPage = lazy(() => import('@/roles/technical-director/pages
 const EstimatorChangeRequestsPage = lazy(() => import('@/roles/estimator/pages/ChangeRequestsPage'));
 const PMChangeRequestsPage = lazy(() => import('@/roles/project-manager/pages/ChangeRequestsPage'));
 const SEExtraMaterialPage = lazy(() => import('@/roles/site-engineer/pages/ExtraMaterialPage'));
-const PMExtraMaterialPage = lazy(() => import('@/roles/project-manager/pages/ExtraMaterialPage'));
 
 const RoleBasedChangeRequests: React.FC = () => {
   const { user } = useAuthStore();
@@ -30,7 +29,7 @@ const RoleBasedChangeRequests: React.FC = () => {
       Component = SEExtraMaterialPage;
     } else if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' ||
                userRoleLower === 'projectmanager' || userRole === 'projectManager') {
-      Component = PMExtraMaterialPage;
+      Component = PMChangeRequestsPage;
     } else {
       // Other roles don't have access to extra material
       return (

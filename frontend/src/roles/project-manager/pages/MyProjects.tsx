@@ -316,16 +316,21 @@ const MyProjects: React.FC = () => {
           )
         );
 
-        // Load change requests for this BOQ
-        const crResponse = await changeRequestService.getBOQChangeRequests(boqId);
-        if (crResponse.success) {
-          const pending = crResponse.data.filter(cr => cr.status === 'pending');
-          const approved = crResponse.data.filter(cr => cr.status === 'approved');
-          const rejected = crResponse.data.filter(cr => cr.status === 'rejected');
-          setPendingChangeRequests(pending);
-          setApprovedChangeRequests(approved);
-          setRejectedChangeRequests(rejected);
-        }
+        // Load change requests for this BOQ - DISABLED for PM role
+        // const crResponse = await changeRequestService.getBOQChangeRequests(boqId);
+        // if (crResponse.success) {
+        //   const pending = crResponse.data.filter(cr => cr.status === 'pending');
+        //   const approved = crResponse.data.filter(cr => cr.status === 'approved');
+        //   const rejected = crResponse.data.filter(cr => cr.status === 'rejected');
+        //   setPendingChangeRequests(pending);
+        //   setApprovedChangeRequests(approved);
+        //   setRejectedChangeRequests(rejected);
+        // }
+
+        // Set empty arrays for now
+        setPendingChangeRequests([]);
+        setApprovedChangeRequests([]);
+        setRejectedChangeRequests([]);
 
         setShowBOQModal(true);
       } else {
@@ -712,23 +717,12 @@ const MyProjects: React.FC = () => {
                   </p>
                   <p className="text-xs text-blue-600 mt-1">Working Hours: {selectedProject.area || 'N/A'}</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  {selectedProject.boq_id && (
-                    <button
-                      onClick={() => window.location.href = '/project-manager/extra-material'}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors flex items-center gap-2"
-                    >
-                      <DocumentTextIcon className="w-4 h-4" />
-                      Request Extra Sub-Items
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setShowBOQModal(false)}
-                    className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
-                  >
-                    <XMarkIcon className="w-6 h-6 text-blue-900" />
-                  </button>
-                </div>
+                <button
+                  onClick={() => setShowBOQModal(false)}
+                  className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6 text-blue-900" />
+                </button>
               </div>
             </div>
 

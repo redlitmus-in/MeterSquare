@@ -57,6 +57,9 @@ class ChangeRequestWorkflow:
     def determine_initial_approver(requester_role: str, change_request) -> Tuple[str, str]:
         """
         Determine initial approver when request is sent for review
+        Automatically routes based on business rules:
+        - SE → PM (always)
+        - PM → TD (if >40% of item overhead) or Estimator (if ≤40%)
 
         Args:
             requester_role: Role of the person creating the request
@@ -73,11 +76,18 @@ class ChangeRequestWorkflow:
             log.info(f"Site Engineer/Supervisor request - routing to Project Manager")
             return CR_CONFIG.ROLE_PROJECT_MANAGER, "Project Manager"
 
-        # Project Manager → Always goes to Estimator (never directly to TD)
+        # Project Manager → Route based on percentage threshold
         # Handle both database formats: camelCase (projectManager) and snake_case (project_manager)
         elif normalized_role in ['projectmanager', 'project_manager']:
-            log.info(f"Project Manager request - routing to Estimator")
-            return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
+            # Calculate percentage of item overhead
+            percentage = change_request.percentage_of_item_overhead or 0
+
+            if percentage > 40:
+                log.info(f"PM request with {percentage}% overhead (>40%) - routing to Technical Director")
+                return CR_CONFIG.ROLE_TECHNICAL_DIRECTOR, "Technical Director"
+            else:
+                log.info(f"PM request with {percentage}% overhead (≤40%) - routing to Estimator")
+                return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
 
         else:
             log.error(f"Invalid role '{requester_role}' (normalized: '{normalized_role}') attempting to send change request")

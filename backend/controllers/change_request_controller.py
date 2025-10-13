@@ -111,6 +111,36 @@ def create_change_request():
         if not overhead_impact:
             return jsonify({"error": "Failed to calculate overhead impact"}), 500
 
+        # Prepare sub_items_data from materials or extra material data
+        sub_items_data = []
+        if hasattr(g, 'extra_material_data') and g.extra_material_data:
+            # Coming from create_extra_material wrapper
+            sub_items_data = g.extra_material_data.get('sub_items', [])
+        else:
+            # Direct API call - convert materials to sub_items format
+            for mat in materials:
+                sub_items_data.append({
+                    'sub_item_name': mat.get('material_name'),
+                    'quantity': mat.get('quantity'),
+                    'unit': mat.get('unit', 'nos'),
+                    'unit_price': mat.get('unit_price'),
+                    'total_price': mat.get('quantity', 0) * mat.get('unit_price', 0),
+                    'is_new': mat.get('master_material_id') is None,
+                    'reason': mat.get('reason')
+                })
+
+        # Get item info from extra_material_data if available
+        item_id = None
+        item_name = None
+        if hasattr(g, 'extra_material_data') and g.extra_material_data:
+            item_id = g.extra_material_data.get('item_id')
+            item_name = g.extra_material_data.get('item_name', '')
+
+        # Calculate percentage of item overhead
+        percentage_of_item_overhead = 0.0
+        if overhead_impact['original_overhead_allocated'] > 0:
+            percentage_of_item_overhead = (materials_total_cost / overhead_impact['original_overhead_allocated']) * 100
+
         # Create change request with status 'pending'
         # No auto-routing - user must explicitly send for review
         change_request = ChangeRequest(
@@ -124,8 +154,12 @@ def create_change_request():
             status='pending',  # User hasn't sent it yet
             current_approver_role=None,  # Will be set when sent for review
             approval_required_from=None,  # Will be set when sent for review
+            item_id=item_id,
+            item_name=item_name,
             materials_data=materials_data,
             materials_total_cost=materials_total_cost,
+            sub_items_data=sub_items_data,  # Add this required field
+            percentage_of_item_overhead=percentage_of_item_overhead,
             overhead_consumed=overhead_impact['overhead_consumed'],
             overhead_balance_impact=overhead_impact['overhead_balance_impact'],
             profit_impact=overhead_impact['profit_impact'],
@@ -285,13 +319,21 @@ def get_all_change_requests():
             query = query.filter_by(requested_by_user_id=user_id)
         elif user_role in ['projectmanager', 'project_manager']:
             # PM sees:
-            # 1. Their own requests (sent to Estimator)
+            # 1. Their own requests
             # 2. Requests from SEs that need PM approval (approval_required_from = 'project_manager')
-            from sqlalchemy import or_
+            # 3. ALL requests from their projects (for extra materials page)
+            from sqlalchemy import or_, and_
+            from models.project_model import Project
+
+            # Get projects assigned to this PM
+            pm_projects = Project.query.filter_by(pm_user_id=user_id).all()
+            pm_project_ids = [p.project_id for p in pm_projects]
+
             query = query.filter(
                 or_(
-                    ChangeRequest.requested_by_user_id == user_id,
-                    ChangeRequest.approval_required_from == 'project_manager'
+                    ChangeRequest.requested_by_user_id == user_id,  # PM's own requests
+                    ChangeRequest.approval_required_from == 'project_manager',  # Requests needing PM approval
+                    ChangeRequest.project_id.in_(pm_project_ids) if pm_project_ids else False  # All requests from PM's projects
                 )
             )
         elif user_role == 'estimator':
@@ -420,26 +462,35 @@ def approve_change_request(cr_id):
 
         # Multi-stage approval logic
         if normalized_role in ['projectmanager']:
-            # PM approves - route to TD or Estimator based on budget
+            # PM approves - route to TD or Estimator based on percentage threshold
             change_request.pm_approved_by_user_id = approver_id
             change_request.pm_approved_by_name = approver_name
             change_request.pm_approval_date = datetime.utcnow()
             change_request.status = CR_CONFIG.STATUS_APPROVED_BY_PM
 
-            # Determine next approver using workflow service
-            next_role, next_approver = workflow_service.determine_next_approver_after_pm(change_request)
+            # Determine next approver using workflow service (based on 40% threshold)
+            percentage = change_request.percentage_of_item_overhead or 0
+
+            if percentage > 40:
+                next_role = 'technical_director'
+                next_approver = 'Technical Director'
+                log.info(f"PM approved CR {cr_id} with {percentage:.2f}% overhead (>40%), routing to TD")
+            else:
+                next_role = 'estimator'
+                next_approver = 'Estimator'
+                log.info(f"PM approved CR {cr_id} with {percentage:.2f}% overhead (≤40%), routing to Estimator")
+
             change_request.approval_required_from = next_role
             change_request.current_approver_role = next_role
 
             db.session.commit()
 
-            log.info(f"PM approved CR {cr_id}, routing to {next_approver}")
-
             return jsonify({
                 "success": True,
-                "message": f"Approved by PM. Forwarded to {next_approver}",
+                "message": f"Approved by PM. Automatically forwarded to {next_approver} (Overhead: {percentage:.2f}%)",
                 "status": CR_CONFIG.STATUS_APPROVED_BY_PM,
-                "next_approver": next_approver
+                "next_approver": next_approver,
+                "overhead_percentage": percentage
             }), 200
 
         elif normalized_role in ['technicaldirector', 'technical_director']:
@@ -783,145 +834,10 @@ def get_item_overhead(boq_id, item_id):
         return jsonify({"error": str(e)}), 500
 
 
-def get_extra_materials():
-    """
-    Get extra material requests (separate from BOQ view)
-    Filters: project_id, area_id, status
-    GET /api/change_request/extra_materials
-    """
-    try:
-        current_user = g.get("user")
-        user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
-        user_id = current_user.get('user_id')
-
-        # Build query
-        query = ChangeRequest.query.filter_by(
-            request_type='EXTRA_MATERIALS',
-            is_deleted=False
-        )
-
-        # Apply filters from query params
-        project_id = request.args.get('project_id')
-        area_id = request.args.get('area_id')
-        status = request.args.get('status')
-
-        if project_id:
-            query = query.filter_by(project_id=int(project_id))
-        if status:
-            query = query.filter_by(status=status)
-
-        # Role-based filtering
-        if user_role in ['siteengineer', 'sitesupervisor']:
-            query = query.filter_by(requested_by_user_id=user_id)
-        elif user_role == 'projectmanager':
-            # Get projects assigned to PM
-            projects = Project.query.filter_by(pm_id=user_id, is_deleted=False).all()
-            project_ids = [p.project_id for p in projects]
-            query = query.filter(ChangeRequest.project_id.in_(project_ids))
-
-        extra_materials = query.order_by(ChangeRequest.created_at.desc()).all()
-
-        # Format response
-        result = []
-        for em in extra_materials:
-            # Get project and area info
-            project = Project.query.get(em.project_id)
-
-            # Parse sub_items_data for display
-            sub_items = em.sub_items_data or []
-            for sub_item in sub_items:
-                result.append({
-                    'id': em.cr_id,
-                    'project_id': em.project_id,
-                    'project_name': project.project_name if project else 'Unknown',
-                    'area_id': 1,  # Placeholder - would come from area table
-                    'area_name': project.floor_name if project else 'Main Area',
-                    'boq_item_id': em.item_id,
-                    'boq_item_name': em.item_name,
-                    'sub_item_id': sub_item.get('sub_item_id'),
-                    'sub_item_name': sub_item.get('name') or sub_item.get('sub_item_name'),
-                    'quantity': sub_item.get('qty') or sub_item.get('quantity'),
-                    'unit_rate': sub_item.get('unit_price'),
-                    'total_cost': (sub_item.get('qty', 0) or sub_item.get('quantity', 0)) * sub_item.get('unit_price', 0),
-                    'reason_for_new_sub_item': sub_item.get('new_reason'),
-                    'requested_by': em.requested_by_name,
-                    'overhead_percent': em.percentage_of_item_overhead,
-                    'status': em.status,
-                    'created_at': em.created_at.isoformat() if em.created_at else None,
-                    'remarks': em.justification
-                })
-
-        return jsonify({"extra_materials": result}), 200
-
-    except Exception as e:
-        log.error(f"Error getting extra materials: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-
-def create_extra_material():
-    """
-    Create extra material request with proper routing
-    Routes: PM → Purchase → TD (>40%) or PM → Estimator (≤40%)
-    POST /api/change_request/extra_materials/create
-    """
-    try:
-        data = request.get_json()
-        current_user = g.get("user")
-
-        # Create sub_items array with proper structure
-        sub_items = [{
-            'sub_item_id': data.get('sub_item_id'),
-            'name': data.get('sub_item_name'),
-            'qty': data.get('quantity'),
-            'unit': data.get('unit'),
-            'unit_price': data.get('unit_rate'),
-            'is_new': data.get('sub_item_id') is None,
-            'new_reason': data.get('reason')
-        }]
-
-        # Create change request using existing logic
-        cr_data = {
-            'boq_id': data.get('boq_item_id'),  # May need to map from item_id to boq_id
-            'project_id': data.get('project_id'),
-            'area_id': data.get('area_id'),
-            'item_id': data.get('boq_item_id'),
-            'item_name': data.get('boq_item_name', ''),
-            'sub_items': sub_items,
-            'justification': data.get('remarks', ''),
-            'requester_id': current_user.get('user_id')
-        }
-
-        # Use existing create_change_request logic
-        request._cached_json = (cr_data, cr_data)  # Hack to pass data through
-        response = create_change_request()
-
-        # Extract response data
-        response_data, status_code = response
-
-        if status_code == 200 or status_code == 201:
-            return jsonify({"success": True, "message": "Extra material request created"}), 200
-        else:
-            return response_data, status_code
-
-    except Exception as e:
-        log.error(f"Error creating extra material: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-
-def approve_extra_material(id):
-    """
-    Approve extra material request
-    Roles allowed: PM, Purchase, Estimator, TD
-    PATCH /api/change_request/extra_materials/approve/:id
-    """
-    try:
-        # Use existing approval logic
-        return approve_change_request(id)
-
-    except Exception as e:
-        log.error(f"Error approving extra material: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+# REMOVED: get_extra_materials, create_extra_material, approve_extra_material functions
+# These functions have been removed as they were just wrappers around the main change request functionality.
+# Use the main change request functions directly:
+# - get_all_change_requests() for fetching
+# - create_change_request() for creating
+# - approve_change_request() for approving
+# This eliminates duplicate code and maintains a single source of truth.

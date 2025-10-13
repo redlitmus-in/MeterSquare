@@ -63,16 +63,44 @@ const ExtraMaterialPage: React.FC = () => {
   const fetchRequestedMaterials = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      if (filterProject) params.append('project_id', filterProject);
-      if (filterArea) params.append('area_id', filterArea);
-      params.append('status', 'pending,under_review');
-
+      // Use the main change-requests endpoint instead of extra_materials
       const response = await axios.get(
-        `${API_URL}/change_request/extra_materials?${params.toString()}`,
+        `${API_URL}/change-requests`,
         { headers }
       );
-      setExtraMaterials(response.data.extra_materials || []);
+
+      // Filter for pending and under_review statuses
+      const filteredRequests = (response.data.data || [])
+        .filter((cr: any) => ['pending', 'under_review'].includes(cr.status))
+        .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
+        .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
+
+      // Transform data to match expected format
+      const transformedData = filteredRequests.flatMap((cr: any) => {
+        const materials = cr.materials_data || [];
+        return materials.map((mat: any) => ({
+          id: cr.cr_id,
+          project_id: cr.project_id,
+          project_name: cr.project_name || 'Unknown',
+          area_id: cr.area_id || 1,
+          area_name: cr.area_name || 'Main Area',
+          boq_item_id: cr.item_id || '',
+          boq_item_name: cr.item_name || '',
+          sub_item_id: mat.master_material_id || '',
+          sub_item_name: mat.material_name,
+          quantity: mat.quantity,
+          unit_rate: mat.unit_price,
+          total_cost: mat.total_price,
+          reason_for_new_sub_item: mat.reason,
+          requested_by: cr.requested_by_name,
+          overhead_percent: cr.percentage_of_item_overhead || 0,
+          status: cr.status,
+          created_at: cr.created_at,
+          remarks: cr.justification
+        }));
+      });
+
+      setExtraMaterials(transformedData);
     } catch (error) {
       console.error('Error fetching extra materials:', error);
       toast.error('Failed to load extra material requests');
@@ -84,17 +112,45 @@ const ExtraMaterialPage: React.FC = () => {
   const fetchApprovedMaterials = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      if (filterProject) params.append('project_id', filterProject);
-      if (filterArea) params.append('area_id', filterArea);
-      if (filterItem) params.append('item_id', filterItem);
-      params.append('status', 'approved');
-
+      // Use the main change-requests endpoint instead of extra_materials
       const response = await axios.get(
-        `${API_URL}/change_request/extra_materials?${params.toString()}`,
+        `${API_URL}/change-requests`,
         { headers }
       );
-      setApprovedMaterials(response.data.extra_materials || []);
+
+      // Filter for approved status only
+      const filteredRequests = (response.data.data || [])
+        .filter((cr: any) => cr.status === 'approved')
+        .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
+        .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea))
+        .filter((cr: any) => !filterItem || cr.item_id === filterItem);
+
+      // Transform data to match expected format
+      const transformedData = filteredRequests.flatMap((cr: any) => {
+        const materials = cr.materials_data || [];
+        return materials.map((mat: any) => ({
+          id: cr.cr_id,
+          project_id: cr.project_id,
+          project_name: cr.project_name || 'Unknown',
+          area_id: cr.area_id || 1,
+          area_name: cr.area_name || 'Main Area',
+          boq_item_id: cr.item_id || '',
+          boq_item_name: cr.item_name || '',
+          sub_item_id: mat.master_material_id || '',
+          sub_item_name: mat.material_name,
+          quantity: mat.quantity,
+          unit_rate: mat.unit_price,
+          total_cost: mat.total_price,
+          reason_for_new_sub_item: mat.reason,
+          requested_by: cr.requested_by_name,
+          overhead_percent: cr.percentage_of_item_overhead || 0,
+          status: cr.status,
+          created_at: cr.created_at,
+          remarks: cr.justification
+        }));
+      });
+
+      setApprovedMaterials(transformedData);
     } catch (error) {
       console.error('Error fetching approved materials:', error);
       toast.error('Failed to load approved materials');
@@ -105,17 +161,48 @@ const ExtraMaterialPage: React.FC = () => {
 
   const handleSubmitExtraMaterial = async (data: any) => {
     try {
+      // Use the main change request API endpoint with proper structure
+      const changeRequestPayload = {
+        boq_id: data.boq_id,
+        justification: data.justification || data.remarks || 'Extra materials required',
+        materials: data.materials.map((mat: any) => ({
+          material_name: mat.sub_item_name,
+          quantity: mat.quantity,
+          unit: mat.unit,
+          unit_price: mat.unit_rate,
+          master_material_id: mat.sub_item_id || null,
+          reason: mat.reason || null
+        }))
+      };
+
       const response = await axios.post(
-        `${API_URL}/change_request/extra_materials/create`,
-        {
-          ...data,
-          requested_by: user?.user_id
-        },
+        `${API_URL}/boq/change-request`,
+        changeRequestPayload,
         { headers }
       );
 
-      if (response.data.success) {
-        toast.success('Extra material request submitted successfully');
+      if (response.data.success || response.data.cr_id) {
+        // Get the created CR ID from response
+        const crId = response.data.cr_id;
+
+        if (crId) {
+          // Automatically send for review to PM
+          try {
+            await axios.post(
+              `${API_URL}/change-request/${crId}/send-for-review`,
+              {},
+              { headers }
+            );
+            toast.success('Extra material request submitted and sent to PM for approval');
+          } catch (sendError: any) {
+            console.error('Error sending for review:', sendError);
+            // If sending for review fails, still show success for creation
+            toast.warning('Request created but needs to be sent for review manually');
+          }
+        } else {
+          toast.success('Extra material request submitted successfully');
+        }
+
         setShowForm(false);
         fetchRequestedMaterials();
       }
@@ -133,9 +220,19 @@ const ExtraMaterialPage: React.FC = () => {
         label: 'Pending'
       },
       under_review: {
+        color: 'bg-yellow-100 text-yellow-700 border-yellow-300',
+        icon: <ClockIcon className="w-4 h-4" />,
+        label: 'PM Approval Pending'
+      },
+      approved_by_pm: {
         color: 'bg-blue-100 text-blue-700 border-blue-300',
         icon: <ClockIcon className="w-4 h-4" />,
-        label: 'Under Review'
+        label: 'PM Approved - Under Review'
+      },
+      approved_by_td: {
+        color: 'bg-indigo-100 text-indigo-700 border-indigo-300',
+        icon: <ClockIcon className="w-4 h-4" />,
+        label: 'TD Approved - Final Review'
       },
       approved: {
         color: 'bg-green-100 text-green-700 border-green-300',

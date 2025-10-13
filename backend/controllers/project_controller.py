@@ -442,33 +442,43 @@ def get_assigned_projects():
 
                 items = boq_details.get('items', [])
 
-                for item in items:
-                    # Calculate item overhead
-                    item_overhead = item.get('overhead', 0)
+                for idx, item in enumerate(items):
+                    # Get item overhead amount
+                    item_overhead = item.get('overhead_amount', 0)
                     if item_overhead == 0:
                         # Calculate from percentage if not stored
                         overhead_percentage = item.get('overhead_percentage', 10)
                         total_cost = item.get('total_cost', 0)
                         item_overhead = (total_cost * overhead_percentage) / 100
 
+                    # Use master_item_id if available, otherwise use index
+                    item_id = item.get('master_item_id', '')
+                    if not item_id:
+                        item_id = f"item_{boq.boq_id}_{idx + 1}"
+
                     item_info = {
-                        "item_id": item.get('id', ''),
-                        "item_name": item.get('name', ''),
+                        "item_id": str(item_id),
+                        "item_name": item.get('item_name', ''),
                         "overhead_allocated": round(item_overhead, 2),
                         "overhead_consumed": 0.0,  # TODO: Calculate from approved change requests
                         "overhead_available": round(item_overhead, 2),
                         "sub_items": []
                     }
 
-                    # Add sub-items
-                    sub_items = item.get('sub_items', [])
-                    for sub_item in sub_items:
+                    # Add materials as sub-items
+                    materials = item.get('materials', [])
+                    for mat_idx, material in enumerate(materials):
+                        # Use master_material_id if available, otherwise generate one
+                        material_id = material.get('master_material_id', '')
+                        if not material_id:
+                            material_id = f"mat_{boq.boq_id}_{idx + 1}_{mat_idx + 1}"
+
                         sub_item_info = {
-                            "sub_item_id": sub_item.get('id', ''),
-                            "name": sub_item.get('name', ''),
-                            "unit": sub_item.get('unit', ''),
-                            "unit_price": sub_item.get('unit_price', 0),
-                            "default_qty": sub_item.get('quantity', 0)
+                            "sub_item_id": str(material_id),
+                            "name": material.get('material_name', ''),
+                            "unit": material.get('unit', ''),
+                            "unit_price": material.get('unit_price', 0),
+                            "default_qty": material.get('quantity', 0)
                         }
                         item_info["sub_items"].append(sub_item_info)
 

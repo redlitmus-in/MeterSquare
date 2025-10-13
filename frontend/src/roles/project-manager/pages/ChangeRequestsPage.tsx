@@ -31,7 +31,7 @@ import {
   LayoutGrid,
   List,
   Plus,
-  Cube
+  Box
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { toast } from 'sonner';
@@ -179,9 +179,9 @@ const ChangeRequestsPage: React.FC = () => {
 
     let matchesTab = false;
     if (isExtraMaterial) {
-      // Extra Material tab filtering
+      // Extra Material tab filtering - PM sees all pending requests
       matchesTab = (
-        (activeTab === 'requested' && req.requested_by_role === 'site_engineer' && req.status === 'pending') ||
+        (activeTab === 'requested' && (req.status === 'pending' || req.status === 'under_review')) ||
         (activeTab === 'under_review' && req.status === 'under_review') ||
         (activeTab === 'approved' && (req.status === 'approved' || req.status === 'approved_by_pm'))
       );
@@ -199,7 +199,10 @@ const ChangeRequestsPage: React.FC = () => {
   const stats = {
     pending: changeRequests.filter(r => r.approval_required_from === 'project_manager' && r.status !== 'approved' && r.status !== 'rejected').length,
     approved: changeRequests.filter(r => r.status === 'approved_by_pm' || r.status === 'approved').length,
-    rejected: changeRequests.filter(r => r.status === 'rejected').length
+    rejected: changeRequests.filter(r => r.status === 'rejected').length,
+    // For Extra Material counts
+    requested: changeRequests.filter(r => r.status === 'pending' || r.status === 'under_review').length,
+    under_review: changeRequests.filter(r => r.status === 'under_review').length
   };
 
   if (initialLoad) {
@@ -291,7 +294,7 @@ const ChangeRequestsPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className={`p-2 rounded-lg ${isExtraMaterial ? "bg-gradient-to-br from-orange-50 to-orange-100" : "bg-gradient-to-br from-purple-50 to-purple-100"}`}>
-                {isExtraMaterial ? <Cube className="w-6 h-6 text-orange-600" /> : <FileText className="w-6 h-6 text-purple-600" />}
+                {isExtraMaterial ? <Box className="w-6 h-6 text-orange-600" /> : <FileText className="w-6 h-6 text-purple-600" />}
               </div>
               <div>
                 <h1 className={`text-2xl font-bold ${isExtraMaterial ? "text-orange-700" : "text-purple-700"}`}>{isExtraMaterial ? "Extra Material" : "Change Requests"}</h1>
@@ -366,7 +369,7 @@ const ChangeRequestsPage: React.FC = () => {
                   >
                     <FileText className="w-4 h-4 mr-2" />
                     Requested
-                    <span className="ml-1 sm:ml-2 text-gray-400">({changeRequests.filter(r => r.requested_by_role === 'site_engineer').length})</span>
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.requested})</span>
                   </TabsTrigger>
                   <TabsTrigger
                     value="under_review"
@@ -374,7 +377,7 @@ const ChangeRequestsPage: React.FC = () => {
                   >
                     <Clock className="w-4 h-4 mr-2" />
                     Under Review
-                    <span className="ml-1 sm:ml-2 text-gray-400">({changeRequests.filter(r => r.status === 'under_review').length})</span>
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.under_review})</span>
                   </TabsTrigger>
                   <TabsTrigger
                     value="approved"
@@ -610,7 +613,7 @@ const ChangeRequestsPage: React.FC = () => {
             {isExtraMaterial && (
               <TabsContent value="requested" className="mt-0 p-0">
                 <div className="space-y-4 sm:space-y-6">
-                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Requested by Site Engineers</h2>
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending Review</h2>
                   {filteredRequests.length === 0 ? (
                     <div className="text-center py-12">
                       <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />

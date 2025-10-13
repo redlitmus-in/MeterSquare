@@ -45,7 +45,20 @@ interface BOQItem {
     amount: number;
   }[];
   laborCost: number;
+  totalLabourCost?: number;
+  totalMaterialCost?: number;
   estimatedSellingPrice: number;
+  selling_price?: number;
+  base_cost?: number;
+  overhead_percentage?: number;
+  overhead_amount?: number;
+  profit_margin_percentage?: number;
+  profit_margin_amount?: number;
+  discount_percentage?: number;
+  discount_amount?: number;
+  selling_price_before_discount?: number;
+  vat_percentage?: number;
+  vat_amount?: number;
   purchaseType?: 'existing' | 'new';
 }
 
@@ -156,7 +169,20 @@ const MyProjects: React.FC = () => {
           amount: lab.total_cost
         })) || [],
         laborCost: item.totalLabourCost || item.labor_cost || 0,
+        totalLabourCost: item.totalLabourCost,
+        totalMaterialCost: item.totalMaterialCost,
         estimatedSellingPrice: item.selling_price || item.estimatedSellingPrice || item.estimated_selling_price || item.amount,
+        selling_price: item.selling_price,
+        base_cost: item.base_cost,
+        overhead_percentage: item.overhead_percentage,
+        overhead_amount: item.overhead_amount,
+        profit_margin_percentage: item.profit_margin_percentage,
+        profit_margin_amount: item.profit_margin_amount,
+        discount_percentage: item.discount_percentage,
+        discount_amount: item.discount_amount,
+        selling_price_before_discount: item.selling_price_before_discount,
+        vat_percentage: item.vat_percentage,
+        vat_amount: item.vat_amount,
         purchaseType
       });
 
@@ -204,16 +230,21 @@ const MyProjects: React.FC = () => {
         newPurchaseItems: newItems
       });
 
-      // Load change requests for this BOQ
-      const crResponse = await changeRequestService.getBOQChangeRequests(boqId);
-      if (crResponse.success) {
-        const pending = crResponse.data.filter(cr => cr.status === 'pending');
-        const approved = crResponse.data.filter(cr => cr.status === 'approved');
-        const rejected = crResponse.data.filter(cr => cr.status === 'rejected');
-        setPendingChangeRequests(pending);
-        setApprovedChangeRequests(approved);
-        setRejectedChangeRequests(rejected);
-      }
+      // Load change requests for this BOQ - DISABLED for SE role
+      // const crResponse = await changeRequestService.getBOQChangeRequests(boqId);
+      // if (crResponse.success) {
+      //   const pending = crResponse.data.filter(cr => cr.status === 'pending');
+      //   const approved = crResponse.data.filter(cr => cr.status === 'approved');
+      //   const rejected = crResponse.data.filter(cr => cr.status === 'rejected');
+      //   setPendingChangeRequests(pending);
+      //   setApprovedChangeRequests(approved);
+      //   setRejectedChangeRequests(rejected);
+      // }
+
+      // Set empty arrays for now
+      setPendingChangeRequests([]);
+      setApprovedChangeRequests([]);
+      setRejectedChangeRequests([]);
     } catch (error: any) {
       console.error('Error loading project details:', error);
       toast.error(error?.response?.data?.error || 'Failed to load project details');
@@ -478,23 +509,12 @@ const MyProjects: React.FC = () => {
                     {projectDetails?.project_details?.client || selectedProject.client} • {projectDetails?.project_details?.location || selectedProject.location}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  {selectedProject.boq_id && (
-                    <button
-                      onClick={() => window.location.href = '/site-engineer/extra-material'}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors flex items-center gap-2"
-                    >
-                      <DocumentTextIcon className="w-4 h-4" />
-                      Request Extra Sub-Items
-                    </button>
-                  )}
-                  <button
-                    onClick={handleCloseModal}
-                    className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
-                  >
-                    <XMarkIcon className="w-6 h-6 text-blue-900" />
-                  </button>
-                </div>
+                <button
+                  onClick={handleCloseModal}
+                  className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6 text-blue-900" />
+                </button>
               </div>
             </div>
 
@@ -592,7 +612,7 @@ const MyProjects: React.FC = () => {
                                     ))}
                                   </div>
                                   <p className="text-sm font-bold text-blue-900 mt-2 pt-2 border-t border-blue-200">
-                                    Total Materials: AED{item.materials.reduce((sum, m) => sum + (m.amount || 0), 0).toLocaleString()}
+                                    Total Materials: AED{(item.totalMaterialCost || item.materials.reduce((sum, m) => sum + (m.amount || 0), 0)).toLocaleString()}
                                   </p>
                                 </div>
                               )}
@@ -609,15 +629,56 @@ const MyProjects: React.FC = () => {
                                     ))}
                                   </div>
                                   <p className="text-sm font-bold text-green-900 mt-2 pt-2 border-t border-green-200">
-                                    Total Labour: AED{(item.laborCost || 0).toLocaleString()}
+                                    Total Labour: AED{(item.totalLabourCost || item.laborCost || 0).toLocaleString()}
                                   </p>
                                 </div>
                               )}
 
+                              {/* Cost Breakdown */}
+                              <div className="mb-3 bg-gray-50 border border-gray-300 rounded-lg p-3">
+                                <p className="text-sm font-medium text-gray-900 mb-2">Cost Breakdown</p>
+                                <div className="space-y-1 text-sm">
+                                  <div className="flex justify-between text-gray-700">
+                                    <span>Base Cost:</span>
+                                    <span className="font-medium">AED{(item.base_cost || 0).toLocaleString()}</span>
+                                  </div>
+                                  {item.overhead_percentage !== undefined && (
+                                    <div className="flex justify-between text-orange-700">
+                                      <span>+ Overhead ({item.overhead_percentage}%):</span>
+                                      <span className="font-medium">AED{(item.overhead_amount || 0).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                  {item.profit_margin_percentage !== undefined && (
+                                    <div className="flex justify-between text-purple-700">
+                                      <span>+ Profit Margin ({item.profit_margin_percentage}%):</span>
+                                      <span className="font-medium">AED{(item.profit_margin_amount || 0).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                  {item.selling_price_before_discount && (
+                                    <div className="flex justify-between text-gray-600 pt-1 border-t">
+                                      <span>Price before Discount:</span>
+                                      <span className="font-medium">AED{(item.selling_price_before_discount || 0).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                  {item.discount_percentage !== undefined && item.discount_percentage > 0 && (
+                                    <div className="flex justify-between text-red-700">
+                                      <span>- Discount ({item.discount_percentage}%):</span>
+                                      <span className="font-medium">AED{(item.discount_amount || 0).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                  {item.vat_percentage !== undefined && item.vat_percentage > 0 && (
+                                    <div className="flex justify-between text-indigo-700">
+                                      <span>+ VAT ({item.vat_percentage}%):</span>
+                                      <span className="font-medium">AED{(item.vat_amount || 0).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
                               <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-3">
                                 <div className="flex justify-between items-center">
                                   <span className="text-sm font-medium text-green-900">Estimated Selling Price:</span>
-                                  <span className="text-xl font-bold text-green-900">AED{(item.estimatedSellingPrice || 0).toLocaleString()}</span>
+                                  <span className="text-xl font-bold text-green-900">AED{(item.selling_price || item.estimatedSellingPrice || 0).toLocaleString()}</span>
                                 </div>
                               </div>
                             </div>
@@ -697,7 +758,7 @@ const MyProjects: React.FC = () => {
                                     ))}
                                   </div>
                                   <p className="text-sm font-bold text-blue-900 mt-2 pt-2 border-t border-blue-200">
-                                    Total Materials: AED{item.materials.reduce((sum, m) => sum + (m.amount || 0), 0).toLocaleString()}
+                                    Total Materials: AED{(item.totalMaterialCost || item.materials.reduce((sum, m) => sum + (m.amount || 0), 0)).toLocaleString()}
                                   </p>
                                 </div>
                               )}
@@ -714,15 +775,56 @@ const MyProjects: React.FC = () => {
                                     ))}
                                   </div>
                                   <p className="text-sm font-bold text-green-900 mt-2 pt-2 border-t border-green-200">
-                                    Total Labour: AED{(item.laborCost || 0).toLocaleString()}
+                                    Total Labour: AED{(item.totalLabourCost || item.laborCost || 0).toLocaleString()}
                                   </p>
                                 </div>
                               )}
 
+                              {/* Cost Breakdown */}
+                              <div className="mb-3 bg-gray-50 border border-gray-300 rounded-lg p-3">
+                                <p className="text-sm font-medium text-gray-900 mb-2">Cost Breakdown</p>
+                                <div className="space-y-1 text-sm">
+                                  <div className="flex justify-between text-gray-700">
+                                    <span>Base Cost:</span>
+                                    <span className="font-medium">AED{(item.base_cost || 0).toLocaleString()}</span>
+                                  </div>
+                                  {item.overhead_percentage !== undefined && (
+                                    <div className="flex justify-between text-orange-700">
+                                      <span>+ Overhead ({item.overhead_percentage}%):</span>
+                                      <span className="font-medium">AED{(item.overhead_amount || 0).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                  {item.profit_margin_percentage !== undefined && (
+                                    <div className="flex justify-between text-purple-700">
+                                      <span>+ Profit Margin ({item.profit_margin_percentage}%):</span>
+                                      <span className="font-medium">AED{(item.profit_margin_amount || 0).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                  {item.selling_price_before_discount && (
+                                    <div className="flex justify-between text-gray-600 pt-1 border-t">
+                                      <span>Price before Discount:</span>
+                                      <span className="font-medium">AED{(item.selling_price_before_discount || 0).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                  {item.discount_percentage !== undefined && item.discount_percentage > 0 && (
+                                    <div className="flex justify-between text-red-700">
+                                      <span>- Discount ({item.discount_percentage}%):</span>
+                                      <span className="font-medium">AED{(item.discount_amount || 0).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                  {item.vat_percentage !== undefined && item.vat_percentage > 0 && (
+                                    <div className="flex justify-between text-indigo-700">
+                                      <span>+ VAT ({item.vat_percentage}%):</span>
+                                      <span className="font-medium">AED{(item.vat_amount || 0).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
                               <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-3">
                                 <div className="flex justify-between items-center">
                                   <span className="text-sm font-medium text-green-900">Estimated Selling Price:</span>
-                                  <span className="text-xl font-bold text-green-900">AED{(item.estimatedSellingPrice || 0).toLocaleString()}</span>
+                                  <span className="text-xl font-bold text-green-900">AED{(item.selling_price || item.estimatedSellingPrice || 0).toLocaleString()}</span>
                                 </div>
                               </div>
                             </div>
