@@ -472,10 +472,6 @@ def get_assigned_projects():
                         # Get approved change requests for this specific item only
                         approved_crs = ChangeRequest.query.filter(
                             ChangeRequest.boq_id == boq.boq_id,
-                            or_(
-                                ChangeRequest.item_id == str(item_id),
-                                ChangeRequest.item_name == item.get('item_name', '')
-                            ),
                             ChangeRequest.status == 'approved',
                             ChangeRequest.is_deleted == False
                         ).all()
