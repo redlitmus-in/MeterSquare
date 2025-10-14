@@ -164,6 +164,8 @@ const ExtraMaterialPage: React.FC = () => {
       // Use the main change request API endpoint with proper structure
       const changeRequestPayload = {
         boq_id: data.boq_id,
+        item_id: data.boq_item_id,  // Include item_id
+        item_name: data.boq_item_name,  // Include item_name
         justification: data.justification || data.remarks || 'Extra materials required',
         materials: data.materials.map((mat: any) => ({
           material_name: mat.sub_item_name,
