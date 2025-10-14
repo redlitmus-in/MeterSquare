@@ -136,16 +136,23 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     <div className="bg-gray-50 rounded p-3 space-y-2 text-sm">
                       {item.materials.map((mat: any, mIdx: number) => (
                         <div key={mIdx} className="flex justify-between items-center">
-                          <span className="text-gray-700">
-                            {mat.sub_item_name || mat.material_name}
-                            {mat.planned && (
-                              <span className="text-xs text-gray-500 ml-2">
-                                ({mat.planned.quantity} {mat.planned.unit} @ {formatCurrency(mat.planned.unit_price)}/{mat.planned.unit})
-                              </span>
-                            )}
-                            {!mat.planned && (
-                              <span className="text-xs text-orange-600 ml-2 font-semibold">
-                                (Unplanned)
+                          <span className="text-gray-700 flex items-center gap-2">
+                            <span>
+                              {mat.sub_item_name || mat.material_name}
+                              {mat.planned && (
+                                <span className="text-xs text-gray-500 ml-2">
+                                  ({mat.planned.quantity} {mat.planned.unit} @ {formatCurrency(mat.planned.unit_price)}/{mat.planned.unit})
+                                </span>
+                              )}
+                              {!mat.planned && (
+                                <span className="text-xs text-orange-600 ml-2 font-semibold">
+                                  (Unplanned)
+                                </span>
+                              )}
+                            </span>
+                            {mat.is_from_change_request && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-200">
+                                NEW - CR #{mat.change_request_id}
                               </span>
                             )}
                           </span>
@@ -252,7 +259,16 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       <tbody>
                         {item.materials.map((mat: any, mIdx: number) => mat.planned && (
                           <tr key={mIdx} className="border-t border-gray-100">
-                            <td className="py-2 px-3 text-gray-700">{mat.sub_item_name || mat.material_name}</td>
+                            <td className="py-2 px-3 text-gray-700">
+                              <div className="flex items-center gap-2">
+                                <span>{mat.sub_item_name || mat.material_name}</span>
+                                {mat.is_from_change_request && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-200">
+                                    NEW - CR #{mat.change_request_id}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="py-2 px-3 text-right font-medium text-gray-900">
                               {formatCurrency(mat.planned.total)}
                             </td>
@@ -357,7 +373,11 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                             <td className="py-2 px-3">
                               <div className="flex items-center gap-2">
                                 <span className="text-gray-700">{mat.sub_item_name || mat.material_name}</span>
-                                {mat.status === 'unplanned' && (
+                                {mat.is_from_change_request ? (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-200">
+                                    NEW - CR #{mat.change_request_id}
+                                  </span>
+                                ) : mat.status === 'unplanned' && (
                                   <span className="px-1.5 py-0.5 text-xs bg-orange-500 text-white rounded font-semibold">
                                     NEW
                                   </span>
