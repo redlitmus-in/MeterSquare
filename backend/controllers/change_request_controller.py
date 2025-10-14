@@ -2,7 +2,7 @@ from flask import request, jsonify, g
 from sqlalchemy.exc import SQLAlchemyError
 from config.db import db
 from models.change_request import ChangeRequest
-from models.boq import BOQ, BOQDetails, BOQHistory
+from models.boq import BOQ, BOQDetails, BOQHistory, MaterialPurchaseTracking
 from models.project import Project
 from models.user import User
 from config.logging import get_logger

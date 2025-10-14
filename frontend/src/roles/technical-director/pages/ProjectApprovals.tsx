@@ -123,6 +123,7 @@ const ProjectApprovals: React.FC = () => {
   const [showPMDetailsModal, setShowPMDetailsModal] = useState(false);
   const [selectedProjectPM, setSelectedProjectPM] = useState<any>(null);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [isRevisionApproval, setIsRevisionApproval] = useState(false);
 
   // Dynamic Revision Tabs States
   const [revisionTabs, setRevisionTabs] = useState<Array<{
@@ -613,9 +614,16 @@ const ProjectApprovals: React.FC = () => {
   const handleApproval = async (id: number, approved: boolean, notes?: string) => {
     try {
       if (approved) {
-        // Close approval notes modal and show comparison modal for TD to review
-        setShowApprovalModal(false);
-        setShowComparisonModal(true);
+        // For revision tab: directly approve without comparison modal
+        if (isRevisionApproval) {
+          setShowApprovalModal(false);
+          await handleFinalApproval();
+          setIsRevisionApproval(false); // Reset flag
+        } else {
+          // For pending tab: show comparison modal before approval
+          setShowApprovalModal(false);
+          setShowComparisonModal(true);
+        }
       } else {
         if (!notes || !notes.trim()) {
           toast.error('Please provide a rejection reason');
@@ -964,6 +972,7 @@ const ProjectApprovals: React.FC = () => {
               const estimation = filteredEstimations.find(est => est.id === boq.boq_id);
               if (estimation) {
                 setSelectedEstimation(estimation);
+                setIsRevisionApproval(true); // Flag to skip comparison modal
                 setShowApprovalModal(true);
               }
             }}

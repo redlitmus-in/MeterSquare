@@ -827,8 +827,11 @@ def get_all_boq():
                 sender_role = boq_history.sender_role.lower().replace('_', '').replace(' ', '')
                 receiver_role = boq_history.receiver_role.lower().replace('_', '').replace(' ', '')
 
+                # Don't override if BOQ has a definitive status (PM_Approved, PM_Rejected, etc.)
                 if sender_role == 'projectmanager' and receiver_role == 'estimator':
-                    display_status = 'pending'
+                    # Only set to pending if status is not already PM_Approved or PM_Rejected
+                    if boq.status not in ['PM_Approved', 'PM_Rejected', 'Pending_TD_Approval', 'Approved', 'Rejected']:
+                        display_status = 'pending'
                 elif sender_role == 'technicaldirector' and receiver_role == 'projectmanager':
                     display_status = 'Client_Confirmed'
                 elif sender_role == 'projectmanager' and receiver_role == 'siteengineer':

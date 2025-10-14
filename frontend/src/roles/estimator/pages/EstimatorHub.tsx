@@ -207,7 +207,16 @@ const ProjectCreationForm: React.FC<{
           <DatePicker
             id="start_date"
             selected={formData.start_date ? new Date(formData.start_date) : null}
-            onChange={(date: Date | null) => handleChange('start_date', date ? date.toISOString().split('T')[0] : '')}
+            onChange={(date: Date | null) => {
+              if (date) {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                handleChange('start_date', `${year}-${month}-${day}`);
+              } else {
+                handleChange('start_date', '');
+              }
+            }}
             dateFormat="dd/MM/yyyy"
             placeholderText="Select start date"
             minDate={new Date()}
@@ -1145,6 +1154,9 @@ const EstimatorHub: React.FC = () => {
       draft: { className: 'bg-gray-50 text-gray-600 border-gray-200', icon: FileText },
       inreview: { className: 'bg-yellow-50 text-yellow-700 border-yellow-200', icon: Clock },
       approved: { className: 'bg-green-50 text-green-700 border-green-200', icon: CheckCircle },
+      pmapproved: { className: 'bg-green-50 text-green-700 border-green-200', icon: CheckCircle, label: 'PM APPROVED' },
+      pendingtdapproval: { className: 'bg-yellow-50 text-yellow-700 border-yellow-200', icon: Clock, label: 'PENDING TD APPROVAL' },
+      pendingpmapproval: { className: 'bg-orange-50 text-orange-700 border-orange-200', icon: Clock, label: 'PENDING PM APPROVAL' },
       sentforconfirmation: { className: 'bg-blue-50 text-blue-700 border-blue-200', icon: Send },
       pending: { className: 'bg-orange-50 text-orange-700 border-orange-200', icon: Clock },
       pendingrevision: { className: 'bg-red-50 text-red-700 border-red-200', icon: Clock, label: 'PENDING REVISION' },
@@ -1921,7 +1933,7 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Approved</span>
                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
                   const s = b.status?.toLowerCase();
-                  return s === 'approved' || s === 'sent_for_confirmation' || s === 'client_confirmed' || s === 'client_rejected';
+                  return s === 'pm_approved' || s === 'pending_td_approval' || s === 'approved' || s === 'sent_for_confirmation' || s === 'client_confirmed';
                 }).length})</span>
               </TabsTrigger>
               <TabsTrigger
