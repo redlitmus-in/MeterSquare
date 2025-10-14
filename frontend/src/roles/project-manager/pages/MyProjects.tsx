@@ -13,7 +13,9 @@ import {
   DocumentTextIcon,
   ArrowDownTrayIcon,
   PencilIcon,
+  MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
+import { Squares2X2Icon, ListBulletIcon } from '@heroicons/react/24/solid';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
 import { projectManagerService } from '../services/projectManagerService';
@@ -149,6 +151,8 @@ const MyProjects: React.FC = () => {
   const [rejectionReason, setRejectionReason] = useState('');
   const [approvalComments, setApprovalComments] = useState('');
   const [processingBOQ, setProcessingBOQ] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
   useEffect(() => {
     loadProjects();
@@ -172,7 +176,6 @@ const MyProjects: React.FC = () => {
         const hasSiteSupervisor = siteSupervisorId !== null &&
                                   siteSupervisorId !== undefined &&
                                   siteSupervisorId !== 0;
-        const effectiveStatus = hasSiteSupervisor ? 'assigned' : (boq.boq_status || 'pending');
 
         return {
           project_id: boq.project_details?.project_id || boq.project_id,
@@ -187,9 +190,10 @@ const MyProjects: React.FC = () => {
           site_supervisor_id: siteSupervisorId,
           site_supervisor_name: boq.project_details?.site_supervisor_name || null,
           completion_requested: boq.project_details?.completion_requested === true,
+          user_id: boq.project_details?.user_id || null, // Add user_id from project_details
           boq_id: boq.boq_id,
           boq_name: boq.boq_name,
-          boq_status: effectiveStatus,
+          boq_status: boq.boq_status, // Keep the actual BOQ status from backend
           boq_details: undefined, // Load on demand when viewing BOQ
           created_at: boq.created_at,
           priority: boq.priority || 'medium'
@@ -430,10 +434,26 @@ const MyProjects: React.FC = () => {
                               project.site_supervisor_id !== undefined &&
                               project.site_supervisor_id !== 0;
 
+    // Apply search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const matchesSearch =
+        project.project_name?.toLowerCase().includes(query) ||
+        project.client?.toLowerCase().includes(query) ||
+        project.location?.toLowerCase().includes(query) ||
+        project.boq_name?.toLowerCase().includes(query);
+
+      if (!matchesSearch) return false;
+    }
+
     if (filterStatus === 'pending') {
-      return !hasSiteSupervisor && project.status?.toLowerCase() !== 'completed' &&
-             project.boq_status?.toLowerCase() !== 'approved' &&
-             project.boq_status?.toLowerCase() !== 'rejected';
+      const status = project.boq_status?.toLowerCase() || '';
+      // Show: 1) Waiting for PM approval OR 2) Projects assigned by TD (Client_Confirmed/Approved status)
+      return (!hasSiteSupervisor && project.status?.toLowerCase() !== 'completed') &&
+             (status === 'pending_pm_approval' ||
+              status === 'client_confirmed' ||
+              (status === 'approved' && project.user_id !== null)) && // Assigned projects with approved status
+             status !== 'pm_rejected';
     }
     if (filterStatus === 'assigned') {
       return hasSiteSupervisor && project.status?.toLowerCase() !== 'completed';
@@ -442,10 +462,17 @@ const MyProjects: React.FC = () => {
       return project.status?.toLowerCase() === 'completed';
     }
     if (filterStatus === 'approved') {
-      return project.boq_status?.toLowerCase() === 'approved';
+      const status = project.boq_status?.toLowerCase() || '';
+      // Show BOQs that THIS PM has approved
+      // Stay here until TD assigns PM to the project (user_id is null)
+      // Once TD assigns PM (user_id is set), it moves to Pending tab
+      // Include revision statuses too
+      const pmOnlyApprovedStatuses = ['pm_approved', 'pending_td_approval', 'approved', 'sent_for_confirmation', 'client_confirmed', 'pending_revision', 'under_revision', 'revision_approved'];
+      return pmOnlyApprovedStatuses.includes(status) && project.user_id === null && !hasSiteSupervisor && project.status?.toLowerCase() !== 'completed';
     }
     if (filterStatus === 'rejected') {
-      return project.boq_status?.toLowerCase() === 'rejected';
+      const status = project.boq_status?.toLowerCase() || '';
+      return status === 'rejected' || status === 'pm_rejected';
     }
     return false;
   });
@@ -453,17 +480,28 @@ const MyProjects: React.FC = () => {
   const getTabCounts = () => ({
     pending: projects.filter(p => {
       const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
-      return !hasSS && p.status?.toLowerCase() !== 'completed' &&
-             p.boq_status?.toLowerCase() !== 'approved' &&
-             p.boq_status?.toLowerCase() !== 'rejected';
+      const status = p.boq_status?.toLowerCase() || '';
+      return (!hasSS && p.status?.toLowerCase() !== 'completed') &&
+             (status === 'pending_pm_approval' ||
+              status === 'client_confirmed' ||
+              (status === 'approved' && p.user_id !== null)) &&
+             status !== 'pm_rejected';
     }).length,
     assigned: projects.filter(p => {
       const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
       return hasSS && p.status?.toLowerCase() !== 'completed';
     }).length,
     completed: projects.filter(p => p.status?.toLowerCase() === 'completed').length,
-    approved: projects.filter(p => p.boq_status?.toLowerCase() === 'approved').length,
-    rejected: projects.filter(p => p.boq_status?.toLowerCase() === 'rejected').length
+    approved: projects.filter(p => {
+      const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
+      const status = p.boq_status?.toLowerCase() || '';
+      const pmOnlyApprovedStatuses = ['pm_approved', 'pending_td_approval', 'approved', 'sent_for_confirmation', 'client_confirmed', 'pending_revision', 'under_revision', 'revision_approved'];
+      return pmOnlyApprovedStatuses.includes(status) && p.user_id === null && !hasSS && p.status?.toLowerCase() !== 'completed';
+    }).length,
+    rejected: projects.filter(p => {
+      const status = p.boq_status?.toLowerCase() || '';
+      return status === 'rejected' || status === 'pm_rejected';
+    }).length
   });
 
   const formatDate = (dateString?: string) => {
@@ -497,23 +535,71 @@ const MyProjects: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <h1 className="text-2xl font-bold text-gray-900">My Projects</h1>
+      {/* Header - Match Estimator/TD Style */}
+      <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 py-5">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
+              <BuildingOfficeIcon className="w-6 h-6 text-blue-600" />
+            </div>
+            <h1 className="text-2xl font-bold text-[#243d8a]">My Projects</h1>
+          </div>
+        </div>
+      </div>
+
+      {/* Search Bar and Controls */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
+          {/* Search Bar */}
+          <div className="relative flex-1 max-w-full sm:max-w-md">
+            <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <input
+              type="text"
+              placeholder="Search projects, client, location..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:border-gray-300 focus:ring-0 text-sm"
+            />
+          </div>
+
+          {/* View Mode Toggle */}
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('cards')}
+              className={`h-8 px-3 rounded-md transition-all flex items-center gap-1.5 text-sm font-medium ${
+                viewMode === 'cards'
+                  ? 'bg-[#243d8a] text-white hover:opacity-90'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'
+              }`}
+            >
+              <Squares2X2Icon className="h-4 w-4" />
+              <span className="hidden sm:inline">Cards</span>
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              className={`h-8 px-3 rounded-md transition-all flex items-center gap-1.5 text-sm font-medium ${
+                viewMode === 'table'
+                  ? 'bg-[#243d8a] text-white hover:opacity-90'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'
+              }`}
+            >
+              <ListBulletIcon className="h-4 w-4" />
+              <span className="hidden sm:inline">Table</span>
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Tab Filters */}
-      <div className="bg-gray-50 py-4">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-center gap-2">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
+        <div className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6">
+          <div className="flex items-start justify-start gap-0 border-b border-gray-200 mb-6">
             <button
               onClick={() => setFilterStatus('pending')}
-              className={`px-5 py-2 text-sm font-medium whitespace-nowrap transition-all rounded-lg ${
+              className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-all border-b-2 ${
                 filterStatus === 'pending'
-                  ? 'bg-white text-orange-600 shadow-sm border-2 border-orange-200'
-                  : 'bg-transparent text-gray-700 hover:bg-white/50'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
               Pending ({tabCounts.pending})
@@ -521,10 +607,10 @@ const MyProjects: React.FC = () => {
 
             <button
               onClick={() => setFilterStatus('assigned')}
-              className={`px-5 py-2 text-sm font-medium whitespace-nowrap transition-all rounded-lg ${
+              className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-all border-b-2 ${
                 filterStatus === 'assigned'
-                  ? 'bg-white text-red-600 shadow-sm border-2 border-red-200'
-                  : 'bg-transparent text-gray-700 hover:bg-white/50'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
               Assigned ({tabCounts.assigned})
@@ -532,10 +618,10 @@ const MyProjects: React.FC = () => {
 
             <button
               onClick={() => setFilterStatus('approved')}
-              className={`px-5 py-2 text-sm font-medium whitespace-nowrap transition-all rounded-lg ${
+              className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-all border-b-2 ${
                 filterStatus === 'approved'
-                  ? 'bg-white text-green-600 shadow-sm border-2 border-green-200'
-                  : 'bg-transparent text-gray-700 hover:bg-white/50'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
               Approved ({tabCounts.approved})
@@ -543,10 +629,10 @@ const MyProjects: React.FC = () => {
 
             <button
               onClick={() => setFilterStatus('rejected')}
-              className={`px-5 py-2 text-sm font-medium whitespace-nowrap transition-all rounded-lg ${
+              className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-all border-b-2 ${
                 filterStatus === 'rejected'
-                  ? 'bg-white text-red-600 shadow-sm border-2 border-red-200'
-                  : 'bg-transparent text-gray-700 hover:bg-white/50'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
               Rejected ({tabCounts.rejected})
@@ -554,28 +640,25 @@ const MyProjects: React.FC = () => {
 
             <button
               onClick={() => setFilterStatus('completed')}
-              className={`px-5 py-2 text-sm font-medium whitespace-nowrap transition-all rounded-lg ${
+              className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-all border-b-2 ${
                 filterStatus === 'completed'
-                  ? 'bg-white text-blue-600 shadow-sm border-2 border-blue-200'
-                  : 'bg-transparent text-gray-700 hover:bg-white/50'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
               Completed ({tabCounts.completed})
             </button>
           </div>
-        </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Projects List - TD Style Cards */}
-        <div className="space-y-4">
+          {/* Projects List */}
           {filteredProjects.length === 0 ? (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
+            <div className="bg-gray-50 rounded-xl border border-gray-200 p-12 text-center">
               <BuildingOfficeIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500 text-lg">No projects in this category</p>
             </div>
-          ) : (
-            filteredProjects.map((project, index) => (
+          ) : viewMode === 'cards' ? (
+            <div className="space-y-4">
+              {filteredProjects.map((project, index) => (
               <motion.div
                 key={project.project_id}
                 initial={{ opacity: 0, y: 20 }}
@@ -614,7 +697,7 @@ const MyProjects: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
                       <button
                         onClick={() => {
                           setSelectedProject(project);
@@ -622,18 +705,21 @@ const MyProjects: React.FC = () => {
                             loadBOQDetails(project.boq_id);
                           }
                         }}
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
                         title="View Details"
                       >
                         <EyeIcon className="w-5 h-5" />
                       </button>
-                      {!project.site_supervisor_id && (
+                      {!project.site_supervisor_id &&
+                       project.user_id !== null &&
+                       (project.boq_status?.toLowerCase() === 'client_confirmed' ||
+                        project.boq_status?.toLowerCase() === 'approved') && (
                         <button
                           onClick={() => {
                             setSelectedProject(project);
                             setShowAssignModal(true);
                           }}
-                          className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                          className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-all"
                           title="Assign Site Engineer"
                         >
                           <UserPlusIcon className="w-5 h-5" />
@@ -704,7 +790,130 @@ const MyProjects: React.FC = () => {
 
                 </div>
               </motion.div>
-            ))
+              ))}
+            </div>
+          ) : (
+            /* Table View */
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Project
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Client
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Priority
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Site Engineer
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Date
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredProjects.map((project) => (
+                    <tr key={project.project_id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{project.project_name}</div>
+                        <div className="text-xs text-gray-500">{project.location || 'N/A'}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{project.client || 'N/A'}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700 flex items-center gap-1 w-fit">
+                          <ClockIcon className="w-3 h-3" />
+                          {project.boq_status || 'pending'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPriorityColor(project.priority)}`}>
+                          {project.priority}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {project.site_supervisor_name ? (
+                          <div className="flex items-center gap-1 px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md w-fit">
+                            <UserIcon className="w-3.5 h-3.5 text-purple-600" />
+                            <span className="text-xs font-medium text-purple-900">{project.site_supervisor_name}</span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-gray-400">Not assigned</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{formatDate(project.created_at)}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              setSelectedProject(project);
+                              if (project.boq_id) {
+                                loadBOQDetails(project.boq_id);
+                              }
+                            }}
+                            className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
+                            title="View Details"
+                          >
+                            <EyeIcon className="w-5 h-5" />
+                          </button>
+                          {!project.site_supervisor_id &&
+                           project.user_id !== null &&
+                           (project.boq_status?.toLowerCase() === 'client_confirmed' ||
+                            project.boq_status?.toLowerCase() === 'approved') && (
+                            <button
+                              onClick={() => {
+                                setSelectedProject(project);
+                                setShowAssignModal(true);
+                              }}
+                              className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-all"
+                              title="Assign Site Engineer"
+                            >
+                              <UserPlusIcon className="w-5 h-5" />
+                            </button>
+                          )}
+                          {project.site_supervisor_id && project.status?.toLowerCase() !== 'completed' && (
+                            <>
+                              {project.completion_requested ? (
+                                <button
+                                  onClick={() => {
+                                    setProjectToComplete(project);
+                                    setShowCompleteModal(true);
+                                  }}
+                                  className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg transition-colors flex items-center gap-1.5 text-xs font-medium shadow-sm relative"
+                                  title="SE Requested Completion - Click to Approve"
+                                >
+                                  <CheckCircleIcon className="w-4 h-4" />
+                                  Confirm
+                                </button>
+                              ) : null}
+                            </>
+                          )}
+                          {project.status?.toLowerCase() === 'completed' && (
+                            <div className="px-3 py-1 bg-green-100 border border-green-400 rounded-lg flex items-center gap-1.5">
+                              <CheckCircleIcon className="w-4 h-4 text-green-600" />
+                              <span className="text-xs font-bold text-green-900">Completed</span>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>
@@ -1182,27 +1391,28 @@ const MyProjects: React.FC = () => {
                           <CheckCircleIcon className="w-5 h-5 text-purple-600" />
                           <span className="font-semibold text-purple-700">Completed</span>
                         </div>
-                      ) : selectedProject.boq_status?.toLowerCase() === 'pending' ? (
+                      ) : (selectedProject.boq_status?.toLowerCase() === 'pending' ||
+                             selectedProject.boq_status?.toLowerCase() === 'pending_pm_approval') ? (
                         <>
                           <button
                             onClick={() => handleEditBOQ(selectedProject)}
-                            className="px-6 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center gap-2"
+                            className="px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
                           >
-                            <PencilIcon className="w-5 h-5" />
+                            <PencilIcon className="w-4 h-4" />
                             Edit BOQ
                           </button>
                           <button
                             onClick={() => setShowRejectModal(true)}
-                            className="px-6 py-2.5 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center gap-2"
+                            className="px-4 py-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
                           >
-                            <XMarkIcon className="w-5 h-5" />
+                            <XMarkIcon className="w-4 h-4" />
                             Reject BOQ
                           </button>
                           <button
                             onClick={() => setShowApproveModal(true)}
-                            className="px-6 py-2.5 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center gap-2"
+                            className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
                           >
-                            <CheckCircleIcon className="w-5 h-5" />
+                            <CheckCircleIcon className="w-4 h-4" />
                             Approve BOQ
                           </button>
                         </>
@@ -2095,14 +2305,31 @@ const MyProjects: React.FC = () => {
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    setShowApproveModal(false);
-                    setShowComparisonModal(true);
+                  onClick={async () => {
+                    try {
+                      setProcessingBOQ(true);
+                      await projectManagerService.sendBOQToEstimator({
+                        boq_id: selectedProject.boq_id,
+                        boq_status: 'approved',
+                        comments: approvalComments || '',
+                      });
+
+                      toast.success('BOQ approved and sent to estimator');
+                      setShowApproveModal(false);
+                      setShowBOQModal(false);
+                      setApprovalComments('');
+                      loadProjects();
+                    } catch (error: any) {
+                      toast.error(error.response?.data?.error || 'Failed to approve BOQ');
+                    } finally {
+                      setProcessingBOQ(false);
+                    }
                   }}
-                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center justify-center gap-2"
+                  disabled={processingBOQ}
+                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <CheckCircleIcon className="w-5 h-5" />
-                  Continue to Comparison
+                  {processingBOQ ? 'Approving...' : 'Approve BOQ'}
                 </button>
               </div>
             </div>

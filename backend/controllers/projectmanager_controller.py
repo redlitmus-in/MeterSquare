@@ -81,7 +81,7 @@ def get_all_pm_boqs():
         project_ids = [p.project_id for p in assigned_projects]
 
         # MODIFIED: Also get BOQs where this PM is the recipient in BOQ history (for approval requests)
-        # Find BOQs where this PM was sent the BOQ for approval
+        # Find BOQs where this PM was sent the BOQ for approval OR where PM approved it
         # Query using raw SQL to search in JSONB array
         from sqlalchemy import text
 
@@ -90,9 +90,15 @@ def get_all_pm_boqs():
                 SELECT DISTINCT bh.boq_id
                 FROM boq_history bh,
                      jsonb_array_elements(bh.action) AS action_item
-                WHERE action_item->>'receiver_role' = 'project_manager'
-                  AND (action_item->>'recipient_user_id')::INTEGER = :user_id
-                  AND action_item->>'type' = 'sent_to_pm'
+                WHERE (
+                    (action_item->>'receiver_role' = 'project_manager'
+                     AND (action_item->>'recipient_user_id')::INTEGER = :user_id
+                     AND action_item->>'type' = 'sent_to_pm')
+                    OR
+                    (action_item->>'sender_role' = 'project_manager'
+                     AND (action_item->>'decided_by_user_id')::INTEGER = :user_id
+                     AND action_item->>'type' = 'sent_to_estimator')
+                )
             """),
             {"user_id": user_id}
         )
@@ -108,11 +114,12 @@ def get_all_pm_boqs():
                 BOQ.boq_id == -1  # No results
             )
         elif not project_ids:
-            # Only approval requests
+            # Only approval requests - show from PM approval onwards until project is assigned
             query = db.session.query(BOQ).filter(
                 BOQ.is_deleted == False,
                 BOQ.email_sent == True,
-                BOQ.boq_id.in_(boq_ids_for_approval)
+                BOQ.boq_id.in_(boq_ids_for_approval),
+                BOQ.status.in_(['Pending_PM_Approval', 'PM_Approved', 'PM_Rejected', 'Pending_TD_Approval', 'Approved', 'Sent_for_Confirmation', 'Client_Confirmed', 'Pending_Revision', 'Under_Revision', 'Revision_Approved'])  # Show throughout approval and revision flow
             ).order_by(BOQ.created_at.desc())
         elif not boq_ids_for_approval:
             # Only assigned projects
@@ -127,8 +134,11 @@ def get_all_pm_boqs():
                 BOQ.is_deleted == False,
                 BOQ.email_sent == True,
                 db.or_(
-                    BOQ.project_id.in_(project_ids),
-                    BOQ.boq_id.in_(boq_ids_for_approval)
+                    BOQ.project_id.in_(project_ids),  # Show all BOQs for assigned projects
+                    db.and_(
+                        BOQ.boq_id.in_(boq_ids_for_approval),  # For approval requests
+                        BOQ.status.in_(['Pending_PM_Approval', 'PM_Approved', 'PM_Rejected', 'Pending_TD_Approval', 'Approved', 'Sent_for_Confirmation', 'Client_Confirmed', 'Pending_Revision', 'Under_Revision', 'Revision_Approved'])  # Show throughout approval and revision flow
+                    )
                 )
             ).order_by(BOQ.created_at.desc())
         # Paginate
