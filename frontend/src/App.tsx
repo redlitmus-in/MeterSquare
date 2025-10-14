@@ -24,7 +24,6 @@ const TasksPage = lazy(() => import('@/pages/common/TasksPage'));
 const ProjectsPage = lazy(() => import('@/pages/common/ProjectsPage'));
 const ProcessFlowPage = lazy(() => import('@/pages/common/ProcessFlowPage'));
 const ProfilePage = lazy(() => import('@/pages/common/ProfilePage'));
-const AnalyticsPage = lazy(() => import('@/pages/common/AnalyticsPage'));
 const WorkflowStatusPage = lazy(() => import('@/pages/common/WorkflowStatusPage'));
 const CreativeErrorPage = lazy(() => import('@/components/ui/CreativeErrorPage'));
 
@@ -462,7 +461,6 @@ function App() {
             <Route path="workflow-status" element={<WorkflowStatusPage />} />
             <Route path="workflows/material-dispatch-production" element={<MaterialDispatchProductionPage />} />
             <Route path="workflows/material-dispatch-site" element={<MaterialDispatchSitePage />} />
-            <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="profile" element={<ProfilePage />} />
 
             {/* Technical Director Routes */}

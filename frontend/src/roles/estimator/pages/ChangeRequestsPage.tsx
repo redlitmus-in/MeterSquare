@@ -29,7 +29,8 @@ import {
   Calendar,
   FolderOpen,
   LayoutGrid,
-  List
+  List,
+  Pencil
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { toast } from 'sonner';
@@ -146,6 +147,16 @@ const ChangeRequestsPage: React.FC = () => {
     setShowRejectionModal(true);
   };
 
+  const handleEdit = (crId: number) => {
+    // Find the change request and open it in the details modal with edit mode
+    const request = changeRequests.find(r => r.cr_id === crId);
+    if (request) {
+      setSelectedChangeRequest(request);
+      setShowDetailsModal(true);
+      // The modal will handle edit mode based on the request status and user role
+    }
+  };
+
   const formatCurrency = (value: number) => {
     return `AED ${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
   };
@@ -234,6 +245,12 @@ const ChangeRequestsPage: React.FC = () => {
                     <Eye className="h-3.5 w-3.5 mr-1" />
                     View
                   </Button>
+                  {request.status === 'pending' && (
+                    <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => handleEdit(request.cr_id)}>
+                      <Pencil className="h-3.5 w-3.5 mr-1" />
+                      Edit
+                    </Button>
+                  )}
                   {request.approval_required_from === 'estimator' && request.status !== 'approved' && request.status !== 'rejected' && (
                     <>
                       <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(request.cr_id)}>
@@ -435,26 +452,35 @@ const ChangeRequestsPage: React.FC = () => {
                         </div>
 
                         {/* Actions */}
-                        <div className="border-t border-gray-200 p-2 sm:p-3 grid grid-cols-3 gap-1 sm:gap-2">
-                          <button
-                            onClick={() => handleReview(request.cr_id)}
-                            className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
-                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                          >
-                            <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                            <span className="hidden sm:inline">Review</span>
-                            <span className="sm:hidden">View</span>
-                          </button>
+                        <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => handleReview(request.cr_id)}
+                              className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                            >
+                              <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                              <span>Review</span>
+                            </button>
+                            {request.status === 'pending' && (
+                              <button
+                                onClick={() => handleEdit(request.cr_id)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] sm:text-xs h-8 rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                              >
+                                <Pencil className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                                <span>Edit</span>
+                              </button>
+                            )}
+                          </div>
                           {request.approval_required_from === 'estimator' && request.status !== 'approved' && request.status !== 'rejected' && (
-                            <>
+                            <div className="grid grid-cols-2 gap-2">
                               <button
                                 onClick={() => handleApprove(request.cr_id)}
                                 className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
                                 style={{ backgroundColor: 'rgb(22, 163, 74)' }}
                               >
                                 <Check className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                                <span className="hidden sm:inline">Approve</span>
-                                <span className="sm:hidden">Yes</span>
+                                <span>Approve</span>
                               </button>
                               <button
                                 onClick={() => handleReject(request.cr_id)}
@@ -464,7 +490,7 @@ const ChangeRequestsPage: React.FC = () => {
                                 <span className="hidden sm:inline">Reject</span>
                                 <span className="sm:hidden">No</span>
                               </button>
-                            </>
+                            </div>
                           )}
                         </div>
                       </motion.div>

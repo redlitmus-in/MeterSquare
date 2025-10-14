@@ -7,7 +7,8 @@
       "Bash(timeout 5 bash -c 'until curl -s http://localhost:8000/api/sitesupervisor_boq > /dev/null 2>&1; do sleep 1; done; echo \"\"Server is ready\"\"')",
       "Bash(python:*)",
       "Bash(C:UsersadminAppDataLocalProgramsPythonPython312python migrations/create_change_requests_table.py)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

@@ -129,10 +129,12 @@ def create_change_request():
                     'reason': mat.get('reason')
                 })
 
-        # Get item info from extra_material_data if available
-        item_id = None
-        item_name = None
-        if hasattr(g, 'extra_material_data') and g.extra_material_data:
+        # Get item info from request data or extra_material_data
+        item_id = data.get('item_id')
+        item_name = data.get('item_name')
+
+        # Fallback to extra_material_data if available
+        if not item_id and hasattr(g, 'extra_material_data') and g.extra_material_data:
             item_id = g.extra_material_data.get('item_id')
             item_name = g.extra_material_data.get('item_name', '')
 
@@ -176,17 +178,38 @@ def create_change_request():
             cost_increase_percentage=overhead_impact['cost_increase_percentage']
         )
 
-        db.session.add(change_request)
-        db.session.commit()
+        # Auto-send for review if created by SE
+        normalized_role = workflow_service.normalize_role(user_role)
+        if normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
+            # Automatically send for review to PM
+            change_request.approval_required_from = 'project_manager'
+            change_request.current_approver_role = 'project_manager'
+            change_request.status = 'under_review'
+            log.info(f"Auto-sending SE request {change_request.cr_id} to PM for review")
+
+            db.session.add(change_request)
+            db.session.commit()
+
+            response_message = "Change request created and sent to Project Manager for review"
+            response_status = "under_review"
+            approval_from = "project_manager"
+        else:
+            # PM or other roles create in pending status
+            db.session.add(change_request)
+            db.session.commit()
+
+            response_message = "Change request created successfully"
+            response_status = "pending"
+            approval_from = None
 
         log.info(f"Change request {change_request.cr_id} created by {user_name} for BOQ {boq_id}")
 
         # Prepare response
         response = {
             "success": True,
-            "message": "Change request created successfully",
+            "message": response_message,
             "cr_id": change_request.cr_id,
-            "status": "pending",
+            "status": response_status,
             "materials_total_cost": round(materials_total_cost, 2),
             "overhead_consumed": round(overhead_impact['overhead_consumed'], 2),
             "overhead_status": {
@@ -198,10 +221,10 @@ def create_change_request():
                 "is_over_budget": overhead_impact['is_over_budget'],
                 "balance": "negative" if overhead_impact['is_over_budget'] else "positive"
             },
-            "approval_required_from": None,  # Not set until sent for review
+            "approval_required_from": approval_from,
             "project_name": project.project_name,
             "boq_name": boq.boq_name,
-            "note": "Request created. Click 'Send for Review' to submit to approver."
+            "note": "Request sent for review." if approval_from else "Request created. Click 'Send for Review' to submit to approver."
         }
 
         return jsonify(response), 201
@@ -323,10 +346,9 @@ def get_all_change_requests():
             # 2. Requests from SEs that need PM approval (approval_required_from = 'project_manager')
             # 3. ALL requests from their projects (for extra materials page)
             from sqlalchemy import or_, and_
-            from models.project_model import Project
 
             # Get projects assigned to this PM
-            pm_projects = Project.query.filter_by(pm_user_id=user_id).all()
+            pm_projects = Project.query.filter_by(user_id=user_id).all()
             pm_project_ids = [p.project_id for p in pm_projects]
 
             query = query.filter(
@@ -362,10 +384,28 @@ def get_all_change_requests():
             # Add project name
             if cr.project:
                 cr_dict['project_name'] = cr.project.project_name
+                cr_dict['project_location'] = cr.project.location
+                cr_dict['project_client'] = cr.project.client
 
-            # Add BOQ name
+            # Add BOQ name and status
             if cr.boq:
                 cr_dict['boq_name'] = cr.boq.boq_name
+                cr_dict['boq_status'] = cr.boq.status
+
+            # If item_name is missing, try to get it from materials data
+            if not cr.item_name and cr.materials_data:
+                # Try to get item info from first material's master data
+                first_material = cr.materials_data[0] if isinstance(cr.materials_data, list) else None
+                if first_material and first_material.get('master_material_id'):
+                    from models.boq import MasterMaterial, MasterItem
+                    material = MasterMaterial.query.filter_by(
+                        material_id=int(first_material['master_material_id'])
+                    ).first()
+                    if material and material.item_id:
+                        item = MasterItem.query.filter_by(item_id=material.item_id).first()
+                        if item:
+                            cr_dict['item_id'] = str(item.item_id)
+                            cr_dict['item_name'] = item.item_name
 
             result.append(cr_dict)
 
@@ -403,6 +443,23 @@ def get_change_request_by_id(cr_id):
             result['boq_name'] = change_request.boq.boq_name
             result['boq_status'] = change_request.boq.status
 
+        # If item_name is missing, try to get it from materials data
+        if not change_request.item_name and change_request.materials_data:
+            # Try to get item info from first material's master data
+            first_material = change_request.materials_data[0] if isinstance(change_request.materials_data, list) else None
+            if first_material and first_material.get('master_material_id'):
+                from models.boq import MasterMaterial, MasterItem
+                try:
+                    material_id = int(first_material['master_material_id'])
+                    material = MasterMaterial.query.filter_by(material_id=material_id).first()
+                    if material and material.item_id:
+                        item = MasterItem.query.filter_by(item_id=material.item_id).first()
+                        if item:
+                            result['item_id'] = str(item.item_id)
+                            result['item_name'] = item.item_name
+                except (ValueError, TypeError):
+                    pass  # Invalid material_id format
+
         return jsonify({
             "success": True,
             "data": result
@@ -439,26 +496,38 @@ def approve_change_request(cr_id):
         if change_request.status in ['approved', 'rejected']:
             return jsonify({"error": f"Change request already {change_request.status}"}), 400
 
-        # Check if request is under review
-        if change_request.status not in ['under_review', 'approved_by_pm', 'approved_by_td']:
-            return jsonify({"error": "Request must be sent for review first"}), 400
+        # Normalize role for consistent comparison
+        normalized_role = workflow_service.normalize_role(approver_role)
 
-        # Validate workflow state
-        is_valid, error_msg = workflow_service.validate_workflow_state(change_request, 'approve')
-        if not is_valid:
-            return jsonify({"error": error_msg}), 400
+        # PM can approve requests that are under_review from SE
+        if normalized_role in ['projectmanager'] and change_request.status == 'under_review':
+            # PM can approve requests from Site Engineers
+            if change_request.requested_by_role and 'site' in change_request.requested_by_role.lower():
+                # This is a valid PM approval scenario
+                pass
+            elif change_request.approval_required_from == 'project_manager':
+                # This is explicitly assigned to PM
+                pass
+            else:
+                return jsonify({"error": f"PM cannot approve this request. Current approver: {change_request.approval_required_from}"}), 403
+        else:
+            # Check if request is under review for other roles
+            if change_request.status not in ['under_review', 'approved_by_pm', 'approved_by_td']:
+                return jsonify({"error": "Request must be sent for review first"}), 400
 
-        # Check if user has permission to approve using workflow service
-        required_approver = change_request.approval_required_from
-        if not workflow_service.can_approve(approver_role, required_approver):
-            return jsonify({"error": f"You don't have permission to approve this request. Required: {required_approver}"}), 403
+            # Validate workflow state
+            is_valid, error_msg = workflow_service.validate_workflow_state(change_request, 'approve')
+            if not is_valid:
+                return jsonify({"error": error_msg}), 400
+
+            # Check if user has permission to approve using workflow service
+            required_approver = change_request.approval_required_from
+            if not workflow_service.can_approve(approver_role, required_approver):
+                return jsonify({"error": f"You don't have permission to approve this request. Required: {required_approver}, Your role: {approver_role}"}), 403
 
         # Get request data
         data = request.get_json() or {}
         comments = data.get('comments', '')
-
-        # Normalize role for consistent comparison
-        normalized_role = workflow_service.normalize_role(approver_role)
 
         # Multi-stage approval logic
         if normalized_role in ['projectmanager']:
@@ -679,6 +748,124 @@ def get_boq_change_requests(boq_id):
         return jsonify({"error": str(e)}), 500
 
 
+def update_change_request(cr_id):
+    """
+    Update a pending change request
+    PUT /api/change-request/{cr_id}
+    {
+        "justification": "Updated justification",
+        "materials": [...]
+    }
+    """
+    try:
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({"error": "User not authenticated"}), 401
+
+        user_id = current_user.get('user_id')
+
+        # Get change request
+        change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+        if not change_request:
+            return jsonify({"error": "Change request not found"}), 404
+
+        # Check edit permissions
+        user_role = current_user.get('role_name', '').lower()
+
+        # PM can edit any pending request, SE can only edit their own
+        if user_role in ['projectmanager', 'project_manager']:
+            # PM can edit any pending request in their projects
+            pass
+        elif change_request.requested_by_user_id != user_id:
+            return jsonify({"error": "You can only edit your own requests"}), 403
+
+        # Check if request is still editable (must be pending)
+        if change_request.status != 'pending':
+            return jsonify({"error": "Can only edit pending requests"}), 400
+
+        # Get updated data
+        data = request.get_json()
+        justification = data.get('justification')
+        materials = data.get('materials', [])
+
+        if not justification or justification.strip() == '':
+            return jsonify({"error": "Justification is required"}), 400
+
+        if not materials or len(materials) == 0:
+            return jsonify({"error": "At least one material is required"}), 400
+
+        # Calculate new materials total cost
+        materials_total_cost = 0.0
+        materials_data = []
+        sub_items_data = []
+
+        for mat in materials:
+            quantity = float(mat.get('quantity', 0))
+            unit_price = float(mat.get('unit_price', 0))
+            total_price = quantity * unit_price
+            materials_total_cost += total_price
+
+            materials_data.append({
+                'material_name': mat.get('material_name'),
+                'quantity': quantity,
+                'unit': mat.get('unit', 'nos'),
+                'unit_price': unit_price,
+                'total_price': total_price,
+                'master_material_id': mat.get('master_material_id')
+            })
+
+            sub_items_data.append({
+                'sub_item_name': mat.get('material_name'),
+                'quantity': quantity,
+                'unit': mat.get('unit', 'nos'),
+                'unit_price': unit_price,
+                'total_price': total_price,
+                'is_new': mat.get('master_material_id') is None,
+                'reason': mat.get('reason')
+            })
+
+        # Get BOQ details for recalculation
+        boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
+        if not boq_details:
+            return jsonify({"error": "BOQ details not found"}), 404
+
+        # Recalculate overhead impact
+        overhead_impact = calculate_overhead_impact(boq_details, materials_total_cost)
+
+        # Update change request
+        change_request.justification = justification
+        change_request.materials_data = materials_data
+        change_request.sub_items_data = sub_items_data
+        change_request.materials_total_cost = materials_total_cost
+        change_request.overhead_consumed = overhead_impact['overhead_consumed']
+        change_request.overhead_balance_impact = overhead_impact['overhead_balance_impact']
+        change_request.new_overhead_remaining = overhead_impact['new_overhead_remaining']
+        change_request.is_over_budget = overhead_impact['is_over_budget']
+        change_request.cost_increase_amount = overhead_impact['cost_increase_amount']
+        change_request.cost_increase_percentage = overhead_impact['cost_increase_percentage']
+        change_request.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        log.info(f"Change request {cr_id} updated by user {user_id}")
+
+        return jsonify({
+            "success": True,
+            "message": "Change request updated successfully",
+            "cr_id": cr_id,
+            "materials_total_cost": round(materials_total_cost, 2)
+        }), 200
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        log.error(f"Database error updating change request {cr_id}: {str(e)}")
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error updating change request {cr_id}: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
 def reject_change_request(cr_id):
     """
     Reject change request (Estimator/TD)
@@ -705,18 +892,30 @@ def reject_change_request(cr_id):
         if change_request.status in ['approved', 'rejected']:
             return jsonify({"error": f"Change request already {change_request.status}"}), 400
 
-        # Check if request is under review (can reject at any stage)
-        if change_request.status not in ['under_review', 'approved_by_pm', 'approved_by_td']:
-            return jsonify({"error": "Request must be under review to reject"}), 400
+        # Normalize role for consistent comparison
+        normalized_role = workflow_service.normalize_role(approver_role)
 
-        # Check if user has permission to reject
-        required_approver = change_request.approval_required_from
-        if required_approver == 'project_manager' and approver_role not in ['projectmanager', 'project_manager', 'admin']:
-            return jsonify({"error": "Only Project Manager can reject this request"}), 403
-        elif required_approver == 'estimator' and approver_role not in ['estimator', 'admin']:
-            return jsonify({"error": "Only Estimator can reject this request"}), 403
-        elif required_approver == 'technical_director' and approver_role not in ['technical_director', 'technicaldirector', 'admin']:
-            return jsonify({"error": "Only Technical Director can reject this request"}), 403
+        # PM can reject requests that are under_review from SE
+        if normalized_role in ['projectmanager'] and change_request.status == 'under_review':
+            # PM can reject requests from Site Engineers
+            if change_request.requested_by_role and 'site' in change_request.requested_by_role.lower():
+                # This is a valid PM rejection scenario
+                pass
+            elif change_request.approval_required_from == 'project_manager':
+                # This is explicitly assigned to PM
+                pass
+            else:
+                return jsonify({"error": f"PM cannot reject this request. Current approver: {change_request.approval_required_from}"}), 403
+        else:
+            # Check if request is under review (can reject at any stage)
+            if change_request.status not in ['under_review', 'approved_by_pm', 'approved_by_td']:
+                return jsonify({"error": "Request must be under review to reject"}), 400
+
+        # For other roles, check if user has permission to reject
+        if normalized_role not in ['projectmanager']:
+            required_approver = change_request.approval_required_from
+            if not workflow_service.can_approve(approver_role, required_approver):
+                return jsonify({"error": f"You don't have permission to reject this request. Required: {required_approver}, Your role: {approver_role}"}), 403
 
         # Get request data
         data = request.get_json() or {}

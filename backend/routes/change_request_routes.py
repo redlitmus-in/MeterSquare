@@ -6,6 +6,7 @@ from controllers.change_request_controller import (
     get_change_request_by_id,
     approve_change_request,
     reject_change_request,
+    update_change_request,
     get_boq_change_requests,
     send_for_review
 )
@@ -59,6 +60,29 @@ def get_change_request_by_id_route(cr_id):
     Includes overhead analysis, budget impact, and materials
     """
     return get_change_request_by_id(cr_id)
+
+
+# Update change request (Only for pending requests by creator)
+@change_request_routes.route('/change-request/<int:cr_id>', methods=['PUT'])
+@jwt_required
+def update_change_request_route(cr_id):
+    """
+    Update a pending change request
+    Only the creator can update their own pending requests
+    Request body:
+    {
+        "justification": "Updated justification",
+        "materials": [
+            {
+                "material_name": "Cement",
+                "quantity": 15,
+                "unit": "bags",
+                "unit_price": 450
+            }
+        ]
+    }
+    """
+    return update_change_request(cr_id)
 
 
 # Approve change request (Estimator/TD)

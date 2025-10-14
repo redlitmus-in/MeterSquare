@@ -352,6 +352,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         // Use the main change request API endpoint instead of extra_materials wrapper
         const changeRequestPayload = {
           boq_id: selectedBoq.boq_id,
+          item_id: selectedItem?.item_id || null,
+          item_name: selectedItem?.item_name || null,
           justification: justification || remarks,
           materials: materials.map(mat => ({
             material_name: mat.subItemName,
@@ -529,6 +531,47 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             <div>
               <p className="text-gray-600">Available</p>
               <p className="font-semibold text-green-600">AED{itemOverhead.available.toLocaleString()}</p>
+            </div>
+          </div>
+
+          {/* Threshold Information */}
+          <div className="mt-3 pt-3 border-t border-purple-200">
+            <div className="flex items-start gap-2">
+              <InformationCircleIcon className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+              <div className="text-xs space-y-1">
+                <p className="text-purple-900">
+                  <span className="font-medium">40% Threshold:</span> AED{(itemOverhead.allocated * 0.4).toLocaleString()}
+                </p>
+                <p className="text-gray-600">
+                  Requests exceeding 40% of allocated overhead (AED{(itemOverhead.allocated * 0.4).toLocaleString()}) require Technical Director approval
+                </p>
+              </div>
+            </div>
+
+            {/* Visual Progress Bar */}
+            <div className="mt-3">
+              <div className="flex justify-between text-xs text-gray-600 mb-1">
+                <span>Consumed: {((itemOverhead.consumed / itemOverhead.allocated) * 100).toFixed(1)}%</span>
+                <span>Available: {((itemOverhead.available / itemOverhead.allocated) * 100).toFixed(1)}%</span>
+              </div>
+              <div className="relative h-6 bg-gray-200 rounded-full overflow-hidden">
+                {/* Consumed portion */}
+                <div
+                  className="absolute left-0 top-0 h-full bg-orange-400"
+                  style={{ width: `${Math.min((itemOverhead.consumed / itemOverhead.allocated) * 100, 100)}%` }}
+                />
+                {/* 40% threshold marker */}
+                <div
+                  className="absolute top-0 h-full w-0.5 bg-red-600"
+                  style={{ left: '40%' }}
+                >
+                  <span className="absolute -top-5 -left-3 text-xs text-red-600 font-medium">40%</span>
+                </div>
+              </div>
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>0</span>
+                <span>AED{itemOverhead.allocated.toLocaleString()}</span>
+              </div>
             </div>
           </div>
         </motion.div>
@@ -769,16 +812,24 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
               <p className="font-semibold text-gray-900">AED{calculations.totalCost.toLocaleString()}</p>
             </div>
             <div>
-              <p className="text-gray-600">Additional Overhead %</p>
+              <p className="text-gray-600">Overhead Usage</p>
               <p className={`font-semibold ${calculations.exceeds40Percent ? 'text-red-600' : 'text-green-600'}`}>
-                {calculations.overheadPercentage.toFixed(2)}%
+                {calculations.overheadPercentage.toFixed(2)}% of AED{itemOverhead?.allocated.toLocaleString() || '0'}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {calculations.exceeds40Percent ? '> 40% threshold' : '≤ 40% threshold'}
               </p>
             </div>
             <div>
-              <p className="text-gray-600">Available After</p>
+              <p className="text-gray-600">Available After Approval</p>
               <p className={`font-semibold ${calculations.availableAfter < 0 ? 'text-red-600' : 'text-green-600'}`}>
                 AED{calculations.availableAfter.toLocaleString()}
               </p>
+              {itemOverhead && (
+                <p className="text-xs text-gray-500 mt-0.5">
+                  from AED{itemOverhead.available.toLocaleString()}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-gray-600">Approval Routing</p>

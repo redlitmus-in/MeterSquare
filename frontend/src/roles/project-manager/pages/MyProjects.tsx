@@ -12,6 +12,7 @@ import {
   CheckIcon,
   DocumentTextIcon,
   ArrowDownTrayIcon,
+  PencilIcon,
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
@@ -19,6 +20,7 @@ import { projectManagerService } from '../services/projectManagerService';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
+import BOQEditModal from '@/roles/estimator/components/BOQEditModal';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
 import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
@@ -143,6 +145,7 @@ const MyProjects: React.FC = () => {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [showComparisonModal, setShowComparisonModal] = useState(false);
+  const [showEditBOQModal, setShowEditBOQModal] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [approvalComments, setApprovalComments] = useState('');
   const [processingBOQ, setProcessingBOQ] = useState(false);
@@ -414,6 +417,12 @@ const MyProjects: React.FC = () => {
     } finally {
       setAssigning(false);
     }
+  };
+
+  const handleEditBOQ = (project: Project) => {
+    setSelectedProject(project);
+    setShowEditBOQModal(true);
+    setShowBOQModal(false);
   };
 
   const filteredProjects = projects.filter(project => {
@@ -1151,7 +1160,7 @@ const MyProjects: React.FC = () => {
                       Submitted by: Estimator on {formatDate(selectedProject.created_at)}
                     </div>
 
-                    {/* Status Badge or Approve/Reject Buttons */}
+                    {/* Status Badge or Approve/Reject/Edit Buttons */}
                     <div className="flex items-center gap-3">
                       {selectedProject.boq_status?.toLowerCase() === 'approved' ? (
                         <div className="px-6 py-2.5 bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-500 rounded-lg flex items-center gap-2">
@@ -1163,8 +1172,25 @@ const MyProjects: React.FC = () => {
                           <XMarkIcon className="w-5 h-5 text-red-600" />
                           <span className="font-semibold text-red-700">Rejected</span>
                         </div>
-                      ) : (
+                      ) : selectedProject.boq_status?.toLowerCase() === 'assigned' ? (
+                        <div className="px-6 py-2.5 bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-500 rounded-lg flex items-center gap-2">
+                          <UserPlusIcon className="w-5 h-5 text-blue-600" />
+                          <span className="font-semibold text-blue-700">Assigned</span>
+                        </div>
+                      ) : selectedProject.boq_status?.toLowerCase() === 'completed' ? (
+                        <div className="px-6 py-2.5 bg-gradient-to-r from-purple-50 to-purple-100 border-2 border-purple-500 rounded-lg flex items-center gap-2">
+                          <CheckCircleIcon className="w-5 h-5 text-purple-600" />
+                          <span className="font-semibold text-purple-700">Completed</span>
+                        </div>
+                      ) : selectedProject.boq_status?.toLowerCase() === 'pending' ? (
                         <>
+                          <button
+                            onClick={() => handleEditBOQ(selectedProject)}
+                            className="px-6 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center gap-2"
+                          >
+                            <PencilIcon className="w-5 h-5" />
+                            Edit BOQ
+                          </button>
                           <button
                             onClick={() => setShowRejectModal(true)}
                             className="px-6 py-2.5 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center gap-2"
@@ -1180,6 +1206,11 @@ const MyProjects: React.FC = () => {
                             Approve BOQ
                           </button>
                         </>
+                      ) : (
+                        <div className="px-6 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 border-2 border-gray-500 rounded-lg flex items-center gap-2">
+                          <ClockIcon className="w-5 h-5 text-gray-600" />
+                          <span className="font-semibold text-gray-700">{selectedProject.boq_status || 'Unknown'}</span>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -2326,6 +2357,39 @@ const MyProjects: React.FC = () => {
           </motion.div>
         </div>
       )}
+
+      {/* Edit BOQ Modal */}
+      <BOQEditModal
+        isOpen={showEditBOQModal}
+        onClose={() => {
+          setShowEditBOQModal(false);
+          setShowBOQModal(true);
+        }}
+        boq={selectedProject ? {
+          boq_id: selectedProject.boq_id,
+          boq_name: selectedProject.boq_name || '',
+          project_id: selectedProject.project_id,
+          project_name: selectedProject.project_name,
+          client_name: selectedProject.client || '',
+          location: selectedProject.location || '',
+          area: selectedProject.area || '',
+          status: selectedProject.boq_status || 'pending',
+          total_cost: selectedProject.boq_details?.total_cost || 0,
+          total_items: selectedProject.boq_details?.total_items || 0,
+          total_materials_cost: selectedProject.boq_details?.total_materials || 0,
+          total_labour_cost: selectedProject.boq_details?.total_labour || 0,
+          overhead_percentage: selectedProject.boq_details?.overhead_percentage || 10,
+          profit_margin_percentage: selectedProject.boq_details?.profit_margin_percentage || 15,
+          items: selectedProject.boqItems || selectedProject.boq_details?.boq_details || [],
+          created_at: selectedProject.created_at || '',
+          updated_at: selectedProject.updated_at || '',
+        } : null}
+        onSave={() => {
+          setShowEditBOQModal(false);
+          loadProjects();
+          toast.success('BOQ updated successfully');
+        }}
+      />
     </div>
   );
 };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Package, DollarSign, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Send } from 'lucide-react';
+import { X, Package, DollarSign, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Send, Edit } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -15,6 +15,7 @@ interface ChangeRequestDetailsModalProps {
   onApprove?: () => void;
   onReject?: () => void;
   canApprove?: boolean;
+  onEdit?: () => void;
 }
 
 const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
@@ -23,9 +24,12 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   changeRequest,
   onApprove,
   onReject,
-  canApprove: canApproveFromParent
+  canApprove: canApproveFromParent,
+  onEdit
 }) => {
   const { user } = useAuthStore();
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [sendingForReview, setSendingForReview] = useState(false);
 
   if (!isOpen || !changeRequest) return null;
 
@@ -70,6 +74,34 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const canApproveReject = canApproveFromParent !== undefined
     ? canApproveFromParent
     : (userIsEstimator || userIsTechnicalDirector) && changeRequest.status !== 'approved' && changeRequest.status !== 'rejected';
+
+  // Can edit if the request is pending and user is either the requester, PM, or Estimator
+  const canEdit = changeRequest.status === 'pending' &&
+                  (changeRequest.requested_by_user_id === user?.user_id || userIsProjectManager || userIsEstimator);
+
+  // Can send for review if the request is pending and user is the requester
+  const canSendForReview = changeRequest.status === 'pending' &&
+                           changeRequest.requested_by_user_id === user?.user_id;
+
+  const handleSendForReview = async () => {
+    if (!changeRequest) return;
+
+    setSendingForReview(true);
+    try {
+      const response = await changeRequestService.sendForReview(changeRequest.cr_id);
+      if (response.success) {
+        toast.success('Request sent for review successfully');
+        // Reload to update the status
+        window.location.reload();
+      } else {
+        toast.error(response.message || 'Failed to send for review');
+      }
+    } catch (error) {
+      toast.error('Failed to send request for review');
+    } finally {
+      setSendingForReview(false);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -259,9 +291,11 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-gray-900">{material.material_name}</td>
                           <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                              {material.related_item || 'N/A'}
-                            </span>
+                            {changeRequest.item_name && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                {changeRequest.item_name}
+                              </span>
+                            )}
                           </td>
                           <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600 text-right whitespace-nowrap">
                             {material.quantity} {material.unit}
@@ -424,6 +458,40 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
             {/* Footer - Responsive Actions */}
             <div className="border-t border-gray-200 px-4 sm:px-6 py-3 sm:py-4 bg-gray-50 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3">
+              {canSendForReview && (
+                <button
+                  onClick={handleSendForReview}
+                  disabled={sendingForReview}
+                  className="w-full sm:w-auto px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base disabled:bg-gray-400"
+                >
+                  {sendingForReview ? (
+                    <>
+                      <ModernLoadingSpinners variant="dots" size="small" color="white" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      Send for Review
+                    </>
+                  )}
+                </button>
+              )}
+              {canEdit && (
+                <button
+                  onClick={() => {
+                    if (onEdit) {
+                      onEdit();
+                    } else {
+                      setShowEditModal(true);
+                    }
+                  }}
+                  className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base"
+                >
+                  <Edit className="w-4 h-4" />
+                  Edit Request
+                </button>
+              )}
               {canApproveReject ? (
                 <>
                   <button
@@ -441,16 +509,32 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   </button>
                 </>
               ) : (
-                <button
-                  onClick={onClose}
-                  className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium text-sm sm:text-base"
-                >
-                  Close
-                </button>
+                !canEdit && (
+                  <button
+                    onClick={onClose}
+                    className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium text-sm sm:text-base"
+                  >
+                    Close
+                  </button>
+                )
               )}
             </div>
           </motion.div>
         </div>
+
+        {/* Edit Change Request Modal */}
+        {showEditModal && (
+          <EditChangeRequestModal
+            isOpen={showEditModal}
+            onClose={() => setShowEditModal(false)}
+            changeRequest={changeRequest}
+            onSuccess={() => {
+              setShowEditModal(false);
+              // Optionally refresh the data
+              window.location.reload();
+            }}
+          />
+        )}
       </>
     </AnimatePresence>
   );

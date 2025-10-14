@@ -31,17 +31,20 @@ import {
   LayoutGrid,
   List,
   Plus,
-  Box
+  Box,
+  Pencil
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { useAuthStore } from '@/store/authStore';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 
 const ChangeRequestsPage: React.FC = () => {
   const location = useLocation();
+  const { user } = useAuthStore();
   const isExtraMaterial = location.pathname.includes('extra-material');
   const [activeTab, setActiveTab] = useState(isExtraMaterial ? 'requested' : 'pending');
   const [searchTerm, setSearchTerm] = useState('');
@@ -135,6 +138,16 @@ const ChangeRequestsPage: React.FC = () => {
     } catch (error) {
       console.error('Error in handleReview:', error);
       toast.error('Failed to load change request details');
+    }
+  };
+
+  const handleEdit = (crId: number) => {
+    // Find the change request and open it in the details modal with edit mode
+    const request = changeRequests.find(r => r.cr_id === crId);
+    if (request) {
+      setSelectedChangeRequest(request);
+      setShowDetailsModal(true);
+      // The modal will handle edit mode based on the request status
     }
   };
 
@@ -671,14 +684,25 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
 
                           <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
-                            <button
-                              onClick={() => handleReview(request.cr_id)}
-                              className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
-                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                            >
-                              <Eye className="h-4 w-4" />
-                              <span>Review</span>
-                            </button>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => handleReview(request.cr_id)}
+                                className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                              >
+                                <Eye className="h-4 w-4" />
+                                <span>Review</span>
+                              </button>
+                              {request.status === 'pending' && (
+                                <button
+                                  onClick={() => handleEdit(request.cr_id)}
+                                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                  <span>Edit</span>
+                                </button>
+                              )}
+                            </div>
                             <div className="grid grid-cols-2 gap-2">
                               <button
                                 onClick={() => handleApprove(request.cr_id)}

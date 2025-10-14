@@ -8,6 +8,8 @@ export interface ChangeRequestItem {
   project_id: number;
   project_name?: string;
   boq_name?: string;
+  item_id?: string | null;
+  item_name?: string | null;
   requested_by_user_id: number;
   requested_by_name: string;
   requested_by_role: string;
@@ -66,6 +68,30 @@ export interface ChangeRequestItem {
   rejected_at_stage?: string;
   created_at: string;
   updated_at?: string;
+
+  // Additional fields from API
+  sub_items_data?: Array<{
+    is_new: boolean;
+    name?: string;
+    sub_item_name?: string;
+    quantity?: number;
+    qty?: number;
+    unit?: string;
+    unit_price?: number;
+    total_price?: number;
+    reason?: string | null;
+    new_reason?: string | null;
+    sub_item_id?: string;
+  }> | null;
+
+  has_new_sub_items?: boolean;
+  new_sub_item_reason?: string | null;
+  item_overhead?: {
+    allocated: number;
+    available: number;
+    consumed_before: number;
+  };
+  percentage_of_item_overhead?: number;
 }
 
 export interface CreateChangeRequestData {
@@ -90,6 +116,40 @@ class ChangeRequestService {
         'Content-Type': 'application/json'
       }
     };
+  }
+
+  /**
+   * Update an existing change request
+   * PUT /api/change-request/{cr_id}
+   */
+  async updateChangeRequest(crId: number, data: {
+    justification: string;
+    materials: Array<{
+      material_name: string;
+      quantity: number;
+      unit: string;
+      unit_price: number;
+      master_material_id?: number | null;
+    }>;
+  }): Promise<{ success: boolean; data?: any; message?: string }> {
+    try {
+      const response = await axios.put(
+        `${API_BASE_URL}/change-request/${crId}`,
+        data,
+        this.getAuthHeaders()
+      );
+
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error: any) {
+      console.error('Error updating change request:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to update change request'
+      };
+    }
   }
 
   /**
@@ -179,6 +239,31 @@ class ChangeRequestService {
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to fetch change request detail'
+      };
+    }
+  }
+
+  /**
+   * Send change request for review
+   * POST /api/change-request/{cr_id}/send-for-review
+   */
+  async sendForReview(crId: number): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await axios.post(
+        `${API_BASE_URL}/change-request/${crId}/send-for-review`,
+        {},
+        this.getAuthHeaders()
+      );
+
+      return {
+        success: true,
+        message: response.data.message || 'Change request sent for review'
+      };
+    } catch (error: any) {
+      console.error('Error sending change request for review:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to send for review'
       };
     }
   }
