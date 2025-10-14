@@ -833,14 +833,18 @@ def update_change_request(cr_id):
 
         # PM can edit any pending request, SE can only edit their own
         if user_role in ['projectmanager', 'project_manager']:
-            # PM can edit any pending request in their projects
-            pass
-        elif change_request.requested_by_user_id != user_id:
-            return jsonify({"error": "You can only edit your own requests"}), 403
+            # PM can edit any pending or under_review request in their projects
+            # under_review means SE sent it to PM, PM can still edit before approving
+            if change_request.status not in ['pending', 'under_review']:
+                return jsonify({"error": "Can only edit pending or under review requests"}), 400
+        else:
+            # SE can only edit their own requests
+            if change_request.requested_by_user_id != user_id:
+                return jsonify({"error": "You can only edit your own requests"}), 403
 
-        # Check if request is still editable (must be pending)
-        if change_request.status != 'pending':
-            return jsonify({"error": "Can only edit pending requests"}), 400
+            # SE can only edit pending requests (not yet sent for review)
+            if change_request.status != 'pending':
+                return jsonify({"error": "Can only edit pending requests. Once sent for review, contact your PM to edit."}), 400
 
         # Get updated data
         data = request.get_json()
