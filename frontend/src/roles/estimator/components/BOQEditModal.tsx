@@ -597,11 +597,13 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
         is_revision: isRevision
       };
 
-      // Service layer handles total_price and total_cost calculation
-      const result = await estimatorService.updateBOQ(editedBoq.boq_id, payload);
+      // Use revisionBOQ endpoint if this is a revision, otherwise updateBOQ
+      const result = isRevision
+        ? await estimatorService.revisionBOQ(editedBoq.boq_id, payload)
+        : await estimatorService.updateBOQ(editedBoq.boq_id, payload);
 
       if (result.success) {
-        toast.success('BOQ updated successfully');
+        toast.success(isRevision ? 'BOQ revision saved successfully' : 'BOQ updated successfully');
         onSave();
         onClose();
       } else {

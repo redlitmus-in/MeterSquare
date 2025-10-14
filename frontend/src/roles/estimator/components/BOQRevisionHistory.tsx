@@ -6,16 +6,24 @@ import { toast } from 'sonner';
 
 interface BOQRevisionHistoryProps {
   boqId: number;
+  compact?: boolean; // Add compact mode for inline display
+  showTitle?: boolean; // Option to hide title in compact mode
+  refreshTrigger?: number; // Trigger to force refresh from parent
 }
 
-const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({ boqId }) => {
+const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({
+  boqId,
+  compact = false,
+  showTitle = true,
+  refreshTrigger
+}) => {
   const [history, setHistory] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedVersions, setExpandedVersions] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     loadRevisionHistory();
-  }, [boqId]);
+  }, [boqId, refreshTrigger]); // Add refreshTrigger to dependencies
 
   const loadRevisionHistory = async () => {
     setIsLoading(true);
@@ -231,27 +239,29 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({ boqId }) => {
 
   if (history.length === 0) {
     return (
-      <div className="text-center py-12">
-        <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-8 border border-purple-200">
-          <Clock className="w-12 h-12 text-purple-400 mx-auto mb-3" />
+      <div className={`text-center ${compact ? 'py-4' : 'py-12'}`}>
+        <div className={`bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg ${compact ? 'p-4' : 'p-8'} border border-purple-200`}>
+          <Clock className={`${compact ? 'w-8 h-8' : 'w-12 h-12'} text-purple-400 mx-auto mb-3`} />
           <p className="text-purple-700 font-medium">No Revisions Yet</p>
-          <p className="text-sm text-purple-600 mt-1">Revision history will appear here once changes are made</p>
+          {!compact && <p className="text-sm text-purple-600 mt-1">Revision history will appear here once changes are made</p>}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-4 border border-purple-200">
-        <h3 className="text-lg font-bold text-purple-900 flex items-center gap-2">
-          <Clock className="w-5 h-5" />
-          Revision Timeline ({history.length} {history.length === 1 ? 'Version' : 'Versions'})
-        </h3>
-      </div>
+    <div className={compact ? 'space-y-2' : 'space-y-4'}>
+      {showTitle && (
+        <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-4 border border-purple-200">
+          <h3 className="text-lg font-bold text-purple-900 flex items-center gap-2">
+            <Clock className="w-5 h-5" />
+            Revision Timeline ({history.length} {history.length === 1 ? 'Version' : 'Versions'})
+          </h3>
+        </div>
+      )}
 
-      <div className="space-y-3">
-        {history.map((version, index) => {
+      <div className={compact ? 'space-y-2' : 'space-y-3'}>
+        {history.slice(0, compact ? 3 : undefined).map((version, index) => {
           const isExpanded = expandedVersions.has(version.boq_detail_history_id || index);
           const previousVersion = history[index + 1]; // Next in array is previous in time
           const changes = getChanges(version, previousVersion);
@@ -262,10 +272,10 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({ boqId }) => {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: index * 0.05 }}
-              className={`bg-gradient-to-r ${getVersionColor(version)} rounded-lg border shadow-sm overflow-hidden`}
+              className={`bg-gradient-to-r ${getVersionColor(version)} rounded-lg border ${compact ? 'shadow' : 'shadow-sm'} overflow-hidden`}
             >
               <div
-                className="p-4 cursor-pointer hover:opacity-90"
+                className={`${compact ? 'p-3' : 'p-4'} cursor-pointer hover:opacity-90`}
                 onClick={() => toggleVersion(version.boq_detail_history_id || index)}
               >
                 <div className="flex items-start gap-3">
@@ -599,6 +609,15 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({ boqId }) => {
             </motion.div>
           );
         })}
+
+        {/* Show "View More" link in compact mode if there are more revisions */}
+        {compact && history.length > 3 && (
+          <div className="text-center pt-2">
+            <button className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+              View all {history.length} revisions →
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

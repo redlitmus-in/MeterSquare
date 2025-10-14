@@ -236,6 +236,78 @@ class EstimatorService {
     }
   }
 
+  async revisionBOQ(boqId: number, updateData: any): Promise<{ success: boolean; message: string }> {
+    try {
+      console.log('=== REVISION BOQ PAYLOAD ===', JSON.stringify(updateData, null, 2));
+
+      // Validate required fields
+      if (!updateData.boq_name || !updateData.boq_name.trim()) {
+        return {
+          success: false,
+          message: 'BOQ name is required'
+        };
+      }
+
+      if (!updateData.items || updateData.items.length === 0) {
+        return {
+          success: false,
+          message: 'At least one BOQ item is required'
+        };
+      }
+
+      // Process data similar to updateBOQ
+      const processedData = {
+        ...updateData,
+        is_revision: true, // Flag to indicate this is a revision
+        items: updateData.items.map((item: any) => ({
+          ...item,
+          materials: item.materials.map((mat: any) => ({
+            ...mat,
+            total_price: mat.total_price || (mat.quantity * mat.unit_price)
+          })),
+          labour: item.labour.map((lab: any) => ({
+            ...lab,
+            total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour)
+          }))
+        }))
+      };
+
+      console.log('=== PROCESSED REVISION PAYLOAD ===', JSON.stringify(processedData, null, 2));
+
+      const response = await apiClient.put(`/revision_boq/${boqId}`, processedData);
+      console.log('BOQ revision response:', response.data);
+
+      return {
+        success: true,
+        message: response.data.message || 'BOQ revision created successfully'
+      };
+    } catch (error: any) {
+      console.error('BOQ revision error:', error.response?.data || error.message);
+
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'BOQ not found'
+        };
+      } else if (error.response?.status === 400) {
+        return {
+          success: false,
+          message: error.response?.data?.error || 'Invalid BOQ data provided'
+        };
+      } else if (error.response?.status === 500) {
+        return {
+          success: false,
+          message: 'Server error occurred while creating revision. Please try again.'
+        };
+      }
+
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to create BOQ revision'
+      };
+    }
+  }
+
   async deleteBOQ(boqId: number): Promise<{ success: boolean; message: string }> {
     try {
       const response = await apiClient.delete(`/delete_boq/${boqId}`);

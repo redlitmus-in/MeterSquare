@@ -1390,12 +1390,14 @@ def revision_boq(boq_id):
             return jsonify({"error": "BOQ details not found"}), 404
 
         # Store old values before updating (for change tracking)
+        # IMPORTANT: Use deepcopy to create independent copy of JSON data
+        import copy
         old_boq_name = boq.boq_name
         old_status = boq.status
         old_revision_number = boq.revision_number or 0
         old_total_cost = boq_details.total_cost
         old_total_items = boq_details.total_items
-        old_boq_details_json = boq_details.boq_details
+        old_boq_details_json = copy.deepcopy(boq_details.boq_details)  # Deep copy to prevent reference issues
 
         # Update BOQ basic details
         if "boq_name" in data:
@@ -1428,31 +1430,27 @@ def revision_boq(boq_id):
         boq.last_modified_by = user_name
         boq.last_modified_at = datetime.utcnow()
 
-        # Store BOQ details history ONLY if user is admin
-        next_version = 1
-        if user_role == 'admin':
-            # Get the latest version number for this BOQ detail
-            latest_history = BOQDetailsHistory.query.filter_by(
-                boq_detail_id=boq_details.boq_detail_id
-            ).order_by(BOQDetailsHistory.version.desc()).first()
+        # Store BOQ details history for ALL revisions (not just admin)
+        # The version number should match the OLD revision number (state before update)
+        # - When old_revision_number = 0 (original), save as version 0
+        # - When old_revision_number = 1 (first revision), save as version 1
+        # - When old_revision_number = 2 (second revision), save as version 2, etc.
+        next_version = old_revision_number
 
-            next_version = 1 if not latest_history else latest_history.version + 1
-
-            # Create history entry with current BOQ details BEFORE updating
-            boq_detail_history = BOQDetailsHistory(
-                boq_detail_id=boq_details.boq_detail_id,
-                boq_id=boq_id,
-                version=next_version,
-                boq_details=old_boq_details_json,  # Save OLD state before updating
-                total_cost=old_total_cost,
-                total_items=old_total_items,
-                total_materials=boq_details.total_materials,
-                total_labour=boq_details.total_labour,
-                created_by=user_name
-            )
-            db.session.add(boq_detail_history)
-        else:
-            log.info(f"✗ BOQ details history NOT created - User '{user_name}' (Role: {user_role}, ID: {user_id}) is not admin")
+        # Create history entry with current BOQ details BEFORE updating
+        boq_detail_history = BOQDetailsHistory(
+            boq_detail_id=boq_details.boq_detail_id,
+            boq_id=boq_id,
+            version=next_version,
+            boq_details=old_boq_details_json,  # Save OLD state before updating
+            total_cost=old_total_cost,
+            total_items=old_total_items,
+            total_materials=boq_details.total_materials,
+            total_labour=boq_details.total_labour,
+            created_by=user_name
+        )
+        db.session.add(boq_detail_history)
+        log.info(f"✓ BOQ history created - Version: {next_version}, User: {user_name} ({user_role})")
         # If items are provided, update the JSON structure
         if "items" in data:
             # Use the same current user logic for BOQ details

@@ -27,6 +27,10 @@ import BOQCreationForm from '@/components/forms/BOQCreationForm';
 import BOQDetailsModal from '../components/BOQDetailsModal';
 import BOQEditModal from '../components/BOQEditModal';
 import SendBOQEmailModal from '../components/SendBOQEmailModal';
+import RevisionCard from '../components/RevisionCard';
+import BOQRevisionHistory from '../components/BOQRevisionHistory';
+import BOQComparisonView from '../components/BOQComparisonView';
+import RevisionComparisonPage from '../components/RevisionComparisonPage';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { estimatorService } from '../services/estimatorService';
@@ -55,6 +59,7 @@ import {
   Mail,
   Download,
   XCircle as XCircleIcon,
+  ArrowRight,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Label } from '@/components/ui/label';
@@ -288,6 +293,8 @@ const EstimatorHub: React.FC = () => {
   const [showBoqEdit, setShowBoqEdit] = useState(false);
   const [deletingBoq, setDeletingBoq] = useState<any>(null);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
+  const [selectedBoqForComparison, setSelectedBoqForComparison] = useState<BOQ | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalProjects, setTotalProjects] = useState(0);
   const itemsPerPage = 10; // Fixed at 10 items per page
@@ -305,6 +312,7 @@ const EstimatorHub: React.FC = () => {
   const [boqToCancel, setBoqToCancel] = useState<BOQ | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
   const [showRevisionModal, setShowRevisionModal] = useState(false);
+  const [boqDetailsRefreshTrigger, setBoqDetailsRefreshTrigger] = useState(0); // Trigger for refreshing BOQ details modal
   const [selectedBoqForRevision, setSelectedBoqForRevision] = useState<BOQ | null>(null);
   const [showSendToTDPopup, setShowSendToTDPopup] = useState(false);
   const [boqToSendToTD, setBoqToSendToTD] = useState<BOQ | null>(null);
@@ -1290,7 +1298,7 @@ const EstimatorHub: React.FC = () => {
         </div>
 
         {/* Actions */}
-        <div className={`border-t border-gray-200 p-2 sm:p-3 grid ${isClientRejected ? 'grid-cols-3' : 'grid-cols-3'} gap-1 sm:gap-2`}>
+        <div className={`border-t border-gray-200 p-2 sm:p-3 grid ${isClientRejected ? 'grid-cols-4' : revisionNumber > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-1 sm:gap-2`}>
           <button
             className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
             style={{ backgroundColor: 'rgb(36, 61, 138)' }}
@@ -1303,6 +1311,22 @@ const EstimatorHub: React.FC = () => {
             <span className="hidden sm:inline">View Details</span>
             <span className="sm:hidden">View</span>
           </button>
+
+          {/* Show Compare button only if revision number > 0 */}
+          {revisionNumber > 0 && (
+            <button
+              className="text-blue-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm font-semibold"
+              onClick={() => {
+                setSelectedBoqForComparison(boq);
+                setShowComparisonModal(true);
+              }}
+              title="Compare Revisions"
+            >
+              <ArrowRight className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+              <span className="hidden sm:inline">Compare</span>
+              <span className="sm:hidden">Cmp</span>
+            </button>
+          )}
 
           {/* Draft BOQs - Can edit and send to TD */}
           {isDraft ? (
@@ -2522,112 +2546,64 @@ const EstimatorHub: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="revisions" className="mt-0 p-0">
-              <div className="space-y-4 sm:space-y-6">
-                {/* Dynamic Revision Tabs */}
-                <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-gray-200">
-                  {loadingRevisionTabs ? (
-                    <div className="text-sm text-gray-500">Loading revision tabs...</div>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => setSelectedRevisionTab('all')}
-                        className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
-                          selectedRevisionTab === 'all'
-                            ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-500'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        All {filteredBOQs.length > 0 && `(${filteredBOQs.length})`}
-                      </button>
-                      {/* Reverse order: highest revision first, Initial Review last */}
-                      {[...revisionTabs].reverse().map((tab) => (
-                        <button
-                          key={tab.revision_number}
-                          onClick={() => setSelectedRevisionTab(tab.revision_number)}
-                          className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
-                            selectedRevisionTab === tab.revision_number
-                              ? tab.alert_level === 'critical'
-                                ? 'bg-red-100 text-red-700 ring-2 ring-red-500'
-                                : tab.alert_level === 'warning'
-                                ? 'bg-orange-100 text-orange-700 ring-2 ring-orange-500'
-                                : 'bg-green-100 text-green-700 ring-2 ring-green-500'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                        >
-                          {tab.revision_number === 0 ? 'Initial Review' : `Rev ${tab.revision_number}`} ({tab.project_count})
-                        </button>
-                      ))}
-                    </>
-                  )}
-                </div>
-
-                {/* BOQ List */}
-                {(() => {
-                  // Filter BOQs by selected revision tab
-                  let displayBOQs = filteredBOQs;
-                  if (selectedRevisionTab !== 'all') {
-                    displayBOQs = filteredBOQs.filter(boq => {
-                      const revisionNumber = boq.revision_number || 0;
-                      return revisionNumber === selectedRevisionTab;
-                    });
+              <RevisionComparisonPage
+                boqList={filteredBOQs}
+                onSendToTD={async (boq) => {
+                  // Send directly to TD without email modal
+                  // Note: revision_boq endpoint is used during BOQ editing (in BOQEditModal)
+                  // This sendBOQEmail just notifies TD after the revision is saved
+                  const result = await estimatorService.sendBOQEmail(boq.boq_id!, {
+                    comments: (boq.revision_number || 0) > 0
+                      ? `Sending Revision ${boq.revision_number} for review`
+                      : 'Sending BOQ for review'
+                  });
+                  if (result.success) {
+                    toast.success('BOQ sent to Technical Director successfully!');
+                    loadBOQs();
+                  } else {
+                    toast.error(result.message || 'Failed to send BOQ to TD');
                   }
-
-                  const totalBoqPages = Math.ceil(displayBOQs.length / itemsPerPage);
-                  const startIndex = (boqCurrentPage - 1) * itemsPerPage;
-                  const endIndex = startIndex + itemsPerPage;
-                  const paginatedBOQs = displayBOQs.slice(startIndex, endIndex);
-
-                  return (
-                    <>
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <h2 className="text-lg sm:text-xl font-bold text-gray-900">
-                          {selectedRevisionTab === 'all'
-                            ? 'All BOQs in Revision'
-                            : selectedRevisionTab === 0
-                            ? 'Initial Review - First Time Revisions'
-                            : `Revision ${selectedRevisionTab} - Projects`
-                          }
-                        </h2>
-                        <div className="text-xs sm:text-sm text-gray-600">
-                          {displayBOQs.length} BOQ{displayBOQs.length !== 1 ? 's' : ''}
-                        </div>
-                      </div>
-                      {viewMode === 'cards' ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                          {paginatedBOQs.map((boq) => (
-                            <BOQCard key={boq.boq_id} boq={boq} />
-                          ))}
-                        </div>
-                      ) : (
-                        <BOQTable boqList={paginatedBOQs} />
-                      )}
-
-                      {/* Pagination */}
-                      {totalBoqPages > 1 && (
-                        <div className="flex items-center justify-between pt-4">
-                          <button
-                            className="px-4 py-2 bg-white border border-gray-300 rounded-lg disabled:opacity-50 text-sm"
-                            onClick={() => setBoqCurrentPage(prev => Math.max(1, prev - 1))}
-                            disabled={boqCurrentPage === 1}
-                          >
-                            Previous
-                          </button>
-                          <span className="text-sm text-gray-600">
-                            Page {boqCurrentPage} of {totalBoqPages}
-                          </span>
-                          <button
-                            className="px-4 py-2 bg-white border border-gray-300 rounded-lg disabled:opacity-50 text-sm"
-                            onClick={() => setBoqCurrentPage(prev => Math.min(totalBoqPages, prev + 1))}
-                            disabled={boqCurrentPage === totalBoqPages}
-                          >
-                            Next
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
+                }}
+                onSendToClient={(boq) => {
+                  // Open send to client modal with preview and download options
+                  setBoqToEmail(boq);
+                  setEmailMode('client');
+                  setShowSendEmailModal(true);
+                }}
+                onEdit={(boq) => {
+                  setEditingBoq(boq);
+                  setIsRevisionEdit(true);
+                  setShowBoqEdit(true);
+                }}
+                onViewDetails={(boq) => {
+                  setSelectedBoqForDetails(boq);
+                  setShowBoqDetails(true);
+                }}
+                onCompare={(currentBoq, previousRevision) => {
+                  setSelectedBoqForComparison(currentBoq);
+                  setShowComparisonModal(true);
+                }}
+                onClientApproval={async (boq) => {
+                  const result = await estimatorService.confirmClientApproval(boq.boq_id!);
+                  if (result.success) {
+                    toast.success(result.message);
+                    loadBOQs();
+                  } else {
+                    toast.error(result.message);
+                  }
+                }}
+                onRevisionRequest={(boq) => {
+                  setSelectedBoqForRevision(boq);
+                  setShowRevisionModal(true);
+                }}
+                onCancel={(boq) => {
+                  setBoqToCancel(boq);
+                  setShowCancelModal(true);
+                }}
+                onRefresh={async () => {
+                  await loadBOQs();
+                }}
+              />
             </TabsContent>
 
             <TabsContent value="rejected" className="mt-0 p-0">
@@ -3567,6 +3543,7 @@ const EstimatorHub: React.FC = () => {
         }}
         boq={selectedBoqForDetails}
         showNewPurchaseItems={false} // Projects page should NOT show new_purchase items
+        refreshTrigger={boqDetailsRefreshTrigger}
         onEdit={() => {
           if (selectedBoqForDetails) {
             setShowBoqDetails(false);
@@ -3593,6 +3570,7 @@ const EstimatorHub: React.FC = () => {
         isRevision={isRevisionEdit} // Pass revision flag to modal
         onSave={async () => {
           await loadBOQs(); // Refresh the list
+          setBoqDetailsRefreshTrigger(prev => prev + 1); // Trigger BOQ details modal refresh
           setShowBoqEdit(false);
           // Show Send to TD popup after save
           setBoqToSendToTD(editingBoq);
@@ -3617,8 +3595,51 @@ const EstimatorHub: React.FC = () => {
           mode={emailMode}
           onEmailSent={() => {
             loadBOQs(); // Refresh to get updated email_sent status
+            setBoqDetailsRefreshTrigger(prev => prev + 1); // Trigger BOQ details modal refresh
           }}
         />
+      )}
+
+      {/* Comparison Modal */}
+      {showComparisonModal && selectedBoqForComparison && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-7xl w-full max-h-[90vh] overflow-hidden"
+          >
+            {/* Header */}
+            <div className="bg-gradient-to-r from-purple-50 to-blue-50 p-6 border-b border-purple-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-purple-900">Revision Comparison</h2>
+                  <p className="text-sm text-purple-700 mt-1">
+                    {selectedBoqForComparison.title || selectedBoqForComparison.boq_name}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowComparisonModal(false);
+                    setSelectedBoqForComparison(null);
+                  }}
+                  className="p-2 hover:bg-purple-200 rounded-lg transition-colors"
+                >
+                  <svg className="w-6 h-6 text-purple-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+              <BOQComparisonView
+                boqId={selectedBoqForComparison.boq_id}
+                currentRevisionNumber={selectedBoqForComparison.revision_number || 0}
+              />
+            </div>
+          </motion.div>
+        </div>
       )}
 
       {/* Download Format Selection Modal */}

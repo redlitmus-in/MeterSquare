@@ -26,6 +26,7 @@ import { tdService } from '@/roles/technical-director/services/tdService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQHistoryTimeline from '@/roles/estimator/components/BOQHistoryTimeline';
 import BOQRevisionHistory from '@/roles/estimator/components/BOQRevisionHistory';
+import TDRevisionComparisonPage from '@/roles/technical-director/components/TDRevisionComparisonPage';
 import {
   exportBOQToExcelInternal,
   exportBOQToExcelClient,
@@ -136,6 +137,9 @@ const ProjectApprovals: React.FC = () => {
 
   // Ref to track previous BOQs data for comparison
   const prevBOQsRef = useRef<string>('');
+
+  // State to trigger BOQ detail refresh after approval/rejection actions
+  const [boqDetailsRefreshTrigger, setBoqDetailsRefreshTrigger] = useState(0);
 
   // Format currency for display
   const formatCurrency = (amount: number): string => {
@@ -629,10 +633,15 @@ const ProjectApprovals: React.FC = () => {
         const response = await tdService.rejectBOQ(id, notes);
         if (response.success) {
           toast.success('BOQ rejected successfully');
-          setShowBOQModal(false); // Close BOQ details modal
+
+          // Refresh BOQ details BEFORE closing modal to show updated data
+          if (showBOQModal && selectedEstimation?.id) {
+            await loadBOQDetails(selectedEstimation.id);
+          }
 
           // Refresh data silently in background
           loadBOQs(false);
+          setBoqDetailsRefreshTrigger(prev => prev + 1); // Trigger BOQ details refresh
           if (filterStatus === 'revisions') {
             loadRevisionTabs();
           }
@@ -669,13 +678,18 @@ const ProjectApprovals: React.FC = () => {
       const response = await tdService.approveBOQ(selectedEstimation.id, approvalNotes);
       if (response.success) {
         toast.success('BOQ approved successfully');
+
+        // Refresh BOQ details BEFORE closing modal to show updated data
+        if (showBOQModal && selectedEstimation?.id) {
+          await loadBOQDetails(selectedEstimation.id);
+        }
+
         setShowComparisonModal(false); // Close comparison modal
-        setShowBOQModal(false); // Close BOQ details modal
-        setSelectedEstimation(null); // Clear selection
         setApprovalNotes(''); // Clear notes
 
         // Refresh data silently in background
         loadBOQs(false);
+        setBoqDetailsRefreshTrigger(prev => prev + 1); // Trigger BOQ details refresh
         if (filterStatus === 'revisions') {
           loadRevisionTabs();
         }
@@ -941,50 +955,42 @@ const ProjectApprovals: React.FC = () => {
           </div>
         </div>
 
-        {/* Dynamic Revision Tabs - Exactly like Estimator */}
-        {filterStatus === 'revisions' && (
-          <div className="mb-6">
-            <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-gray-200">
-              {loadingRevisionTabs ? (
-                <div className="text-sm text-gray-500">Loading revision tabs...</div>
-              ) : (
-                <>
-                  <button
-                    onClick={() => setSelectedRevisionNumber('all')}
-                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
-                      selectedRevisionNumber === 'all'
-                        ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-500'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    All {filteredEstimations.length > 0 && `(${filteredEstimations.length})`}
-                  </button>
-                  {/* Reverse order: highest revision first, Initial Review last */}
-                  {[...revisionTabs].reverse().map((tab) => (
-                    <button
-                      key={tab.revision_number}
-                      onClick={() => setSelectedRevisionNumber(tab.revision_number)}
-                      className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
-                        selectedRevisionNumber === tab.revision_number
-                          ? tab.alert_level === 'critical'
-                            ? 'bg-red-100 text-red-700 ring-2 ring-red-500'
-                            : tab.alert_level === 'warning'
-                            ? 'bg-orange-100 text-orange-700 ring-2 ring-orange-500'
-                            : 'bg-green-100 text-green-700 ring-2 ring-green-500'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      {tab.revision_number === 0 ? 'Initial Review' : `Rev ${tab.revision_number}`} ({tab.project_count})
-                    </button>
-                  ))}
-                </>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Estimations List - Always show */}
-        {false ? (
+        {/* TD Revision Comparison Page - Show only for revisions tab */}
+        {filterStatus === 'revisions' ? (
+          <TDRevisionComparisonPage
+            boqList={boqs}
+            onApprove={(boq) => {
+              // Find the estimation and open approval modal
+              const estimation = filteredEstimations.find(est => est.id === boq.boq_id);
+              if (estimation) {
+                setSelectedEstimation(estimation);
+                setShowApprovalModal(true);
+              }
+            }}
+            onReject={(boq) => {
+              // Find the estimation and open rejection modal
+              const estimation = filteredEstimations.find(est => est.id === boq.boq_id);
+              if (estimation) {
+                setSelectedEstimation(estimation);
+                setShowRejectionModal(true);
+              }
+            }}
+            onViewDetails={async (boq) => {
+              // Find the estimation and load details
+              const estimation = filteredEstimations.find(est => est.id === boq.boq_id);
+              if (estimation) {
+                await loadBOQDetails(estimation.id, estimation);
+                setShowBOQModal(true);
+              }
+            }}
+            onRefresh={async () => {
+              await loadBOQs(false);
+              await loadRevisionTabs();
+            }}
+          />
+        ) : (
+          /* Estimations List - Show for all other tabs */
+          false ? (
           <div className="space-y-4">
             {allPMs.map((pm: any, index: number) => {
               const projectCount = pm.projectCount || 0;
@@ -1397,9 +1403,9 @@ const ProjectApprovals: React.FC = () => {
               </Table>
             </div>
           </div>
-        )}
+        ))}
 
-        {!showPMWorkloadView && filteredEstimations.length === 0 && (
+        {!showPMWorkloadView && filteredEstimations.length === 0 && filterStatus !== 'revisions' && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
             <DocumentTextIcon className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-500">No estimations found for the selected filter</p>
@@ -2091,6 +2097,16 @@ const ProjectApprovals: React.FC = () => {
                     <div className="text-sm text-gray-600">
                       <span className="font-semibold text-green-600">✓ Internally Approved</span>
                       <p className="text-xs text-gray-500 mt-0.5">Waiting for Estimator to send to client</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Status Info - For revision_approved BOQs */}
+                {selectedEstimation.status === 'revision_approved' && (
+                  <div className="px-6 py-4 border-b border-gray-200">
+                    <div className="text-sm text-gray-600">
+                      <span className="font-semibold text-green-600">✓ Revision Approved</span>
+                      <p className="text-xs text-gray-500 mt-0.5">Waiting for Estimator to send revision to client</p>
                     </div>
                   </div>
                 )}
@@ -3139,7 +3155,7 @@ const ProjectApprovals: React.FC = () => {
                 {historyTab === 'full' ? (
                   <BOQHistoryTimeline boqId={selectedEstimation.id} />
                 ) : (
-                  <BOQRevisionHistory boqId={selectedEstimation.id} />
+                  <BOQRevisionHistory boqId={selectedEstimation.id} refreshTrigger={boqDetailsRefreshTrigger} />
                 )}
               </div>
             </motion.div>
