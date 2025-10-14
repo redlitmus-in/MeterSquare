@@ -119,7 +119,6 @@ def extract_text_from_pdf_fallback(file_path):
                         })
     except Exception as e:
         print(f"pdfplumber extraction failed: {e}")
-
         # Fallback: PyPDF2
         try:
             with open(file_path, 'rb') as file:
@@ -139,25 +138,87 @@ def extract_text_from_excel(file_path):
     tables = []
 
     try:
-        # Read Excel file
-        excel_file = pd.ExcelFile(file_path)
+        # Read Excel file with openpyxl engine (for .xlsx files)
+        # For .xls files, we'll need xlrd but xlrd doesn't work with Python 3.12+
+        file_ext = file_path.rsplit('.', 1)[1].lower()
 
-        for sheet_name in excel_file.sheet_names:
-            df = pd.read_excel(file_path, sheet_name=sheet_name)
+        if file_ext == 'xls':
+            return text, tables
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(file_path, read_only=True, data_only=True)
+            sheet_names = wb.sheetnames
+            wb.close()
+        except Exception as e:
+            print(f"Error loading workbook: {e}")
+            # Fallback: try reading with pandas directly
+            sheet_names = [0]  # Read first sheet by index
+
+        for sheet_name in sheet_names:
+            # Read with header detection - directly specify openpyxl engine
+            df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, engine='openpyxl')
+            # Find the header row by looking for key column names
+            header_row_idx = None
+            for idx, row in df.iterrows():
+                row_str = ' '.join([str(x).lower() for x in row if pd.notna(x)])
+                if any(keyword in row_str for keyword in ['work type', 'description', 'qty', 'unit', 'rate', 'amount', 'item', 'sub item']):
+                    header_row_idx = idx
+                    break
+
+            if header_row_idx is not None:
+                # Use found header row
+                headers = df.iloc[header_row_idx].tolist()
+                data_rows = df.iloc[header_row_idx + 1:].values.tolist()
+            else:
+                # No header found, use first row
+                headers = df.iloc[0].tolist()
+                data_rows = df.iloc[1:].values.tolist()
+
+            # Clean headers and data
+            cleaned_headers = []
+            for h in headers:
+                if pd.notna(h):
+                    h_str = str(h).strip()
+                    # Handle nan strings from Excel
+                    if h_str.lower() != 'nan':
+                        cleaned_headers.append(h_str)
+                    else:
+                        cleaned_headers.append('')
+                else:
+                    cleaned_headers.append('')
+
+            cleaned_data = []
+            for row in data_rows:
+                cleaned_row = []
+                for cell in row:
+                    if pd.notna(cell):
+                        cell_str = str(cell).strip()
+                        # Handle nan strings from Excel
+                        if cell_str.lower() != 'nan':
+                            cleaned_row.append(cell_str)
+                        else:
+                            cleaned_row.append('')
+                    else:
+                        cleaned_row.append('')
+
+                # Skip completely empty rows
+                if any(cell for cell in cleaned_row):
+                    cleaned_data.append(cleaned_row)
 
             # Convert to text
             text += f"\n--- Sheet: {sheet_name} ---\n"
-            text += df.to_string()
+            text += f"Headers: {cleaned_headers}\n"
+            for row in cleaned_data[:10]:  # Sample first 10 rows for text
+                text += f"{row}\n"
 
-            # Store as table
+            # Store as table with proper structure
+            table_data = [cleaned_headers] + cleaned_data
             tables.append({
                 'sheet': sheet_name,
-                'headers': df.columns.tolist(),
-                'data': df.values.tolist()
+                'data': table_data  # This matches the format expected by process_boq_table
             })
     except Exception as e:
         print(f"Excel extraction failed: {e}")
-
     return text, tables
 
 def extract_boq_data(text, tables, boq_data=None):
@@ -214,10 +275,12 @@ def extract_with_rules(text, tables):
             extracted['project_details'][key] = match.group(1).strip()
 
     # Process tables to extract BOQ items
-    for table_data in tables:
+    for idx, table_data in enumerate(tables):
         if 'data' in table_data:
             items = process_boq_table(table_data['data'])
             extracted['boq_items'].extend(items)
+        else:
+            print(f"DEBUG: Table #{idx + 1} has no 'data' key, skipping")
 
     return extracted
 
@@ -238,47 +301,79 @@ def process_boq_table(table_data):
             header = str(h).lower().strip()
             # Remove extra whitespaces and special chars
             header = ' '.join(header.split())
+            # Remove parentheses content for easier matching
+            header = header.replace('(aed)', '').replace('(', '').replace(')', '').strip()
             headers.append(header)
+    # If no valid headers found, skip this table
+    if not any(headers):
+        return items
 
-    # Debug: print headers to understand the structure
-    print(f"DEBUG: Headers found: {headers}")
-
-    # Find relevant column indices - matching your PDF format exactly
+    # Find relevant column indices - matching your Excel format exactly
     col_map = {}
+    labour_role_idx = None  # Track labour role column to identify the next Amount column
+    amount_columns = []  # Track all amount columns to distinguish between material and labour amounts
+
     for i, h in enumerate(headers):
-        h_lower = h.lower()
-        if 'work' in h_lower and 'type' in h_lower:
+        h_clean = str(h).strip()
+        h_lower = h_clean.lower()
+
+        # Remove common patterns to simplify matching
+        h_normalized = h_lower.replace('(aed)', '').replace('aed', '').replace('(', '').replace(')', '').strip()
+        # Work type
+        if 'work' in h_normalized and 'type' in h_normalized:
             col_map['work_type'] = i
-        elif h_lower == 'item' or (h_lower == 'item' and 'sub' not in h_lower):
+        # Item column (exact match to avoid confusion with "Sub Item")
+        elif h_normalized == 'item':
             col_map['item'] = i
-        elif 'sub' in h_lower and 'item' in h_lower:
+        # Sub item column
+        elif 'sub' in h_normalized and 'item' in h_normalized:
             col_map['sub_item'] = i
-        elif 'desc' in h_lower or 'description' in h_lower:
+        # Description
+        elif 'description' in h_normalized:
             col_map['description'] = i
-        elif h_lower == 'qty' or h_lower == 'quantity':
+        # QTY
+        elif h_normalized in ['qty', 'quantity']:
             col_map['qty'] = i
-        elif h_lower == 'unit':
+        # Unit
+        elif h_normalized == 'unit':
             col_map['unit'] = i
-        elif 'rate' in h_lower and ('aed' in h_lower or h_lower == 'rate(aed)'):
+        # Rate - Material rate (before labour columns, first rate column)
+        elif 'rate' in h_normalized and 'per' not in h_normalized and 'hour' not in h_normalized and 'rate' not in col_map:
             col_map['rate'] = i
-        elif 'amount' in h_lower and ('aed' in h_lower or h_lower == 'amount (aed)' or h_lower == 'amount(aed)') and 'labour' not in h_lower:
+        # Amount - Material amount (appears before Labour Role)
+        elif 'amount' in h_normalized and labour_role_idx is None and 'amount' not in col_map:
             col_map['amount'] = i
-        elif 'labour' in h_lower and 'role' in h_lower:
+            amount_columns.append(('material', i))
+        # Labour Role
+        elif 'labour' in h_normalized and 'role' in h_normalized:
             col_map['labour_role'] = i
-        elif 'rate_per_h' in h_lower or 'rate per h' in h_lower or (i > 0 and 'labour' in headers[i-1].lower() and 'rate' not in headers[i-1].lower()):
-            col_map['rate_per_hour'] = i
-        elif 'working' in h_lower and 'hours' in h_lower:
+            labour_role_idx = i
+        # Working Hours
+        elif 'working' in h_normalized and 'hours' in h_normalized:
             col_map['working_hours'] = i
-        elif h_lower == 'amount' and i > 0 and 'labour' in headers[i-1].lower():
-            col_map['labour_amount'] = i
-        elif 'profit' in h_lower and 'margin' in h_lower and 'percent' in h_lower:
+        # Profit margin percentage
+        elif 'profit' in h_normalized and 'margin' in h_normalized:
             col_map['profit_margin_percentage'] = i
-        elif 'overhead' in h_lower and 'percent' in h_lower:
+        # Overhead percentage (comes after profit in your format)
+        elif 'overhead' in h_normalized or 'over' in h_normalized and 'head' in h_normalized:
             col_map['overhead_percentage'] = i
+        # Amount column after Labour Role = Labour Amount
+        elif 'amount' in h_normalized and labour_role_idx is not None and i > labour_role_idx:
+            if 'labour_amount' not in col_map:
+                col_map['labour_amount'] = i
+                amount_columns.append(('labour', i))
 
-    # Debug: print column mapping
-    print(f"DEBUG: Column mapping: {col_map}")
+    # Second pass: If labour_amount not found but we have labour_role, find next "Amount" column
+    if labour_role_idx is not None and 'labour_amount' not in col_map:
+        for i, h in enumerate(headers):
+            h_lower = h.lower()
+            # Look for "Amount" column that appears after "Labour Role"
+            if i > labour_role_idx and h_lower == 'amount':
+                col_map['labour_amount'] = i
+                break
 
+    for field_name, col_idx in col_map.items():
+        actual_header = headers[col_idx] if col_idx < len(headers) else 'N/A'
     # Extract items from rows
     item_counter = 1
     current_work_type = "General"  # Default work type
@@ -287,13 +382,6 @@ def process_boq_table(table_data):
     for row in table_data[1:]:
         if not row or all(not cell for cell in row):
             continue
-
-        # Check if this row has a work type
-        if 'work_type' in col_map and col_map['work_type'] < len(row):
-            work_type_value = row[col_map['work_type']]
-            if work_type_value and str(work_type_value).strip():
-                current_work_type = str(work_type_value).strip()
-
         # Extract all fields into item dict
         item = {}
         for field, idx in col_map.items():
@@ -311,30 +399,51 @@ def process_boq_table(table_data):
                             item[field] = 0.0
                     else:
                         item[field] = str(value).strip()
-
         # Get main values
         item_value = item.get('item', '')
         sub_item_value = item.get('sub_item', '')
         description_value = item.get('description', '')
-
-        # Debug what we found in this row
-        print(f"DEBUG: Row {item_counter} - Item: '{item_value}', Sub-item: '{sub_item_value}', Desc: '{description_value}'")
-
-        # Determine the actual item name based on PDF format
-        if sub_item_value:
-            # Sub-item has value - this is the actual item name
-            item['item_name'] = sub_item_value
-            item['parent_item'] = item_value if item_value else current_main_item
-            item['is_sub_item'] = bool(item_value)
-        elif item_value:
-            # Only item column has value - this is a main item
-            item['item_name'] = item_value
-            item['is_sub_item'] = False
-            current_main_item = item_value
-        elif description_value:
+        work_type_value = item.get('work_type', '')
+        # Update work type if present in this row
+        if work_type_value and str(work_type_value).strip():
+            current_work_type = str(work_type_value).strip()
+        # In your format: Item column = main category, Sub Item column = actual MATERIAL
+        if sub_item_value and str(sub_item_value).strip():
+            # Sub-item has value - this is the MATERIAL (sub item = material)
+            item['item_name'] = str(sub_item_value).strip()
+            # Use Item column as parent category
+            if item_value and str(item_value).strip():
+                current_main_item = str(item_value).strip()
+                item['parent_item'] = current_main_item
+            else:
+                item['parent_item'] = current_main_item if current_main_item else 'General'
+            item['is_sub_item'] = True
+            item['is_material'] = True  # Sub Item = Material (as per user requirement)
+        elif item_value and str(item_value).strip():
+            # Only Item column has value - could be a category header or standalone item
+            # Check if it has financial data (qty, rate, amount)
+            has_financial_data = (
+                item.get('qty', 0) > 0 or
+                item.get('rate', 0) > 0 or
+                item.get('amount', 0) > 0
+            )
+            if has_financial_data:
+                # It's a standalone item with data
+                item['item_name'] = str(item_value).strip()
+                item['parent_item'] = current_work_type
+                item['is_sub_item'] = False
+            else:
+                # This is a category header row - track it but don't add as item
+                current_main_item = str(item_value).strip()
+                continue  # Skip to next row
+        elif description_value and str(description_value).strip():
             # Use description as item name
-            item['item_name'] = description_value
+            item['item_name'] = str(description_value).strip()
+            item['parent_item'] = current_main_item if current_main_item else current_work_type
             item['is_sub_item'] = False
+        else:
+            # No meaningful data in this row
+            continue
 
         # Add description if not already set
         if 'description' not in item or not item['description']:
@@ -347,15 +456,12 @@ def process_boq_table(table_data):
         # Store labour information properly
         if 'labour_role' in item and item.get('labour_role'):
             working_hours = item.get('working_hours', 0.0)
-            rate_per_hour = item.get('rate_per_hour', 0.0)
             labour_amount = item.get('labour_amount', 0.0)
+            rate_per_hour = 0.0
 
-            # Calculate missing values if possible
-            if labour_amount > 0 and working_hours > 0 and rate_per_hour == 0:
+            # Calculate rate_per_hour from labour_amount and working_hours
+            if labour_amount > 0 and working_hours > 0:
                 rate_per_hour = labour_amount / working_hours
-            elif rate_per_hour > 0 and working_hours > 0 and labour_amount == 0:
-                labour_amount = rate_per_hour * working_hours
-
             item['labour'] = {
                 'role': item.get('labour_role', ''),
                 'amount': labour_amount,
@@ -363,14 +469,41 @@ def process_boq_table(table_data):
                 'rate_per_hour': rate_per_hour
             }
 
-        # Only add if we have valid data (item name and at least rate or amount)
+        # Only add if we have valid data (item name and at least some financial data)
         if item.get('item_name') and item.get('item_name').strip():
-            if item.get('rate', 0) > 0 or item.get('amount', 0) > 0:
-                print(f"DEBUG: Adding item #{item_counter}: {item['item_name']} (Work type: {current_work_type})")
+            # Check if we have any financial data (material or labour)
+            has_material_data = (
+                item.get('rate', 0) > 0 or
+                item.get('amount', 0) > 0 or
+                item.get('qty', 0) > 0
+            )
+            has_labour_data = 'labour' in item and item.get('labour', {}).get('amount', 0) > 0
+            has_financial_data = has_material_data or has_labour_data
+
+            if has_financial_data:
+                has_labour = 'labour' in item and item['labour']
+                if has_labour:
+                    print(f"       Labour details: {item['labour']}")
                 items.append(item)
                 item_counter += 1
+            else:
+                print(f"DEBUG: Skipping item '{item.get('item_name')}' - no financial data (rate={item.get('rate', 0)}, amount={item.get('amount', 0)}, qty={item.get('qty', 0)})")
 
     return items
+
+def truncate_and_clean_name(name, max_length=100):
+    """Truncate and clean a name to fit database constraints"""
+    if not name:
+        return "Untitled BOQ"
+
+    # Remove newlines and excessive whitespace
+    name = ' '.join(name.split())
+
+    # Truncate if too long
+    if len(name) > max_length:
+        name = name[:max_length-3] + "..."
+
+    return name
 
 def validate_and_clean_data(extracted_data):
     """Validate and clean extracted BOQ data"""
@@ -380,6 +513,15 @@ def validate_and_clean_data(extracted_data):
 
     if 'boq_items' not in extracted_data:
         extracted_data['boq_items'] = []
+
+    # Clean project name if it exists
+    if 'project_name' in extracted_data['project_details']:
+        original_name = extracted_data['project_details']['project_name']
+        extracted_data['project_details']['project_name'] = truncate_and_clean_name(original_name, max_length=200)
+
+        # Store original name separately if truncated
+        if len(original_name) > 200:
+            extracted_data['project_details']['original_project_name'] = original_name
 
     # Clean and validate items
     cleaned_items = []
@@ -429,7 +571,6 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
         )
         db.session.add(master_item)
         db.session.flush()
-        print(f"Created new master item: {item_name} with overhead: {overhead_percentage}%, profit: {profit_margin_percentage}%")
     else:
         # Update description and overhead/profit values
         if description:
@@ -442,8 +583,6 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
         master_item.profit_margin_amount = profit_margin_amount
 
         db.session.flush()
-        print(f"Updated existing master item: {master_item.item_name} with overhead: {overhead_percentage}%, profit: {profit_margin_percentage}%")
-
     master_item_id = master_item.item_id
 
     # Add to master materials - PROPERLY AVOIDING DUPLICATES
@@ -472,7 +611,6 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
             )
             db.session.add(master_material)
             db.session.flush()
-            print(f"Created new master material: {material_name}")
         else:
             # Update existing material ONLY if values have changed
             updated = False
@@ -495,7 +633,6 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
 
             if updated:
                 db.session.flush()
-                print(f"Updated existing master material: {master_material.material_name}")
             else:
                 print(f"No changes for master material: {master_material.material_name}")
 
@@ -537,7 +674,6 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
             )
             db.session.add(master_labour)
             db.session.flush()
-            print(f"Created new master labour: {labour_role} (Hours: {hours}, Rate: {rate_per_hour}, Amount: {labour_amount})")
         else:
             # Update existing labour ONLY if values have changed
             updated = False
@@ -569,7 +705,6 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
 
             if updated:
                 db.session.flush()
-                print(f"Updated existing master labour: {master_labour.labour_role} (Hours: {hours}, Rate: {rate_per_hour}, Amount: {labour_amount})")
             else:
                 print(f"No changes for master labour: {master_labour.labour_role}")
 
@@ -578,7 +713,13 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
     return master_item_id, master_material_ids, master_labour_ids
 
 def process_extracted_items_to_boq(extracted_items, project_id, boq_name, created_by, file_info=None):
-    """Convert extracted items to BOQ structure using existing models"""
+    """Convert extracted items to BOQ structure
+
+    Structure:
+    - Sub-items (materials) are stored in boq_material table
+    - Labour details are stored in boq_labours table
+    - Each category becomes an item in boq_items table
+    """
     try:
         # Create BOQ
         boq = BOQ(
@@ -588,7 +729,15 @@ def process_extracted_items_to_boq(extracted_items, project_id, boq_name, create
             created_by=created_by,
         )
         db.session.add(boq)
-        db.session.flush()  # Get boq_id without committing
+        db.session.flush()
+
+        # Group extracted items by parent category
+        items_by_category = {}
+        for item_data in extracted_items:
+            parent = item_data.get('parent_item', 'General')
+            if parent not in items_by_category:
+                items_by_category[parent] = []
+            items_by_category[parent].append(item_data)
 
         # Process items and create JSON structure
         boq_items = []
@@ -596,111 +745,70 @@ def process_extracted_items_to_boq(extracted_items, project_id, boq_name, create
         total_materials = 0
         total_labour = 0
 
-        for item_data in extracted_items:
-            # Extract materials and labour from the parsed data
+        # Process each category (main item)
+        for category_name, category_items in items_by_category.items():
             materials_data = []
             labour_data = []
+            work_type = category_items[0].get('work_type', 'General') if category_items else 'General'
 
-            # Create item name from either item_name or description
-            item_name = item_data.get('item_name') or item_data.get('description', 'Unknown Item')
+            materials_cost_total = 0
+            labour_cost_total = 0
+            overhead_percentage = 10.0
+            profit_margin_percentage = 15.0
 
-            # Create materials based on the item and its properties
-            # For BOQ items, the item itself is often the material
-            if item_name and item_data.get('rate'):
-                # Create material entry from the BOQ item
-                material_name = item_name
+            # Process each sub-item (material) in this category
+            for item_data in category_items:
+                material_name = item_data.get('item_name', 'Unknown Material')
+                qty = float(item_data.get('qty', 1.0) or 1.0)
+                unit = item_data.get('unit', 'nos')
+                rate = float(item_data.get('rate', 0.0) or 0.0)
+                amount = float(item_data.get('amount', 0.0) or 0.0)
 
-                # If this is a sub-item, combine with parent for material name
-                if item_data.get('is_sub_item') and item_data.get('main_item_name'):
-                    material_name = f"{item_data.get('main_item_name')} - {item_name}"
+                # If amount not provided, calculate it
+                if amount == 0 and qty > 0 and rate > 0:
+                    amount = qty * rate
 
+                # Add material
                 materials_data.append({
                     "material_name": material_name,
-                    "quantity": float(item_data.get('quantity', 1.0) or 1.0),
-                    "unit": item_data.get('unit', 'LS'),
-                    "unit_price": float(item_data.get('rate', 0.0) or 0.0)
+                    "quantity": qty,
+                    "unit": unit,
+                    "unit_price": rate
                 })
+                materials_cost_total += amount
 
-            # Create labour entry from uploaded data or infer from work type
-            work_type = item_data.get('work_type', 'General')
+                # Check for labour data
+                if 'labour' in item_data and item_data['labour']:
+                    labour_info = item_data['labour']
+                    labour_role = labour_info.get('role', 'Worker')
+                    working_hours = float(labour_info.get('working_hours', 0.0))
+                    labour_amount = float(labour_info.get('amount', 0.0))
+                    rate_per_hour = float(labour_info.get('rate_per_hour', 0.0))
 
-            # Check if labour data is provided in uploaded file
-            if 'labour' in item_data and item_data['labour']:
-                labour_info = item_data['labour']
-                labour_role = labour_info.get('role', f"{work_type} Technician")
-                labour_amount = float(labour_info.get('amount', 0.0))
-                working_hours = float(labour_info.get('working_hours', 0.0))
-                rate_per_hour = float(labour_info.get('rate_per_hour', 0.0))
+                    if working_hours > 0 and (labour_amount > 0 or rate_per_hour > 0):
+                        labour_data.append({
+                            "labour_role": labour_role,
+                            "hours": working_hours,
+                            "rate_per_hour": rate_per_hour,
+                            "amount": labour_amount
+                        })
+                        labour_cost_total += labour_amount
+                # Get overhead and profit percentages if provided
+                if item_data.get('overhead_percentage'):
+                    overhead_percentage = float(item_data.get('overhead_percentage', 10.0))
+                if item_data.get('profit_margin_percentage'):
+                    profit_margin_percentage = float(item_data.get('profit_margin_percentage', 15.0))
 
-                # Calculate rate_per_hour if not provided
-                if rate_per_hour == 0 and labour_amount > 0 and working_hours > 0:
-                    rate_per_hour = labour_amount / working_hours
-
-                # Calculate amount if not provided
-                if labour_amount == 0 and rate_per_hour > 0 and working_hours > 0:
-                    labour_amount = rate_per_hour * working_hours
-
-                if (labour_amount > 0 or rate_per_hour > 0) and working_hours > 0:
-                    labour_data.append({
-                        "labour_role": labour_role,
-                        "hours": working_hours,
-                        "rate_per_hour": rate_per_hour,
-                        "amount": labour_amount
-                    })
-            else:
-                # Fallback: Determine if this item involves labour based on work type and item description
-                labour_keywords = ['installation', 'work', 'hoarding', 'cladding', 'partition',
-                                 'flooring', 'ceiling', 'painting', 'cleaning', 'setup']
-
-                item_desc_lower = item_name.lower()
-                needs_labour = any(keyword in item_desc_lower for keyword in labour_keywords) or \
-                              work_type.lower() in ['hoarding work', 'flooring works', 'cladding & partition', 'ceiling works']
-
-                if needs_labour and item_data.get('rate'):
-                    # Calculate labour cost as a portion of the total rate
-                    labour_rate = float(item_data.get('rate', 0.0) or 0.0) * 0.4  # 40% for labour
-                    labour_data.append({
-                        "labour_role": f"{work_type} Technician",
-                        "hours": 8.0,  # Standard 8 hours
-                        "rate_per_hour": labour_rate / 8.0 if labour_rate > 0 else 0.0
-                    })
-
-            # First calculate costs to get overhead and profit amounts
-            materials_cost = 0
-            for mat_data in materials_data:
-                quantity = mat_data.get("quantity", 1.0)
-                unit_price = mat_data.get("unit_price", 0.0)
-                materials_cost += quantity * unit_price
-
-            labour_cost = 0
-            for labour_data_item in labour_data:
-                hours = labour_data_item.get("hours", 0.0)
-                rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
-                labour_cost += hours * rate_per_hour
-
-            # Calculate base cost
-            base_cost = materials_cost + labour_cost
-
-            # Use percentages from uploaded data or defaults
-            overhead_percentage = item_data.get('overhead_percentage', 10.0)
-            profit_margin_percentage = item_data.get('profit_margin_percentage', 15.0)
-
-            # Calculate overhead and profit amounts based on base cost
+            # Calculate totals for this category/item
+            base_cost = materials_cost_total + labour_cost_total
             overhead_amount = (base_cost * overhead_percentage) / 100
             profit_margin_amount = (base_cost * profit_margin_percentage) / 100
-
-            # If amount is provided in uploaded data, use it; otherwise calculate
-            if item_data.get('amount') and float(item_data.get('amount', 0)) > 0:
-                selling_price = float(item_data.get('amount', 0))
-            else:
-                selling_price = base_cost + overhead_amount + profit_margin_amount
-
             total_cost = base_cost + overhead_amount
-
-            # Now add to master tables with calculated values
+            selling_price = total_cost + profit_margin_amount
+            # Add to master tables
             master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
-                item_name,  # Use the item_name we extracted above
-                item_data.get("description", item_name),  # Use description or item_name
+                category_name,
+                f"Category: {category_name}",
                 work_type,
                 materials_data,
                 labour_data,
@@ -732,7 +840,10 @@ def process_extracted_items_to_boq(extracted_items, project_id, boq_name, create
             for i, labour_data_item in enumerate(labour_data):
                 hours = labour_data_item.get("hours", 0.0)
                 rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
-                total_cost_labour = hours * rate_per_hour
+                amount = labour_data_item.get("amount", 0.0)
+
+                # Use the amount from Excel if provided, otherwise calculate
+                total_cost_labour = amount if amount > 0 else (hours * rate_per_hour)
 
                 item_labour.append({
                     "master_labour_id": master_labour_ids[i] if i < len(master_labour_ids) else None,
@@ -745,8 +856,8 @@ def process_extracted_items_to_boq(extracted_items, project_id, boq_name, create
             # Create item JSON structure with properly calculated values
             item_json = {
                 "master_item_id": master_item_id,
-                "item_name": item_name,  # Use the item_name we extracted above
-                "description": item_data.get("description", item_name),
+                "item_name": category_name,
+                "description": f"Category: {category_name}",
                 "work_type": work_type,
                 "base_cost": base_cost,
                 "overhead_percentage": overhead_percentage,
@@ -755,8 +866,8 @@ def process_extracted_items_to_boq(extracted_items, project_id, boq_name, create
                 "profit_margin_amount": profit_margin_amount,
                 "total_cost": total_cost,
                 "selling_price": selling_price,
-                "totalMaterialCost": materials_cost,
-                "totalLabourCost": labour_cost,
+                "totalMaterialCost": materials_cost_total,
+                "totalLabourCost": labour_cost_total,
                 "actualItemCost": base_cost,
                 "estimatedSellingPrice": selling_price,
                 "materials": item_materials,
@@ -816,72 +927,9 @@ def process_extracted_items_to_boq(extracted_items, project_id, boq_name, create
         print(f"Error in process_extracted_items_to_boq: {str(e)}")
         raise e
 
-def create_or_get_project(project_details, user_info):
-    """Create a new project or get existing one"""
-    try:
-        # Check if project exists
-        project_name = project_details.get('project_name', 'Unnamed Project')
-        existing_project = Project.query.filter_by(
-            project_name=project_name,
-            is_deleted=False
-        ).first()
-
-        if existing_project:
-            # Update area if it's provided and not already set
-            if project_details.get('area') and not existing_project.area:
-                existing_project.area = project_details.get('area')
-                db.session.flush()
-            return existing_project.project_id
-
-        # Create new project
-        new_project = Project(
-            project_name=project_name,
-            location=project_details.get('location', 'Unknown'),
-            client=project_details.get('client', 'Unknown'),
-            work_type=project_details.get('work_type', 'Construction'),
-            area=project_details.get('area'),  # Add area from PDF
-            start_date=datetime.now().date(),
-            end_date=datetime.now().date(),
-            status='Active',
-            description=project_details.get('description', ''),
-            created_by=user_info.get('username', 'system'),
-            user_id=user_info.get('user_id')
-        )
-
-        db.session.add(new_project)
-        db.session.flush()
-
-        return new_project.project_id
-
-    except Exception as e:
-        print(f"Error creating/getting project: {e}")
-        raise
-
-def create_boq_record(project_id, title, user_info):
-    """Create a new BOQ record (multiple BOQs allowed per project)"""
-    try:
-        # Create new BOQ - multiple BOQs are allowed per project
-        boq = BOQ(
-            project_id=project_id,
-            title=title or f"BOQ - {datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            raised_by=user_info.get('username', 'system'),
-            status='pending',
-            user_id=user_info.get('user_id'),
-            created_by=user_info.get('username', 'system')
-        )
-
-        db.session.add(boq)
-        db.session.flush()
-
-        print(f"Created new BOQ ID: {boq.boq_id} for project {project_id}")
-        return boq.boq_id
-
-    except Exception as e:
-        print(f"Error creating BOQ record: {e}")
-        raise
-
-# Function removed - BOQ items are now stored only in BOQDetails table
-# def save_boq_items - DEPRECATED: Items stored in BOQDetails.boq_details
+# REMOVED: create_or_get_project() - BOQ now requires existing project_id
+# REMOVED: create_boq_record() - BOQ creation handled in process_extracted_items_to_boq()
+# REMOVED: save_boq_items() - Items stored in BOQDetails.boq_details JSON
 
 def format_boq_structure_for_storage(items, project_details, file_url=None):
     """Format BOQ items into hierarchical structure for BOQDetails storage"""
@@ -978,7 +1026,7 @@ def upload_to_supabase(file_content, file_name, boq_id):
         return None
 
     try:
-        bucket_name = 'boq_files'
+        bucket_name = 'file_upload'
         file_path = f"{boq_id}/{file_name}"
 
         # Try to create bucket if it doesn't exist
@@ -994,12 +1042,8 @@ def upload_to_supabase(file_content, file_name, boq_id):
                     bucket_name,
                     {'public': True}
                 )
-                print(f"Successfully created bucket: {bucket_name}")
             except Exception as create_error:
                 print(f"Could not create bucket: {create_error}")
-                print("Note: You may need to create the bucket manually in Supabase dashboard")
-                # Continue anyway, file will be saved locally
-
         # Try to upload file
         try:
             response = supabase.storage.from_(bucket_name).upload(
@@ -1022,8 +1066,19 @@ def upload_to_supabase(file_content, file_name, boq_id):
         return None
 
 def upload_boq_file():
-    """Upload and process BOQ file"""
+    """Upload and process BOQ file for a specific project
+    Args:
+        project_id: The project ID to associate this BOQ with
+    Returns:
+        JSON response with BOQ details and extraction results
+    """
     try:
+        project_id = request.form.get('project_id')
+        # Validate project exists
+        project = Project.query.filter_by(project_id=project_id, is_deleted=False).first()
+        if not project:
+            return jsonify({'error': f'Project with ID {project_id} not found'}), 404
+
         # Check if file is present
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
@@ -1049,9 +1104,6 @@ def upload_boq_file():
         if len(file_content) > MAX_FILE_SIZE:
             return jsonify({'error': 'File size exceeds 50MB limit'}), 400
 
-        # Generate file hash for tracking (but don't block duplicates)
-        file_hash = get_file_hash(file_content)
-
         # Save file temporarily
         temp_dir = 'temp_uploads'
         os.makedirs(temp_dir, exist_ok=True)
@@ -1074,34 +1126,19 @@ def upload_boq_file():
             else:
                 text = file_content.decode('utf-8', errors='ignore')
                 tables = []
-
-            # Extract BOQ data using enhanced extraction
             extracted_data = extract_boq_data(text, tables, boq_data)
-
-            # Validate and clean the data
             extracted_data = validate_and_clean_data(extracted_data)
+            project_name = extracted_data.get('project_details', {}).get('project_name', '')
+            if project_name:
+                boq_name = truncate_and_clean_name(project_name, max_length=95)
+            else:
+                boq_name = truncate_and_clean_name(f'BOQ - {filename}', max_length=95)
 
-            # No need to explicitly begin transaction - Flask-SQLAlchemy handles it
-            # db.session.begin() - REMOVED
-
-            # Create or get project
-            project_id = create_or_get_project(
-                extracted_data.get('project_details', {}),
-                user_info
-            )
-
-            # Process extracted items and create BOQ using existing models
-            boq_name = extracted_data.get('project_details', {}).get('project_name', f'Uploaded BOQ - {filename}')
             created_by = user_info.get('username', 'system')
 
             # Prepare file information
             file_info = {
-                'file_name': filename,
-                # 'file_size': len(file_content),
-                # 'file_type': file_ext,
-                # 'file_hash': file_hash,
-                # 'extraction_method': 'enhanced-rule-based',
-                # 'file_url': None  # Will be updated after upload
+                'file_name': filename
             }
 
             # Process BOQ with file info
@@ -1113,7 +1150,7 @@ def upload_boq_file():
                 file_info
             )
 
-            # Upload file to Supabase (optional)
+            # Upload file to Supabase (optional - continues even if it fails)
             file_url = upload_to_supabase(file_content, filename, boq_result['boq_id'])
 
             # Update BOQDetails with additional extraction information
@@ -1137,17 +1174,10 @@ def upload_boq_file():
                     'extraction_method': 'enhanced-rule-based'
                 }
                 boq_detail.boq_details = existing_details
-
-                # Update file information
                 boq_detail.file_name = filename
 
-                # Merge the changes to avoid detached instance issues
                 db.session.merge(boq_detail)
                 db.session.commit()
-
-            # Get updated BOQ details for response
-            boq_detail = BOQDetails.query.filter_by(boq_id=boq_result['boq_id']).first()
-
             return jsonify({
                 'success': True,
                 'message': 'BOQ file processed and integrated successfully',
@@ -1155,17 +1185,13 @@ def upload_boq_file():
                 'boq_id': boq_result['boq_id'],
                 'project_id': project_id,
                 'items_extracted': len(extracted_data.get('boq_items', [])),
-                # 'file_url': file_url,
                 'file_name': filename,
-                # 'file_size': len(file_content),
-                'boq_details': boq_result,
-                'data': {
-                    'boq_id': boq_result['boq_id'],
-                    'file_name': filename,
-                    # 'extraction_method': 'enhanced-rule-based',
-                    'total_items': boq_result['items_count'],
+                'boq_details': {
+                    'boq_name': boq_name,
                     'total_cost': boq_result['total_cost'],
-                    # 'file_url': file_url
+                    'items_count': boq_result['items_count'],
+                    'materials_count': boq_result['materials_count'],
+                    'labour_count': boq_result['labour_count']
                 }
             }), 201
 
@@ -1180,12 +1206,6 @@ def upload_boq_file():
             db.session.rollback()
         except:
             pass  # If no transaction to rollback, continue
-
-        # Log the error for debugging
-        print(f"Error in upload_boq_file: {str(e)}")
-        import traceback
-        traceback.print_exc()
-
         return jsonify({'error': f'Processing failed: {str(e)}'}), 500
 
 def get_extraction_details(boq_detail_id):

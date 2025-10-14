@@ -324,7 +324,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-green-600'
       },
       {
-        name: 'Record Material Purchase',
+        name: 'Production Management',
         href: buildPath('/record-material'),
         icon: ShoppingCartIcon,
         iconSolid: ShoppingCartIcon,
@@ -356,7 +356,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-blue-600'
       },
       {
-        name: 'Record Material Purchase',
+        name: 'Production Management',
         href: buildPath('/record-material'),
         icon: ShoppingCartIcon,
         iconSolid: ShoppingCartIcon,
@@ -452,7 +452,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-cyan-600'
       },
       {
-        name: 'Record Material Purchase',
+        name: 'Production Management',
         href: buildPath('/record-material'),
         icon: ShoppingCartIcon,
         iconSolid: ShoppingCartIcon,

@@ -827,15 +827,13 @@ def get_all_boq():
                 sender_role = boq_history.sender_role.lower().replace('_', '').replace(' ', '')
                 receiver_role = boq_history.receiver_role.lower().replace('_', '').replace(' ', '')
 
-                if sender_role == 'technicaldirector' and receiver_role == 'projectmanager':
+                if sender_role == 'projectmanager' and receiver_role == 'estimator':
+                    display_status = 'pending'
+                elif sender_role == 'technicaldirector' and receiver_role == 'projectmanager':
                     display_status = 'Client_Confirmed'
                 elif sender_role == 'projectmanager' and receiver_role == 'siteengineer':
                     display_status = 'Client_Confirmed'
                 elif sender_role == 'siteengineer' and receiver_role == 'projectmanager':
-                    display_status = 'Client_Confirmed'
-                elif sender_role == 'project_manager' and receiver_role == 'site_engineer':
-                    display_status = 'Client_Confirmed'
-                elif sender_role == 'site_engineer' and receiver_role == 'project_manager':
                     display_status = 'Client_Confirmed'
             elif boq.status in ['new_purchase_create', 'new_purchase_approved', 'new_purchase_rejected', 'approved']:
                 display_status = 'Client_Confirmed'
