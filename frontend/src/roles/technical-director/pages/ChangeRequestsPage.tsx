@@ -26,21 +26,24 @@ import {
   FolderOpen,
   Info,
   LayoutGrid,
-  List
+  List,
+  Pencil
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
+import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 
 const ChangeRequestsPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('high_value');
+  const [activeTab, setActiveTab] = useState('pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [changeRequests, setChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   // Fetch change requests from backend
   useEffect(() => {
@@ -108,6 +111,27 @@ const ChangeRequestsPage: React.FC = () => {
       console.error('Error in handleReview:', error);
       toast.error('Failed to load change request details');
     }
+  };
+
+  const handleEdit = async (crId: number) => {
+    try {
+      const response = await changeRequestService.getChangeRequestDetail(crId);
+      if (response.success && response.data) {
+        setSelectedChangeRequest(response.data);
+        setShowEditModal(true);
+      } else {
+        toast.error(response.message || 'Failed to load details');
+      }
+    } catch (error) {
+      console.error('Error in handleEdit:', error);
+      toast.error('Failed to load change request details');
+    }
+  };
+
+  const handleEditSuccess = () => {
+    loadChangeRequests();
+    setShowEditModal(false);
+    setSelectedChangeRequest(null);
   };
 
   const handleApproveFromModal = async () => {
@@ -199,18 +223,18 @@ const ChangeRequestsPage: React.FC = () => {
     const matchesSearch = projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesTab = (
-      (activeTab === 'high_value' && req.approval_required_from === 'technical_director' && req.status === 'pending') ||
-      (activeTab === 'all') ||
-      (activeTab === 'approved' && req.status === 'approved') ||
+      (activeTab === 'pending' && ['under_review', 'approved_by_pm', 'pending'].includes(req.status)) ||
+      (activeTab === 'approved' && req.status === 'approved_by_td') ||
+      (activeTab === 'completed' && req.status === 'approved') ||
       (activeTab === 'rejected' && req.status === 'rejected')
     );
     return matchesSearch && matchesTab;
   });
 
   const stats = {
-    high_value: changeRequests.filter(r => r.approval_required_from === 'technical_director' && r.status === 'pending').length,
-    all: changeRequests.length,
-    approved: changeRequests.filter(r => r.status === 'approved').length,
+    pending: changeRequests.filter(r => ['under_review', 'approved_by_pm', 'pending'].includes(r.status)).length,
+    approved: changeRequests.filter(r => r.status === 'approved_by_td').length,
+    completed: changeRequests.filter(r => r.status === 'approved').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length
   };
 
@@ -347,32 +371,28 @@ const ChangeRequestsPage: React.FC = () => {
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200 mb-6">
               <TabsTrigger
-                value="high_value"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-500 data-[state=active]:text-red-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                value="pending"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-yellow-500 data-[state=active]:text-yellow-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
                 <AlertTriangle className="w-4 h-4 mr-2" />
-                High Value (&gt;AED50K)
-                <span className="ml-1 sm:ml-2 text-gray-400">({stats.high_value})</span>
-              </TabsTrigger>
-              <TabsTrigger
-                value="all"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
-                style={{
-                  borderBottomColor: activeTab === 'all' ? 'rgb(36, 61, 138)' : 'transparent',
-                  color: activeTab === 'all' ? 'rgb(36, 61, 138)' : ''
-                }}
-              >
-                <FileText className="w-4 h-4 mr-2" />
-                All Requests
-                <span className="ml-1 sm:ml-2 text-gray-400">({stats.all})</span>
+                Pending
+                <span className="ml-1 sm:ml-2 text-gray-400">({stats.pending})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="approved"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-400 data-[state=active]:text-blue-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
                 <CheckCircle className="w-4 h-4 mr-2" />
                 Approved
                 <span className="ml-1 sm:ml-2 text-gray-400">({stats.approved})</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="completed"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+              >
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Completed
+                <span className="ml-1 sm:ml-2 text-gray-400">({stats.completed})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="rejected"
@@ -384,54 +404,33 @@ const ChangeRequestsPage: React.FC = () => {
               </TabsTrigger>
             </TabsList>
 
-            {/* Info Banner for All Tab */}
-            {activeTab === 'all' && (
-              <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
-                <div className="flex items-start gap-3">
-                  <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-blue-900">
-                      You can see all change requests including those approved by the Estimator (≤AED50,000).
-                    </p>
-                    <p className="text-xs text-blue-700 mt-1">
-                      Requests with green badges were handled by Estimator. High-value requests (&gt;AED50,000) require your approval.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <TabsContent value="high_value" className="mt-0 p-0">
+            <TabsContent value="pending" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">High Value Pending Approval</h2>
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending Approval</h2>
                 {filteredRequests.length === 0 ? (
                   <div className="text-center py-12">
                     <AlertTriangle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No high-value requests found</p>
+                    <p className="text-gray-500 text-lg">No pending requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
                   <RequestsTable requests={filteredRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
                     {filteredRequests.map((request, index) => {
-                      const isHighValue = request.approval_type === 'td' && request.status === 'pending';
-
                       return (
                         <motion.div
                           key={request.cr_id}
                           initial={{ opacity: 0, y: 20 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: 0.05 * index }}
-                          className={`bg-white rounded-lg shadow-sm hover:shadow-lg transition-all duration-200 ${
-                            isHighValue ? 'border-2 border-red-300' : 'border border-gray-200'
-                          }`}
+                          className="bg-white rounded-lg shadow-sm hover:shadow-lg transition-all duration-200 border-2 border-yellow-300"
                         >
                           {/* Header */}
                           <div className="p-4">
                             <div className="flex items-start justify-between mb-2">
                               <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
-                              <Badge className="bg-red-100 text-red-800">
-                                REQUIRES APPROVAL
+                              <Badge className="bg-yellow-100 text-yellow-800">
+                                PENDING
                               </Badge>
                             </div>
 
@@ -449,7 +448,7 @@ const ChangeRequestsPage: React.FC = () => {
 
                           {/* Stats */}
                           <div className="px-4 pb-3 text-center text-sm">
-                            <span className="font-bold text-red-600 text-lg">{(request.materials_data?.length || 0)}</span>
+                            <span className="font-bold text-yellow-600 text-lg">{(request.materials_data?.length || 0)}</span>
                             <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                           </div>
 
@@ -457,7 +456,7 @@ const ChangeRequestsPage: React.FC = () => {
                           <div className="px-4 pb-3 space-y-1.5 text-xs">
                             <div className="flex justify-between">
                               <span className="text-gray-500">Additional Cost:</span>
-                              <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
+                              <span className="font-bold text-gray-900">{formatCurrency(request.materials_total_cost)}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-gray-500">Cost Increase:</span>
@@ -465,22 +464,27 @@ const ChangeRequestsPage: React.FC = () => {
                                 +{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%
                               </span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-500">Value Type:</span>
-                              <span className="font-medium text-red-700">High Value</span>
-                            </div>
                           </div>
 
                           {/* Actions */}
                           <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
-                            <button
-                              onClick={() => handleReview(request.cr_id)}
-                              className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
-                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                            >
-                              <Eye className="h-4 w-4" />
-                              <span>Review</span>
-                            </button>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => handleReview(request.cr_id)}
+                                className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                              >
+                                <Eye className="h-4 w-4" />
+                                <span>Review</span>
+                              </button>
+                              <button
+                                onClick={() => handleEdit(request.cr_id)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              >
+                                <Pencil className="h-4 w-4" />
+                                <span>Edit</span>
+                              </button>
+                            </div>
                             <div className="grid grid-cols-2 gap-2">
                               <button
                                 onClick={() => handleApprove(request.cr_id)}
@@ -508,102 +512,86 @@ const ChangeRequestsPage: React.FC = () => {
               </div>
             </TabsContent>
 
-            <TabsContent value="all" className="mt-0 p-0">
+            <TabsContent value="approved" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">All Change Requests</h2>
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Approved by TD (Pending Estimator)</h2>
                 {filteredRequests.length === 0 ? (
                   <div className="text-center py-12">
-                    <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No change requests found</p>
+                    <CheckCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500 text-lg">No approved requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
                   <RequestsTable requests={filteredRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => {
-                      const isHighValue = request.approval_type === 'td';
-                      const isEstimatorApproved = request.approval_type === 'estimator' && request.status === 'approved_estimator';
-
-                      return (
-                        <motion.div
-                          key={request.cr_id}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.05 * index }}
-                          className={`bg-white rounded-lg shadow-sm hover:shadow-lg transition-all duration-200 ${
-                            isHighValue ? 'border-2 border-blue-300' : 'border border-gray-200'
-                          }`}
-                        >
-                          <div className="p-4">
-                            <div className="flex items-start justify-between mb-2">
-                              <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
-                              {isEstimatorApproved ? (
-                                <Badge className="bg-green-100 text-green-800">APPROVED BY ESTIMATOR</Badge>
-                              ) : isHighValue ? (
-                                <Badge className="bg-blue-100 text-blue-800">HIGH VALUE</Badge>
-                              ) : (
-                                <Badge className={getStatusColor(request.status)}>
-                                  {request.status.replace('_', ' ').toUpperCase()}
-                                </Badge>
-                              )}
-                            </div>
-
-                            <div className="space-y-1 text-sm text-gray-600">
-                              <div className="flex items-center gap-1.5">
-                                <Package className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate">By: {request.requested_by_name}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <Calendar className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
-                              </div>
-                            </div>
+                    {filteredRequests.map((request, index) => (
+                      <motion.div
+                        key={request.cr_id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.05 * index }}
+                        className="bg-white rounded-lg border border-blue-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                      >
+                        <div className="p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
+                            <Badge className="bg-blue-100 text-blue-800">APPROVED BY TD</Badge>
                           </div>
 
-                          <div className="px-4 pb-3 text-center text-sm">
-                            <span className={`font-bold text-lg ${isHighValue ? 'text-blue-600' : 'text-gray-700'}`}>
-                              {(request.materials_data?.length || 0)}
+                          <div className="space-y-1 text-sm text-gray-600">
+                            <div className="flex items-center gap-1.5">
+                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate">By: {request.requested_by_name}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="px-4 pb-3 text-center text-sm">
+                          <span className="font-bold text-blue-600 text-lg">{(request.materials_data?.length || 0)}</span>
+                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                        </div>
+
+                        <div className="px-4 pb-3 space-y-1.5 text-xs">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Additional Cost:</span>
+                            <span className="font-bold text-blue-600">{formatCurrency(request.materials_total_cost)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Cost Increase:</span>
+                            <span className={`font-semibold ${getPercentageColor((request.budget_impact?.increase_percentage || 0))}`}>
+                              +{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%
                             </span>
-                            <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                           </div>
+                        </div>
 
-                          <div className="px-4 pb-3 space-y-1.5 text-xs">
-                            <div className="flex justify-between">
-                              <span className="text-gray-500">Additional Cost:</span>
-                              <span className="font-bold text-gray-900">{formatCurrency(request.materials_total_cost)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-500">Cost Increase:</span>
-                              <span className={`font-semibold ${getPercentageColor((request.budget_impact?.increase_percentage || 0))}`}>
-                                +{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="border-t border-gray-200 p-2 sm:p-3">
-                            <button
-                              className="w-full text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold"
-                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                            >
-                              <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                              <span>View Details</span>
-                            </button>
-                          </div>
-                        </motion.div>
-                      );
-                    })}
+                        <div className="border-t border-gray-200 p-2 sm:p-3">
+                          <button
+                            onClick={() => handleReview(request.cr_id)}
+                            className="w-full text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                          >
+                            <Eye className="h-4 w-4" />
+                            <span>View Details</span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
                   </div>
                 )}
               </div>
             </TabsContent>
 
-            <TabsContent value="approved" className="mt-0 p-0">
+            <TabsContent value="completed" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Approved Requests</h2>
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Completed Requests (Final Approval)</h2>
                 {filteredRequests.length === 0 ? (
                   <div className="text-center py-12">
                     <CheckCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No approved requests found</p>
+                    <p className="text-gray-500 text-lg">No completed requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
                   <RequestsTable requests={filteredRequests} />
@@ -756,6 +744,19 @@ const ChangeRequestsPage: React.FC = () => {
         onReject={handleRejectFromModal}
         canApprove={selectedChangeRequest?.status === 'pending' && selectedChangeRequest?.approval_required_from === 'technical_director'}
       />
+
+      {/* Edit Change Request Modal */}
+      {selectedChangeRequest && (
+        <EditChangeRequestModal
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false);
+            setSelectedChangeRequest(null);
+          }}
+          changeRequest={selectedChangeRequest}
+          onSuccess={handleEditSuccess}
+        />
+      )}
     </div>
   );
 };

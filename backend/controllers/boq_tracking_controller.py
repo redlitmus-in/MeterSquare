@@ -237,6 +237,13 @@ def get_boq_planned_vs_actual(boq_id):
                     # Response placeholder - can be updated later from tracking data
                     variance_response = actual_mat.variance_response if hasattr(actual_mat, 'variance_response') else None
 
+                # Check if this material is from a change request
+                is_from_cr = False
+                cr_id = None
+                if actual_mat:
+                    is_from_cr = getattr(actual_mat, 'is_from_change_request', False)
+                    cr_id = getattr(actual_mat, 'change_request_id', None)
+
                 materials_comparison.append({
                     "material_name": material_name,
                     "sub_item_name": planned_mat.get('sub_item_name', material_name),  # Sub item name from BOQ
@@ -264,7 +271,10 @@ def get_boq_planned_vs_actual(boq_id):
                     } if actual_mat and actual_quantity > 0 else None,
                     "status": material_status,
                     "variance_reason": variance_reason,
-                    "variance_response": variance_response
+                    "variance_response": variance_response,
+                    "is_from_change_request": is_from_cr,
+                    "change_request_id": cr_id,
+                    "source": "change_request" if is_from_cr else "original_boq"
                 })
 
             # Check for unplanned materials (purchased but not in BOQ)
@@ -324,6 +334,10 @@ def get_boq_planned_vs_actual(boq_id):
                                     if entry_mat_name:
                                         processed_material_names.add(entry_mat_name)
 
+                                    # Check if this unplanned material is from a change request
+                                    is_from_cr = getattr(am, 'is_from_change_request', False)
+                                    cr_id = getattr(am, 'change_request_id', None)
+
                                     materials_comparison.append({
                                         "material_name": mat_entry.get('material_name'),
                                         "master_material_id": entry_mat_id,
@@ -352,7 +366,10 @@ def get_boq_planned_vs_actual(boq_id):
                                             "reason": mat_entry.get('reason'),
                                         },
                                         "status": "unplanned",
-                                        "note": "This material was purchased but was not in the original BOQ plan"
+                                        "note": "This material was purchased but was not in the original BOQ plan",
+                                        "is_from_change_request": is_from_cr,
+                                        "change_request_id": cr_id,
+                                        "source": "change_request" if is_from_cr else "unplanned"
                                     })
 
             # Labour comparison

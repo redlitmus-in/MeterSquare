@@ -104,7 +104,7 @@ const ChangeRequestsPage: React.FC = () => {
       approved: {
         color: 'bg-green-100 text-green-700 border-green-300',
         icon: <CheckCircleIcon className="w-4 h-4" />,
-        label: 'Approved'
+        label: 'Completed'
       },
       rejected: {
         color: 'bg-red-100 text-red-700 border-red-300',

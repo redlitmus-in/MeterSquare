@@ -76,17 +76,18 @@ class ChangeRequestWorkflow:
             log.info(f"Site Engineer/Supervisor request - routing to Project Manager")
             return CR_CONFIG.ROLE_PROJECT_MANAGER, "Project Manager"
 
-        # Project Manager → Route based on percentage threshold
+        # Project Manager → Route based on overhead threshold
         # Handle both database formats: camelCase (projectManager) and snake_case (project_manager)
         elif normalized_role in ['projectmanager', 'project_manager']:
-            # Calculate percentage of item overhead
+            # Check if overhead consumption exceeds 40% threshold
+            # If overhead > 40%, it needs TD approval
             percentage = change_request.percentage_of_item_overhead or 0
 
             if percentage > 40:
                 log.info(f"PM request with {percentage}% overhead (>40%) - routing to Technical Director")
                 return CR_CONFIG.ROLE_TECHNICAL_DIRECTOR, "Technical Director"
             else:
-                log.info(f"PM request with {percentage}% overhead (≤40%) - routing to Estimator")
+                log.info(f"PM request with {percentage}% overhead (≤40%) - routing directly to Estimator")
                 return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
 
         else:

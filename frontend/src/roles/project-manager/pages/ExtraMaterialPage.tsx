@@ -160,7 +160,7 @@ const ExtraMaterialPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
+    <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <motion.div
@@ -168,19 +168,31 @@ const ExtraMaterialPage: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
         >
-          <div className="bg-gradient-to-r from-orange-50 to-amber-50 rounded-2xl p-6 shadow-sm border border-orange-100">
+          <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-8 shadow-md border border-orange-100">
             <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">Extra Material</h1>
-                <p className="text-gray-600">Request additional sub-items for assigned projects</p>
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-orange-500 rounded-lg">
+                  <CubeIcon className="w-8 h-8 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">Extra Material</h1>
+                  <p className="text-sm text-gray-600 mt-1">Manage extra sub-items for approved BOQs</p>
+                </div>
               </div>
+              <button
+                onClick={() => setShowForm(true)}
+                className="inline-flex items-center px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors shadow-md font-semibold"
+              >
+                <PlusIcon className="w-5 h-5 mr-2" />
+                Add Extra Sub Item
+              </button>
             </div>
           </div>
         </motion.div>
 
         {/* Tabs */}
-        <div className="mb-6 border-b border-gray-200 bg-white rounded-t-xl">
-          <nav className="-mb-px flex space-x-8 px-6">
+        <div className="mb-6 bg-white rounded-xl shadow-sm border border-gray-200">
+          <nav className="flex space-x-8 px-6 border-b border-gray-200">
             <button
               onClick={() => setActiveTab('request')}
               className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
@@ -190,8 +202,8 @@ const ExtraMaterialPage: React.FC = () => {
               }`}
             >
               <div className="flex items-center gap-2">
-                <PlusIcon className="w-5 h-5" />
-                Request
+                <ClockIcon className="w-5 h-5" />
+                Requested ({extraMaterials.length})
               </div>
             </button>
             <button
@@ -204,7 +216,7 @@ const ExtraMaterialPage: React.FC = () => {
             >
               <div className="flex items-center gap-2">
                 <CheckCircleIcon className="w-5 h-5" />
-                Approved
+                Approved ({approvedMaterials.length})
               </div>
             </button>
           </nav>
@@ -218,16 +230,6 @@ const ExtraMaterialPage: React.FC = () => {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.3 }}
           >
-            {/* Add Extra Sub Item Button */}
-            <div className="mb-6 flex justify-end">
-              <button
-                onClick={() => setShowForm(true)}
-                className="inline-flex items-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors shadow-md"
-              >
-                <PlusIcon className="w-5 h-5 mr-2" />
-                Add Extra Sub Item
-              </button>
-            </div>
 
             {/* Request List */}
             {loading ? (
@@ -451,16 +453,37 @@ const ExtraMaterialPage: React.FC = () => {
 
         {/* Form Modal */}
         {showForm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+            onClick={() => setShowForm(false)}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
             >
-              <div className="sticky top-0 bg-white border-b px-6 py-4">
-                <h2 className="text-xl font-semibold text-gray-900">Request Extra Materials</h2>
+              {/* Modal Header */}
+              <div className="sticky top-0 bg-gradient-to-r from-orange-500 to-orange-600 px-6 py-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white bg-opacity-20 rounded-lg">
+                    <CubeIcon className="w-6 h-6 text-white" />
+                  </div>
+                  <h2 className="text-xl font-bold text-white">Request Extra Materials</h2>
+                </div>
+                <button
+                  onClick={() => setShowForm(false)}
+                  className="text-white hover:bg-white hover:bg-opacity-20 rounded-lg p-2 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
-              <div className="p-6">
+
+              {/* Modal Body */}
+              <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
                 <ExtraMaterialForm
                   onSubmit={handleSubmitExtraMaterial}
                   onCancel={() => setShowForm(false)}

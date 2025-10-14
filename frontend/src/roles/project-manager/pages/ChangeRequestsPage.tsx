@@ -91,11 +91,33 @@ const ChangeRequestsPage: React.FC = () => {
     }
   };
 
+  const handleSendForReview = async (crId: number, routeTo?: 'technical_director' | 'estimator') => {
+    try {
+      const response = await changeRequestService.sendForReview(crId, routeTo);
+      if (response.success) {
+        toast.success(response.message || 'Request sent for review');
+        loadChangeRequests();
+      } else {
+        toast.error(response.message);
+      }
+    } catch (error) {
+      toast.error('Failed to send request for review');
+    }
+  };
+
+  const handleSendToTD = async (crId: number) => {
+    await handleSendForReview(crId, 'technical_director');
+  };
+
+  const handleSendToEstimator = async (crId: number) => {
+    await handleSendForReview(crId, 'estimator');
+  };
+
   const handleApprove = async (crId: number) => {
     try {
-      const response = await changeRequestService.approve(crId, 'Approved by Estimator');
+      const response = await changeRequestService.approve(crId, 'Approved by PM');
       if (response.success) {
-        toast.success('Change request approved successfully');
+        toast.success(response.message || 'Change request approved successfully');
         loadChangeRequests();
       } else {
         toast.error(response.message);
@@ -181,11 +203,33 @@ const ChangeRequestsPage: React.FC = () => {
   const getStatusColor = (status: string) => {
     const colors = {
       pending: 'bg-yellow-100 text-yellow-800',
-      approved_estimator: 'bg-green-100 text-green-800',
-      approved_td: 'bg-blue-100 text-blue-800',
+      under_review: 'bg-yellow-100 text-yellow-800',
+      approved_by_pm: 'bg-yellow-100 text-yellow-800',
+      approved_by_td: 'bg-blue-100 text-blue-800',
+      approved: 'bg-green-100 text-green-800',
       rejected: 'bg-red-100 text-red-800'
     };
     return colors[status as keyof typeof colors] || colors.pending;
+  };
+
+  const getStatusLabel = (status: string) => {
+    // Status display based on workflow stage
+    if (['pending', 'under_review'].includes(status)) {
+      return 'PENDING';
+    }
+    if (status === 'approved_by_pm') {
+      return 'APPROVED BY PM';
+    }
+    if (status === 'approved_by_td') {
+      return 'APPROVED BY TD';
+    }
+    if (status === 'approved') {
+      return 'COMPLETED';  // Final approval by Estimator = Completed
+    }
+    if (status === 'rejected') {
+      return 'REJECTED';
+    }
+    return status.replace('_', ' ').toUpperCase();
   };
 
   const getPercentageColor = (percentage: number) => {
@@ -201,17 +245,17 @@ const ChangeRequestsPage: React.FC = () => {
 
     let matchesTab = false;
     if (isExtraMaterial) {
-      // Extra Material tab filtering - PM sees all pending requests
+      // Extra Material tab filtering - PM sees requests (pending = not sent yet, under_review/approved_by_pm = in progress)
       matchesTab = (
-        (activeTab === 'requested' && (req.status === 'pending' || req.status === 'under_review')) ||
-        (activeTab === 'under_review' && req.status === 'under_review') ||
-        (activeTab === 'approved' && (req.status === 'approved' || req.status === 'approved_by_pm'))
+        (activeTab === 'requested' && ['pending', 'under_review', 'approved_by_pm'].includes(req.status)) ||
+        (activeTab === 'approved' && req.status === 'approved')
       );
     } else {
-      // Change Requests tab filtering
+      // Change Requests tab filtering - show requests that need PM action or PM created
       matchesTab = (
-        (activeTab === 'pending' && req.approval_required_from === 'project_manager' && req.status !== 'approved' && req.status !== 'rejected') ||
-        (activeTab === 'approved' && (req.status === 'approved_by_pm' || req.status === 'approved')) ||
+        (activeTab === 'pending' && ['pending', 'under_review'].includes(req.status)) ||
+        (activeTab === 'approved' && ['approved_by_pm', 'approved_by_td'].includes(req.status)) ||
+        (activeTab === 'completed' && req.status === 'approved') ||
         (activeTab === 'rejected' && req.status === 'rejected')
       );
     }
@@ -219,12 +263,12 @@ const ChangeRequestsPage: React.FC = () => {
   });
 
   const stats = {
-    pending: changeRequests.filter(r => r.approval_required_from === 'project_manager' && r.status !== 'approved' && r.status !== 'rejected').length,
-    approved: changeRequests.filter(r => r.status === 'approved_by_pm' || r.status === 'approved').length,
+    pending: changeRequests.filter(r => ['pending', 'under_review'].includes(r.status)).length,
+    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td'].includes(r.status)).length,  // PM or TD approved, not final yet
+    completed: changeRequests.filter(r => r.status === 'approved').length,  // Final approved by Estimator = completed
     rejected: changeRequests.filter(r => r.status === 'rejected').length,
     // For Extra Material counts
-    requested: changeRequests.filter(r => r.status === 'pending' || r.status === 'under_review').length,
-    under_review: changeRequests.filter(r => r.status === 'under_review').length
+    requested: changeRequests.filter(r => ['pending', 'under_review', 'approved_by_pm'].includes(r.status)).length
   };
 
   if (initialLoad) {
@@ -266,7 +310,7 @@ const ChangeRequestsPage: React.FC = () => {
               </TableCell>
               <TableCell>
                 <Badge className={getStatusColor(request.status)}>
-                  {request.status.toUpperCase()}
+                  {getStatusLabel(request.status)}
                 </Badge>
               </TableCell>
               <TableCell className="text-right">
@@ -294,33 +338,20 @@ const ChangeRequestsPage: React.FC = () => {
     </div>
   );
 
-  // Conditional rendering for Extra Material Form
-  if (isExtraMaterial && showExtraForm) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-        <div className="max-w-4xl mx-auto p-6">
-          <ExtraMaterialForm onClose={() => {
-            setShowExtraForm(false);
-            loadChangeRequests();
-          }} />
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
+    <div className="min-h-screen bg-gray-50">
       {/* Header - Conditional theme */}
-      <div className={isExtraMaterial ? "bg-gradient-to-r from-orange-500/5 to-orange-600/10 shadow-sm border-b-2 border-orange-200" : "bg-gradient-to-r from-purple-500/5 to-purple-600/10 shadow-sm border-b-2 border-purple-200"}>
-        <div className="max-w-7xl mx-auto px-6 py-5">
+      <div className="bg-white border-b border-gray-200 shadow-sm mb-8">
+        <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-lg ${isExtraMaterial ? "bg-gradient-to-br from-orange-50 to-orange-100" : "bg-gradient-to-br from-purple-50 to-purple-100"}`}>
-                {isExtraMaterial ? <Box className="w-6 h-6 text-orange-600" /> : <FileText className="w-6 h-6 text-purple-600" />}
+            <div className="flex items-center gap-4">
+              <div className={`p-3 rounded-lg ${isExtraMaterial ? "bg-orange-500" : "bg-purple-500"}`}>
+                {isExtraMaterial ? <Box className="w-8 h-8 text-white" /> : <FileText className="w-8 h-8 text-white" />}
               </div>
               <div>
-                <h1 className={`text-2xl font-bold ${isExtraMaterial ? "text-orange-700" : "text-purple-700"}`}>{isExtraMaterial ? "Extra Material" : "Change Requests"}</h1>
-                <p className={`text-sm ${isExtraMaterial ? "text-orange-600" : "text-purple-600"}`}>
+                <h1 className="text-2xl font-bold text-gray-900">{isExtraMaterial ? "Extra Material" : "Change Requests"}</h1>
+                <p className="text-sm text-gray-600 mt-1">
                   {isExtraMaterial ? "Manage extra sub-items for approved BOQs" : "Material additions to existing approved projects"}
                 </p>
               </div>
@@ -328,9 +359,9 @@ const ChangeRequestsPage: React.FC = () => {
             {isExtraMaterial && activeTab === 'requested' && (
               <Button
                 onClick={() => setShowExtraForm(true)}
-                className="bg-orange-600 hover:bg-orange-700 text-white"
+                className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 font-semibold"
               >
-                <Plus className="w-4 h-4 mr-2" />
+                <Plus className="w-5 h-5 mr-2" />
                 Add Extra Sub Item
               </Button>
             )}
@@ -422,11 +453,19 @@ const ChangeRequestsPage: React.FC = () => {
                   </TabsTrigger>
                   <TabsTrigger
                     value="approved"
-                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-400 data-[state=active]:text-blue-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
                   >
                     <CheckCircle className="w-4 h-4 mr-2" />
                     Approved
                     <span className="ml-1 sm:ml-2 text-gray-400">({stats.approved})</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="completed"
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                  >
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Completed
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.completed})</span>
                   </TabsTrigger>
                   <TabsTrigger
                     value="rejected"
@@ -465,7 +504,7 @@ const ChangeRequestsPage: React.FC = () => {
                           <div className="flex items-start justify-between mb-2">
                             <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
                             <Badge className={getStatusColor(request.status)}>
-                              {request.status.replace('_', ' ').toUpperCase()}
+                              {getStatusLabel(request.status)}
                             </Badge>
                           </div>
 
@@ -523,43 +562,61 @@ const ChangeRequestsPage: React.FC = () => {
 
                         {/* Actions */}
                         <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              onClick={() => handleReview(request.cr_id)}
-                              className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
-                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                            >
-                              <Eye className="h-4 w-4" />
-                              <span>Review</span>
-                            </button>
-                            {request.status === 'pending' && (
+                          <button
+                            onClick={() => handleReview(request.cr_id)}
+                            className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                          >
+                            <Eye className="h-4 w-4" />
+                            <span>Review</span>
+                          </button>
+
+                          {request.status === 'pending' && (
+                            <div className="space-y-2">
                               <button
                                 onClick={() => handleEdit(request.cr_id)}
-                                className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
                               >
                                 <Pencil className="h-4 w-4" />
                                 <span>Edit</span>
                               </button>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              onClick={() => handleApprove(request.cr_id)}
-                              className="text-white text-[10px] sm:text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 font-semibold px-1"
-                              style={{ backgroundColor: 'rgb(22, 163, 74)' }}
-                            >
-                              <Check className="h-3.5 w-3.5" />
-                              <span className="hidden sm:inline">Send to Est</span>
-                              <span className="sm:hidden">Approve</span>
-                            </button>
-                            <button
-                              onClick={() => handleReject(request.cr_id)}
-                              className="bg-red-600 hover:bg-red-700 text-white text-[10px] sm:text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold px-1"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                              <span>Reject</span>
-                            </button>
-                          </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  onClick={() => handleSendToTD(request.cr_id)}
+                                  className="bg-orange-600 hover:bg-orange-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold"
+                                >
+                                  <Check className="h-4 w-4" />
+                                  <span>Send to TD</span>
+                                </button>
+                                <button
+                                  onClick={() => handleSendToEstimator(request.cr_id)}
+                                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold"
+                                >
+                                  <Check className="h-4 w-4" />
+                                  <span>Send to Est.</span>
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {request.status === 'under_review' && request.approval_required_from === 'project_manager' && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => handleApprove(request.cr_id)}
+                                className="bg-green-600 hover:bg-green-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              >
+                                <Check className="h-4 w-4" />
+                                <span>Approve</span>
+                              </button>
+                              <button
+                                onClick={() => handleReject(request.cr_id)}
+                                className="bg-red-600 hover:bg-red-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              >
+                                <X className="h-4 w-4" />
+                                <span>Reject</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </motion.div>
                     ))}
@@ -570,11 +627,84 @@ const ChangeRequestsPage: React.FC = () => {
 
             <TabsContent value="approved" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Approved Requests</h2>
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Approved Requests (Pending Estimator)</h2>
                 {filteredRequests.length === 0 ? (
                   <div className="text-center py-12">
                     <CheckCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                     <p className="text-gray-500 text-lg">No approved requests found</p>
+                  </div>
+                ) : viewMode === 'table' ? (
+                  <RequestsTable requests={filteredRequests} />
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                    {filteredRequests.map((request, index) => (
+                      <motion.div
+                        key={request.cr_id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.05 * index }}
+                        className="bg-white rounded-lg border border-blue-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                      >
+                        <div className="p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
+                            <Badge className={getStatusColor(request.status)}>
+                              {getStatusLabel(request.status)}
+                            </Badge>
+                          </div>
+
+                          <div className="space-y-1 text-sm text-gray-600">
+                            <div className="flex items-center gap-1.5">
+                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate">By: {request.requested_by_name}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="px-4 pb-3 text-center text-sm">
+                          <span className="font-bold text-blue-600 text-lg">{(request.materials_data?.length || 0)}</span>
+                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                        </div>
+
+                        <div className="px-4 pb-3 space-y-1.5 text-xs">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Additional Cost:</span>
+                            <span className="font-bold text-blue-600">{formatCurrency(request.materials_total_cost)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Cost Increase:</span>
+                            <span className="font-semibold text-blue-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-gray-200 p-2 sm:p-3">
+                          <button
+                            onClick={() => handleReview(request.cr_id)}
+                            className="w-full text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold"
+                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                          >
+                            <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                            <span>View Details</span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="completed" className="mt-0 p-0">
+              <div className="space-y-4 sm:space-y-6">
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Completed Requests (Final Approval)</h2>
+                {filteredRequests.length === 0 ? (
+                  <div className="text-center py-12">
+                    <CheckCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500 text-lg">No completed requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
                   <RequestsTable requests={filteredRequests} />
@@ -593,7 +723,7 @@ const ChangeRequestsPage: React.FC = () => {
                           <div className="flex items-start justify-between mb-2">
                             <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
                             <Badge className={getStatusColor(request.status)}>
-                              {request.status.replace('_', ' ').toUpperCase()}
+                              {getStatusLabel(request.status)}
                             </Badge>
                           </div>
 
@@ -934,6 +1064,50 @@ const ChangeRequestsPage: React.FC = () => {
         onSubmit={handleRejectSubmit}
         title="Reject Change Request"
       />
+
+      {/* Extra Material Form Modal */}
+      {showExtraForm && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowExtraForm(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-gradient-to-r from-orange-500 to-orange-600 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white bg-opacity-20 rounded-lg">
+                  <Box className="w-6 h-6 text-white" />
+                </div>
+                <h2 className="text-xl font-bold text-white">Request Extra Materials</h2>
+              </div>
+              <button
+                onClick={() => setShowExtraForm(false)}
+                className="text-white hover:bg-white hover:bg-opacity-20 rounded-lg p-2 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
+              <ExtraMaterialForm
+                onClose={() => {
+                  setShowExtraForm(false);
+                  loadChangeRequests();
+                }}
+              />
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

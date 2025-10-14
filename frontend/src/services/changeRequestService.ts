@@ -329,12 +329,13 @@ class ChangeRequestService {
   /**
    * Send change request for review
    * POST /api/change-request/{cr_id}/send-for-review
+   * @param routeTo - For PM: 'technical_director' or 'estimator' (optional - will auto-route if not provided)
    */
-  async sendForReview(crId: number): Promise<{ success: boolean; message?: string; next_approver?: string }> {
+  async sendForReview(crId: number, routeTo?: 'technical_director' | 'estimator'): Promise<{ success: boolean; message?: string; next_approver?: string }> {
     try {
       const response = await axios.post(
         `${API_BASE_URL}/change-request/${crId}/send-for-review`,
-        {},
+        routeTo ? { route_to: routeTo } : {},
         this.getAuthHeaders()
       );
 

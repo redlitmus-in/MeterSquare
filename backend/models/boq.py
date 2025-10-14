@@ -171,6 +171,10 @@ class MaterialPurchaseTracking(db.Model):
     latest_unit_price = db.Column(db.Float, nullable=True)
     latest_purchase_date = db.Column(db.DateTime, nullable=True)
 
+    # Change Request Tracking - marks materials from approved change requests
+    is_from_change_request = db.Column(db.Boolean, default=False)
+    change_request_id = db.Column(db.Integer, db.ForeignKey("change_requests.cr_id"), nullable=True)
+
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
@@ -180,6 +184,7 @@ class MaterialPurchaseTracking(db.Model):
 
     boq = db.relationship("BOQ", backref=db.backref("material_tracking", lazy=True))
     material = db.relationship("MasterMaterial", backref=db.backref("purchase_tracking", lazy=True))
+    change_request = db.relationship("ChangeRequest", backref=db.backref("material_purchases", lazy=True), foreign_keys=[change_request_id])
 
 # Labour Tracking Table - Tracks labour hours with history
 class LabourTracking(db.Model):

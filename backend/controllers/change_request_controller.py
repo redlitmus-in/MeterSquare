@@ -130,13 +130,29 @@ def create_change_request():
                 })
 
         # Get item info from request data or extra_material_data
-        item_id = data.get('item_id')
-        item_name = data.get('item_name')
+        item_id = data.get('item_id') or data.get('boq_item_id')
+        item_name = data.get('item_name') or data.get('boq_item_name')
 
         # Fallback to extra_material_data if available
         if not item_id and hasattr(g, 'extra_material_data') and g.extra_material_data:
             item_id = g.extra_material_data.get('item_id')
             item_name = g.extra_material_data.get('item_name', '')
+
+        # If still no item_name, try to get it from the BOQ details
+        if not item_name and item_id and boq_details:
+            boq_json = boq_details.boq_details or {}
+            items = boq_json.get('items', [])
+            for itm in items:
+                # Check both master_item_id and generated item_id formats
+                itm_id = itm.get('master_item_id', '')
+                if not itm_id:
+                    # Generate the same ID format as in get_assigned_projects
+                    itm_idx = items.index(itm)
+                    itm_id = f"item_{boq_id}_{itm_idx + 1}"
+
+                if str(itm_id) == str(item_id):
+                    item_name = itm.get('item_name', '')
+                    break
 
         # Calculate percentage of item overhead
         percentage_of_item_overhead = 0.0
@@ -241,10 +257,14 @@ def check_budget_threshold(change_request):
 def send_for_review(cr_id):
     """
     Send change request for review
-    SE → Sends to PM
-    PM → Sends to Estimator or TD (based on budget threshold)
+    SE → Sends to PM (always)
+    PM → Must explicitly choose TD or Estimator via route_to parameter
 
     POST /api/change-request/{cr_id}/send-for-review
+    Body (optional for PM):
+    {
+        "route_to": "technical_director" or "estimator"  // PM only - if not provided, auto-routes based on 40% threshold
+    }
     """
     try:
         current_user = getattr(g, 'user', None)
@@ -270,12 +290,40 @@ def send_for_review(cr_id):
         if not is_valid:
             return jsonify({"error": error_msg}), 400
 
-        # Determine where to route based on requester role using workflow service
-        try:
-            next_role, next_approver = workflow_service.determine_initial_approver(user_role, change_request)
-        except ValueError as e:
-            log.error(f"Error determining approver: {str(e)}")
-            return jsonify({"error": str(e)}), 403
+        # Get request data for PM explicit routing
+        data = request.get_json() or {}
+        route_to = data.get('route_to')  # PM can specify where to send
+
+        normalized_role = workflow_service.normalize_role(user_role)
+
+        # Determine where to route based on requester role
+        if normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
+            # SE always sends to PM
+            next_role = CR_CONFIG.ROLE_PROJECT_MANAGER
+            next_approver = "Project Manager"
+            log.info(f"SE/SS request - routing to PM")
+
+        elif normalized_role in ['projectmanager', 'project_manager']:
+            # PM can explicitly choose route_to, or auto-route based on 40% threshold
+            if route_to:
+                # PM explicitly chose where to send
+                if route_to == 'technical_director':
+                    next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
+                    next_approver = "Technical Director"
+                    log.info(f"PM explicitly routing to TD")
+                elif route_to == 'estimator':
+                    next_role = CR_CONFIG.ROLE_ESTIMATOR
+                    next_approver = "Estimator"
+                    log.info(f"PM explicitly routing to Estimator")
+                else:
+                    return jsonify({"error": f"Invalid route_to value: {route_to}. Must be 'technical_director' or 'estimator'"}), 400
+            else:
+                # Auto-route based on 40% threshold
+                next_role, next_approver = workflow_service.determine_initial_approver(user_role, change_request)
+                log.info(f"PM auto-routing based on {change_request.percentage_of_item_overhead}% overhead")
+        else:
+            log.error(f"Invalid role '{user_role}' attempting to send change request")
+            return jsonify({"error": f"Invalid role for sending request: {user_role}. Only Site Engineers and Project Managers can create change requests."}), 403
 
         # Update change request
         change_request.approval_required_from = next_role
@@ -344,13 +392,27 @@ def get_all_change_requests():
                 )
             )
         elif user_role == 'estimator':
-            # Estimator sees requests where approval_required_from = 'estimator'
-            # This includes: PM direct requests (within budget) AND TD-approved requests
-            query = query.filter_by(approval_required_from='estimator')
+            # Estimator sees:
+            # 1. Requests where approval_required_from = 'estimator' (under review)
+            # 2. Requests already approved by estimator (status='approved')
+            from sqlalchemy import or_
+            query = query.filter(
+                or_(
+                    ChangeRequest.approval_required_from == 'estimator',
+                    ChangeRequest.status == 'approved'  # Show completed requests approved by estimator
+                )
+            )
         elif user_role in ['technical_director', 'technicaldirector']:
-            # TD sees requests where approval_required_from = 'technical_director'
-            # This includes: PM requests over budget OR over 50k
-            query = query.filter_by(approval_required_from='technical_director')
+            # TD sees:
+            # 1. Requests where approval_required_from = 'technical_director' (under review)
+            # 2. Requests already approved by TD (status='approved_by_td' or 'approved')
+            from sqlalchemy import or_
+            query = query.filter(
+                or_(
+                    ChangeRequest.approval_required_from == 'technical_director',
+                    ChangeRequest.status.in_(['approved_by_td', 'approved'])  # Show requests TD has approved
+                )
+            )
         elif user_role == 'admin':
             # Admin sees all
             pass
@@ -616,6 +678,43 @@ def approve_change_request(cr_id):
             boq_details.last_modified_at = datetime.utcnow()
 
             flag_modified(boq_details, 'boq_details')
+
+            # Create MaterialPurchaseTracking entries for each material in the change request
+            # This marks them as "from change request" in the production management
+            item_name = change_request.item_name or f'Extra Materials - CR #{change_request.cr_id}'
+
+            for material in materials:
+                # Check if tracking entry already exists
+                existing_tracking = MaterialPurchaseTracking.query.filter_by(
+                    boq_id=change_request.boq_id,
+                    material_name=material.get('material_name'),
+                    master_material_id=material.get('master_material_id'),
+                    is_from_change_request=True,
+                    change_request_id=change_request.cr_id,
+                    is_deleted=False
+                ).first()
+
+                if not existing_tracking:
+                    # Create new tracking entry marked as from change request
+                    tracking_entry = MaterialPurchaseTracking(
+                        boq_id=change_request.boq_id,
+                        project_id=change_request.project_id,
+                        master_item_id=change_request.item_id,
+                        item_name=item_name,
+                        master_material_id=material.get('master_material_id'),
+                        material_name=material.get('material_name'),
+                        unit=material.get('unit', 'nos'),
+                        purchase_history=[],
+                        total_quantity_purchased=0.0,
+                        total_quantity_used=0.0,
+                        remaining_quantity=0.0,
+                        is_from_change_request=True,
+                        change_request_id=change_request.cr_id,
+                        created_by=approver_name,
+                        created_at=datetime.utcnow()
+                    )
+                    db.session.add(tracking_entry)
+                    log.info(f"Created MaterialPurchaseTracking for CR #{cr_id} material: {material.get('material_name')}")
 
             db.session.commit()
 
