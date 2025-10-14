@@ -38,3 +38,9 @@ def get_boq_details_history_route(boq_id):
 @jwt_required
 def send_boq_to_pm_route():
     return send_boq_to_project_manager()
+
+# BOQ Email Notification to Technical Director (after PM approval)
+@estimator_routes.route('/boq/send_to_td', methods=['POST'])
+@jwt_required
+def send_boq_to_td_route():
+    return send_boq_to_technical_director()

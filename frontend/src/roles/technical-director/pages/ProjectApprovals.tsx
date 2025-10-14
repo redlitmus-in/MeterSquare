@@ -147,29 +147,25 @@ const ProjectApprovals: React.FC = () => {
     return amount.toLocaleString();
   };
 
-  // Load BOQs on mount and set up auto-refresh polling
+  // Load BOQs on mount and set up auto-refresh polling (ONLY ONCE)
   useEffect(() => {
     loadBOQs(); // Initial load with spinner
     loadPMs(); // Load PMs for assigned tab
 
-    // Poll for new BOQs every 10 seconds (reduced frequency to minimize flickering)
+    // Poll for new BOQs every 15 seconds (background refresh)
     const intervalId = setInterval(() => {
       loadBOQs(false); // Auto-refresh without showing loading spinner
-      if (filterStatus === 'revisions') {
-        loadRevisionTabs(); // Refresh revision tabs when on revisions view
-      }
       loadPMs(); // Also refresh PM data
-    }, 10000); // 10 seconds to reduce flickering
+    }, 15000); // 15 seconds
 
     // Cleanup interval on unmount
     return () => clearInterval(intervalId);
-  }, [filterStatus]);
+  }, []); // Empty dependency array - run only once on mount
 
   // Load revision tabs when revisions filter is active
   useEffect(() => {
     if (filterStatus === 'revisions') {
       loadRevisionTabs();
-      loadRevisionProjects(selectedRevisionNumber);
     }
   }, [filterStatus]);
 

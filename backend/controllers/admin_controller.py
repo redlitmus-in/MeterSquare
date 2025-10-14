@@ -718,6 +718,119 @@ def get_all_sitesupervisor():
         return jsonify({"error": f"Failed to fetch sitesupervisor: {str(e)}"}), 500
 
 # ============================================
+# PROJECT MANAGER & SITE ENGINEER APIs
+# ============================================
+
+@jwt_required
+def get_all_project_managers():
+    """
+    Get all project managers with their project counts (admin only)
+    """
+    try:
+        current_user = g.get("user")
+
+        # Verify admin role
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        # Get the projectManager role
+        pm_role = Role.query.filter_by(role='projectManager').first()
+
+        if not pm_role:
+            return jsonify({"error": "Project Manager role not found"}), 404
+
+        # Get all users with projectManager role
+        project_managers = User.query.filter_by(
+            role_id=pm_role.role_id,
+            is_deleted=False,
+            is_active=True
+        ).all()
+
+        pm_list = []
+        for pm in project_managers:
+            # Count projects assigned to this PM
+            project_count = Project.query.filter_by(
+                user_id=pm.user_id,
+                is_deleted=False
+            ).count()
+
+            pm_list.append({
+                "user_id": pm.user_id,
+                "full_name": pm.full_name,
+                "email": pm.email,
+                "phone": pm.phone,
+                "department": pm.department,
+                "user_status": pm.user_status,
+                "project_count": project_count,
+                "last_login": pm.last_login.isoformat() if pm.last_login else None,
+                "created_at": pm.created_at.isoformat() if pm.created_at else None
+            })
+
+        return jsonify({
+            "project_managers": pm_list
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching project managers: {str(e)}")
+        return jsonify({"error": f"Failed to fetch project managers: {str(e)}"}), 500
+
+
+@jwt_required
+def get_all_site_engineers():
+    """
+    Get all site engineers with their project counts (admin only)
+    """
+    try:
+        current_user = g.get("user")
+
+        # Verify admin role
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        # Get the siteEngineer role
+        se_role = Role.query.filter_by(role='siteEngineer').first()
+
+        if not se_role:
+            return jsonify({"error": "Site Engineer role not found"}), 404
+
+        # Get all users with siteEngineer role
+        site_engineers = User.query.filter_by(
+            role_id=se_role.role_id,
+            is_deleted=False,
+            is_active=True
+        ).all()
+
+        se_list = []
+        for se in site_engineers:
+            # Count projects assigned to this SE
+            from models.project_assignment import ProjectAssignment
+            project_count = ProjectAssignment.query.filter_by(
+                site_supervisor_id=se.user_id,
+                is_deleted=False
+            ).count()
+
+            se_list.append({
+                "user_id": se.user_id,
+                "full_name": se.full_name,
+                "email": se.email,
+                "phone": se.phone,
+                "department": se.department,
+                "user_status": se.user_status,
+                "project_count": project_count,
+                "last_login": se.last_login.isoformat() if se.last_login else None,
+                "created_at": se.created_at.isoformat() if se.created_at else None
+            })
+
+        return jsonify({
+            "site_engineers": se_list
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching site engineers: {str(e)}")
+        return jsonify({"error": f"Failed to fetch site engineers: {str(e)}"}), 500
+
+
+# ============================================
 # BOQ MANAGEMENT (Admin)
 # ============================================
 

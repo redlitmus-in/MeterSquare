@@ -1331,6 +1331,30 @@ class EstimatorService {
     }
   }
 
+  // Send BOQ to Technical Director (after PM approval)
+  async sendBOQToTechnicalDirector(boqId: number, technicalDirectorId?: number): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    try {
+      const response = await apiClient.post('/boq/send_to_td', {
+        boq_id: boqId,
+        technical_director_id: technicalDirectorId
+      });
+
+      return {
+        success: true,
+        message: response.data.message || 'BOQ sent to Technical Director successfully'
+      };
+    } catch (error: any) {
+      console.error('Failed to send BOQ to TD:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to send BOQ to Technical Director'
+      };
+    }
+  }
+
   // Get all Project Managers (both assigned and unassigned)
   async getAllProjectManagers(): Promise<{
     success: boolean;

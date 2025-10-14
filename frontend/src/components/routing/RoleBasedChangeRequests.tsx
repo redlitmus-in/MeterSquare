@@ -30,6 +30,9 @@ const RoleBasedChangeRequests: React.FC = () => {
     } else if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' ||
                userRoleLower === 'projectmanager' || userRole === 'projectManager') {
       Component = PMChangeRequestsPage;
+    } else if (userRoleLower === 'admin' || userRole === 'admin') {
+      // Admin uses SE Extra Material page (simpler and works for all)
+      Component = SEExtraMaterialPage;
     } else {
       // Other roles don't have access to extra material
       return (
@@ -58,6 +61,9 @@ const RoleBasedChangeRequests: React.FC = () => {
     } else if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' ||
                userRoleLower === 'projectmanager' || userRole === 'projectManager') {
       Component = PMChangeRequestsPage;
+    } else if (userRoleLower === 'admin' || userRole === 'admin') {
+      // Admin uses TD Change Requests page (has full access)
+      Component = TDChangeRequestsPage;
     } else {
       // Default to showing access denied message
       return (

@@ -79,12 +79,58 @@ def get_all_pm_boqs():
         ).all()
         # Extract project IDs
         project_ids = [p.project_id for p in assigned_projects]
-        # Build query - get all BOQs for assigned projects
-        query = db.session.query(BOQ).filter(
-            BOQ.is_deleted == False,
-            BOQ.email_sent == True,
-            BOQ.project_id.in_(project_ids)
-        ).order_by(BOQ.created_at.desc())
+
+        # MODIFIED: Also get BOQs where this PM is the recipient in BOQ history (for approval requests)
+        # Find BOQs where this PM was sent the BOQ for approval
+        # Query using raw SQL to search in JSONB array
+        from sqlalchemy import text
+
+        boqs_for_approval_query = db.session.execute(
+            text("""
+                SELECT DISTINCT bh.boq_id
+                FROM boq_history bh,
+                     jsonb_array_elements(bh.action) AS action_item
+                WHERE action_item->>'receiver_role' = 'project_manager'
+                  AND (action_item->>'recipient_user_id')::INTEGER = :user_id
+                  AND action_item->>'type' = 'sent_to_pm'
+            """),
+            {"user_id": user_id}
+        )
+
+        boq_ids_for_approval = [row[0] for row in boqs_for_approval_query]
+
+        # Build query - get all BOQs for assigned projects OR sent for approval
+        # Handle empty lists by providing a fallback
+        if not project_ids and not boq_ids_for_approval:
+            # No projects assigned and no approval requests
+            query = db.session.query(BOQ).filter(
+                BOQ.is_deleted == False,
+                BOQ.boq_id == -1  # No results
+            )
+        elif not project_ids:
+            # Only approval requests
+            query = db.session.query(BOQ).filter(
+                BOQ.is_deleted == False,
+                BOQ.email_sent == True,
+                BOQ.boq_id.in_(boq_ids_for_approval)
+            ).order_by(BOQ.created_at.desc())
+        elif not boq_ids_for_approval:
+            # Only assigned projects
+            query = db.session.query(BOQ).filter(
+                BOQ.is_deleted == False,
+                BOQ.email_sent == True,
+                BOQ.project_id.in_(project_ids)
+            ).order_by(BOQ.created_at.desc())
+        else:
+            # Both assigned projects and approval requests
+            query = db.session.query(BOQ).filter(
+                BOQ.is_deleted == False,
+                BOQ.email_sent == True,
+                db.or_(
+                    BOQ.project_id.in_(project_ids),
+                    BOQ.boq_id.in_(boq_ids_for_approval)
+                )
+            ).order_by(BOQ.created_at.desc())
         # Paginate
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
         # Build response with BOQ details and history
@@ -391,6 +437,17 @@ def assign_projects():
         if not user:
             return jsonify({"error": "Project Manager not found"}), 404
 
+        # Validate that all projects have Client_Confirmed BOQs
+        for pid in project_ids:
+            project = Project.query.filter_by(project_id=pid).first()
+            if project:
+                boqs = BOQ.query.filter_by(project_id=pid, is_deleted=False).all()
+                for boq in boqs:
+                    if boq.status not in ['Client_Confirmed', 'approved']:
+                        return jsonify({
+                            "error": f"Cannot assign PM. BOQ '{boq.boq_name}' must be client-approved first. Current status: {boq.status}"
+                        }), 400
+
         # Get current user (Technical Director)
         current_user = getattr(g, 'user', None)
         td_name = current_user.get('full_name', 'Technical Director') if current_user else 'Technical Director'
@@ -629,7 +686,12 @@ def send_boq_to_estimator():
         )
 
         if email_sent:
-            boq.status = boq_status
+            # If PM approves, set to PM_Approved so estimator can send to TD
+            # If PM rejects, set to rejected
+            if boq_status == 'approved':
+                boq.status = 'PM_Approved'
+            else:
+                boq.status = 'PM_Rejected'
             boq.last_modified_by = current_user_name
             boq.last_modified_at = datetime.utcnow()
             boq.email_sent = True

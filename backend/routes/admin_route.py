@@ -6,7 +6,12 @@ from flask import Blueprint
 from controllers.admin_controller import *
 from controllers.settings_controller import get_settings, update_settings
 from controllers.auth_controller import jwt_required
-from controllers.admin_controller import get_all_boqs_admin, approve_boq_admin
+from controllers.admin_controller import (
+    get_all_boqs_admin,
+    approve_boq_admin,
+    get_all_project_managers,
+    get_all_site_engineers
+)
 
 admin_routes = Blueprint("admin_routes", __name__, url_prefix='/api/admin')
 
@@ -117,6 +122,22 @@ def get_boqs_route():
 def approve_boq_route(boq_id):
     """Approve/Reject BOQ"""
     return approve_boq_admin(boq_id)
+
+# ============================================
+# PROJECT MANAGER & SITE ENGINEER ROUTES
+# ============================================
+
+@admin_routes.route('/project-managers', methods=['GET'])
+@jwt_required
+def get_project_managers_route():
+    """Get all project managers with project counts"""
+    return get_all_project_managers()
+
+@admin_routes.route('/site-engineers', methods=['GET'])
+@jwt_required
+def get_site_engineers_route():
+    """Get all site engineers with project counts"""
+    return get_all_site_engineers()
 
 # ============================================
 # LEGACY ROUTES (for backward compatibility)

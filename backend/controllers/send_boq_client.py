@@ -40,6 +40,13 @@ def send_boq_to_client():
         if not boq:
             return jsonify({"success": False, "error": "BOQ not found"}), 404
 
+        # Validate BOQ is approved by both PM and TD before sending to client
+        if boq.status != "Approved":
+            return jsonify({
+                "success": False,
+                "error": f"BOQ must be approved by Project Manager and Technical Director before sending to client. Current status: {boq.status}"
+            }), 400
+
         # Fetch BOQ Details (contains JSON structure)
         boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq_details:

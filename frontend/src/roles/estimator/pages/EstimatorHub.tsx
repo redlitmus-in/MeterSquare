@@ -567,7 +567,7 @@ const EstimatorHub: React.FC = () => {
           return status === 'under_revision' || status === 'pending_revision' || status === 'revision_approved';
         });
       } else if (activeTab === 'approved') {
-        // Approved: TD approved (includes all stages after TD approval until PM assignment)
+        // Approved: PM approved, TD approved (includes all stages after approvals until PM assignment)
         // EXCLUDE projects with revision_number > 0 (those stay in Revisions tab)
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
@@ -578,8 +578,8 @@ const EstimatorHub: React.FC = () => {
             return false;
           }
 
-          // Show if approved, sent to client, or client confirmed (but not yet PM assigned/completed)
-          return (status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed') && !boq.pm_assigned;
+          // Show if PM approved, pending TD approval, TD approved, sent to client, or client confirmed (but not yet PM assigned/completed)
+          return (status === 'pm_approved' || status === 'pending_td_approval' || status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed') && !boq.pm_assigned;
         });
       } else if (activeTab === 'rejected') {
         // Rejected: TD rejected OR client rejected
@@ -1173,9 +1173,13 @@ const EstimatorHub: React.FC = () => {
     const revisionNumber = boq.revision_number || 0;
 
     // Draft: Not sent to TD/PM yet (can edit/delete/send) - status NOT in workflow states
-    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled');
+    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_td_approval' && status !== 'pm_approved' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled');
     // Sent to TD or PM: Waiting for approval
     const isSentToTD = status === 'pending' || status === 'pending_pm_approval';
+    // PM Approved: Ready to send to TD for final approval
+    const isPMApproved = status === 'pm_approved';
+    // Pending TD Approval: Sent to TD after PM approval
+    const isPendingTDApproval = status === 'pending_td_approval';
     // Pending Revision: Revised BOQ sent to TD for approval
     const isPendingRevision = status === 'pending_revision';
     // Under Revision: BOQ edited, ready to send to TD
@@ -1336,12 +1340,53 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">To TD</span>
               </button>
             </>
-          ) : isSentToTD ? (
-            /* Sent to TD - waiting for approval */
+          ) : isSentToTD || isPendingTDApproval ? (
+            /* Sent to TD/PM - waiting for approval */
             <div className="col-span-2 flex items-center justify-center text-xs text-gray-500">
               <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
-              Sent to BOQ
+              {isPendingTDApproval ? 'Pending TD Approval' : 'Sent to BOQ'}
             </div>
+          ) : isPMApproved ? (
+            /* PM Approved - Can send to TD */
+            <>
+              <button
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+                style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+                onClick={() => {
+                  setEditingBoq(boq);
+                  setShowBoqEdit(true);
+                }}
+              >
+                <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Edit BOQ</span>
+                <span className="sm:hidden">Edit</span>
+              </button>
+              <button
+                className="text-blue-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm"
+                onClick={async () => {
+                  setSendingToTD(true);
+                  try {
+                    const result = await estimatorService.sendBOQToTechnicalDirector(boq.boq_id!);
+                    if (result.success) {
+                      toast.success('BOQ sent to Technical Director successfully!');
+                      loadBOQs();
+                    } else {
+                      toast.error(result.message);
+                    }
+                  } catch (error) {
+                    toast.error('Failed to send BOQ to TD');
+                  } finally {
+                    setSendingToTD(false);
+                  }
+                }}
+                disabled={sendingToTD}
+                title="Send to Technical Director for final approval"
+              >
+                <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">{sendingToTD ? 'Sending...' : 'Send to TD'}</span>
+                <span className="sm:hidden">{sendingToTD ? '...' : 'TD'}</span>
+              </button>
+            </>
           ) : isPendingRevision ? (
             /* Revision sent to TD - waiting for approval */
             <div className="col-span-2 flex items-center justify-center text-xs text-red-700 font-medium">

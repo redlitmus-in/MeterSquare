@@ -58,12 +58,13 @@ const RoleBasedChangeRequests = lazy(() => import('@/components/routing/RoleBase
 // Site Engineer Pages
 const SiteEngineerProjects = lazy(() => import('@/roles/site-engineer/pages/MyProjects'));
 
-// Admin Pages
+// Admin Pages - Mix of custom admin pages and role pages
 const AdminUserManagement = lazy(() => import('@/pages/admin/UserManagement'));
 const AdminRoleManagement = lazy(() => import('@/pages/admin/RoleManagement'));
 const AdminBOQManagement = lazy(() => import('@/pages/admin/BOQManagement'));
-const AdminProjectApprovals = lazy(() => import('@/pages/admin/ProjectApprovals'));
 const AdminSettings = lazy(() => import('@/pages/admin/Settings'));
+const AdminMyProjects = lazy(() => import('@/pages/admin/AdminMyProjects'));
+const AdminSEProjects = lazy(() => import('@/pages/admin/AdminSEProjects'));
 
 // Lazy load workflow pages
 const MaterialDispatchProductionPage = lazy(() => import('@/pages/workflows/MaterialDispatchProductionPage'));
@@ -269,6 +270,32 @@ const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children
 
   if (!isProjectManager && !isTechnicalDirector && !isAdmin) {
     console.log('Access denied. User role:', userRole, 'role_id:', roleId);
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+// Admin Only Route Component
+const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuthStore();
+
+  // Get role from user object
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+
+  // Also check role_id for compatibility
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  // Check if user is Admin
+  const isAdmin = userRole === 'Admin' ||
+                 userRoleLower === 'admin' ||
+                 roleId === 'admin' ||
+                 roleIdLower === 'admin';
+
+  if (!isAdmin) {
+    console.log('Admin access denied. User role:', userRole, 'role_id:', roleId);
     return <Navigate to="/403" replace />;
   }
 
@@ -485,18 +512,56 @@ function App() {
               </ProjectManagerRoute>
             } />
 
-            {/* Role-based Change Requests - Single route for all roles */}
+            {/* Role-based Change Requests and Extra Material - Single route for all roles */}
             <Route path="change-requests" element={<RoleBasedChangeRequests />} />
-
-            {/* Admin Routes */}
-            <Route path="user-management" element={<AdminUserManagement />} />
-            <Route path="roles" element={<AdminRoleManagement />} />
-            <Route path="boq-management" element={<AdminBOQManagement />} />
-            <Route path="project-approvals" element={<AdminProjectApprovals />} />
-            <Route path="settings" element={<AdminSettings />} />
-
-            {/* Extra Material Management - For SE and PM roles */}
             <Route path="extra-material" element={<RoleBasedChangeRequests />} />
+
+            {/* Admin Routes - Use original role pages directly */}
+            <Route path="user-management" element={
+              <AdminRoute>
+                <AdminUserManagement />
+              </AdminRoute>
+            } />
+            <Route path="pm-projects" element={
+              <AdminRoute>
+                <AdminMyProjects />
+              </AdminRoute>
+            } />
+            <Route path="se-projects" element={
+              <AdminRoute>
+                <AdminSEProjects />
+              </AdminRoute>
+            } />
+            <Route path="roles" element={
+              <AdminRoute>
+                <AdminRoleManagement />
+              </AdminRoute>
+            } />
+            <Route path="boq-management" element={
+              <AdminRoute>
+                <AdminBOQManagement />
+              </AdminRoute>
+            } />
+            <Route path="project-approvals" element={
+              <AdminRoute>
+                <ProjectApprovals />
+              </AdminRoute>
+            } />
+            <Route path="projects-overview" element={
+              <AdminRoute>
+                <ProjectsOverview />
+              </AdminRoute>
+            } />
+            <Route path="record-material" element={
+              <AdminRoute>
+                <RecordMaterialPurchase />
+              </AdminRoute>
+            } />
+            <Route path="settings" element={
+              <AdminRoute>
+                <AdminSettings />
+              </AdminRoute>
+            } />
 
             {/* Site Engineer specific routes - Temporarily commented out */}
             {/* <Route path="my-project" element={<MyProject />} /> */}

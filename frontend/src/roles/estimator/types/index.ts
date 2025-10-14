@@ -3,7 +3,7 @@
  * Based on backend models and API structure
  */
 
-export type BOQStatus = 'Draft' | 'In_Review' | 'Approved' | 'Sent_for_Confirmation' | 'Rejected';
+export type BOQStatus = 'Draft' | 'Pending_PM_Approval' | 'PM_Approved' | 'PM_Rejected' | 'Pending_TD_Approval' | 'Approved' | 'Rejected' | 'Sent_for_Confirmation' | 'Client_Confirmed' | 'Client_Rejected';
 export type WorkType = 'contract' | 'daily_wages' | 'piece_rate';
 
 // Backend-aligned Material interface

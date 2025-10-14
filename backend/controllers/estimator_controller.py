@@ -1,5 +1,6 @@
 from flask import request, jsonify, g
 from models.user import User
+from models.role import Role
 from utils.boq_email_service import BOQEmailService
 from models.project import Project
 from models.boq import *
@@ -370,17 +371,13 @@ def send_boq_to_project_manager():
         )
 
         if email_sent:
-            # Update BOQ status to indicate it's sent to PM for approval
-            # Use different status: "Pending" for TD, "Pending_PM_Approval" for PM
-            boq.status = 'Pending'
+            # Update BOQ status to indicate it's sent to PM for approval (NOT assignment)
+            boq.status = 'Pending_PM_Approval'
             boq.last_modified_by = current_user_name
             boq.last_modified_at = datetime.utcnow()
             boq.email_sent = True
 
-            # Update project to assign the SPECIFIC PM
-            project.user_id = pm_id
-            project.last_modified_by = current_user_name
-            project.last_modified_at = datetime.utcnow()
+            # NOTE: PM is NOT assigned to project here - only after client approval and TD assignment
 
             # Check if history entry already exists for this BOQ
             existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -494,5 +491,223 @@ def send_boq_to_project_manager():
         return jsonify({
             "success": False,
             "message": "Failed to send BOQ to Project Manager",
+            "error": str(e)
+        }), 500
+
+def send_boq_to_technical_director():
+    """Send PM-approved BOQ to Technical Director for final approval"""
+    try:
+        data = request.get_json()
+
+        boq_id = data.get('boq_id')
+        td_id = data.get('technical_director_id')
+
+        if not boq_id:
+            return jsonify({"error": "boq_id is required"}), 400
+
+        # Get current user (Estimator)
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({"error": "User not authenticated"}), 401
+
+        current_user_name = current_user.get('full_name')
+        current_user_id = current_user.get('user_id')
+        current_user_role = current_user.get('role')
+
+        # Get BOQ
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Validate BOQ status - must be PM_Approved
+        if boq.status != 'PM_Approved':
+            return jsonify({
+                "error": f"BOQ must be approved by Project Manager first. Current status: {boq.status}"
+            }), 400
+
+        # Get BOQ details
+        boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq_details:
+            return jsonify({"error": "BOQ details not found"}), 404
+
+        # Get project
+        project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Get Technical Director
+        td_role = Role.query.filter_by(role='technicalDirector').first()
+        if not td_role:
+            return jsonify({"error": "Technical Director role not found"}), 404
+
+        # If specific TD ID provided, use it; otherwise get first available TD
+        if td_id:
+            td = User.query.filter_by(user_id=td_id, role_id=td_role.role_id, is_deleted=False).first()
+        else:
+            td = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).first()
+
+        if not td:
+            return jsonify({"error": "Technical Director not found"}), 404
+
+        if not td.email:
+            return jsonify({"error": f"Technical Director {td.full_name} has no email address"}), 400
+
+        # Prepare BOQ data
+        boq_data = {
+            'boq_id': boq.boq_id,
+            'boq_name': boq.boq_name,
+            'status': boq.status
+        }
+
+        # Prepare project data
+        project_data = {
+            'project_name': project.project_name,
+            'client': project.client if hasattr(project, 'client') else 'N/A',
+            'location': project.location if hasattr(project, 'location') else 'N/A'
+        }
+
+        # Prepare items summary from BOQ details JSON
+        items_summary = boq_details.boq_details.get('summary', {})
+        items_summary['items'] = boq_details.boq_details.get('items', [])
+
+        # Initialize email service
+        boq_email_service = BOQEmailService()
+
+        # Prepare projects data for TD notification
+        projects_data = [{
+            'project_id': project.project_id,
+            'project_name': project.project_name,
+            'boq_id': boq.boq_id,
+            'boq_name': boq.boq_name,
+            'client': project.client if hasattr(project, 'client') else 'N/A',
+            'location': project.location if hasattr(project, 'location') else 'N/A',
+            'total_cost': items_summary.get('total_cost', 0),
+            'status': 'Pending TD Approval'
+        }]
+
+        # Send email to Technical Director
+        email_sent = boq_email_service.send_pm_assignment_notification(
+            td.email, td.full_name, current_user_name, projects_data
+        )
+
+        if email_sent:
+            # Update BOQ status to Pending_TD_Approval
+            boq.status = 'Pending_TD_Approval'
+            boq.last_modified_by = current_user_name
+            boq.last_modified_at = datetime.utcnow()
+            boq.email_sent = True
+
+            # Check if history entry already exists for this BOQ
+            existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+            # Prepare action data
+            new_action = {
+                "role": current_user_role,
+                "type": "sent_to_td",
+                "sender": current_user_name,
+                "receiver": td.full_name,
+                "sender_role": current_user_role,
+                "receiver_role": "technical_director",
+                "status": boq.status,
+                "comments": f"BOQ sent to Technical Director {td.full_name} for final approval",
+                "timestamp": datetime.utcnow().isoformat(),
+                "decided_by": current_user_name,
+                "decided_by_user_id": current_user_id,
+                "recipient_email": td.email,
+                "recipient_name": td.full_name,
+                "recipient_user_id": td.user_id,
+                "boq_name": boq.boq_name,
+                "project_name": project_data.get("project_name")
+            }
+
+            if existing_history:
+                # Handle existing actions - ensure it's always a list
+                if existing_history.action is None:
+                    current_actions = []
+                elif isinstance(existing_history.action, list):
+                    current_actions = existing_history.action
+                elif isinstance(existing_history.action, dict):
+                    current_actions = [existing_history.action]
+                else:
+                    current_actions = []
+
+                # Check if similar action already exists
+                action_exists = False
+                for existing_action in current_actions:
+                    if (existing_action.get('type') == new_action['type'] and
+                        existing_action.get('sender') == new_action['sender'] and
+                        existing_action.get('receiver') == new_action['receiver']):
+                        existing_ts = existing_action.get('timestamp', '')
+                        new_ts = new_action['timestamp']
+                        if existing_ts and new_ts:
+                            try:
+                                existing_dt = datetime.fromisoformat(existing_ts)
+                                new_dt = datetime.fromisoformat(new_ts)
+                                if abs((new_dt - existing_dt).total_seconds()) < 60:
+                                    action_exists = True
+                                    break
+                            except:
+                                pass
+
+                if not action_exists:
+                    current_actions.append(new_action)
+                    existing_history.action = current_actions
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(existing_history, "action")
+
+                existing_history.action_by = current_user_name
+                existing_history.boq_status = boq.status
+                existing_history.sender = current_user_name
+                existing_history.receiver = td.full_name
+                existing_history.comments = f"BOQ sent to Technical Director {td.full_name} for final approval"
+                existing_history.sender_role = current_user_role
+                existing_history.receiver_role = 'technical_director'
+                existing_history.action_date = datetime.utcnow()
+                existing_history.last_modified_by = current_user_name
+                existing_history.last_modified_at = datetime.utcnow()
+            else:
+                # Create new history entry
+                boq_history = BOQHistory(
+                    boq_id=boq_id,
+                    action=[new_action],
+                    action_by=current_user_name,
+                    boq_status=boq.status,
+                    sender=current_user_name,
+                    receiver=td.full_name,
+                    comments=f"BOQ sent to Technical Director {td.full_name} for final approval",
+                    sender_role=current_user_role,
+                    receiver_role='technical_director',
+                    action_date=datetime.utcnow(),
+                    created_by=current_user_name
+                )
+                db.session.add(boq_history)
+
+            db.session.commit()
+
+            return jsonify({
+                "success": True,
+                "message": f"BOQ sent successfully to Technical Director {td.full_name}",
+                "boq_id": boq_id,
+                "technical_director": {
+                    "id": td.user_id,
+                    "name": td.full_name,
+                    "email": td.email
+                },
+                "status": boq.status
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Failed to send BOQ email to Technical Director",
+                "boq_id": boq_id,
+                "error": "Email service failed"
+            }), 500
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error sending BOQ to Technical Director: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": "Failed to send BOQ to Technical Director",
             "error": str(e)
         }), 500

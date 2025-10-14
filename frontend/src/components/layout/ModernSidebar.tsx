@@ -23,6 +23,7 @@ import {
   CubeIcon,
   ExclamationTriangleIcon,
   ClockIcon,
+  UserGroupIcon,
   Cog6ToothIcon as Settings
 } from '@heroicons/react/24/outline';
 import {
@@ -413,7 +414,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       }
     ];
 
-    // Admin specific navigation items
+    // Admin specific navigation items - Full access to all role functionalities
     const adminItems: NavigationItem[] = [
       {
         name: 'User Management',
@@ -437,11 +438,46 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-emerald-600'
       },
       {
+        name: 'PM Projects',
+        href: buildPath('/pm-projects'),
+        icon: BuildingOfficeIcon,
+        iconSolid: BuildingOfficeSolid,
+        color: 'text-blue-600'
+      },
+      {
+        name: 'SE Projects',
+        href: buildPath('/se-projects'),
+        icon: BuildingOfficeIcon,
+        iconSolid: BuildingOfficeSolid,
+        color: 'text-cyan-600'
+      },
+      {
         name: 'Record Material Purchase',
         href: buildPath('/record-material'),
         icon: ShoppingCartIcon,
         iconSolid: ShoppingCartIcon,
         color: 'text-indigo-600'
+      },
+      {
+        name: 'Change Requests',
+        href: buildPath('/change-requests'),
+        icon: DocumentPlusIcon,
+        iconSolid: DocumentPlusSolid,
+        color: 'text-red-600'
+      },
+      {
+        name: 'Extra Material',
+        href: buildPath('/extra-material'),
+        icon: CubeIcon,
+        iconSolid: CubeSolid,
+        color: 'text-purple-600'
+      },
+      {
+        name: 'Projects Overview',
+        href: buildPath('/projects-overview'),
+        icon: BuildingOfficeIcon,
+        iconSolid: BuildingOfficeSolid,
+        color: 'text-purple-600'
       },
       {
         name: 'Roles',

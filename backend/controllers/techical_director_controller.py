@@ -244,6 +244,7 @@ def td_mail_send():
             log.info(f"BOQ {boq_id} approved by TD, sending to Estimator")
 
             # Check if this is a revision approval (status was Pending_Revision)
+            # or a regular approval from Pending_TD_Approval
             is_revision_approval = boq.status.lower() == 'pending_revision'
             new_status = "Revision_Approved" if is_revision_approval else "Approved"
 
