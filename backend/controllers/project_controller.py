@@ -456,12 +456,46 @@ def get_assigned_projects():
                     if not item_id:
                         item_id = f"item_{boq.boq_id}_{idx + 1}"
 
+                    # Calculate consumed overhead from approved change requests
+                    from models.change_request import ChangeRequest
+                    from sqlalchemy import or_
+                    consumed_overhead = 0.0
+
+                    # Special handling for items created by change requests
+                    if 'Extra Materials - CR #' in item.get('item_name', ''):
+                        # This is an item created by a change request
+                        # For these items, consumed overhead should be 0 since the item itself represents the consumption
+                        consumed_overhead = 0.0
+                        print(f"Item '{item.get('item_name', '')}' is from a CR, consumed=0")
+
+                    else:
+                        # Get approved change requests for this specific item only
+                        approved_crs = ChangeRequest.query.filter(
+                            ChangeRequest.boq_id == boq.boq_id,
+                            or_(
+                                ChangeRequest.item_id == str(item_id),
+                                ChangeRequest.item_name == item.get('item_name', '')
+                            ),
+                            ChangeRequest.status == 'approved',
+                            ChangeRequest.is_deleted == False
+                        ).all()
+
+                        print(f"Item {item_id} ({item.get('item_name', '')}): Found {len(approved_crs)} approved CRs")
+
+                        for cr in approved_crs:
+                            # Sum up the overhead consumed from each approved change request
+                            cr_overhead = cr.overhead_consumed if cr.overhead_consumed else 0.0
+                            consumed_overhead += cr_overhead
+                            print(f"  CR#{cr.cr_id}: overhead={cr_overhead}, total={consumed_overhead}")
+                    # Calculate available overhead
+                    available_overhead = item_overhead - consumed_overhead
+
                     item_info = {
                         "item_id": str(item_id),
                         "item_name": item.get('item_name', ''),
                         "overhead_allocated": round(item_overhead, 2),
-                        "overhead_consumed": 0.0,  # TODO: Calculate from approved change requests
-                        "overhead_available": round(item_overhead, 2),
+                        "overhead_consumed": round(consumed_overhead, 2),
+                        "overhead_available": round(available_overhead, 2),
                         "sub_items": []
                     }
 

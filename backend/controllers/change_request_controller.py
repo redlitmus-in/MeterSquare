@@ -178,29 +178,14 @@ def create_change_request():
             cost_increase_percentage=overhead_impact['cost_increase_percentage']
         )
 
-        # Auto-send for review if created by SE
-        normalized_role = workflow_service.normalize_role(user_role)
-        if normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
-            # Automatically send for review to PM
-            change_request.approval_required_from = 'project_manager'
-            change_request.current_approver_role = 'project_manager'
-            change_request.status = 'under_review'
-            log.info(f"Auto-sending SE request {change_request.cr_id} to PM for review")
+        # All users create requests in pending status - no auto-send
+        # User must explicitly click "Send for Review" button
+        db.session.add(change_request)
+        db.session.commit()
 
-            db.session.add(change_request)
-            db.session.commit()
-
-            response_message = "Change request created and sent to Project Manager for review"
-            response_status = "under_review"
-            approval_from = "project_manager"
-        else:
-            # PM or other roles create in pending status
-            db.session.add(change_request)
-            db.session.commit()
-
-            response_message = "Change request created successfully"
-            response_status = "pending"
-            approval_from = None
+        response_message = "Change request created successfully"
+        response_status = "pending"
+        approval_from = None
 
         log.info(f"Change request {change_request.cr_id} created by {user_name} for BOQ {boq_id}")
 
@@ -386,26 +371,15 @@ def get_all_change_requests():
                 cr_dict['project_name'] = cr.project.project_name
                 cr_dict['project_location'] = cr.project.location
                 cr_dict['project_client'] = cr.project.client
+                cr_dict['area'] = cr.project.area
 
             # Add BOQ name and status
             if cr.boq:
                 cr_dict['boq_name'] = cr.boq.boq_name
                 cr_dict['boq_status'] = cr.boq.status
 
-            # If item_name is missing, try to get it from materials data
-            if not cr.item_name and cr.materials_data:
-                # Try to get item info from first material's master data
-                first_material = cr.materials_data[0] if isinstance(cr.materials_data, list) else None
-                if first_material and first_material.get('master_material_id'):
-                    from models.boq import MasterMaterial, MasterItem
-                    material = MasterMaterial.query.filter_by(
-                        material_id=int(first_material['master_material_id'])
-                    ).first()
-                    if material and material.item_id:
-                        item = MasterItem.query.filter_by(item_id=material.item_id).first()
-                        if item:
-                            cr_dict['item_id'] = str(item.item_id)
-                            cr_dict['item_name'] = item.item_name
+            # Skip material lookup - master_material_id values like 'mat_198_1_2'
+            # are not database IDs but sub_item identifiers
 
             result.append(cr_dict)
 
@@ -443,22 +417,8 @@ def get_change_request_by_id(cr_id):
             result['boq_name'] = change_request.boq.boq_name
             result['boq_status'] = change_request.boq.status
 
-        # If item_name is missing, try to get it from materials data
-        if not change_request.item_name and change_request.materials_data:
-            # Try to get item info from first material's master data
-            first_material = change_request.materials_data[0] if isinstance(change_request.materials_data, list) else None
-            if first_material and first_material.get('master_material_id'):
-                from models.boq import MasterMaterial, MasterItem
-                try:
-                    material_id = int(first_material['master_material_id'])
-                    material = MasterMaterial.query.filter_by(material_id=material_id).first()
-                    if material and material.item_id:
-                        item = MasterItem.query.filter_by(item_id=material.item_id).first()
-                        if item:
-                            result['item_id'] = str(item.item_id)
-                            result['item_name'] = item.item_name
-                except (ValueError, TypeError):
-                    pass  # Invalid material_id format
+        # Skip material lookup - master_material_id values like 'mat_198_1_2'
+        # are not database IDs but sub_item identifiers
 
         return jsonify({
             "success": True,

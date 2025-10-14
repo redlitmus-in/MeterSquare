@@ -39,6 +39,7 @@ import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
+import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 
@@ -54,6 +55,7 @@ const ChangeRequestsPage: React.FC = () => {
   const [initialLoad, setInitialLoad] = useState(true);
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
   const [showExtraForm, setShowExtraForm] = useState(false);
@@ -142,13 +144,20 @@ const ChangeRequestsPage: React.FC = () => {
   };
 
   const handleEdit = (crId: number) => {
-    // Find the change request and open it in the details modal with edit mode
+    // Find the change request and open it in the edit modal
     const request = changeRequests.find(r => r.cr_id === crId);
     if (request) {
       setSelectedChangeRequest(request);
-      setShowDetailsModal(true);
-      // The modal will handle edit mode based on the request status
+      setShowEditModal(true);
     }
+  };
+
+  const handleEditSuccess = () => {
+    // Reload change requests after successful edit
+    loadChangeRequests();
+    setShowEditModal(false);
+    setSelectedChangeRequest(null);
+    toast.success('Change request updated successfully');
   };
 
   const handleApproveFromModal = async () => {
@@ -514,14 +523,25 @@ const ChangeRequestsPage: React.FC = () => {
 
                         {/* Actions */}
                         <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
-                          <button
-                            onClick={() => handleReview(request.cr_id)}
-                            className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
-                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                          >
-                            <Eye className="h-4 w-4" />
-                            <span>Review</span>
-                          </button>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => handleReview(request.cr_id)}
+                              className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                            >
+                              <Eye className="h-4 w-4" />
+                              <span>Review</span>
+                            </button>
+                            {request.status === 'pending' && (
+                              <button
+                                onClick={() => handleEdit(request.cr_id)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              >
+                                <Pencil className="h-4 w-4" />
+                                <span>Edit</span>
+                              </button>
+                            )}
+                          </div>
                           <div className="grid grid-cols-2 gap-2">
                             <button
                               onClick={() => handleApprove(request.cr_id)}
@@ -693,15 +713,13 @@ const ChangeRequestsPage: React.FC = () => {
                                 <Eye className="h-4 w-4" />
                                 <span>Review</span>
                               </button>
-                              {request.status === 'pending' && (
-                                <button
-                                  onClick={() => handleEdit(request.cr_id)}
-                                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                  <span>Edit</span>
-                                </button>
-                              )}
+                              <button
+                                onClick={() => handleEdit(request.cr_id)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              >
+                                <Pencil className="h-4 w-4" />
+                                <span>Edit</span>
+                              </button>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
                               <button
@@ -742,7 +760,64 @@ const ChangeRequestsPage: React.FC = () => {
                     <RequestsTable requests={filteredRequests} />
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                      {/* Similar card structure for under review items */}
+                      {filteredRequests.map((request, index) => (
+                        <motion.div
+                          key={request.cr_id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.05 * index }}
+                          className="bg-white rounded-lg border border-yellow-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                        >
+                          <div className="p-4">
+                            <div className="flex items-start justify-between mb-2">
+                              <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
+                              <Badge className={getStatusColor(request.status)}>
+                                {request.status.replace('_', ' ').toUpperCase()}
+                              </Badge>
+                            </div>
+
+                            <div className="space-y-1 text-sm text-gray-600">
+                              <div className="flex items-center gap-1.5">
+                                <Package className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate">By: {request.requested_by_name}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="px-4 pb-3 text-center text-sm">
+                            <span className="font-bold text-yellow-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
+                            <span className="text-gray-600 ml-1">Sub-Item{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                          </div>
+
+                          <div className="px-4 pb-3 space-y-1.5 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Additional Cost:</span>
+                              <span className="font-bold text-yellow-600">{formatCurrency(request.materials_total_cost)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">% of Item Overhead:</span>
+                              <span className={`font-semibold ${getPercentageColor(request.percentage_of_item_overhead || 0)}`}>
+                                {(request.percentage_of_item_overhead || 0).toFixed(1)}%
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-gray-200 p-2 sm:p-3">
+                            <button
+                              onClick={() => handleReview(request.cr_id)}
+                              className="w-full text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                            >
+                              <Eye className="h-4 w-4" />
+                              <span>View Details</span>
+                            </button>
+                          </div>
+                        </motion.div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -835,6 +910,19 @@ const ChangeRequestsPage: React.FC = () => {
         onReject={handleRejectFromModal}
         canApprove={selectedChangeRequest?.approval_required_from === 'estimator' && selectedChangeRequest?.status !== 'approved' && selectedChangeRequest?.status !== 'rejected'}
       />
+
+      {/* Edit Change Request Modal */}
+      {selectedChangeRequest && (
+        <EditChangeRequestModal
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false);
+            setSelectedChangeRequest(null);
+          }}
+          changeRequest={selectedChangeRequest}
+          onSuccess={handleEditSuccess}
+        />
+      )}
 
       {/* Rejection Reason Modal */}
       <RejectionReasonModal

@@ -7,6 +7,7 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
 import { formatCurrency } from '@/utils/formatters';
 import { isSiteEngineer, isProjectManager, isEstimator, isTechnicalDirector } from '@/utils/roleHelpers';
+import EditChangeRequestModal from './EditChangeRequestModal';
 
 interface ChangeRequestDetailsModalProps {
   isOpen: boolean;

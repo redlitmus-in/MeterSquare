@@ -142,9 +142,16 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const fetchItemOverhead = async () => {
     if (!selectedBoq || !selectedItem || !selectedItem.item_id) return;
 
-    // Set overhead from selectedItem directly - no need for API call
-    // The overhead data is already present in the selectedItem from projects/assigned-to-me API
+    // Use the overhead values from the selectedItem
+    // These come from the /api/projects/assigned-to-me endpoint
     if (selectedItem) {
+      console.log('Selected Item Overhead Values:', {
+        allocated: selectedItem.overhead_allocated,
+        consumed: selectedItem.overhead_consumed,
+        available: selectedItem.overhead_available,
+        fullItem: selectedItem
+      });
+
       setItemOverhead({
         allocated: selectedItem.overhead_allocated || 0,
         consumed: selectedItem.overhead_consumed || 0,
@@ -372,33 +379,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         );
 
         if (response.data.success) {
-          // For Site Engineers, automatically send for review to PM
-          const userRole = (user as any)?.role || '';
-          const userRoleLower = userRole.toLowerCase();
-
-          if (userRoleLower === 'site engineer' || userRoleLower === 'site_engineer' ||
-              userRoleLower === 'siteengineer' || userRole === 'siteEngineer') {
-            // Get the created CR ID from response (if available)
-            const crId = response.data.cr_id;
-            if (crId) {
-              // Send for review to PM
-              try {
-                await axios.post(
-                  `${API_URL}/change-request/${crId}/send-for-review`,
-                  {},
-                  { headers }
-                );
-                toast.success('Extra material request submitted and sent to PM for approval');
-              } catch (sendError) {
-                console.error('Error sending for review:', sendError);
-                toast.success('Extra material request created. Please send for review manually.');
-              }
-            } else {
-              toast.success('Extra material request submitted successfully');
-            }
-          } else {
-            toast.success('Extra material request submitted successfully');
-          }
+          // All users must manually send for review - no auto-send
+          toast.success('Extra material request created successfully. Click "Send for Review" to submit for approval.');
           onClose();
         }
       }

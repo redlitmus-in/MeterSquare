@@ -118,39 +118,6 @@ class ChangeRequestService {
     };
   }
 
-  /**
-   * Update an existing change request
-   * PUT /api/change-request/{cr_id}
-   */
-  async updateChangeRequest(crId: number, data: {
-    justification: string;
-    materials: Array<{
-      material_name: string;
-      quantity: number;
-      unit: string;
-      unit_price: number;
-      master_material_id?: number | null;
-    }>;
-  }): Promise<{ success: boolean; data?: any; message?: string }> {
-    try {
-      const response = await axios.put(
-        `${API_BASE_URL}/change-request/${crId}`,
-        data,
-        this.getAuthHeaders()
-      );
-
-      return {
-        success: true,
-        data: response.data
-      };
-    } catch (error: any) {
-      console.error('Error updating change request:', error);
-      return {
-        success: false,
-        message: error.response?.data?.error || 'Failed to update change request'
-      };
-    }
-  }
 
   /**
    * Create a new change request to add extra materials
@@ -243,30 +210,6 @@ class ChangeRequestService {
     }
   }
 
-  /**
-   * Send change request for review
-   * POST /api/change-request/{cr_id}/send-for-review
-   */
-  async sendForReview(crId: number): Promise<{ success: boolean; message: string }> {
-    try {
-      const response = await axios.post(
-        `${API_BASE_URL}/change-request/${crId}/send-for-review`,
-        {},
-        this.getAuthHeaders()
-      );
-
-      return {
-        success: true,
-        message: response.data.message || 'Change request sent for review'
-      };
-    } catch (error: any) {
-      console.error('Error sending change request for review:', error);
-      return {
-        success: false,
-        message: error.response?.data?.error || 'Failed to send for review'
-      };
-    }
-  }
 
   /**
    * Approve change request
@@ -409,6 +352,36 @@ class ChangeRequestService {
     }
   }
 
+  /**
+   * Update change request
+   * PUT /api/change-request/{cr_id}
+   */
+  async updateChangeRequest(crId: number, data: {
+    quantity?: number;
+    unit_rate?: number;
+    justification?: string;
+    remarks?: string;
+  }): Promise<{ success: boolean; message?: string; data?: any }> {
+    try {
+      const response = await axios.put(
+        `${API_BASE_URL}/change-request/${crId}`,
+        data,
+        this.getAuthHeaders()
+      );
+
+      return {
+        success: true,
+        message: response.data.message || 'Change request updated successfully',
+        data: response.data
+      };
+    } catch (error: any) {
+      console.error('Error updating change request:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to update change request'
+      };
+    }
+  }
   // REMOVED: updateChangeRequestStatus - DEPRECATED
   // Use sendForReview() method instead
   // The backend endpoint /api/change-request/{cr_id}/status has been removed
