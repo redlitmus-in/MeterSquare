@@ -1941,6 +1941,15 @@ def get_all_item():
 # SEND EMAIL - Send BOQ to Technical Director
 def send_boq_email(boq_id):
     try:
+        current_user = getattr(g, 'user', None)
+        user_id = current_user.get('user_id') if current_user else None
+        user_role = current_user.get('role', '').lower() if current_user else ''
+        user_name = current_user.get('full_name') or current_user.get('username') or 'Unknown' if current_user else 'Unknown'
+        print("user_name:",user_name)
+        print("user_role:",user_role)
+        # Debug logging to verify current user
+        log.info(f"send_boq_email called by user_id={user_id}, role={user_role}, name={user_name}")
+        log.debug(f"Full user context: {current_user}")
         # Get BOQ data
         boq = BOQ.query.filter_by(boq_id=boq_id).first()
         if not boq:
@@ -2016,7 +2025,7 @@ def send_boq_email(boq_id):
 
                 boq.email_sent = True
                 boq.status = new_status
-                boq.last_modified_by = boq.created_by
+                boq.last_modified_by = user_name
                 boq.last_modified_at = datetime.utcnow()
 
                 # Check if history entry already exists for this BOQ
@@ -2024,16 +2033,16 @@ def send_boq_email(boq_id):
 
                 # Prepare action data in the new format
                 new_action = {
-                    "role": "estimator",
+                    "role": user_role,
                     "type": "revision_sent" if is_revision else "email_sent",
-                    "sender": "estimator",
+                    "sender": user_role,
                     "receiver": "technicalDirector",
                     "status": new_status.lower(),
                     # "pending",
                     "comments": comments if comments else ("BOQ revision sent for review" if is_revision else "BOQ sent for review and approval"),
                     "timestamp": datetime.utcnow().isoformat(),
-                    "decided_by": boq.created_by,
-                    "decided_by_user_id": g.user.get('user_id') if hasattr(g, 'user') and g.user else None,
+                    "decided_by": user_name,
+                    "decided_by_user_id": user_id,
                     "recipient_email": td_email,
                     "recipient_name": td_name if td_name else None,
                     "boq_name": boq.boq_name,
@@ -2080,30 +2089,30 @@ def send_boq_email(boq_id):
                         from sqlalchemy.orm.attributes import flag_modified
                         flag_modified(existing_history, "action")
 
-                    existing_history.action_by = boq.created_by
+                    existing_history.action_by = user_name
                     existing_history.boq_status = "Pending"
-                    existing_history.sender = boq.created_by
+                    existing_history.sender = user_name
                     existing_history.receiver = td_name if td_name else td_email
                     existing_history.comments = comments if comments else "BOQ sent for review and approval"
-                    existing_history.sender_role = 'estimator'
+                    existing_history.sender_role = user_role
                     existing_history.receiver_role = 'technicalDirector'
                     existing_history.action_date = datetime.utcnow()
-                    existing_history.last_modified_by = boq.created_by
+                    existing_history.last_modified_by = user_name
                     existing_history.last_modified_at = datetime.utcnow()
                 else:
                     # Create new history entry with action as array
                     boq_history = BOQHistory(
                         boq_id=boq_id,
                         action=[new_action],  # Store as array
-                        action_by=boq.created_by,
+                        action_by=user_name,
                         boq_status="Pending",
-                        sender=boq.created_by,
+                        sender=user_name,
                         receiver=td_name if td_name else td_email,
                         comments=comments if comments else "BOQ sent for review and approval",
-                        sender_role='estimator',
+                        sender_role=user_role,
                         receiver_role='technicalDirector',
                         action_date=datetime.utcnow(),
-                        created_by=boq.created_by
+                        created_by=user_name
                     )
                     db.session.add(boq_history)
 
@@ -2173,15 +2182,15 @@ def send_boq_email(boq_id):
 
                 # Prepare action data in the new format
                 new_action = {
-                    "role": "estimator",
+                    "role": user_role,
                     "type": "revision_sent" if is_revision else "email_sent",
-                    "sender": "estimator",
+                    "sender": user_name,
                     "receiver": "technicalDirector",
                     "status": new_status.lower(),
                     "comments": comments if comments else "BOQ sent for review and approval",
                     "timestamp": datetime.utcnow().isoformat(),
-                    "decided_by": boq.created_by,
-                    "decided_by_user_id": g.user.get('user_id') if hasattr(g, 'user') and g.user else None,
+                    "decided_by": user_name,
+                    "decided_by_user_id": user_id,
                     "recipient_email": technical_director.email if technical_director.email else None,
                     "recipient_name": technical_director.full_name if technical_director.full_name else None,
                     "boq_name": boq.boq_name,
@@ -2227,30 +2236,30 @@ def send_boq_email(boq_id):
                         from sqlalchemy.orm.attributes import flag_modified
                         flag_modified(existing_history, "action")
 
-                    existing_history.action_by = boq.created_by
+                    existing_history.action_by = user_name
                     existing_history.boq_status = "Pending"
-                    existing_history.sender = boq.created_by
+                    existing_history.sender = user_name
                     existing_history.receiver = technical_director.full_name if technical_director.full_name else technical_director.email
                     existing_history.comments = comments if comments else "BOQ sent for review and approval"
-                    existing_history.sender_role = 'estimator'
+                    existing_history.sender_role = user_role
                     existing_history.receiver_role = 'technicalDirector'
                     existing_history.action_date = datetime.utcnow()
-                    existing_history.last_modified_by = boq.created_by
+                    existing_history.last_modified_by = user_name
                     existing_history.last_modified_at = datetime.utcnow()
                 else:
                     # Create new history entry with action as array
                     boq_history = BOQHistory(
                         boq_id=boq_id,
                         action=[new_action],  # Store as array
-                        action_by=boq.created_by,
+                        action_by=user_name,
                         boq_status="Pending",
-                        sender=boq.created_by,
+                        sender=user_name,
                         receiver=technical_director.full_name if technical_director.full_name else technical_director.email,
                         comments=comments if comments else "BOQ sent for review and approval",
-                        sender_role='estimator',
+                        sender_role=user_role,
                         receiver_role='technicalDirector',
                         action_date=datetime.utcnow(),
-                        created_by=boq.created_by
+                        created_by=user_name
                     )
                     db.session.add(boq_history)
 

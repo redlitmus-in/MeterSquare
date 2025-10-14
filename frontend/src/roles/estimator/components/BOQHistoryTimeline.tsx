@@ -96,11 +96,19 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
         result.data.forEach((record: BackendHistoryRecord) => {
           // If action is an array, process each action
           if (Array.isArray(record.action)) {
-            record.action.forEach((actionItem, index) => {
+            record.action.forEach((actionItem: any, index) => {
+              // Get the correct action_by name based on action type
+              let actionByName = record.action_by;
+              if (actionItem.type === 'revision_sent' || actionItem.type === 'email_sent') {
+                actionByName = actionItem.decided_by || actionItem.sender || record.action_by;
+              } else if (actionItem.type === 'boq_updated') {
+                actionByName = actionItem.updated_by || actionItem.user_name || record.action_by;
+              }
+
               transformedHistory.push({
                 action_id: record.boq_history_id * 1000 + index, // Generate unique ID
                 action_type: actionItem.type?.toUpperCase().replace(/_/g, '_') || 'UNKNOWN',
-                action_by: actionItem.sender_name || record.action_by,
+                action_by: actionByName,
                 action_at: actionItem.timestamp || record.action_date,
                 sender_email: record.sender_role === 'estimator' ? record.sender : undefined,
                 receiver_email: actionItem.recipient_email || record.receiver,
@@ -108,8 +116,8 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
                 comments: actionItem.comments || actionItem.rejection_reason || record.comments,
                 status: actionItem.status || record.boq_status,
                 project_name: actionItem.project_name,
-                total_value: actionItem.total_value,
-                item_count: actionItem.item_count,
+                total_value: actionItem.total_value || actionItem.total_cost,
+                item_count: actionItem.item_count || actionItem.total_items,
                 attachments: actionItem.attachments,
                 rejection_reason: actionItem.rejection_reason
               });

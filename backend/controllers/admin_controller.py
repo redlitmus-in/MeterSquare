@@ -803,8 +803,7 @@ def get_all_site_engineers():
         se_list = []
         for se in site_engineers:
             # Count projects assigned to this SE
-            from models.project_assignment import ProjectAssignment
-            project_count = ProjectAssignment.query.filter_by(
+            project_count = Project.query.filter_by(
                 site_supervisor_id=se.user_id,
                 is_deleted=False
             ).count()

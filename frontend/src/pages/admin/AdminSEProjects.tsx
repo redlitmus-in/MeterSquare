@@ -39,7 +39,7 @@ const AdminSEProjects: React.FC = () => {
       const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
       const token = localStorage.getItem('access_token');
 
-      const response = await axios.get(`${API_URL}/admin/site-engineers`, {
+      const response = await axios.get(`${API_URL}/site-engineers`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
 
