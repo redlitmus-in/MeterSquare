@@ -1422,8 +1422,7 @@ const MyProjects: React.FC = () => {
                           <CheckCircleIcon className="w-5 h-5 text-purple-600" />
                           <span className="font-semibold text-purple-700">Completed</span>
                         </div>
-                      ) : (selectedProject.boq_status?.toLowerCase() === 'pending' ||
-                             selectedProject.boq_status?.toLowerCase() === 'pending_pm_approval') ? (
+                      ) : (['pending', 'pending_pm_approval', 'draft', 'pending_revision', 'under_revision'].includes(selectedProject.boq_status?.toLowerCase() || '')) ? (
                         <>
                           <button
                             onClick={() => handleEditBOQ(selectedProject)}
