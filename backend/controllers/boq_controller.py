@@ -1409,12 +1409,37 @@ def revision_boq(boq_id):
         # Check if this is a revision edit (from Revisions button)
         is_revision = data.get("is_revision", False)
 
-        # Increment revision number
-        boq.revision_number = (boq.revision_number or 0) + 1
-        new_revision_number = boq.revision_number
+        # Set current_status BEFORE using it
+        current_status = old_status
+
+        # Increment revision number when creating a new revision cycle AFTER sending to client
+        #
+        # CORRECT FLOW:
+        # 1. Original (rev=0) -> TD approves -> Send to client -> Status=Sent_for_Confirmation, Rev=0
+        # 2. "Revisions" button appears -> Estimator clicks "Make Revision" (FIRST time) -> INCREMENT to Rev=1, Status=Under_Revision
+        # 3. Edit and save -> Rev=1 (no change), Status=Under_Revision
+        # 4. Send to TD -> Rev=1, Status=Pending_Revision
+        # 5. TD approves -> Rev=1, Status=Revision_Approved
+        # 6. Send to client -> Rev=1, Status=Sent_for_Confirmation
+        # 7. "Revisions" button appears -> Estimator clicks "Make Revision" (SECOND time) -> INCREMENT to Rev=2, Status=Under_Revision
+        # 8. Continue cycle...
+        #
+        # KEY RULE: Increment when transitioning FROM Sent_for_Confirmation or Client_Rejected TO Under_Revision
+        # - The "Revisions" button ONLY shows when status = Sent_for_Confirmation (after sending to client)
+        # - So clicking "Make Revision" from this status means starting a NEW revision cycle
+        # - Each click on "Make Revision" from Sent_for_Confirmation = new revision number
+        # - Subsequent edits (already in Under_Revision) do NOT increment
+        #
+        # This ensures revision increments each time estimator starts revising after sending to client
+        statuses_that_start_new_revision = ["Client_Rejected", "Sent_for_Confirmation"]
+
+        if is_revision and current_status in statuses_that_start_new_revision:
+            boq.revision_number = (boq.revision_number or 0) + 1
+            log.info(f"📊 Revision number incremented: {(boq.revision_number or 0) - 1} → {boq.revision_number} (Starting new revision from status: {current_status})")
+
+        new_revision_number = boq.revision_number or 0
 
         # Set status based on current status and revision mode
-        current_status = old_status
         if is_revision:
             # If this is a revision edit, always set to Under_Revision
             boq.status = "Under_Revision"

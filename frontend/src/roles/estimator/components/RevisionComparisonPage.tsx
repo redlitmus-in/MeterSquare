@@ -4,6 +4,7 @@ import { Search, TrendingUp, TrendingDown, Send, Mail, Edit, Eye, ArrowRight, Ch
 import { estimatorService } from '../services/estimatorService';
 import { toast } from 'sonner';
 import { BOQ } from '../types';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface RevisionComparisonPageProps {
   boqList: BOQ[];
@@ -41,24 +42,30 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Get display revision number (backend sends 1-indexed, but we want 0-indexed)
-  // Original = 0, First Revision = 1, Second Revision = 2, etc.
+  // Get display revision number
+  // Original = show "Original", First Revision = 1, Second Revision = 2, etc.
   const getDisplayRevisionNumber = (boq: BOQ) => {
-    const backendRevNum = boq.revision_number || 0;
-    return backendRevNum > 0 ? backendRevNum - 1 : 0;
+    return boq.revision_number || 0;
+  };
+
+  const getRevisionLabel = (boq: BOQ) => {
+    const revNum = boq.revision_number || 0;
+    return revNum === 0 ? 'Original' : `${revNum}`;
   };
 
   // Filter BOQs for Revisions tab:
   // 1. BOQs with revisions (revision_number > 0)
   // 2. Approved BOQs waiting to send to client (approved/revision_approved)
   // 3. BOQs pending TD approval (pending_approval/pending_revision)
+  // 4. BOQs being edited (under_revision)
   const boqsWithRevisions = boqList.filter(boq => {
     const status = boq.status?.toLowerCase() || '';
     const hasRevisions = (boq.revision_number || 0) > 0;
     const isApprovedNotSent = (status === 'approved' || status === 'revision_approved');
     const isPendingApproval = (status === 'pending_approval' || status === 'pending_revision' || status === 'pending');
+    const isUnderRevision = (status === 'under_revision');
 
-    return hasRevisions || isApprovedNotSent || isPendingApproval;
+    return hasRevisions || isApprovedNotSent || isPendingApproval || isUnderRevision;
   });
 
   // Filter based on search
@@ -77,6 +84,20 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
       stopPolling();
     };
   }, [selectedBoq]);
+
+  // Update selectedBoq when boqList changes (e.g., after approval/rejection or client response)
+  useEffect(() => {
+    if (selectedBoq && boqList.length > 0) {
+      const updatedBoq = boqList.find(b => b.boq_id === selectedBoq.boq_id);
+      if (updatedBoq) {
+        // Only update if the status actually changed (not just any property)
+        if (updatedBoq.status !== selectedBoq.status) {
+          console.log('🔄 BOQ status updated from', selectedBoq.status, 'to', updatedBoq.status);
+          setSelectedBoq(updatedBoq);
+        }
+      }
+    }
+  }, [boqList]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -113,7 +134,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
             stopPolling();
           }
         }
-      }, 5000); // Poll every 5 seconds
+      }, 3000); // Poll every 3 seconds for instant updates
       setPollingInterval(interval);
     }
   };
@@ -208,6 +229,51 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
     return { value: change, percentage: parseFloat(percentage) };
   };
 
+  // Helper function to check if a value has changed compared to previous revision
+  const hasChanged = (currentValue: any, previousValue: any): boolean => {
+    if (currentValue === undefined || previousValue === undefined) return false;
+    if (typeof currentValue === 'number' && typeof previousValue === 'number') {
+      return Math.abs(currentValue - previousValue) > 0.01; // Account for floating point precision
+    }
+    return currentValue !== previousValue;
+  };
+
+  // Get previous revision for comparison (the immediate previous one)
+  const getPreviousRevisionForComparison = () => {
+    if (previousRevisions.length > 0) {
+      // Sort by version descending and get the first one (most recent previous)
+      const sorted = [...previousRevisions].sort((a, b) => {
+        const aNum = typeof a.version === 'number' ? a.version : parseInt(a.version || '0');
+        const bNum = typeof b.version === 'number' ? b.version : parseInt(b.version || '0');
+        return bNum - aNum;
+      });
+      return sorted[0];
+    }
+    return null;
+  };
+
+  // Find matching material in previous revision
+  const findPreviousMaterial = (itemName: string, materialName: string, prevRevision: any) => {
+    if (!prevRevision?.boq_details?.items) return null;
+    const prevItem = prevRevision.boq_details.items.find((item: any) => item.item_name === itemName);
+    if (!prevItem?.materials) return null;
+    return prevItem.materials.find((mat: any) => mat.material_name === materialName);
+  };
+
+  // Find matching labour in previous revision
+  const findPreviousLabour = (itemName: string, labourRole: string, prevRevision: any) => {
+    if (!prevRevision?.boq_details?.items) return null;
+    const prevItem = prevRevision.boq_details.items.find((item: any) => item.item_name === itemName);
+    if (!prevItem?.labour) return null;
+    return prevItem.labour.find((lab: any) => lab.labour_role === labourRole);
+  };
+
+  // Find matching item in previous revision
+  const findPreviousItem = (itemName: string, prevRevision: any) => {
+    if (!prevRevision?.boq_details?.items) return null;
+    return prevRevision.boq_details.items.find((item: any) => item.item_name === itemName);
+  };
+
   return (
     <div className="space-y-6">
       {/* Project Selection Dropdown */}
@@ -284,7 +350,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                           getDisplayRevisionNumber(boq) > 0 ? 'bg-yellow-100 text-yellow-700' :
                           'bg-blue-100 text-blue-700'
                         }`}>
-                          Rev {getDisplayRevisionNumber(boq)}
+                          {getRevisionLabel(boq)}
                         </div>
                         <div className="text-xs text-gray-500 mt-1">{formatCurrency(boq.total_cost || 0)}</div>
                       </div>
@@ -312,7 +378,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                 </p>
               </div>
               <div className="text-right">
-                <div className="text-lg font-bold text-blue-900">Rev {getDisplayRevisionNumber(selectedBoq)}</div>
+                <div className="text-lg font-bold text-blue-900">{getRevisionLabel(selectedBoq)}</div>
                 <div className="text-sm text-blue-700">{formatCurrency(selectedBoq.total_cost || 0)}</div>
               </div>
             </div>
@@ -334,7 +400,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-bold text-green-900">📌 Current Revision</h3>
-                  <p className="text-sm text-green-700">Rev {getDisplayRevisionNumber(selectedBoq)}</p>
+                  <p className="text-sm text-green-700">{getRevisionLabel(selectedBoq)}</p>
                 </div>
                 <div className="text-right">
                   <div className="text-2xl font-bold text-green-900">
@@ -346,8 +412,8 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
             {/* Content */}
             {isLoading ? (
-              <div className="p-8 text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
+              <div className="p-8 text-center flex flex-col items-center justify-center">
+                <ModernLoadingSpinners size="md" />
                 <p className="mt-4 text-gray-600">Loading details...</p>
               </div>
             ) : currentRevisionData ? (
@@ -374,78 +440,105 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                 </div>
 
                 {/* Items */}
-                {currentRevisionData.boq_details?.items?.map((item: any, index: number) => (
-                  <div key={index} className="bg-white border border-gray-200 rounded-lg p-4">
-                    <h5 className="font-semibold text-gray-900 mb-2">{item.item_name}</h5>
-                    {item.description && (
-                      <p className="text-sm text-gray-600 mb-3">{item.description}</p>
-                    )}
+                {currentRevisionData.boq_details?.items?.map((item: any, index: number) => {
+                  const prevRevision = getPreviousRevisionForComparison();
+                  const prevItem = prevRevision ? findPreviousItem(item.item_name, prevRevision) : null;
 
-                    {/* Materials */}
-                    {item.materials && item.materials.length > 0 && (
-                      <div className="mb-3">
-                        <p className="text-xs font-semibold text-gray-700 mb-1">📦 Materials:</p>
-                        <div className="space-y-1">
-                          {item.materials.map((mat: any, matIdx: number) => (
-                            <div key={matIdx} className="text-sm text-gray-600 flex justify-between">
-                              <span>{mat.material_name} ({mat.quantity} {mat.unit})</span>
-                              <span className="font-semibold">AED {mat.total_price}</span>
-                            </div>
-                          ))}
+                  return (
+                    <div key={index} className="bg-white border border-gray-200 rounded-lg p-4">
+                      <h5 className="font-semibold text-gray-900 mb-2">{item.item_name}</h5>
+                      {item.description && (
+                        <p className="text-sm text-gray-600 mb-3">{item.description}</p>
+                      )}
+
+                      {/* Materials */}
+                      {item.materials && item.materials.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-xs font-semibold text-gray-700 mb-1">📦 Materials:</p>
+                          <div className="space-y-1">
+                            {item.materials.map((mat: any, matIdx: number) => {
+                              const prevMat = prevRevision ? findPreviousMaterial(item.item_name, mat.material_name, prevRevision) : null;
+                              const quantityChanged = prevMat ? hasChanged(mat.quantity, prevMat.quantity) : !prevMat;
+                              const priceChanged = prevMat ? hasChanged(mat.total_price, prevMat.total_price) : !prevMat;
+                              const isNew = !prevMat;
+
+                              return (
+                                <div key={matIdx} className={`text-sm text-gray-600 flex justify-between rounded px-2 py-1 ${isNew ? 'bg-yellow-100' : ''}`}>
+                                  <span className={quantityChanged ? 'bg-yellow-200 px-1 rounded' : ''}>
+                                    {mat.material_name} ({mat.quantity} {mat.unit})
+                                  </span>
+                                  <span className={`font-semibold ${priceChanged ? 'bg-yellow-200 px-1 rounded' : ''}`}>
+                                    AED {mat.total_price}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
+                      )}
+
+                      {/* Labour */}
+                      {item.labour && item.labour.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-xs font-semibold text-gray-700 mb-1">👷 Labour:</p>
+                          <div className="space-y-1">
+                            {item.labour.map((lab: any, labIdx: number) => {
+                              const prevLab = prevRevision ? findPreviousLabour(item.item_name, lab.labour_role, prevRevision) : null;
+                              const hoursChanged = prevLab ? hasChanged(lab.hours, prevLab.hours) : !prevLab;
+                              const costChanged = prevLab ? hasChanged(lab.total_cost, prevLab.total_cost) : !prevLab;
+                              const isNew = !prevLab;
+
+                              return (
+                                <div key={labIdx} className={`text-sm text-gray-600 flex justify-between rounded px-2 py-1 ${isNew ? 'bg-yellow-100' : ''}`}>
+                                  <span className={hoursChanged ? 'bg-yellow-200 px-1 rounded' : ''}>
+                                    {lab.labour_role} ({lab.hours}h)
+                                  </span>
+                                  <span className={`font-semibold ${costChanged ? 'bg-yellow-200 px-1 rounded' : ''}`}>
+                                    AED {lab.total_cost}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Additional Details: Overhead, Profit, Discount, VAT */}
+                      <div className="mt-3 pt-2 border-t border-gray-200 space-y-1">
+                        {item.overhead_percentage > 0 && (
+                          <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.overhead_percentage, prevItem.overhead_percentage) ? 'bg-yellow-200' : ''}`}>
+                            <span>Overhead ({item.overhead_percentage}%):</span>
+                            <span className="font-semibold">AED {((item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) + item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0)) * item.overhead_percentage / 100).toFixed(2)}</span>
+                          </div>
+                        )}
+                        {item.profit_margin_percentage > 0 && (
+                          <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.profit_margin_percentage, prevItem.profit_margin_percentage) ? 'bg-yellow-200' : ''}`}>
+                            <span>Profit Margin ({item.profit_margin_percentage}%):</span>
+                            <span className="font-semibold">AED {((item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) + item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0)) * item.profit_margin_percentage / 100).toFixed(2)}</span>
+                          </div>
+                        )}
+                        {item.discount_percentage > 0 && (
+                          <div className={`text-xs text-red-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.discount_percentage, prevItem.discount_percentage) ? 'bg-yellow-200' : ''}`}>
+                            <span>Discount ({item.discount_percentage}%):</span>
+                            <span className="font-semibold">- AED {(item.selling_price * item.discount_percentage / 100).toFixed(2)}</span>
+                          </div>
+                        )}
+                        {item.vat_percentage > 0 && (
+                          <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.vat_percentage, prevItem.vat_percentage) ? 'bg-yellow-200' : ''}`}>
+                            <span>VAT ({item.vat_percentage}%):</span>
+                            <span className="font-semibold">AED {(item.selling_price * item.vat_percentage / 100).toFixed(2)}</span>
+                          </div>
+                        )}
                       </div>
-                    )}
 
-                    {/* Labour */}
-                    {item.labour && item.labour.length > 0 && (
-                      <div className="mb-3">
-                        <p className="text-xs font-semibold text-gray-700 mb-1">👷 Labour:</p>
-                        <div className="space-y-1">
-                          {item.labour.map((lab: any, labIdx: number) => (
-                            <div key={labIdx} className="text-sm text-gray-600 flex justify-between">
-                              <span>{lab.labour_role} ({lab.hours}h)</span>
-                              <span className="font-semibold">AED {lab.total_cost}</span>
-                            </div>
-                          ))}
-                        </div>
+                      {/* Selling Price */}
+                      <div className={`pt-2 border-t border-gray-300 flex justify-between mt-2 rounded px-2 py-1 ${prevItem && hasChanged(item.selling_price, prevItem.selling_price) ? 'bg-yellow-200' : ''}`}>
+                        <span className="font-semibold text-gray-900">Selling Price:</span>
+                        <span className="font-bold text-green-600">AED {item.selling_price}</span>
                       </div>
-                    )}
-
-                    {/* Additional Details: Overhead, Profit, Discount, VAT */}
-                    <div className="mt-3 pt-2 border-t border-gray-200 space-y-1">
-                      {item.overhead_percentage > 0 && (
-                        <div className="text-xs text-gray-600 flex justify-between">
-                          <span>Overhead ({item.overhead_percentage}%):</span>
-                          <span className="font-semibold">AED {((item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) + item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0)) * item.overhead_percentage / 100).toFixed(2)}</span>
-                        </div>
-                      )}
-                      {item.profit_margin_percentage > 0 && (
-                        <div className="text-xs text-gray-600 flex justify-between">
-                          <span>Profit Margin ({item.profit_margin_percentage}%):</span>
-                          <span className="font-semibold">AED {((item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) + item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0)) * item.profit_margin_percentage / 100).toFixed(2)}</span>
-                        </div>
-                      )}
-                      {item.discount_percentage > 0 && (
-                        <div className="text-xs text-red-600 flex justify-between">
-                          <span>Discount ({item.discount_percentage}%):</span>
-                          <span className="font-semibold">- AED {(item.selling_price * item.discount_percentage / 100).toFixed(2)}</span>
-                        </div>
-                      )}
-                      {item.vat_percentage > 0 && (
-                        <div className="text-xs text-gray-600 flex justify-between">
-                          <span>VAT ({item.vat_percentage}%):</span>
-                          <span className="font-semibold">AED {(item.selling_price * item.vat_percentage / 100).toFixed(2)}</span>
-                        </div>
-                      )}
                     </div>
-
-                    {/* Selling Price */}
-                    <div className="pt-2 border-t border-gray-300 flex justify-between mt-2">
-                      <span className="font-semibold text-gray-900">Selling Price:</span>
-                      <span className="font-bold text-green-600">AED {item.selling_price}</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="p-8 text-center text-gray-500">No data available</div>
@@ -475,10 +568,13 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                 }
 
                 if (isClientConfirmed) {
+                  // Check if PM is already assigned
+                  const isPMAssigned = selectedBoq.pm_assigned || selectedBoq.project_manager_id;
+
                   return (
                     <div className="text-center text-xs text-green-700 font-medium py-2">
                       <CheckCircle className="h-5 w-5 mx-auto mb-1 text-green-600" />
-                      Client Approved - Awaiting PM Assignment
+                      {isPMAssigned ? 'PM Assigned' : 'Client Approved - Awaiting PM Assignment'}
                     </div>
                   );
                 }
@@ -549,46 +645,37 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
                 if (isSentToClient) {
                   return (
-                    <div className="space-y-2">
-                      {/* Edit button */}
+                    <div className="grid grid-cols-3 gap-2">
+                      {/* Client Approved */}
                       <button
-                        onClick={() => onEdit(selectedBoq)}
-                        className="w-full text-white text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1"
-                        style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+                        onClick={() => onClientApproval && onClientApproval(selectedBoq)}
+                        className="col-span-1 text-green-600 text-xs h-8 rounded hover:bg-green-50 transition-all flex items-center justify-center gap-1 border border-green-300"
+                        title="Client Approved"
                       >
-                        <Edit className="h-3.5 w-3.5" />
-                        Edit BOQ
+                        <CheckCircle className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Client Approved</span>
+                        <span className="sm:hidden">Approved</span>
                       </button>
 
-                      {/* Client Response Buttons */}
-                      <div className="grid grid-cols-3 gap-2">
-                        <button
-                          onClick={() => onClientApproval && onClientApproval(selectedBoq)}
-                          className="col-span-1 text-green-600 text-xs h-8 rounded hover:bg-green-50 transition-all flex items-center justify-center gap-1 border border-green-300"
-                          title="Client Approved"
-                        >
-                          <CheckCircle className="h-3.5 w-3.5" />
-                          <span className="hidden sm:inline">Approved</span>
-                        </button>
+                      {/* Revisions */}
+                      <button
+                        onClick={() => onRevisionRequest && onRevisionRequest(selectedBoq)}
+                        className="col-span-1 text-red-600 text-xs h-8 rounded hover:bg-red-50 transition-all flex items-center justify-center gap-1 border border-red-300"
+                        title="Revisions Needed"
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Revisions</span>
+                      </button>
 
-                        <button
-                          onClick={() => onRevisionRequest && onRevisionRequest(selectedBoq)}
-                          className="col-span-1 text-red-600 text-xs h-8 rounded hover:bg-red-50 transition-all flex items-center justify-center gap-1 border border-red-300"
-                          title="Revisions Needed"
-                        >
-                          <Edit className="h-3.5 w-3.5" />
-                          <span className="hidden sm:inline">Revisions</span>
-                        </button>
-
-                        <button
-                          onClick={() => onCancel && onCancel(selectedBoq)}
-                          className="col-span-1 text-red-600 text-xs h-8 rounded hover:bg-red-50 transition-all flex items-center justify-center gap-1 border border-red-300"
-                          title="Cancel Project"
-                        >
-                          <XCircle className="h-3.5 w-3.5" />
-                          <span className="hidden sm:inline">Cancel</span>
-                        </button>
-                      </div>
+                      {/* Cancel */}
+                      <button
+                        onClick={() => onCancel && onCancel(selectedBoq)}
+                        className="col-span-1 text-red-600 text-xs h-8 rounded hover:bg-red-50 transition-all flex items-center justify-center gap-1 border border-red-300"
+                        title="Cancel Project"
+                      >
+                        <XCircle className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Cancel</span>
+                      </button>
                     </div>
                   );
                 }
@@ -646,7 +733,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                         title={`Send ${isRevisionApproved ? 'Revision' : 'BOQ'} to Client`}
                       >
                         <Send className="h-3.5 w-3.5" />
-                        {getDisplayRevisionNumber(selectedBoq) > 0 ? 'Send Revision to Client' : 'Send to Client'}
+                        {selectedBoq.revision_number && selectedBoq.revision_number > 0 ? 'Send Revision to Client' : 'Send to Client'}
                       </button>
                     </div>
                   );
@@ -723,8 +810,8 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
             {/* Content */}
             {isLoading ? (
-              <div className="p-8 text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
+              <div className="p-8 text-center flex flex-col items-center justify-center">
+                <ModernLoadingSpinners size="md" />
                 <p className="mt-4 text-gray-600">Loading revisions...</p>
               </div>
             ) : previousRevisions.length > 0 ? (
@@ -944,7 +1031,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                           getDisplayRevisionNumber(boq) > 0 ? 'bg-yellow-100 text-yellow-700' :
                           'bg-blue-100 text-blue-700'
                         }`}>
-                          Rev {getDisplayRevisionNumber(boq)}
+                          {getRevisionLabel(boq)}
                         </div>
                         <div className="text-xs text-gray-500 mt-1">{formatCurrency(boq.total_cost || 0)}</div>
                       </div>

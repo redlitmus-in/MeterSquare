@@ -365,10 +365,10 @@ const EstimatorHub: React.FC = () => {
 
     fetchData();
 
-    // Set up auto-refresh polling every 30 seconds for BOQs
+    // Set up auto-refresh polling every 3 seconds for instant updates
     const intervalId = setInterval(() => {
-      loadBOQs(); // Auto-refresh BOQs in background
-    }, 30000); // 30 seconds
+      loadBOQs(false); // Auto-refresh BOQs in background without showing loading spinner
+    }, 3000); // 3 seconds for instant updates
 
     return () => {
       abortController.abort();
@@ -385,9 +385,11 @@ const EstimatorHub: React.FC = () => {
     setBoqCurrentPage(1);
   }, [activeTab]);
 
-  const loadBOQs = async () => {
+  const loadBOQs = async (showLoadingSpinner = true) => {
     try {
-      setLoading(true);
+      if (showLoadingSpinner) {
+        setLoading(true);
+      }
       const response = await estimatorService.getAllBOQs();
       if (response.success && response.data) {
         // Map the backend BOQ data to include proper project structure
@@ -431,7 +433,9 @@ const EstimatorHub: React.FC = () => {
       }
       setBOQs([]);
     } finally {
-      setLoading(false);
+      if (showLoadingSpinner) {
+        setLoading(false);
+      }
     }
   };
 
@@ -1222,9 +1226,7 @@ const EstimatorHub: React.FC = () => {
     const canEdit = isDraft || isApprovedByTD || isRevisionApproved || isSentToClient || isUnderRevision || isPendingRevision;
 
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
+      <div
         className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
       >
         {/* Header */}
@@ -1602,7 +1604,7 @@ const EstimatorHub: React.FC = () => {
             </button>
           ) : null}
         </div>
-      </motion.div>
+      </div>
     );
   };
 
@@ -2009,11 +2011,8 @@ const EstimatorHub: React.FC = () => {
                     );
 
                     return (
-                    <motion.div
+                    <div
                       key={project.project_id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.05 * index }}
                       className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
                     >
                       {/* Header */}
@@ -2167,7 +2166,7 @@ const EstimatorHub: React.FC = () => {
                           </>
                         ) : null}
                       </div>
-                    </motion.div>
+                    </div>
                     );
                   })}
 
@@ -2613,7 +2612,7 @@ const EstimatorHub: React.FC = () => {
                   setShowCancelModal(true);
                 }}
                 onRefresh={async () => {
-                  await loadBOQs();
+                  await loadBOQs(false); // Silent refresh - no loading spinner
                 }}
               />
             </TabsContent>

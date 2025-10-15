@@ -248,11 +248,10 @@ def td_mail_send():
             is_revision_approval = boq.status.lower() == 'pending_revision'
             new_status = "Revision_Approved" if is_revision_approval else "Approved"
 
-            # Increment revision_number if this is a revision approval
-            if is_revision_approval:
-                current_revision = getattr(boq, 'revision_number', 0) or 0
-                boq.revision_number = current_revision + 1
-                log.info(f"BOQ {boq_id} revision incremented from {current_revision} to {boq.revision_number}")
+            # DO NOT increment revision_number here!
+            # Revision number is already incremented when estimator clicks "Make Revision" and saves
+            # (see boq_controller.py revision_boq function line 1436-1438)
+            # TD approval should only change status, not increment revision number
 
             if not estimator or not estimator_email:
                 return jsonify({

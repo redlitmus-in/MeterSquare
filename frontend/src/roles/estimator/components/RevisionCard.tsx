@@ -59,19 +59,22 @@ const RevisionCard: React.FC<RevisionCardProps> = ({
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  // Get display revision number (backend sends 1-indexed, but we want 0-indexed)
+  // Get display revision number
+  // Original = 0, First Revision = 1, Second Revision = 2, etc.
   const getDisplayRevisionNumber = () => {
-    const backendRevNum = project.revision_number || 0;
-    return backendRevNum > 0 ? backendRevNum - 1 : 0;
+    return project.revision_number || 0;
+  };
+
+  const getRevisionLabel = () => {
+    const revNum = project.revision_number || 0;
+    return revNum === 0 ? 'Original' : `${revNum}`;
   };
 
   const revisionNumber = getDisplayRevisionNumber();
   const totalCost = project.total_cost || project.selling_price || 0;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
+    <div
       className="bg-white rounded-xl shadow-md hover:shadow-lg transition-all border border-gray-200 overflow-hidden"
     >
       {/* Header Section */}
@@ -81,7 +84,7 @@ const RevisionCard: React.FC<RevisionCardProps> = ({
             <div className="flex items-center gap-3 mb-2">
               <h3 className="text-lg font-bold text-gray-900">{project.project_name || project.boq_name}</h3>
               <Badge className={`${getRevisionBadgeColor(revisionNumber)} border font-semibold`}>
-                {getRevisionIcon(revisionNumber)} Rev {revisionNumber}
+                {getRevisionIcon(revisionNumber)} {getRevisionLabel()}
               </Badge>
             </div>
             <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
@@ -143,7 +146,7 @@ const RevisionCard: React.FC<RevisionCardProps> = ({
                       <div className="flex items-center gap-2">
                         <span className="text-xl">📌</span>
                         <div>
-                          <div className="font-semibold text-green-900">Current Revision {revisionNumber}</div>
+                          <div className="font-semibold text-green-900">Current {getRevisionLabel()}</div>
                           <div className="text-xs text-green-700">{formatDate(project.last_modified_at)}</div>
                         </div>
                       </div>
@@ -261,7 +264,7 @@ const RevisionCard: React.FC<RevisionCardProps> = ({
           )}
         </div>
       )}
-    </motion.div>
+    </div>
   );
 };
 

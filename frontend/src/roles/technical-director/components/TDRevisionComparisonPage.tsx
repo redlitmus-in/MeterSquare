@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Search, TrendingUp, TrendingDown, CheckCircle, XCircle, Eye } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, CheckCircle, XCircle, Eye, Clock } from 'lucide-react';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { toast } from 'sonner';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface BOQ {
   boq_id: number;
@@ -65,11 +66,15 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
     return boq.selling_price || boq.total_cost || 0;
   };
 
-  // Get display revision number (backend sends 1-indexed, but we want 0-indexed)
-  // Original = 0, First Revision = 1, Second Revision = 2, etc.
+  // Get display revision number
+  // Original = show "Original", First Revision = 1, Second Revision = 2, etc.
   const getDisplayRevisionNumber = (boq: BOQ) => {
-    const backendRevNum = boq.revision_number || 0;
-    return backendRevNum > 0 ? backendRevNum - 1 : 0;
+    return boq.revision_number || 0;
+  };
+
+  const getRevisionLabel = (boq: BOQ) => {
+    const revNum = boq.revision_number || 0;
+    return revNum === 0 ? 'Original' : `${revNum}`;
   };
 
   // Filter BOQs for TD - show only those pending approval or with revisions
@@ -93,6 +98,20 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
       loadRevisionData(selectedBoq);
     }
   }, [selectedBoq]);
+
+  // Update selectedBoq when boqList changes (e.g., after approval/rejection)
+  useEffect(() => {
+    if (selectedBoq && boqList.length > 0) {
+      const updatedBoq = boqList.find(b => b.boq_id === selectedBoq.boq_id);
+      if (updatedBoq) {
+        // Only update if the status actually changed (not just any property)
+        if (updatedBoq.status !== selectedBoq.status) {
+          console.log('🔄 BOQ status updated from', selectedBoq.status, 'to', updatedBoq.status);
+          setSelectedBoq(updatedBoq);
+        }
+      }
+    }
+  }, [boqList]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -243,7 +262,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                           getDisplayRevisionNumber(boq) > 0 ? 'bg-yellow-100 text-yellow-700' :
                           'bg-blue-100 text-blue-700'
                         }`}>
-                          Rev {getDisplayRevisionNumber(boq)}
+                          {getRevisionLabel(boq)}
                         </div>
                         <div className="text-xs text-gray-500 mt-1">{formatCurrency(getTotalCost(boq))}</div>
                       </div>
@@ -271,7 +290,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                 </p>
               </div>
               <div className="text-right">
-                <div className="text-lg font-bold text-blue-900">Rev {getDisplayRevisionNumber(selectedBoq)}</div>
+                <div className="text-lg font-bold text-blue-900">{getRevisionLabel(selectedBoq)}</div>
                 <div className="text-sm text-blue-700">{formatCurrency(getTotalCost(selectedBoq))}</div>
               </div>
             </div>
@@ -293,7 +312,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-bold text-green-900">📌 Current Revision</h3>
-                  <p className="text-sm text-green-700">Rev {getDisplayRevisionNumber(selectedBoq)}</p>
+                  <p className="text-sm text-green-700">{getRevisionLabel(selectedBoq)}</p>
                 </div>
                 <div className="text-right">
                   <div className="text-2xl font-bold text-green-900">
@@ -305,8 +324,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
 
             {/* Content */}
             {isLoading ? (
-              <div className="p-8 text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
+              <div className="p-8 text-center flex flex-col items-center justify-center">
+                <ModernLoadingSpinners size="md" />
                 <p className="mt-4 text-gray-600">Loading details...</p>
               </div>
             ) : currentRevisionData ? (
@@ -415,7 +434,54 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
               {(() => {
                 const status = selectedBoq.status?.toLowerCase() || '';
                 const isPendingApproval = status === 'pending_approval' || status === 'pending_revision' || status === 'pending';
-                const isRevisionApproved = status === 'revision_approved';
+                const isRevisionApproved = status === 'revision_approved' || status === 'approved';
+                const isSentToClient = status === 'sent_for_confirmation';
+                const isClientConfirmed = status === 'client_confirmed';
+                const isClientRejected = status === 'client_rejected';
+                const isClientCancelled = status === 'client_cancelled';
+
+                // Client cancelled
+                if (isClientCancelled) {
+                  return (
+                    <div className="text-center text-xs text-gray-600 font-medium py-2">
+                      <XCircle className="h-5 w-5 mx-auto mb-1 text-gray-500" />
+                      Client Cancelled Project
+                    </div>
+                  );
+                }
+
+                // Client confirmed - ready for PM assignment or already assigned
+                if (isClientConfirmed) {
+                  // Check if PM is already assigned
+                  const isPMAssigned = selectedBoq.pm_assigned || selectedBoq.project_manager_id;
+
+                  return (
+                    <div className="text-center text-xs text-green-700 font-medium py-2">
+                      <CheckCircle className="h-5 w-5 mx-auto mb-1 text-green-600" />
+                      {isPMAssigned ? 'PM Assigned' : 'Client Approved - Awaiting PM Assignment'}
+                    </div>
+                  );
+                }
+
+                // Client rejected - waiting for estimator revision
+                if (isClientRejected) {
+                  return (
+                    <div className="text-center text-xs text-orange-700 font-medium py-2">
+                      <XCircle className="h-5 w-5 mx-auto mb-1 text-orange-600" />
+                      Client Rejected - Awaiting Revision
+                    </div>
+                  );
+                }
+
+                // Sent to client - awaiting response
+                if (isSentToClient) {
+                  return (
+                    <div className="text-center text-xs text-blue-700 font-medium py-2">
+                      <Clock className="h-5 w-5 mx-auto mb-1 text-blue-600" />
+                      Sent to Client - Awaiting Response
+                    </div>
+                  );
+                }
 
                 // Show View button only for revision_approved (already approved by TD)
                 if (isRevisionApproved) {
@@ -431,7 +497,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                       </button>
                       <div className="text-center text-xs text-green-700 font-medium py-1">
                         <CheckCircle className="h-4 w-4 inline-block mr-1 text-green-600" />
-                        Revision Approved - Ready for Client
+                        Approved - Ready for Client
                       </div>
                     </div>
                   );
@@ -474,11 +540,11 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                   );
                 }
 
-                // Default: Show approved status
+                // Default: Show view button
                 return (
-                  <div className="text-center text-xs text-green-700 font-medium py-2">
-                    <CheckCircle className="h-5 w-5 mx-auto mb-1 text-green-600" />
-                    Approved - Ready for Client
+                  <div className="text-center text-xs text-gray-600 font-medium py-2">
+                    <Eye className="h-5 w-5 mx-auto mb-1 text-gray-500" />
+                    View Only
                   </div>
                 );
               })()}
@@ -499,8 +565,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
 
             {/* Content */}
             {isLoading ? (
-              <div className="p-8 text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
+              <div className="p-8 text-center flex flex-col items-center justify-center">
+                <ModernLoadingSpinners size="md" />
                 <p className="mt-4 text-gray-600">Loading revisions...</p>
               </div>
             ) : previousRevisions.length > 0 ? (
@@ -721,7 +787,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                           getDisplayRevisionNumber(boq) > 0 ? 'bg-yellow-100 text-yellow-700' :
                           'bg-blue-100 text-blue-700'
                         }`}>
-                          Rev {getDisplayRevisionNumber(boq)}
+                          {getRevisionLabel(boq)}
                         </div>
                         <div className="text-xs text-gray-500 mt-1">{formatCurrency(getTotalCost(boq))}</div>
                       </div>
