@@ -699,7 +699,7 @@ def approve_change_request(cr_id):
                     tracking_entry = MaterialPurchaseTracking(
                         boq_id=change_request.boq_id,
                         project_id=change_request.project_id,
-                        master_item_id=change_request.item_id,
+                        master_item_id=None,  # item_id in change_request is a string, but master_item_id expects integer
                         item_name=item_name,
                         master_material_id=material.get('master_material_id'),
                         material_name=material.get('material_name'),
