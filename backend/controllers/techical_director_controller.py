@@ -31,7 +31,7 @@ def get_all_td_boqs():
             # Get BOQ details
             boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
             display_status = boq.status
-            if boq.status in ['new_purchase_create']:
+            if boq.status in ['new_purchase_create', 'sent_for_review']:
                 display_status = 'approved'
 
             # Serialize history data

@@ -41,8 +41,8 @@ def add_new_purchase():
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
 
-        # Update BOQ status
-        boq.status = 'new_purchase_create'
+        # Update BOQ status to sent_for_review instead of hardcoded approval
+        boq.status = 'sent_for_review'
         boq.last_modified_by = created_by
         boq.last_modified_at = datetime.utcnow()
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   BuildingOfficeIcon,
@@ -9,6 +9,7 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { siteEngineerService } from '../services/siteEngineerService';
+import { useDashboardMetricsAutoSync } from '@/hooks/useAutoSync';
 
 interface DashboardStats {
   total_projects: number;
@@ -19,29 +20,22 @@ interface DashboardStats {
 
 const Dashboard: React.FC = () => {
   const { user } = useAuthStore();
-  const [stats, setStats] = useState<DashboardStats>({
+
+  // Real-time auto-sync for dashboard stats
+  const { data: statsData, isLoading: loading } = useDashboardMetricsAutoSync(
+    'site_engineer',
+    async () => {
+      const response = await siteEngineerService.getDashboardStats();
+      return response.stats || response;
+    }
+  );
+
+  const stats = useMemo(() => statsData || {
     total_projects: 0,
     assigned_projects: 0,
     ongoing_projects: 0,
     completed_projects: 0,
-  });
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
-
-  const loadDashboardData = async () => {
-    try {
-      setLoading(true);
-      const response = await siteEngineerService.getDashboardStats();
-      setStats(response.stats || response);
-    } catch (error) {
-      console.error('Error loading dashboard:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [statsData]);
 
   if (loading) {
     return (

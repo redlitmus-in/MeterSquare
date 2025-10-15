@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   PlusIcon,
@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
+import { useExtraMaterialsAutoSync } from '@/hooks/useAutoSync';
 
 interface ExtraMaterialRequest {
   id: number;
@@ -39,9 +40,6 @@ interface ExtraMaterialRequest {
 const ExtraMaterialPage: React.FC = () => {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'request' | 'approved'>('request');
-  const [extraMaterials, setExtraMaterials] = useState<ExtraMaterialRequest[]>([]);
-  const [approvedMaterials, setApprovedMaterials] = useState<ExtraMaterialRequest[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [filterProject, setFilterProject] = useState('');
   const [filterArea, setFilterArea] = useState('');
@@ -52,56 +50,33 @@ const ExtraMaterialPage: React.FC = () => {
   const token = localStorage.getItem('access_token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-  useEffect(() => {
-    if (activeTab === 'request') {
-      fetchRequestedMaterials();
-    } else {
-      fetchApprovedMaterials();
-    }
-  }, [activeTab, filterProject, filterArea, filterItem, filterStatus]);
-
-  const fetchRequestedMaterials = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams();
-      if (filterProject) params.append('project_id', filterProject);
-      if (filterArea) params.append('area_id', filterArea);
-      params.append('status', 'pending,under_review');
-
-      const response = await axios.get(
-        `${API_URL}/change_request/extra_materials?${params.toString()}`,
-        { headers }
-      );
-      setExtraMaterials(response.data.extra_materials || []);
-    } catch (error) {
-      console.error('Error fetching extra materials:', error);
-      toast.error('Failed to load extra material requests');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchApprovedMaterials = async () => {
-    try {
-      setLoading(true);
+  // Real-time auto-sync for extra materials
+  const { data: materialsData, isLoading: loading, refetch } = useExtraMaterialsAutoSync(
+    async () => {
       const params = new URLSearchParams();
       if (filterProject) params.append('project_id', filterProject);
       if (filterArea) params.append('area_id', filterArea);
       if (filterItem) params.append('item_id', filterItem);
-      params.append('status', 'approved');
 
-      const response = await axios.get(
-        `${API_URL}/change_request/extra_materials?${params.toString()}`,
-        { headers }
-      );
-      setApprovedMaterials(response.data.extra_materials || []);
-    } catch (error) {
-      console.error('Error fetching approved materials:', error);
-      toast.error('Failed to load approved materials');
-    } finally {
-      setLoading(false);
+      // Fetch both requested and approved
+      const [requestedRes, approvedRes] = await Promise.all([
+        axios.get(`${API_URL}/change_request/extra_materials?status=pending,under_review&${params.toString()}`, { headers }),
+        axios.get(`${API_URL}/change_request/extra_materials?status=approved&${params.toString()}`, { headers })
+      ]);
+
+      return {
+        requested: requestedRes.data.extra_materials || [],
+        approved: approvedRes.data.extra_materials || []
+      };
     }
-  };
+  );
+
+  const extraMaterials = useMemo(() => materialsData?.requested || [], [materialsData]);
+  const approvedMaterials = useMemo(() => materialsData?.approved || [], [materialsData]);
+
+  useEffect(() => {
+    refetch();
+  }, [activeTab, filterProject, filterArea, filterItem, filterStatus]);
 
   const handleSubmitExtraMaterial = async (data: any) => {
     try {
@@ -117,7 +92,7 @@ const ExtraMaterialPage: React.FC = () => {
       if (response.data.success) {
         toast.success('Extra material request submitted successfully');
         setShowForm(false);
-        fetchRequestedMaterials();
+        refetch(); // Use refetch instead of fetchRequestedMaterials
       }
     } catch (error: any) {
       console.error('Error submitting extra material request:', error);

@@ -109,9 +109,17 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
   const [loadingItemData, setLoadingItemData] = useState<Record<number, boolean>>({});
 
   // Load master items only once when modal opens (not on every boq change)
+  // Load master items only once when modal opens
   useEffect(() => {
     if (isOpen && masterItems.length === 0) {
       loadMasterItems();
+    }
+  }, [isOpen]);
+
+  // Fetch BOQ details when boq changes
+  useEffect(() => {
+    if (boq && boq.boq_id && isOpen) {
+      fetchBOQDetails();
     }
   }, [isOpen]);
 
@@ -120,7 +128,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
     if (boq && boq.boq_id && isOpen) {
       fetchBOQDetails();
     }
-  }, [boq?.boq_id, isOpen]);
+  }, [boq?.boq_id, isOpen?.boq_id, isOpen]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {

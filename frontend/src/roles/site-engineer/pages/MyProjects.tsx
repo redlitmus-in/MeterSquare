@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   BuildingOfficeIcon,
@@ -21,6 +21,7 @@ import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
 import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
 import RejectedRequestsSection from '@/components/boq/RejectedRequestsSection';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
+import { useProjectsAutoSync } from '@/hooks/useAutoSync';
 
 interface BOQItem {
   id: number;
@@ -89,8 +90,6 @@ interface Project {
 
 const MyProjects: React.FC = () => {
   const { user } = useAuthStore();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [filterStatus, setFilterStatus] = useState<'ongoing' | 'completed'>('ongoing');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -101,33 +100,27 @@ const MyProjects: React.FC = () => {
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [projectToRequest, setProjectToRequest] = useState<Project | null>(null);
   const [requesting, setRequesting] = useState(false);
-  // const [showRequestMaterialsModal, setShowRequestMaterialsModal] = useState(false); // Removed - use Change Requests page
   const [pendingChangeRequests, setPendingChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [approvedChangeRequests, setApprovedChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [rejectedChangeRequests, setRejectedChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [selectedChangeRequestId, setSelectedChangeRequestId] = useState<number | null>(null);
   const [showChangeRequestModal, setShowChangeRequestModal] = useState(false);
 
-  useEffect(() => {
-    loadProjects();
-  }, []);
-
-  const loadProjects = async () => {
-    try {
-      setLoading(true);
+  // Real-time auto-sync for projects
+  const { data: projectsData, isLoading: loading, refetch } = useProjectsAutoSync(
+    async () => {
       const response = await siteEngineerService.getMyProjects();
-      setProjects(response.projects || []);
+      const projectsList = response.projects || [];
 
-      if (!response.projects || response.projects.length === 0) {
+      if (projectsList.length === 0) {
         toast.info('No projects assigned yet');
       }
-    } catch (error: any) {
-      console.error('Error loading projects:', error);
-      toast.error(error?.response?.data?.error || 'Failed to load projects');
-    } finally {
-      setLoading(false);
+
+      return projectsList;
     }
-  };
+  );
+
+  const projects = useMemo(() => projectsData || [], [projectsData]);
 
   const handleViewProject = async (project: Project) => {
     try {
@@ -912,7 +905,7 @@ const MyProjects: React.FC = () => {
           setSelectedProjectForBOQ(null);
 
           // Reload all projects first
-          await loadProjects();
+          await refetch();
 
           // If there was a details modal open, reload its details
           if (selectedProject && currentProject?.boq_ids?.[0]) {
@@ -981,7 +974,7 @@ const MyProjects: React.FC = () => {
                     toast.success('Completion request sent to Project Manager');
                     setShowRequestModal(false);
                     setProjectToRequest(null);
-                    loadProjects();
+                    refetch();
                   } catch (error: any) {
                     console.error('Error requesting completion:', error);
                     toast.error(error?.response?.data?.error || 'Failed to send request');

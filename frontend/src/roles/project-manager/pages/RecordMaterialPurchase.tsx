@@ -1,24 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { DocumentTextIcon, ShoppingCartIcon } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import { boqTrackingService } from '../services/boqTrackingService';
 import PlannedVsActualView from '@/components/boq/PlannedVsActualView';
+import { useProjectsAutoSync } from '@/hooks/useAutoSync';
 
 export default function RecordMaterialPurchase() {
-  const [boqList, setBOQList] = useState<any[]>([]);
   const [selectedBOQ, setSelectedBOQ] = useState<any | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchBOQs();
-  }, []);
-
-  const fetchBOQs = async () => {
-    try {
-      setLoading(true);
+  // Real-time auto-sync for BOQ list
+  const { data: boqData, isLoading: loading, refetch } = useProjectsAutoSync(
+    async () => {
       const response = await boqTrackingService.getAllBOQs();
-      console.log('===== BOQ API Response =====', response);
 
       // Handle different response structures
       let allBOQs: any[] = [];
@@ -33,29 +27,21 @@ export default function RecordMaterialPurchase() {
         allBOQs = response.items;
       }
 
-      console.log('All BOQs extracted:', allBOQs);
-
       // Filter for all BOQs except rejected ones
       const filteredBOQs = allBOQs.filter((boq: any) => {
         const status = (boq.status || boq.boq_status || boq.completion_status || '').toLowerCase();
-        const isRejected = status === 'rejected';
-        console.log(`BOQ ${boq.boq_id || boq.id}: status="${status}", isRejected=${isRejected}`);
-        return !isRejected;
+        return status !== 'rejected';
       });
-
-      console.log('Filtered BOQs (excluding rejected):', filteredBOQs);
-      setBOQList(filteredBOQs);
 
       if (filteredBOQs.length === 0) {
         toast.info('No BOQs found');
       }
-    } catch (error) {
-      console.error('Error fetching BOQs:', error);
-      toast.error('Failed to load BOQs');
-    } finally {
-      setLoading(false);
+
+      return filteredBOQs;
     }
-  };
+  );
+
+  const boqList = useMemo(() => boqData || [], [boqData]);
 
   const handleBOQChange = async (boqId: number) => {
     const boq = boqList.find(b => b.boq_id === boqId);

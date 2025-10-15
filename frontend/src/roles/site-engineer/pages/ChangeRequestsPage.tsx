@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   PlusIcon,
@@ -13,6 +13,8 @@ import { toast } from 'sonner';
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import ExtraSubItemsForm from '@/components/change-requests/ExtraSubItemsForm';
+import { useChangeRequestsAutoSync } from '@/hooks/useAutoSync';
+import { changeRequestService } from '@/services/changeRequestService';
 
 interface ChangeRequest {
   cr_id: number;
@@ -31,8 +33,6 @@ interface ChangeRequest {
 
 const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
-  const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<ChangeRequest | null>(null);
 
@@ -40,22 +40,18 @@ const ChangeRequestsPage: React.FC = () => {
   const token = localStorage.getItem('access_token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-  useEffect(() => {
-    fetchChangeRequests();
-  }, []);
-
-  const fetchChangeRequests = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get(`${API_URL}/change-requests`, { headers });
-      setChangeRequests(response.data.change_requests || []);
-    } catch (error) {
-      console.error('Error fetching change requests:', error);
-      toast.error('Failed to load change requests');
-    } finally {
-      setLoading(false);
+  // Real-time auto-sync hook
+  const { data: changeRequestsData, isLoading: loading, refetch } = useChangeRequestsAutoSync(
+    async () => {
+      const response = await changeRequestService.getChangeRequests();
+      if (response.success) {
+        return response.data;
+      }
+      throw new Error(response.message || 'Failed to load change requests');
     }
-  };
+  );
+
+  const changeRequests = useMemo(() => changeRequestsData || [], [changeRequestsData]);
 
   const handleSubmitChangeRequest = async (data: any) => {
     try {
@@ -72,7 +68,7 @@ const ChangeRequestsPage: React.FC = () => {
 
       toast.success('Change request submitted successfully');
       setShowForm(false);
-      fetchChangeRequests();
+      refetch(); // Trigger background refresh
     } catch (error: any) {
       console.error('Error submitting change request:', error);
       toast.error(error.response?.data?.error || 'Failed to submit change request');

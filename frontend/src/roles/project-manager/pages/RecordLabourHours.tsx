@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ClockIcon } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import { boqTrackingService } from '../services/boqTrackingService';
+import { useLabourHoursAutoSync } from '@/hooks/useAutoSync';
 
 export default function RecordLabourHours() {
-  const [boqList, setBOQList] = useState<any[]>([]);
   const [selectedBOQ, setSelectedBOQ] = useState<any | null>(null);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [selectedLabour, setSelectedLabour] = useState<any | null>(null);
@@ -19,12 +19,10 @@ export default function RecordLabourHours() {
     notes: ''
   });
 
-  useEffect(() => {
-    fetchBOQs();
-  }, []);
-
-  const fetchBOQs = async () => {
-    try {
+  // Real-time auto-sync for BOQ list
+  const { data: boqData, refetch } = useLabourHoursAutoSync(
+    selectedBOQ?.project_id || 0,
+    async () => {
       const response = await boqTrackingService.getProjectsWithBOQ();
 
       // Filter only approved BOQs
@@ -48,12 +46,11 @@ export default function RecordLabourHours() {
         })
       );
 
-      setBOQList(boqsWithDetails);
-    } catch (error) {
-      console.error('Error fetching BOQs:', error);
-      toast.error('Failed to load BOQs');
+      return boqsWithDetails;
     }
-  };
+  );
+
+  const boqList = useMemo(() => boqData || [], [boqData]);
 
   const handleBOQChange = (boqId: number) => {
     const boq = boqList.find(b => b.boq_id === boqId);

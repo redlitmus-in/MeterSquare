@@ -510,12 +510,12 @@ def get_boq(boq_id):
         can_view_new_purchase = False
         boq_status = boq.status.lower() if boq.status else ''
 
-        if boq_status == 'new_purchase_create':
-            # Only Project Manager can view
+        if boq_status in ['new_purchase_create', 'sent_for_review']:
+            # Only Project Manager can view when purchase is created or sent for review
             if user_role in ['projectmanager', 'project_manager']:
                 can_view_new_purchase = True
             else:
-                log.info(f"BOQ {boq_id} - Access DENIED: Only PM can view 'new_purchase_create', current role: '{user_role}'")
+                log.info(f"BOQ {boq_id} - Access DENIED: Only PM can view '{boq_status}', current role: '{user_role}'")
         elif boq_status in ['add_new_purchase', 'new_purchase_request']:
             # Estimator and Project Manager can view
             if user_role in ['estimator', 'projectmanager', 'project_manager']:
@@ -838,7 +838,7 @@ def get_all_boq():
                     display_status = 'Client_Confirmed'
                 elif sender_role == 'siteengineer' and receiver_role == 'projectmanager':
                     display_status = 'Client_Confirmed'
-            elif boq.status in ['new_purchase_create', 'new_purchase_approved', 'new_purchase_rejected', 'approved']:
+            elif boq.status in ['new_purchase_create', 'sent_for_review', 'new_purchase_approved', 'new_purchase_rejected', 'approved']:
                 display_status = 'Client_Confirmed'
 
             boq_summary = {

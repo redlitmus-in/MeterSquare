@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -42,6 +42,7 @@ import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsM
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
+import { useChangeRequestsAutoSync } from '@/hooks/useAutoSync';
 
 const ChangeRequestsPage: React.FC = () => {
   const location = useLocation();
@@ -50,9 +51,6 @@ const ChangeRequestsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState(isExtraMaterial ? 'requested' : 'pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
-  const [changeRequests, setChangeRequests] = useState<ChangeRequestItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [initialLoad, setInitialLoad] = useState(true);
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -60,43 +58,26 @@ const ChangeRequestsPage: React.FC = () => {
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
   const [showExtraForm, setShowExtraForm] = useState(false);
 
-  // Fetch change requests from backend
-  useEffect(() => {
-    console.log('[ChangeRequestsPage] Component mounted');
-    loadChangeRequests();
-  }, []);
-
-  const loadChangeRequests = async () => {
-    try {
-      console.log('[ChangeRequests] Fetching change requests...');
+  // Real-time auto-sync hook - no manual polling needed
+  const { data: changeRequestsData, isLoading, isFetching, refetch } = useChangeRequestsAutoSync(
+    async () => {
       const response = await changeRequestService.getChangeRequests();
-      console.log('[ChangeRequests] Response:', response);
-
       if (response.success) {
-        console.log('[ChangeRequests] Setting data:', response.data);
-        setChangeRequests(response.data);
-        if (response.data.length > 0) {
-          toast.success(`Loaded ${response.data.length} change request(s)`);
-        }
-      } else {
-        console.error('[ChangeRequests] Failed:', response.message);
-        toast.error(response.message || 'Failed to load change requests');
+        return response.data;
       }
-    } catch (error) {
-      console.error('[ChangeRequests] Error loading change requests:', error);
-      toast.error('Failed to load change requests');
-    } finally {
-      console.log('[ChangeRequests] Setting loading to false');
-      setInitialLoad(false);
+      throw new Error(response.message || 'Failed to load change requests');
     }
-  };
+  );
+
+  const changeRequests = useMemo(() => changeRequestsData || [], [changeRequestsData]);
+  const initialLoad = isLoading;
 
   const handleSendForReview = async (crId: number, routeTo?: 'technical_director' | 'estimator') => {
     try {
       const response = await changeRequestService.sendForReview(crId, routeTo);
       if (response.success) {
         toast.success(response.message || 'Request sent for review');
-        loadChangeRequests();
+        refetch(); // Trigger background refresh
       } else {
         toast.error(response.message);
       }
@@ -118,7 +99,7 @@ const ChangeRequestsPage: React.FC = () => {
       const response = await changeRequestService.approve(crId, 'Approved by PM');
       if (response.success) {
         toast.success(response.message || 'Change request approved successfully');
-        loadChangeRequests();
+        refetch(); // Trigger background refresh
       } else {
         toast.error(response.message);
       }
@@ -139,7 +120,7 @@ const ChangeRequestsPage: React.FC = () => {
       const response = await changeRequestService.reject(rejectingCrId, reason);
       if (response.success) {
         toast.success('Change request rejected');
-        loadChangeRequests();
+        refetch(); // Trigger background refresh
         setShowRejectionModal(false);
         setRejectingCrId(null);
       } else {
@@ -175,8 +156,8 @@ const ChangeRequestsPage: React.FC = () => {
   };
 
   const handleEditSuccess = () => {
-    // Reload change requests after successful edit
-    loadChangeRequests();
+    // Trigger background refresh after successful edit
+    refetch();
     setShowEditModal(false);
     setSelectedChangeRequest(null);
     toast.success('Change request updated successfully');
@@ -268,7 +249,8 @@ const ChangeRequestsPage: React.FC = () => {
     completed: changeRequests.filter(r => r.status === 'approved').length,  // Final approved by Estimator = completed
     rejected: changeRequests.filter(r => r.status === 'rejected').length,
     // For Extra Material counts
-    requested: changeRequests.filter(r => ['pending', 'under_review', 'approved_by_pm'].includes(r.status)).length
+    requested: changeRequests.filter(r => r.status === 'pending').length,
+    under_review: changeRequests.filter(r => r.status === 'under_review').length
   };
 
   if (initialLoad) {
@@ -1101,7 +1083,7 @@ const ChangeRequestsPage: React.FC = () => {
               <ExtraMaterialForm
                 onClose={() => {
                   setShowExtraForm(false);
-                  loadChangeRequests();
+                  refetch();
                 }}
               />
             </div>

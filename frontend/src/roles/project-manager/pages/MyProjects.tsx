@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   BuildingOfficeIcon,
@@ -28,6 +28,7 @@ import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
 import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
 import RejectedRequestsSection from '@/components/boq/RejectedRequestsSection';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
+import { useProjectsAutoSync } from '@/hooks/useAutoSync';
 
 interface BOQDetails {
   boq_detail_id?: number;
@@ -113,60 +114,20 @@ interface SiteEngineer {
 
 const MyProjects: React.FC = () => {
   const { user } = useAuthStore();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  // Modal states - declared first to use in auto-refresh condition
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [availableSEs, setAvailableSEs] = useState<SiteEngineer[]>([]);
-  const [loadingSEs, setLoadingSEs] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<'pending' | 'assigned' | 'completed' | 'approved' | 'rejected'>('pending');
-  const [showAssignModal, setShowAssignModal] = useState(false);
-  const [selectedSE, setSelectedSE] = useState<SiteEngineer | null>(null);
-  const [assigning, setAssigning] = useState(false);
-  const [seSearchQuery, setSeSearchQuery] = useState('');
-  const [showBOQModal, setShowBOQModal] = useState(false);
-  const [loadingBOQDetails, setLoadingBOQDetails] = useState(false);
-  const [assignMode, setAssignMode] = useState<'existing' | 'create'>('existing');
-  const [newSEData, setNewSEData] = useState({ full_name: '', email: '', phone: '' });
-  const [editingSE, setEditingSE] = useState<SiteEngineer | null>(null);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editSEData, setEditSEData] = useState({ full_name: '', email: '', phone: '' });
-  const [creatingNewSE, setCreatingNewSE] = useState(false);
-  const [showSEDetailsModal, setShowSEDetailsModal] = useState(false);
-  const [selectedSEDetails, setSelectedSEDetails] = useState<SiteEngineer | null>(null);
-  const [showCreateBOQModal, setShowCreateBOQModal] = useState(false);
-  const [selectedProjectForBOQ, setSelectedProjectForBOQ] = useState<Project | null>(null);
-  const [showCompleteModal, setShowCompleteModal] = useState(false);
-  // const [showRequestMaterialsModal, setShowRequestMaterialsModal] = useState(false); // Removed - use Change Requests page
-  const [pendingChangeRequests, setPendingChangeRequests] = useState<ChangeRequestItem[]>([]);
-  const [approvedChangeRequests, setApprovedChangeRequests] = useState<ChangeRequestItem[]>([]);
-  const [rejectedChangeRequests, setRejectedChangeRequests] = useState<ChangeRequestItem[]>([]);
-  const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
-  const [showChangeRequestModal, setShowChangeRequestModal] = useState(false);
-  const [projectToComplete, setProjectToComplete] = useState<Project | null>(null);
-  const [completing, setCompleting] = useState(false);
-  const [showRejectModal, setShowRejectModal] = useState(false);
-  const [showApproveModal, setShowApproveModal] = useState(false);
-  const [showComparisonModal, setShowComparisonModal] = useState(false);
   const [showEditBOQModal, setShowEditBOQModal] = useState(false);
-  const [rejectionReason, setRejectionReason] = useState('');
-  const [approvalComments, setApprovalComments] = useState('');
-  const [processingBOQ, setProcessingBOQ] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [showBOQModal, setShowBOQModal] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [showCreateBOQModal, setShowCreateBOQModal] = useState(false);
 
-  useEffect(() => {
-    loadProjects();
-  }, []);
+  // Pause auto-refresh when any modal is open to prevent flickering during editing
+  const isAnyModalOpen = showEditBOQModal || showBOQModal || showAssignModal || showCreateBOQModal;
 
-  useEffect(() => {
-    if (showAssignModal) {
-      loadAvailableSEs();
-    }
-  }, [showAssignModal]);
-
-  const loadProjects = async () => {
-    try {
-      setLoading(true);
+  // Real-time auto-sync for projects - disabled when editing
+  const { data: projectsData, isLoading: loading, refetch } = useProjectsAutoSync(
+    async () => {
       const boqsResponse = await projectManagerService.getMyBOQs();
       const boqsList = boqsResponse.boqs || [];
 
@@ -190,28 +151,69 @@ const MyProjects: React.FC = () => {
           site_supervisor_id: siteSupervisorId,
           site_supervisor_name: boq.project_details?.site_supervisor_name || null,
           completion_requested: boq.project_details?.completion_requested === true,
-          user_id: boq.project_details?.user_id || null, // Add user_id from project_details
+          user_id: boq.project_details?.user_id || null,
           boq_id: boq.boq_id,
           boq_name: boq.boq_name,
-          boq_status: boq.boq_status, // Keep the actual BOQ status from backend
-          boq_details: undefined, // Load on demand when viewing BOQ
+          boq_status: boq.boq_status,
+          boq_details: undefined,
           created_at: boq.created_at,
           priority: boq.priority || 'medium'
         };
       });
 
-      setProjects(enrichedProjects);
-
       if (enrichedProjects.length === 0) {
         toast.info('No projects assigned yet');
       }
-    } catch (error: any) {
-      console.error('Error loading projects:', error);
-      toast.error(error?.response?.data?.error || 'Failed to load projects');
-    } finally {
-      setLoading(false);
+
+      return enrichedProjects;
+    },
+    !isAnyModalOpen // Disable auto-refresh when modal is open
+  );
+
+  const projects = useMemo(() => projectsData || [], [projectsData]);
+
+  // Other state variables
+  const [availableSEs, setAvailableSEs] = useState<SiteEngineer[]>([]);
+  const [loadingSEs, setLoadingSEs] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<'review' | 'pending' | 'assigned' | 'completed' | 'approved' | 'rejected'>('review');
+  const [selectedSE, setSelectedSE] = useState<SiteEngineer | null>(null);
+  const [assigning, setAssigning] = useState(false);
+  const [seSearchQuery, setSeSearchQuery] = useState('');
+  const [loadingBOQDetails, setLoadingBOQDetails] = useState(false);
+  const [assignMode, setAssignMode] = useState<'existing' | 'create'>('existing');
+  const [newSEData, setNewSEData] = useState({ full_name: '', email: '', phone: '' });
+  const [editingSE, setEditingSE] = useState<SiteEngineer | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editSEData, setEditSEData] = useState({ full_name: '', email: '', phone: '' });
+  const [creatingNewSE, setCreatingNewSE] = useState(false);
+  const [showSEDetailsModal, setShowSEDetailsModal] = useState(false);
+  const [selectedSEDetails, setSelectedSEDetails] = useState<SiteEngineer | null>(null);
+  const [selectedProjectForBOQ, setSelectedProjectForBOQ] = useState<Project | null>(null);
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+  // const [showRequestMaterialsModal, setShowRequestMaterialsModal] = useState(false); // Removed - use Change Requests page
+  const [pendingChangeRequests, setPendingChangeRequests] = useState<ChangeRequestItem[]>([]);
+  const [approvedChangeRequests, setApprovedChangeRequests] = useState<ChangeRequestItem[]>([]);
+  const [rejectedChangeRequests, setRejectedChangeRequests] = useState<ChangeRequestItem[]>([]);
+  const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
+  const [showChangeRequestModal, setShowChangeRequestModal] = useState(false);
+  const [projectToComplete, setProjectToComplete] = useState<Project | null>(null);
+  const [completing, setCompleting] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [approvalComments, setApprovalComments] = useState('');
+  const [processingBOQ, setProcessingBOQ] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+
+  useEffect(() => {
+    if (showAssignModal) {
+      loadAvailableSEs();
     }
-  };
+  }, [showAssignModal]);
+
+  // Removed loadProjects - now handled by useProjectsAutoSync hook
 
   const loadAvailableSEs = async () => {
     try {
@@ -316,12 +318,8 @@ const MyProjects: React.FC = () => {
           boq_details: boqDetails
         } : null);
 
-        // Also update the project in the projects array so the cards reflect the updated data
-        setProjects(prevProjects =>
-          prevProjects.map(p =>
-            p.boq_id === boqId ? { ...p, boq_details: boqDetails } : p
-          )
-        );
+        // Trigger background refresh to update the projects list
+        refetch();
 
         // Load change requests for this BOQ - DISABLED for PM role
         // const crResponse = await changeRequestService.getBOQChangeRequests(boqId);
@@ -413,7 +411,7 @@ const MyProjects: React.FC = () => {
       toast.success(`Assigned ${selectedSE.sitesupervisor_name} to ${selectedProject.project_name}`);
       setSelectedSE(null);
       setShowAssignModal(false);
-      await loadProjects();
+      await refetch();
       setFilterStatus('assigned');
     } catch (error: any) {
       console.error('Error assigning SE:', error);
@@ -446,14 +444,25 @@ const MyProjects: React.FC = () => {
       if (!matchesSearch) return false;
     }
 
+    if (filterStatus === 'review') {
+      const status = project.boq_status?.toLowerCase() || '';
+      // Review tab: BOQs sent by EST for PM review (including edited ones)
+      const reviewStatuses = [
+        'pending_pm_approval',
+        'draft',
+        'pending_revision',
+        'under_revision'
+      ];
+      return (!hasSiteSupervisor && project.status?.toLowerCase() !== 'completed') &&
+             reviewStatuses.includes(status) &&
+             status !== 'pm_rejected' && status !== 'rejected';
+    }
     if (filterStatus === 'pending') {
       const status = project.boq_status?.toLowerCase() || '';
-      // Show: 1) Waiting for PM approval OR 2) Projects assigned by TD (Client_Confirmed/Approved status)
+      // Pending tab: Projects assigned by TD, waiting for SE assignment
       return (!hasSiteSupervisor && project.status?.toLowerCase() !== 'completed') &&
-             (status === 'pending_pm_approval' ||
-              status === 'client_confirmed' ||
-              (status === 'approved' && project.user_id !== null)) && // Assigned projects with approved status
-             status !== 'pm_rejected';
+             (status === 'approved' || status === 'pm_approved' || status === 'client_confirmed') &&
+             project.user_id !== null;
     }
     if (filterStatus === 'assigned') {
       return hasSiteSupervisor && project.status?.toLowerCase() !== 'completed';
@@ -478,14 +487,25 @@ const MyProjects: React.FC = () => {
   });
 
   const getTabCounts = () => ({
+    review: projects.filter(p => {
+      const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
+      const status = p.boq_status?.toLowerCase() || '';
+      const reviewStatuses = [
+        'pending_pm_approval',
+        'draft',
+        'pending_revision',
+        'under_revision'
+      ];
+      return (!hasSS && p.status?.toLowerCase() !== 'completed') &&
+             reviewStatuses.includes(status) &&
+             status !== 'pm_rejected' && status !== 'rejected';
+    }).length,
     pending: projects.filter(p => {
       const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
       const status = p.boq_status?.toLowerCase() || '';
       return (!hasSS && p.status?.toLowerCase() !== 'completed') &&
-             (status === 'pending_pm_approval' ||
-              status === 'client_confirmed' ||
-              (status === 'approved' && p.user_id !== null)) &&
-             status !== 'pm_rejected';
+             (status === 'approved' || status === 'pm_approved' || status === 'client_confirmed') &&
+             p.user_id !== null;
     }).length,
     assigned: projects.filter(p => {
       const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
@@ -594,6 +614,17 @@ const MyProjects: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
         <div className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6">
           <div className="flex items-start justify-start gap-0 border-b border-gray-200 mb-6">
+            <button
+              onClick={() => setFilterStatus('review')}
+              className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-all border-b-2 ${
+                filterStatus === 'review'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Review ({tabCounts.review})
+            </button>
+
             <button
               onClick={() => setFilterStatus('pending')}
               className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-all border-b-2 ${
@@ -1964,7 +1995,7 @@ const MyProjects: React.FC = () => {
           setSelectedProjectForBOQ(null);
 
           // Reload all projects first
-          await loadProjects();
+          await refetch();
 
           // If there was a BOQ modal open, reload its details
           if (selectedProject && selectedProject.boq_id) {
@@ -2048,7 +2079,7 @@ const MyProjects: React.FC = () => {
                     toast.success(projectToComplete.completion_requested ? 'Completion request approved' : 'Project marked as completed');
                     setShowCompleteModal(false);
                     setProjectToComplete(null);
-                    loadProjects();
+                    refetch();
                   } catch (error: any) {
                     console.error('Error completing project:', error);
                     toast.error(error?.response?.data?.error || 'Failed to complete project');
@@ -2204,7 +2235,7 @@ const MyProjects: React.FC = () => {
                       setShowRejectModal(false);
                       setShowBOQModal(false);
                       setRejectionReason('');
-                      loadProjects();
+                      refetch();
                     } catch (error: any) {
                       toast.error(error.response?.data?.error || 'Failed to reject BOQ');
                     } finally {
@@ -2318,7 +2349,7 @@ const MyProjects: React.FC = () => {
                       setShowApproveModal(false);
                       setShowBOQModal(false);
                       setApprovalComments('');
-                      loadProjects();
+                      refetch();
                     } catch (error: any) {
                       toast.error(error.response?.data?.error || 'Failed to approve BOQ');
                     } finally {
@@ -2567,7 +2598,7 @@ const MyProjects: React.FC = () => {
                     setShowComparisonModal(false);
                     setShowBOQModal(false);
                     setApprovalComments('');
-                    loadProjects();
+                    refetch();
                   } catch (error: any) {
                     toast.error(error.response?.data?.error || 'Failed to approve BOQ');
                   } finally {
@@ -2613,7 +2644,7 @@ const MyProjects: React.FC = () => {
         } : null}
         onSave={() => {
           setShowEditBOQModal(false);
-          loadProjects();
+          refetch();
           toast.success('BOQ updated successfully');
         }}
       />

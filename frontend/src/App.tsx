@@ -35,7 +35,6 @@ const CreativeErrorPage = lazy(() => import('@/components/ui/CreativeErrorPage')
 
 // Lazy load role hubs - Direct import for better code splitting
 const ProjectManagerHub = lazy(() => import('@/roles/project-manager/pages/ProjectManagerHub'));
-const PurchaseApprovalsPage = lazy(() => import('@/roles/project-manager/pages/PurchaseApprovalsPage'));
 const EstimationHub = lazy(() => import('@/roles/estimation/pages/EstimationHub'));
 const EstimatorHub = lazy(() => import('@/roles/estimator/pages/EstimatorHub'));
 const TechnicalDirectorHub = lazy(() => import('@/roles/technical-director/pages/TechnicalDirectorHub'));
@@ -481,7 +480,6 @@ function App() {
             {/* <Route path="vendor-sow-review" element={<ProcurementVendorReview />} /> */}
             {/* <Route path="vendor-quotations" element={<ProcurementVendorReview />} /> */}
 
-            <Route path="purchase/:purchaseId" element={<PurchaseApprovalsPage />} />
             {/* <Route path="mep-supervisor" element={<MEPSupervisorHub />} /> */}
             <Route path="tasks" element={<TasksPage />} />
             <Route path="process-flow" element={<ProcessFlowPage />} />

@@ -119,7 +119,7 @@ def get_all_pm_boqs():
                 BOQ.is_deleted == False,
                 BOQ.email_sent == True,
                 BOQ.boq_id.in_(boq_ids_for_approval),
-                BOQ.status.in_(['Pending_PM_Approval', 'PM_Approved', 'PM_Rejected', 'Pending_TD_Approval', 'Approved', 'Sent_for_Confirmation', 'Client_Confirmed', 'Pending_Revision', 'Under_Revision', 'Revision_Approved'])  # Show throughout approval and revision flow
+                BOQ.status.in_(['Pending_PM_Approval', 'PM_Approved', 'PM_Rejected', 'Pending_TD_Approval', 'Approved', 'Sent_for_Confirmation', 'Client_Confirmed', 'Pending_Revision', 'Under_Revision', 'Revision_Approved', 'draft', 'Draft', 'pending', 'Pending'])  # Show throughout approval and revision flow
             ).order_by(BOQ.created_at.desc())
         elif not boq_ids_for_approval:
             # Only assigned projects
@@ -137,7 +137,7 @@ def get_all_pm_boqs():
                     BOQ.project_id.in_(project_ids),  # Show all BOQs for assigned projects
                     db.and_(
                         BOQ.boq_id.in_(boq_ids_for_approval),  # For approval requests
-                        BOQ.status.in_(['Pending_PM_Approval', 'PM_Approved', 'PM_Rejected', 'Pending_TD_Approval', 'Approved', 'Sent_for_Confirmation', 'Client_Confirmed', 'Pending_Revision', 'Under_Revision', 'Revision_Approved'])  # Show throughout approval and revision flow
+                        BOQ.status.in_(['Pending_PM_Approval', 'PM_Approved', 'PM_Rejected', 'Pending_TD_Approval', 'Approved', 'Sent_for_Confirmation', 'Client_Confirmed', 'Pending_Revision', 'Under_Revision', 'Revision_Approved', 'draft', 'Draft', 'pending', 'Pending'])  # Show throughout approval and revision flow
                     )
                 )
             ).order_by(BOQ.created_at.desc())

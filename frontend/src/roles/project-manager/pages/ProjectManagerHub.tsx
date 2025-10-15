@@ -1,16 +1,37 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
 import { motion } from 'framer-motion';
 import { projectManagerService } from '../services/projectManagerService';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
+import { useDashboardMetricsAutoSync } from '@/hooks/useAutoSync';
 
 const ProjectManagerHub: React.FC = () => {
   const { user } = useAuthStore();
-  const [loading, setLoading] = useState(true);
-  const [boqs, setBOQs] = useState<any[]>([]);
-  const [projects, setProjects] = useState<any[]>([]);
+
+  // Real-time auto-sync for dashboard data
+  const { data: dashboardData, isLoading: loading, refetch } = useDashboardMetricsAutoSync(
+    'project_manager',
+    async () => {
+      if (!user?.user_id) {
+        throw new Error('User not authenticated');
+      }
+
+      const [boqsData, myProjectsData] = await Promise.all([
+        projectManagerService.getMyBOQs(),
+        projectManagerService.getMyProjects(user.user_id)
+      ]);
+
+      return {
+        boqs: boqsData.boqs || [],
+        projects: myProjectsData.user_list || []
+      };
+    }
+  );
+
+  const boqs = useMemo(() => dashboardData?.boqs || [], [dashboardData]);
+  const projects = useMemo(() => dashboardData?.projects || [], [dashboardData]);
 
   useEffect(() => {
     // Set Highcharts global options for consistent theming
@@ -22,32 +43,7 @@ const ProjectManagerHub: React.FC = () => {
         }
       }
     });
-
-    // Fetch real data
-    loadDashboardData();
   }, []);
-
-  const loadDashboardData = async () => {
-    try {
-      if (!user?.user_id) {
-        toast.error('User not authenticated');
-        return;
-      }
-
-      setLoading(true);
-      const [boqsData, myProjectsData] = await Promise.all([
-        projectManagerService.getMyBOQs(),
-        projectManagerService.getMyProjects(user.user_id)
-      ]);
-      setBOQs(boqsData.boqs || []);
-      setProjects(myProjectsData.user_list || []);
-    } catch (error) {
-      console.error('Error loading dashboard data:', error);
-      toast.error('Failed to load dashboard data');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Project Status Chart - Dynamic data from API
   const projectStatusOptions = {

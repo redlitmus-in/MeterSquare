@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   PlusIcon,
@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
+import { useExtraMaterialsAutoSync } from '@/hooks/useAutoSync';
 
 interface ExtraMaterialRequest {
   id: number;
@@ -39,9 +40,6 @@ interface ExtraMaterialRequest {
 const ExtraMaterialPage: React.FC = () => {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'request' | 'approved'>('request');
-  const [extraMaterials, setExtraMaterials] = useState<ExtraMaterialRequest[]>([]);
-  const [approvedMaterials, setApprovedMaterials] = useState<ExtraMaterialRequest[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [filterProject, setFilterProject] = useState('');
   const [filterArea, setFilterArea] = useState('');
@@ -52,31 +50,18 @@ const ExtraMaterialPage: React.FC = () => {
   const token = localStorage.getItem('access_token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-  useEffect(() => {
-    if (activeTab === 'request') {
-      fetchRequestedMaterials();
-    } else {
-      fetchApprovedMaterials();
-    }
-  }, [activeTab, filterProject, filterArea, filterItem, filterStatus]);
+  // Real-time auto-sync for extra materials
+  const { data: materialsData, isLoading: loading, refetch } = useExtraMaterialsAutoSync(
+    async () => {
+      const response = await axios.get(`${API_URL}/change-requests`, { headers });
 
-  const fetchRequestedMaterials = async () => {
-    try {
-      setLoading(true);
-      // Use the main change-requests endpoint instead of extra_materials
-      const response = await axios.get(
-        `${API_URL}/change-requests`,
-        { headers }
-      );
-
-      // Filter for pending and under_review statuses
-      const filteredRequests = (response.data.data || [])
+      // Transform requested materials
+      const filteredRequested = (response.data.data || [])
         .filter((cr: any) => ['pending', 'under_review'].includes(cr.status))
         .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
         .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
 
-      // Transform data to match expected format
-      const transformedData = filteredRequests.flatMap((cr: any) => {
+      const transformedRequested = filteredRequested.flatMap((cr: any) => {
         const materials = cr.materials_data || [];
         return materials.map((mat: any) => ({
           id: cr.cr_id,
@@ -100,33 +85,14 @@ const ExtraMaterialPage: React.FC = () => {
         }));
       });
 
-      setExtraMaterials(transformedData);
-    } catch (error) {
-      console.error('Error fetching extra materials:', error);
-      toast.error('Failed to load extra material requests');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchApprovedMaterials = async () => {
-    try {
-      setLoading(true);
-      // Use the main change-requests endpoint instead of extra_materials
-      const response = await axios.get(
-        `${API_URL}/change-requests`,
-        { headers }
-      );
-
-      // Filter for approved status only
-      const filteredRequests = (response.data.data || [])
+      // Transform approved materials
+      const filteredApproved = (response.data.data || [])
         .filter((cr: any) => cr.status === 'approved')
         .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
         .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea))
         .filter((cr: any) => !filterItem || cr.item_id === filterItem);
 
-      // Transform data to match expected format
-      const transformedData = filteredRequests.flatMap((cr: any) => {
+      const transformedApproved = filteredApproved.flatMap((cr: any) => {
         const materials = cr.materials_data || [];
         return materials.map((mat: any) => ({
           id: cr.cr_id,
@@ -150,14 +116,19 @@ const ExtraMaterialPage: React.FC = () => {
         }));
       });
 
-      setApprovedMaterials(transformedData);
-    } catch (error) {
-      console.error('Error fetching approved materials:', error);
-      toast.error('Failed to load approved materials');
-    } finally {
-      setLoading(false);
+      return {
+        requested: transformedRequested,
+        approved: transformedApproved
+      };
     }
-  };
+  );
+
+  const extraMaterials = useMemo(() => materialsData?.requested || [], [materialsData]);
+  const approvedMaterials = useMemo(() => materialsData?.approved || [], [materialsData]);
+
+  useEffect(() => {
+    refetch();
+  }, [activeTab, filterProject, filterArea, filterItem, filterStatus]);
 
   const handleSubmitExtraMaterial = async (data: any) => {
     try {
