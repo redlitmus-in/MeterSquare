@@ -216,18 +216,18 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
     }
 
     if (subItems.length === 0) {
-      toast.error('Please add at least one sub-item');
+      toast.error('Please add at least one material');
       return;
     }
 
-    // Validate each sub-item
+    // Validate each material
     for (const item of subItems) {
       if (!item.name || item.qty <= 0 || !item.unit || item.unit_price <= 0) {
-        toast.error('Please fill all sub-item fields with valid values');
+        toast.error('Please fill all material fields with valid values');
         return;
       }
       if (item.is_new && (!item.new_reason || item.new_reason.length < 10)) {
-        toast.error('Please provide a reason (min 10 characters) for new sub-items');
+        toast.error('Please provide a reason (min 10 characters) for new materials');
         return;
       }
     }
@@ -403,21 +403,21 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
         </motion.div>
       )}
 
-      {/* Sub-Items Section */}
+      {/* Raw Materials Section */}
       {selectedItem && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
         >
           <div className="flex justify-between items-center mb-3">
-            <h3 className="text-lg font-medium text-gray-900">Sub-Items</h3>
+            <h3 className="text-lg font-medium text-gray-900">Raw Materials</h3>
             <button
               type="button"
               onClick={handleAddSubItem}
               className="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
             >
               <PlusIcon className="w-4 h-4 mr-1" />
-              Add Sub-Item
+              Add Material
             </button>
           </div>
 
@@ -432,7 +432,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
                   className="bg-gray-50 p-4 rounded-lg border border-gray-200"
                 >
                   <div className="flex justify-between items-start mb-3">
-                    <h4 className="font-medium text-gray-900">Sub-Item #{index + 1}</h4>
+                    <h4 className="font-medium text-gray-900">Material #{index + 1}</h4>
                     {subItems.length > 1 && (
                       <button
                         type="button"
@@ -444,7 +444,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
                     )}
                   </div>
 
-                  {/* New Sub-Item Toggle */}
+                  {/* New Material Toggle */}
                   <div className="mb-3">
                     <label className="flex items-center gap-2">
                       <input
@@ -453,16 +453,16 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
                         onChange={(e) => handleSubItemChange(index, 'is_new', e.target.checked)}
                         className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                       />
-                      <span className="text-sm text-gray-700">Add New Sub-Item</span>
+                      <span className="text-sm text-gray-700">Add New Material</span>
                     </label>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    {/* Sub-Item Selection or Name */}
+                    {/* Material Selection or Name */}
                     {!subItem.is_new ? (
                       <div className="col-span-2">
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Select Sub-Item <span className="text-red-500">*</span>
+                          Select Material <span className="text-red-500">*</span>
                         </label>
                         <select
                           value={subItem.sub_item_id || ''}
@@ -470,7 +470,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           required
                         >
-                          <option value="">Select Sub-Item</option>
+                          <option value="">Select Material</option>
                           {selectedItem.sub_items.map(si => (
                             <option key={si.sub_item_id} value={si.sub_item_id}>
                               {si.name} ({si.unit})
@@ -482,7 +482,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
                       <>
                         <div className="col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Sub-Item Name <span className="text-red-500">*</span>
+                            Material Name <span className="text-red-500">*</span>
                           </label>
                           <input
                             type="text"

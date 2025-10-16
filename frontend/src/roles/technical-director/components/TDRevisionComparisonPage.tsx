@@ -4,6 +4,8 @@ import { Search, TrendingUp, TrendingDown, CheckCircle, XCircle, Eye, Clock } fr
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import InternalRevisionTimeline from '@/roles/estimator/components/InternalRevisionTimeline';
 
 interface BOQ {
   boq_id: number;
@@ -187,9 +189,18 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Project Selection Dropdown */}
-      <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200">
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Select Project to Review Revisions</h3>
+      <Tabs defaultValue="client" className="w-full">
+        {/* Sub-navigation Tabs */}
+        <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
+          <TabsTrigger value="client">Client Revisions</TabsTrigger>
+          <TabsTrigger value="internal">Internal Revisions</TabsTrigger>
+        </TabsList>
+
+        {/* Client Revisions Tab */}
+        <TabsContent value="client" className="space-y-6">
+          {/* Project Selection Dropdown */}
+          <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Select Project to Review Revisions</h3>
 
         {/* Search/Select Dropdown */}
         <div className="relative" ref={dropdownRef}>
@@ -807,6 +818,13 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
           )}
         </div>
       )}
+        </TabsContent>
+
+        {/* Internal Revisions Tab */}
+        <TabsContent value="internal">
+          <InternalRevisionTimeline />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

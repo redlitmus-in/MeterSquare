@@ -338,19 +338,51 @@ const ProjectApprovals: React.FC = () => {
       totalVatAmount: boq.total_vat_amount || boq.totalVatAmount || 0,
       overallVatPercentage: boq.overall_vat_percentage || boq.overallVatPercentage || 0,
       // Support both old format (items) and new format (existing_purchase/new_purchase)
-      existingItems: (boq.existing_purchase?.items || boq.items)?.map((item: any) => {
-        const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
-        const sellingPrice = item.selling_price || 0;
-        const calculatedRate = totalQuantity > 0 ? sellingPrice / totalQuantity : sellingPrice;
+      existingItems: (boq.existing_purchase?.items || boq.items)?.map((item: any, idx: number) => {
+        // Helper to clean wrapped values - returns number or 0
+        const cleanValue = (val: any): number => {
+          if (val === null || val === undefined) return 0;
+          if (typeof val === 'object') {
+            if (val.parsedValue !== undefined && val.parsedValue !== null) {
+              const parsed = parseFloat(val.parsedValue);
+              return isNaN(parsed) ? 0 : parsed;
+            }
+            if (val.source !== undefined && val.source !== null) {
+              const parsed = parseFloat(val.source);
+              return isNaN(parsed) ? 0 : parsed;
+            }
+            return 0;
+          }
+          const parsed = parseFloat(val);
+          return isNaN(parsed) ? 0 : parsed;
+        };
+
+        // Use actual item quantity and rate if available, otherwise fallback
+        const itemQuantity = cleanValue(item.quantity) || 1;
+        const itemRate = cleanValue(item.rate) || 0;
+        const itemTotal = cleanValue(item.item_total) || (itemQuantity * itemRate);
+
+        // Clean percentages and amounts - try both new and old field names
+        const miscPercentage = cleanValue(item.miscellaneous_percentage) || cleanValue(item.overhead_percentage);
+        const miscAmount = cleanValue(item.miscellaneous_amount) || (itemTotal * miscPercentage / 100);
+        const ohProfitPercentage = cleanValue(item.overhead_profit_percentage) || cleanValue(item.profit_margin_percentage);
+        const ohProfitAmount = cleanValue(item.overhead_profit_amount) || cleanValue(item.profit_margin_amount) || (itemTotal * ohProfitPercentage / 100);
+        const beforeDiscount = cleanValue(item.before_discount) || (itemTotal + miscAmount + ohProfitAmount);
 
         return {
           id: item.master_item_id || item.item_id,
           description: item.item_name,
           briefDescription: item.description || '',
-          unit: item.materials?.[0]?.unit || 'nos',
-          quantity: totalQuantity,
-          rate: calculatedRate,
-          amount: sellingPrice,
+          unit: item.unit || 'nos',
+          quantity: itemQuantity,
+          rate: itemRate,
+          amount: cleanValue(item.selling_price) || 0,
+          item_total: itemTotal, // NEW: Item total (qty × rate)
+          miscellaneous_percentage: miscPercentage,
+          miscellaneous_amount: miscAmount,
+          overhead_profit_percentage: ohProfitPercentage,
+          overhead_profit_amount: ohProfitAmount,
+          before_discount: beforeDiscount,
           materials: item.materials?.map((mat: any) => ({
             name: mat.material_name,
             description: mat.description || '',
@@ -368,29 +400,61 @@ const ProjectApprovals: React.FC = () => {
             amount: lab.total_cost
           })) || [],
           laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
-          estimatedSellingPrice: item.selling_price || 0,
-          overheadPercentage: item.overhead_percentage || 0,
-          profitMarginPercentage: item.profit_margin_percentage || 0,
-          discountPercentage: item.discount_percentage || 0,
-          discount_amount: item.discount_amount || 0,
-          vat_percentage: item.vat_percentage || 0,
-          vat_amount: item.vat_amount || 0,
+          estimatedSellingPrice: cleanValue(item.selling_price) || 0,
+          overheadPercentage: miscPercentage, // Map miscellaneous to overhead for compatibility
+          profitMarginPercentage: ohProfitPercentage, // Map overhead_profit to profitMargin for compatibility
+          discountPercentage: cleanValue(item.discount_percentage) || 0,
+          discount_amount: cleanValue(item.discount_amount) || 0,
+          vat_percentage: cleanValue(item.vat_percentage) || 0,
+          vat_amount: cleanValue(item.vat_amount) || 0,
           isNew: false // Mark as existing item
         };
       }) || [],
       newItems: boq.new_purchase?.items?.map((item: any) => {
-        const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
-        const sellingPrice = item.selling_price || 0;
-        const calculatedRate = totalQuantity > 0 ? sellingPrice / totalQuantity : sellingPrice;
+        // Helper to clean wrapped values - returns number or 0
+        const cleanValue = (val: any): number => {
+          if (val === null || val === undefined) return 0;
+          if (typeof val === 'object') {
+            if (val.parsedValue !== undefined && val.parsedValue !== null) {
+              const parsed = parseFloat(val.parsedValue);
+              return isNaN(parsed) ? 0 : parsed;
+            }
+            if (val.source !== undefined && val.source !== null) {
+              const parsed = parseFloat(val.source);
+              return isNaN(parsed) ? 0 : parsed;
+            }
+            return 0;
+          }
+          const parsed = parseFloat(val);
+          return isNaN(parsed) ? 0 : parsed;
+        };
+
+        // Use actual item quantity and rate if available, otherwise fallback
+        const itemQuantity = cleanValue(item.quantity) || 1;
+        const itemRate = cleanValue(item.rate) || 0;
+        const itemTotal = cleanValue(item.item_total) || (itemQuantity * itemRate);
+
+        // Clean percentages and amounts - try both new and old field names
+        const miscPercentage = cleanValue(item.miscellaneous_percentage) || cleanValue(item.overhead_percentage);
+        const miscAmount = cleanValue(item.miscellaneous_amount) || (itemTotal * miscPercentage / 100);
+        const ohProfitPercentage = cleanValue(item.overhead_profit_percentage) || cleanValue(item.profit_margin_percentage);
+        const ohProfitAmount = cleanValue(item.overhead_profit_amount) || cleanValue(item.profit_margin_amount) || (itemTotal * ohProfitPercentage / 100);
+        const beforeDiscount = cleanValue(item.before_discount) || (itemTotal + miscAmount + ohProfitAmount);
 
         return {
           id: item.master_item_id || item.item_id,
           description: item.item_name,
           briefDescription: item.description || '',
-          unit: item.materials?.[0]?.unit || 'nos',
-          quantity: totalQuantity,
-          rate: calculatedRate,
-          amount: sellingPrice,
+          unit: item.unit || 'nos',
+          quantity: itemQuantity,
+          rate: itemRate,
+          amount: cleanValue(item.selling_price) || 0,
+          item_total: itemTotal, // NEW: Item total (qty × rate)
+          miscellaneous_percentage: miscPercentage,
+          miscellaneous_amount: miscAmount,
+          overhead_profit_percentage: ohProfitPercentage,
+          overhead_profit_amount: ohProfitAmount,
+          before_discount: beforeDiscount,
           materials: item.materials?.map((mat: any) => ({
             name: mat.material_name,
             description: mat.description || '',
@@ -408,31 +472,63 @@ const ProjectApprovals: React.FC = () => {
             amount: lab.total_cost
           })) || [],
           laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
-          estimatedSellingPrice: item.selling_price || 0,
-          overheadPercentage: item.overhead_percentage || 0,
-          profitMarginPercentage: item.profit_margin_percentage || 0,
-          discountPercentage: item.discount_percentage || 0,
-          discount_amount: item.discount_amount || 0,
-          vat_percentage: item.vat_percentage || 0,
-          vat_amount: item.vat_amount || 0,
+          estimatedSellingPrice: cleanValue(item.selling_price) || 0,
+          overheadPercentage: miscPercentage, // Map miscellaneous to overhead for compatibility
+          profitMarginPercentage: ohProfitPercentage, // Map overhead_profit to profitMargin for compatibility
+          discountPercentage: cleanValue(item.discount_percentage) || 0,
+          discount_amount: cleanValue(item.discount_amount) || 0,
+          vat_percentage: cleanValue(item.vat_percentage) || 0,
+          vat_amount: cleanValue(item.vat_amount) || 0,
           isNew: true // Mark as new item
         };
       }) || [],
       // Keep boqItems for backward compatibility (combine existing + new)
       boqItems: [
         ...((boq.existing_purchase?.items || boq.items)?.map((item: any) => {
+          // Helper to clean wrapped values
+          const cleanValue = (val: any): number => {
+            if (val === null || val === undefined) return 0;
+            if (typeof val === 'object') {
+              if (val.parsedValue !== undefined && val.parsedValue !== null) {
+                const parsed = parseFloat(val.parsedValue);
+                return isNaN(parsed) ? 0 : parsed;
+              }
+              if (val.source !== undefined && val.source !== null) {
+                const parsed = parseFloat(val.source);
+                return isNaN(parsed) ? 0 : parsed;
+              }
+              return 0;
+            }
+            const parsed = parseFloat(val);
+            return isNaN(parsed) ? 0 : parsed;
+          };
+
           const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
-          const sellingPrice = item.selling_price || 0;
+          const sellingPrice = cleanValue(item.selling_price) || 0;
           const calculatedRate = totalQuantity > 0 ? sellingPrice / totalQuantity : sellingPrice;
+
+          // Clean item-level fields
+          const itemQty = cleanValue(item.quantity) || totalQuantity;
+          const itemRate = cleanValue(item.rate) || calculatedRate;
+          const itemTotal = cleanValue(item.item_total) || (itemQty * itemRate);
+
+          // Clean percentages
+          const miscPct = cleanValue(item.miscellaneous_percentage) || cleanValue(item.overhead_percentage);
+          const ohProfitPct = cleanValue(item.overhead_profit_percentage) || cleanValue(item.profit_margin_percentage);
 
           return {
             id: item.item_id,
             description: item.item_name,
             briefDescription: item.description || '',
-            unit: item.materials?.[0]?.unit || 'nos',
-            quantity: totalQuantity,
-            rate: calculatedRate,
+            unit: item.unit || item.materials?.[0]?.unit || 'nos',
+            quantity: itemQty,
+            rate: itemRate,
             amount: sellingPrice,
+            item_total: itemTotal,
+            miscellaneous_percentage: miscPct,
+            miscellaneous_amount: cleanValue(item.miscellaneous_amount) || (itemTotal * miscPct / 100),
+            overhead_profit_percentage: ohProfitPct,
+            overhead_profit_amount: cleanValue(item.overhead_profit_amount) || (itemTotal * ohProfitPct / 100),
             materials: item.materials?.map((mat: any) => ({
               name: mat.material_name,
               description: mat.description || '',
@@ -450,29 +546,61 @@ const ProjectApprovals: React.FC = () => {
               amount: lab.total_cost
             })) || [],
             laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
-            estimatedSellingPrice: item.selling_price || 0,
-            overheadPercentage: item.overhead_percentage || 0,
-            profitMarginPercentage: item.profit_margin_percentage || 0,
-            discountPercentage: item.discount_percentage || 0,
-            discount_amount: item.discount_amount || 0,
-            vat_percentage: item.vat_percentage || 0,
-            vat_amount: item.vat_amount || 0,
+            estimatedSellingPrice: sellingPrice,
+            overheadPercentage: miscPct, // Use cleaned miscellaneous as overhead
+            profitMarginPercentage: ohProfitPct, // Use cleaned overhead_profit as profitMargin
+            discountPercentage: cleanValue(item.discount_percentage) || 0,
+            discount_amount: cleanValue(item.discount_amount) || 0,
+            vat_percentage: cleanValue(item.vat_percentage) || 0,
+            vat_amount: cleanValue(item.vat_amount) || 0,
             isNew: false
           };
         }) || []),
         ...(boq.new_purchase?.items?.map((item: any) => {
+          // Helper to clean wrapped values (same as above)
+          const cleanValue = (val: any): number => {
+            if (val === null || val === undefined) return 0;
+            if (typeof val === 'object') {
+              if (val.parsedValue !== undefined && val.parsedValue !== null) {
+                const parsed = parseFloat(val.parsedValue);
+                return isNaN(parsed) ? 0 : parsed;
+              }
+              if (val.source !== undefined && val.source !== null) {
+                const parsed = parseFloat(val.source);
+                return isNaN(parsed) ? 0 : parsed;
+              }
+              return 0;
+            }
+            const parsed = parseFloat(val);
+            return isNaN(parsed) ? 0 : parsed;
+          };
+
           const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
-          const sellingPrice = item.selling_price || 0;
+          const sellingPrice = cleanValue(item.selling_price) || 0;
           const calculatedRate = totalQuantity > 0 ? sellingPrice / totalQuantity : sellingPrice;
+
+          // Clean item-level fields
+          const itemQty = cleanValue(item.quantity) || totalQuantity;
+          const itemRate = cleanValue(item.rate) || calculatedRate;
+          const itemTotal = cleanValue(item.item_total) || (itemQty * itemRate);
+
+          // Clean percentages
+          const miscPct = cleanValue(item.miscellaneous_percentage) || cleanValue(item.overhead_percentage);
+          const ohProfitPct = cleanValue(item.overhead_profit_percentage) || cleanValue(item.profit_margin_percentage);
 
           return {
             id: item.item_id,
             description: item.item_name,
             briefDescription: item.description || '',
-            unit: item.materials?.[0]?.unit || 'nos',
-            quantity: totalQuantity,
-            rate: calculatedRate,
+            unit: item.unit || item.materials?.[0]?.unit || 'nos',
+            quantity: itemQty,
+            rate: itemRate,
             amount: sellingPrice,
+            item_total: itemTotal,
+            miscellaneous_percentage: miscPct,
+            miscellaneous_amount: cleanValue(item.miscellaneous_amount) || (itemTotal * miscPct / 100),
+            overhead_profit_percentage: ohProfitPct,
+            overhead_profit_amount: cleanValue(item.overhead_profit_amount) || (itemTotal * ohProfitPct / 100),
             materials: item.materials?.map((mat: any) => ({
               name: mat.material_name,
               description: mat.description || '',
@@ -490,13 +618,13 @@ const ProjectApprovals: React.FC = () => {
               amount: lab.total_cost
             })) || [],
             laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
-            estimatedSellingPrice: item.selling_price || 0,
-            overheadPercentage: item.overhead_percentage || 0,
-            profitMarginPercentage: item.profit_margin_percentage || 0,
-            discountPercentage: item.discount_percentage || 0,
-            discount_amount: item.discount_amount || 0,
-            vat_percentage: item.vat_percentage || 0,
-            vat_amount: item.vat_amount || 0,
+            estimatedSellingPrice: sellingPrice,
+            overheadPercentage: miscPct, // Use cleaned miscellaneous as overhead
+            profitMarginPercentage: ohProfitPct, // Use cleaned overhead_profit as profitMargin
+            discountPercentage: cleanValue(item.discount_percentage) || 0,
+            discount_amount: cleanValue(item.discount_amount) || (beforeDiscount * cleanValue(item.discount_percentage) / 100),
+            vat_percentage: cleanValue(item.vat_percentage) || 0,
+            vat_amount: cleanValue(item.vat_amount) || (afterDiscount * cleanValue(item.vat_percentage) / 100),
             isNew: true
           };
         }) || [])
@@ -1753,21 +1881,29 @@ const ProjectApprovals: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Overhead, Profit, Discount & VAT */}
+                        {/* Item Total, Miscellaneous, Overhead & Profit, Discount & VAT */}
                         <div className="bg-orange-50 rounded-lg p-3 mb-3">
-                          <p className="text-sm font-semibold text-orange-900 mb-2">+ Overheads, Profit, Discount & VAT</p>
+                          <p className="text-sm font-semibold text-orange-900 mb-2">Pricing Breakdown</p>
                           <div className="space-y-1 text-sm">
                             <div className="flex justify-between">
-                              <span className="text-gray-700">Overhead ({item.overheadPercentage || 0}%)</span>
-                              <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * (item.overheadPercentage || 0) / 100).toLocaleString()}</span>
+                              <span className="text-gray-700">Item Total (Qty × Rate)</span>
+                              <span className="text-gray-900 font-semibold">AED{((item as any).item_total || (item.quantity * item.rate)).toLocaleString()}</span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-gray-700">Profit Margin ({item.profitMarginPercentage || 0}%)</span>
-                              <span className="text-gray-900">AED{((item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost) * (item.profitMarginPercentage || 0) / 100).toLocaleString()}</span>
+                              <span className="text-gray-700">Miscellaneous ({(item as any).miscellaneous_percentage || item.overheadPercentage || 0}%)</span>
+                              <span className="text-gray-900">AED{((item as any).miscellaneous_amount || (((item as any).item_total || (item.quantity * item.rate)) * ((item as any).miscellaneous_percentage || item.overheadPercentage || 0) / 100)).toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-700">Overhead & Profit ({(item as any).overhead_profit_percentage || item.profitMarginPercentage || 0}%)</span>
+                              <span className="text-gray-900">AED{((item as any).overhead_profit_amount || (((item as any).item_total || (item.quantity * item.rate)) * ((item as any).overhead_profit_percentage || item.profitMarginPercentage || 0) / 100)).toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between font-medium border-t border-orange-200 pt-1">
+                              <span className="text-gray-700">Subtotal</span>
+                              <span className="text-gray-900">AED{((item as any).before_discount || ((item as any).item_total + (item as any).miscellaneous_amount + (item as any).overhead_profit_amount)).toLocaleString()}</span>
                             </div>
                             {((item as any).discount_amount || 0) > 0 && (
                               <div className="flex justify-between text-red-600">
-                                <span>Discount ({item.discountPercentage || 0}%)</span>
+                                <span>Discount ({(item as any).discount_percentage || 0}%)</span>
                                 <span className="font-medium">- AED{((item as any).discount_amount || 0).toLocaleString()}</span>
                               </div>
                             )}
@@ -1777,6 +1913,24 @@ const ProjectApprovals: React.FC = () => {
                                 <span className="font-medium">+ AED{((item as any).vat_amount || 0).toLocaleString()}</span>
                               </div>
                             )}
+                          </div>
+                          {/* Raw Materials Reference (for internal view) */}
+                          <div className="mt-3 pt-2 border-t border-orange-200">
+                            <p className="text-xs text-gray-500 font-medium mb-1">Raw Materials Breakdown (Reference Only):</p>
+                            <div className="space-y-0.5 text-xs text-gray-600">
+                              <div className="flex justify-between">
+                                <span>Materials:</span>
+                                <span>AED{item.materials.reduce((sum, m) => sum + m.amount, 0).toLocaleString()}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Labour:</span>
+                                <span>AED{item.laborCost.toLocaleString()}</span>
+                              </div>
+                              <div className="flex justify-between font-medium">
+                                <span>Raw Materials Total:</span>
+                                <span>AED{(item.materials.reduce((sum, m) => sum + m.amount, 0) + item.laborCost).toLocaleString()}</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
@@ -1958,19 +2112,33 @@ const ProjectApprovals: React.FC = () => {
                         return sum + itemVAT + materialVAT;
                       }, 0) || 0;
 
-                      // Calculate discount from items
-                      const totalDiscountFromItems = selectedEstimation.boqItems?.reduce((sum, item) => {
-                        const itemDiscount = (item as any).discount_amount || 0;
-                        return sum + itemDiscount;
-                      }, 0) || 0;
+                      // NEW CALCULATION: Calculate from item_total instead of subitems
+                      let totalItemTotal = 0;
+                      let totalMiscellaneous = 0;
+                      let totalOverheadProfit = 0;
+                      let totalDiscount = 0;
+
+                      selectedEstimation.boqItems?.forEach((item: any) => {
+                        const itemTotal = (item as any).item_total || (item.quantity * item.rate) || 0;
+                        const miscAmount = (item as any).miscellaneous_amount || (itemTotal * (item.overheadPercentage || 0) / 100);
+                        const overheadProfitAmount = (item as any).overhead_profit_amount || (itemTotal * (item.profitMarginPercentage || 0) / 100);
+                        const discountAmount = (item as any).discount_amount || 0;
+
+                        totalItemTotal += itemTotal;
+                        totalMiscellaneous += miscAmount;
+                        totalOverheadProfit += overheadProfitAmount;
+                        totalDiscount += discountAmount;
+                      });
 
                       const baseCost = totalMaterialCost + totalLaborCost;
-                      const overheadAmount = baseCost * selectedEstimation.overheadPercentage / 100;
-                      const profitAmount = baseCost * selectedEstimation.profitMargin / 100;
-                      const subtotal = baseCost + overheadAmount + profitAmount;
-                      const discountAmount = totalDiscountFromItems || (subtotal * (selectedEstimation.discountPercentage || 0) / 100);
-                      const afterDiscount = subtotal - discountAmount;
+                      const subtotal = totalItemTotal + totalMiscellaneous + totalOverheadProfit;
+                      const afterDiscount = subtotal - totalDiscount;
                       const finalTotal = afterDiscount + totalVAT;
+
+                      // Calculate average percentages
+                      const avgMiscPct = totalItemTotal > 0 ? (totalMiscellaneous / totalItemTotal) * 100 : 0;
+                      const avgOHProfitPct = totalItemTotal > 0 ? (totalOverheadProfit / totalItemTotal) * 100 : 0;
+                      const avgDiscountPct = subtotal > 0 ? (totalDiscount / subtotal) * 100 : 0;
 
                       return (
                         <>
@@ -1982,18 +2150,30 @@ const ProjectApprovals: React.FC = () => {
                             <span className="text-gray-600">Total Labor Cost:</span>
                             <span className="font-semibold">AED {totalLaborCost.toLocaleString()}</span>
                           </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-600">Overhead ({selectedEstimation.overheadPercentage}%):</span>
-                            <span className="font-semibold">AED {overheadAmount.toLocaleString()}</span>
+                          <div className="flex justify-between text-sm pt-2 border-t">
+                            <span className="text-gray-700 font-medium">Base Cost:</span>
+                            <span className="font-semibold">AED {baseCost.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between text-sm pt-2 mt-2 border-t-2">
+                            <span className="text-gray-700 font-medium">Item Total (Qty × Rate):</span>
+                            <span className="font-bold">AED {totalItemTotal.toLocaleString()}</span>
                           </div>
                           <div className="flex justify-between text-sm">
-                            <span className="text-gray-600">Profit ({selectedEstimation.profitMargin}%):</span>
-                            <span className="font-semibold">AED {profitAmount.toLocaleString()}</span>
+                            <span className="text-gray-600">Miscellaneous ({avgMiscPct.toFixed(0)}%):</span>
+                            <span className="font-semibold">AED {totalMiscellaneous.toLocaleString()}</span>
                           </div>
-                          {discountAmount > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Overhead & Profit ({avgOHProfitPct.toFixed(0)}%):</span>
+                            <span className="font-semibold">AED {totalOverheadProfit.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between text-sm pt-2 border-t">
+                            <span className="text-gray-700">Subtotal:</span>
+                            <span className="font-semibold">AED {subtotal.toLocaleString()}</span>
+                          </div>
+                          {totalDiscount > 0 && (
                             <div className="flex justify-between text-sm text-red-600">
-                              <span>Total Discount{selectedEstimation.discountPercentage ? ` (${selectedEstimation.discountPercentage}%)` : ''}:</span>
-                              <span className="font-semibold">- AED {discountAmount.toLocaleString()}</span>
+                              <span>Discount ({avgDiscountPct.toFixed(0)}%):</span>
+                              <span className="font-semibold">- AED {totalDiscount.toLocaleString()}</span>
                             </div>
                           )}
                           {totalVAT > 0 && (
@@ -2629,70 +2809,65 @@ const ProjectApprovals: React.FC = () => {
                     <h3 className="font-bold text-gray-900 mb-3">Cost Breakdown</h3>
                     <div className="space-y-2 text-sm">
                       {(() => {
-                        // Calculate actual overhead, profit, and discount from items
-                        const baseCost = selectedEstimation.materialCost + selectedEstimation.laborCost;
-                        let totalOverhead = 0;
-                        let totalProfit = 0;
-                        let totalDiscount = 0;
+                        // NEW CALCULATION: Based on item_total (qty × rate), not subitems
+                        const materialCost = selectedEstimation.materialCost || 0;
+                        const labourCost = selectedEstimation.laborCost || 0;
 
+                        let totalItemTotal = 0;
+                        let totalMiscellaneous = 0;
+                        let totalOverheadProfit = 0;
+                        let totalDiscount = 0;
                         let totalVAT = 0;
 
                         (selectedEstimation.boqItems || []).forEach((item: any) => {
-                          const itemBaseCost = item.materials.reduce((sum: number, m: any) => sum + m.amount, 0) + item.laborCost;
-                          const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
-                          const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
-                          const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
-                          const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+                          // Use new calculation fields
+                          const itemTotal = (item as any).item_total || (item.quantity * item.rate) || 0;
+                          const miscAmount = (item as any).miscellaneous_amount || (itemTotal * (item.overheadPercentage || 0) / 100);
+                          const overheadProfitAmount = (item as any).overhead_profit_amount || (itemTotal * (item.profitMarginPercentage || 0) / 100);
+                          const discountAmount = (item as any).discount_amount || 0;
+                          const vatAmount = (item as any).vat_amount || 0;
 
-                          // Calculate VAT (item-level or per-material)
-                          const itemVAT = (item as any).vat_amount || 0;
-                          let materialVAT = 0;
-                          if (item.materials) {
-                            materialVAT = item.materials.reduce((matSum: number, mat: any) => {
-                              const matVatPct = mat.vat_percentage || 0;
-                              if (matVatPct > 0) {
-                                return matSum + (mat.amount * matVatPct / 100);
-                              }
-                              return matSum;
-                            }, 0);
-                          }
-
-                          totalOverhead += itemOverhead;
-                          totalProfit += itemProfit;
-                          totalDiscount += itemDiscount;
-                          totalVAT += itemVAT + materialVAT;
+                          totalItemTotal += itemTotal;
+                          totalMiscellaneous += miscAmount;
+                          totalOverheadProfit += overheadProfitAmount;
+                          totalDiscount += discountAmount;
+                          totalVAT += vatAmount;
                         });
 
-                        const subtotalBeforeDiscount = baseCost + totalOverhead + totalProfit;
+                        const subtotalBeforeDiscount = totalItemTotal + totalMiscellaneous + totalOverheadProfit;
                         const afterDiscount = subtotalBeforeDiscount - totalDiscount;
                         const finalTotal = afterDiscount + totalVAT;
 
-                        // Calculate average percentages for display
-                        const avgOverheadPct = baseCost > 0 ? (totalOverhead / baseCost) * 100 : 0;
-                        const avgProfitPct = baseCost > 0 ? (totalProfit / baseCost) * 100 : 0;
+                        // Calculate average percentages
+                        const avgMiscPct = totalItemTotal > 0 ? (totalMiscellaneous / totalItemTotal) * 100 : 0;
+                        const avgOHProfitPct = totalItemTotal > 0 ? (totalOverheadProfit / totalItemTotal) * 100 : 0;
                         const avgDiscountPct = subtotalBeforeDiscount > 0 ? (totalDiscount / subtotalBeforeDiscount) * 100 : 0;
 
                         return (
                           <>
                             <div className="flex justify-between">
                               <span className="text-gray-600">Material Cost:</span>
-                              <span className="font-semibold">AED{formatCurrency(selectedEstimation.materialCost)}</span>
+                              <span className="font-semibold">AED{formatCurrency(materialCost)}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-gray-600">Labour Cost:</span>
-                              <span className="font-semibold">AED{formatCurrency(selectedEstimation.laborCost)}</span>
+                              <span className="font-semibold">AED{formatCurrency(labourCost)}</span>
                             </div>
                             <div className="flex justify-between pt-2 border-t">
-                              <span className="text-gray-600">Base Cost:</span>
-                              <span className="font-semibold">AED{formatCurrency(baseCost)}</span>
+                              <span className="text-gray-700 font-medium">Base Cost:</span>
+                              <span className="font-semibold">AED{formatCurrency(materialCost + labourCost)}</span>
+                            </div>
+                            <div className="flex justify-between pt-2 mt-2 border-t-2 border-gray-300">
+                              <span className="text-gray-700 font-medium">Item Total (Qty × Rate):</span>
+                              <span className="font-bold">AED{formatCurrency(totalItemTotal)}</span>
                             </div>
                             <div className="flex justify-between bg-orange-50 p-2 rounded">
-                              <span className="text-orange-800 font-medium">Overhead ({avgOverheadPct.toFixed(0)}%):</span>
-                              <span className="font-bold text-orange-800">AED{formatCurrency(totalOverhead)}</span>
+                              <span className="text-orange-800 font-medium">Miscellaneous ({avgMiscPct.toFixed(0)}%):</span>
+                              <span className="font-bold text-orange-800">AED{formatCurrency(totalMiscellaneous)}</span>
                             </div>
                             <div className="flex justify-between bg-orange-50 p-2 rounded">
-                              <span className="text-orange-800 font-medium">Profit ({avgProfitPct.toFixed(0)}%):</span>
-                              <span className="font-bold text-orange-800">AED{formatCurrency(totalProfit)}</span>
+                              <span className="text-orange-800 font-medium">Overhead & Profit ({avgOHProfitPct.toFixed(0)}%):</span>
+                              <span className="font-bold text-orange-800">AED{formatCurrency(totalOverheadProfit)}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className={`${totalDiscount > 0 ? 'text-red-600' : 'text-gray-700'}`}>Discount ({avgDiscountPct.toFixed(0)}%):</span>
@@ -2800,55 +2975,42 @@ const ProjectApprovals: React.FC = () => {
                     <h3 className="font-bold text-gray-900 mb-3">Cost Breakdown</h3>
                     <div className="space-y-2 text-sm">
                       {(() => {
-                        // Calculate actual overhead, profit, and discount from items
-                        const baseCost = selectedEstimation.materialCost + selectedEstimation.laborCost;
-                        let totalOverhead = 0;
-                        let totalProfit = 0;
-                        let totalDiscount = 0;
+                        // Client version - same calculation but hide internal markup
+                        const materialCost = selectedEstimation.materialCost || 0;
+                        const labourCost = selectedEstimation.laborCost || 0;
 
+                        let totalItemTotal = 0;
+                        let totalMiscellaneous = 0;
+                        let totalOverheadProfit = 0;
+                        let totalDiscount = 0;
                         let totalVAT = 0;
 
                         (selectedEstimation.boqItems || []).forEach((item: any) => {
-                          const itemBaseCost = item.materials.reduce((sum: number, m: any) => sum + m.amount, 0) + item.laborCost;
-                          const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
-                          const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
-                          const itemSubtotal = itemBaseCost + itemOverhead + itemProfit;
-                          const itemDiscount = itemSubtotal * (item.discountPercentage || 0) / 100;
+                          const itemTotal = (item as any).item_total || (item.quantity * item.rate) || 0;
+                          const miscAmount = (item as any).miscellaneous_amount || (itemTotal * (item.overheadPercentage || 0) / 100);
+                          const overheadProfitAmount = (item as any).overhead_profit_amount || (itemTotal * (item.profitMarginPercentage || 0) / 100);
+                          const discountAmount = (item as any).discount_amount || 0;
+                          const vatAmount = (item as any).vat_amount || 0;
 
-                          // Calculate VAT (item-level or per-material)
-                          const itemVAT = (item as any).vat_amount || 0;
-                          let materialVAT = 0;
-                          if (item.materials) {
-                            materialVAT = item.materials.reduce((matSum: number, mat: any) => {
-                              const matVatPct = mat.vat_percentage || 0;
-                              if (matVatPct > 0) {
-                                return matSum + (mat.amount * matVatPct / 100);
-                              }
-                              return matSum;
-                            }, 0);
-                          }
-
-                          totalOverhead += itemOverhead;
-                          totalProfit += itemProfit;
-                          totalDiscount += itemDiscount;
-                          totalVAT += itemVAT + materialVAT;
+                          totalItemTotal += itemTotal;
+                          totalMiscellaneous += miscAmount;
+                          totalOverheadProfit += overheadProfitAmount;
+                          totalDiscount += discountAmount;
+                          totalVAT += vatAmount;
                         });
 
-                        const totalMarkup = totalOverhead + totalProfit;
-                        const subtotalBeforeDiscount = baseCost + totalMarkup;
+                        const subtotalBeforeDiscount = totalItemTotal + totalMiscellaneous + totalOverheadProfit;
                         const afterDiscount = subtotalBeforeDiscount - totalDiscount;
                         const finalTotal = afterDiscount + totalVAT;
-
-                        // Calculate average discount percentage for display
                         const avgDiscountPct = subtotalBeforeDiscount > 0 ? (totalDiscount / subtotalBeforeDiscount) * 100 : 0;
 
-                        // Distribute markup proportionally to materials and labor
-                        const materialRatio = baseCost > 0 ? selectedEstimation.materialCost / baseCost : 0;
-                        const laborRatio = baseCost > 0 ? selectedEstimation.laborCost / baseCost : 0;
-                        const materialMarkupShare = totalMarkup * materialRatio;
-                        const laborMarkupShare = totalMarkup * laborRatio;
-                        const adjustedMaterialCost = selectedEstimation.materialCost + materialMarkupShare;
-                        const adjustedLaborCost = selectedEstimation.laborCost + laborMarkupShare;
+                        // Distribute total markup to materials and labour for display
+                        const baseCost = materialCost + labourCost;
+                        const totalMarkup = totalMiscellaneous + totalOverheadProfit;
+                        const materialRatio = baseCost > 0 ? materialCost / baseCost : 0;
+                        const laborRatio = baseCost > 0 ? labourCost / baseCost : 0;
+                        const adjustedMaterialCost = materialCost + (totalMarkup * materialRatio);
+                        const adjustedLaborCost = labourCost + (totalMarkup * laborRatio);
 
                         return (
                           <>

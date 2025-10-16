@@ -24,11 +24,28 @@ import { ProjectOption, BOQMaterial, BOQLabour, BOQCreatePayload, WorkType } fro
 import { ModernSelect } from '@/components/ui/modern-select';
 
 // Backend-aligned interfaces
+interface SubItemForm {
+  id: string;
+  scope: string; // Item scope/title
+  size?: string; // Optional
+  location?: string; // Optional
+  brand?: string; // Optional
+  quantity: number; // Required
+  unit: string; // Required
+  rate: number; // Required
+  materials: BOQMaterialForm[]; // Raw materials for this sub-item
+  labour: BOQLabourForm[]; // Labour for this sub-item
+}
+
 interface BOQItemForm {
   id: string;
   item_name: string;
   description: string;
+  quantity?: number; // Item quantity
+  unit?: string; // Item unit
+  rate?: number; // Item rate
   work_type: WorkType;
+  sub_items: SubItemForm[]; // Sub-items with their own raw materials
   materials: BOQMaterialForm[];
   labour: BOQLabourForm[];
   overhead_percentage: number;
@@ -117,6 +134,7 @@ const UNIT_OPTIONS = [
   { value: 'gms', label: 'Gms' },
   { value: 'ml', label: 'Ml' },
   { value: 'ft', label: 'Ft' },
+  { value: 'R.ft', label: 'R.ft' },
   { value: 'sq.ft', label: 'Sq.ft' },
   { value: 'set', label: 'Set' },
   { value: 'pair', label: 'Pair' },
@@ -179,6 +197,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
   // VAT mode state - tracks which items use per-material VAT
   const [useMaterialVAT, setUseMaterialVAT] = useState<Record<string, boolean>>({});
+  const [useSubItemMaterialVAT, setUseSubItemMaterialVAT] = useState<Record<string, boolean>>({});
 
   // Preliminaries state
   const [preliminaries, setPreliminaries] = useState<PreliminaryItem[]>([]);
@@ -302,7 +321,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       id: Date.now().toString(),
       item_name: '',
       description: '',
+      quantity: 1,
+      unit: 'nos',
+      rate: 0,
       work_type: 'contract',
+      sub_items: [],
       materials: [],
       labour: [],
       overhead_percentage: overallOverhead,
@@ -358,6 +381,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           master_item_id: masterItem.item_id,
           overhead_percentage: masterItem.default_overhead_percentage || item.overhead_percentage,
           profit_margin_percentage: masterItem.default_profit_percentage || item.profit_margin_percentage,
+          sub_items: item.sub_items || [], // Preserve existing sub_items
           materials: formMaterials,
           labour: formLabours,
           is_new: false
@@ -419,6 +443,110 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const updateItem = (itemId: string, field: keyof BOQItemForm, value: any) => {
     setItems(items.map(item =>
       item.id === itemId ? { ...item, [field]: value } : item
+    ));
+  };
+
+  // Sub-item management functions
+  const addSubItem = (itemId: string) => {
+    const newSubItem: SubItemForm = {
+      id: Date.now().toString(),
+      scope: '',
+      size: '',
+      location: '',
+      brand: '',
+      quantity: 1,
+      unit: 'nos',
+      rate: 0,
+      materials: [],
+      labour: []
+    };
+
+    setItems(items.map(item =>
+      item.id === itemId
+        ? { ...item, sub_items: [...item.sub_items, newSubItem] }
+        : item
+    ));
+  };
+
+  const removeSubItem = (itemId: string, subItemId: string) => {
+    setItems(items.map(item =>
+      item.id === itemId
+        ? { ...item, sub_items: item.sub_items.filter(si => si.id !== subItemId) }
+        : item
+    ));
+  };
+
+  const updateSubItem = (itemId: string, subItemId: string, field: keyof SubItemForm, value: any) => {
+    setItems(items.map(item =>
+      item.id === itemId
+        ? {
+            ...item,
+            sub_items: item.sub_items.map(si =>
+              si.id === subItemId ? { ...si, [field]: value } : si
+            )
+          }
+        : item
+    ));
+  };
+
+  // Sub-item material management
+  const addSubItemMaterial = (itemId: string, subItemId: string) => {
+    const newMaterial: BOQMaterialForm = {
+      id: Date.now().toString(),
+      material_name: '',
+      quantity: 1,
+      unit: 'nos',
+      unit_price: 0,
+      vat_percentage: 0,
+      is_new: true
+    };
+
+    setItems(items.map(item =>
+      item.id === itemId
+        ? {
+            ...item,
+            sub_items: item.sub_items.map(si =>
+              si.id === subItemId
+                ? { ...si, materials: [...si.materials, newMaterial] }
+                : si
+            )
+          }
+        : item
+    ));
+  };
+
+  const removeSubItemMaterial = (itemId: string, subItemId: string, materialId: string) => {
+    setItems(items.map(item =>
+      item.id === itemId
+        ? {
+            ...item,
+            sub_items: item.sub_items.map(si =>
+              si.id === subItemId
+                ? { ...si, materials: si.materials.filter(m => m.id !== materialId) }
+                : si
+            )
+          }
+        : item
+    ));
+  };
+
+  const updateSubItemMaterial = (itemId: string, subItemId: string, materialId: string, field: keyof BOQMaterialForm, value: any) => {
+    setItems(items.map(item =>
+      item.id === itemId
+        ? {
+            ...item,
+            sub_items: item.sub_items.map(si =>
+              si.id === subItemId
+                ? {
+                    ...si,
+                    materials: si.materials.map(m =>
+                      m.id === materialId ? { ...m, [field]: value } : m
+                    )
+                  }
+                : si
+            )
+          }
+        : item
     ));
   };
 
@@ -557,41 +685,54 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   };
 
   const calculateItemCost = (item: BOQItemForm) => {
-    const materialCost = item.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0);
-    const labourCost = item.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0);
-    const baseCost = materialCost + labourCost;
-    const overheadAmount = baseCost * (item.overhead_percentage / 100);
-    const totalCost = baseCost + overheadAmount;
-    const profitAmount = baseCost * (item.profit_margin_percentage / 100);
-    const subtotal = totalCost + profitAmount;
-    const discountAmount = subtotal * (item.discount_percentage / 100);
-    const afterDiscount = subtotal - discountAmount;
+    // Calculate total from all sub-items (quantity × rate for each sub-item)
+    const subItemsTotal = item.sub_items.reduce((sum, subItem) => {
+      return sum + ((subItem.quantity || 0) * (subItem.rate || 0));
+    }, 0);
 
-    // Calculate VAT based on mode
-    let vatAmount = 0;
-    if (useMaterialVAT[item.id]) {
-      // Per-material VAT mode: Calculate VAT for each material separately
-      vatAmount = item.materials.reduce((sum, m) => {
-        const materialTotal = m.quantity * m.unit_price;
-        const materialVAT = materialTotal * ((m.vat_percentage || 0) / 100);
-        return sum + materialVAT;
-      }, 0);
-    } else {
-      // Item-level VAT mode: Apply single VAT to after-discount amount
-      vatAmount = afterDiscount * (item.vat_percentage / 100);
-    }
+    // If no sub-items, fall back to item-level quantity × rate
+    const itemTotal = item.sub_items.length > 0 ? subItemsTotal : ((item.quantity || 0) * (item.rate || 0));
 
+    // Calculate percentages based on itemTotal
+    const miscellaneousAmount = itemTotal * (item.overhead_percentage / 100);
+    const overheadProfitAmount = itemTotal * (item.profit_margin_percentage / 100);
+    const beforeDiscount = itemTotal + miscellaneousAmount + overheadProfitAmount;
+
+    // Calculate discount after miscellaneous and overhead
+    const discountAmount = beforeDiscount * (item.discount_percentage / 100);
+    const afterDiscount = beforeDiscount - discountAmount;
+
+    // Calculate VAT on final amount
+    const vatAmount = afterDiscount * (item.vat_percentage / 100);
     const sellingPrice = afterDiscount + vatAmount;
+
+    // Calculate raw materials and labour cost from sub-items
+    let materialCost = 0;
+    let labourCost = 0;
+
+    item.sub_items.forEach(subItem => {
+      materialCost += subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0);
+      labourCost += subItem.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0);
+    });
+
+    // Also include main item materials and labour if any
+    materialCost += item.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0);
+    labourCost += item.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0);
+
+    const rawMaterialsTotal = materialCost + labourCost;
+
     return {
-      baseCost,
-      materialCost,
-      labourCost,
-      overheadAmount,
-      totalCost,
-      profitAmount,
-      discountAmount,
-      vatAmount,
-      sellingPrice
+      itemTotal, // Total from all sub-items
+      miscellaneousAmount, // Miscellaneous % on itemTotal
+      overheadProfitAmount, // Overhead & Profit % on itemTotal
+      beforeDiscount, // itemTotal + miscellaneous + overhead&profit
+      discountAmount, // Discount % on beforeDiscount
+      afterDiscount, // beforeDiscount - discount
+      vatAmount, // VAT % on afterDiscount
+      sellingPrice, // Final amount
+      materialCost, // Raw materials cost
+      labourCost, // Labour cost
+      rawMaterialsTotal // Total raw materials + labour
     };
   };
 
@@ -795,6 +936,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           items: items.map(item => ({
             item_name: item.item_name,
             description: item.description || '',
+            quantity: item.quantity,
+            unit: item.unit,
+            rate: item.rate,
             work_type: item.work_type,
             overhead_percentage: item.overhead_percentage,
             profit_margin_percentage: item.profit_margin_percentage,
@@ -854,6 +998,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           items: items.map(item => ({
             item_name: item.item_name,
             description: item.description || undefined,
+            quantity: item.quantity,
+            unit: item.unit,
+            rate: item.rate,
             work_type: item.work_type,
             overhead_percentage: item.overhead_percentage,
             profit_margin_percentage: item.profit_margin_percentage,
@@ -1142,671 +1289,775 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 {items.map((item, index) => (
                   <div key={item.id} className="border border-gray-200 rounded-lg relative">
                     {/* Item Header */}
-                    <div className="bg-gray-50 px-4 py-3 flex items-center justify-between">
-                      <div className="flex items-center gap-3 flex-1">
-                        <button
-                          type="button"
-                          onClick={() => toggleItemExpanded(item.id)}
-                          className="p-1 hover:bg-gray-200 rounded"
-                          disabled={isSubmitting}
-                          aria-label="Toggle item details"
-                        >
-                          {expandedItems.includes(item.id) ? (
-                            <ChevronDown className="w-4 h-4" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4" />
-                          )}
-                        </button>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-800">Item #{index + 1}</span>
-                          {item.master_item_id && (
-                            <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">
-                              Master
-                            </span>
-                          )}
-                          {item.is_new && item.item_name && (
-                            <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded-full font-medium">
-                              New
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex-1 relative item-dropdown-container">
-                          <div className="relative">
-                            <input
-                              type="text"
-                              value={itemSearchTerms[item.id] || item.item_name}
-                              onChange={(e) => handleItemNameChange(item.id, e.target.value)}
-                              className="w-full px-3 py-2 pr-8 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                              placeholder="Search or type item name"
-                              disabled={isSubmitting || loadingItemData[item.id]}
-                              onFocus={() => setItemDropdownOpen(prev => ({ ...prev, [item.id]: true }))}
-                            />
-                            {loadingItemData[item.id] ? (
-                              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
+                    <div className="bg-gray-50 px-4 py-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3 flex-1">
+                          <button
+                            type="button"
+                            onClick={() => toggleItemExpanded(item.id)}
+                            className="p-1 hover:bg-gray-200 rounded"
+                            disabled={isSubmitting}
+                            aria-label="Toggle item details"
+                          >
+                            {expandedItems.includes(item.id) ? (
+                              <ChevronDown className="w-4 h-4" />
                             ) : (
-                              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                              <ChevronRight className="w-4 h-4" />
+                            )}
+                          </button>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-gray-800">Item #{index + 1}</span>
+                            {item.master_item_id && (
+                              <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">
+                                Master
+                              </span>
+                            )}
+                            {item.is_new && item.item_name && (
+                              <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded-full font-medium">
+                                New
+                              </span>
                             )}
                           </div>
-                          {itemDropdownOpen[item.id] && (
-                            <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
-                              {(() => {
-                                const filtered = getFilteredItems(itemSearchTerms[item.id] || '');
-                                const showNewOption = itemSearchTerms[item.id] &&
-                                  !filtered.some(i => i.item_name.toLowerCase() === itemSearchTerms[item.id].toLowerCase());
-
-                                if (filtered.length === 0 && !showNewOption) {
-                                  return (
-                                    <div className="px-3 py-2 text-sm text-gray-500">
-                                      {masterItems.length === 0 ? 'No master items available yet' : 'Type to search items or add new'}
-                                    </div>
-                                  );
-                                }
-
-                                return (
-                                  <>
-                                    {filtered.map(masterItem => (
-                                      <button
-                                        key={masterItem.item_id}
-                                        type="button"
-                                        onClick={() => selectMasterItem(item.id, masterItem)}
-                                        className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors flex items-center justify-between group"
-                                      >
-                                        <div>
-                                          <div className="font-medium text-gray-900">{masterItem.item_name}</div>
-                                          {masterItem.description && (
-                                            <div className="text-xs text-gray-500 truncate">{masterItem.description}</div>
-                                          )}
-                                        </div>
-                                        <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                                          Select
-                                        </span>
-                                      </button>
-                                    ))}
-                                    {showNewOption && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          updateItem(item.id, 'item_name', itemSearchTerms[item.id]);
-                                          updateItem(item.id, 'is_new', true);
-                                          setItemDropdownOpen(prev => ({ ...prev, [item.id]: false }));
-                                        }}
-                                        className="w-full px-3 py-2 text-left text-sm bg-green-50 hover:bg-green-100 transition-colors border-t border-gray-200"
-                                      >
-                                        <div className="flex items-center gap-2">
-                                          <PlusCircle className="w-4 h-4 text-green-600" />
-                                          <span className="font-medium text-green-700">
-                                            Add "{itemSearchTerms[item.id]}" as new item
-                                          </span>
-                                        </div>
-                                      </button>
-                                    )}
-                                  </>
-                                );
-                              })()}
+                          <div className="w-64 relative item-dropdown-container">
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={itemSearchTerms[item.id] || item.item_name}
+                                onChange={(e) => handleItemNameChange(item.id, e.target.value)}
+                                className="w-full px-3 py-2 pr-8 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                placeholder="Search or type item name"
+                                disabled={isSubmitting || loadingItemData[item.id]}
+                                onFocus={() => setItemDropdownOpen(prev => ({ ...prev, [item.id]: true }))}
+                              />
+                              {loadingItemData[item.id] ? (
+                                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
+                              ) : (
+                                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                              )}
                             </div>
-                          )}
+                            {itemDropdownOpen[item.id] && (
+                              <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                                {(() => {
+                                  const filtered = getFilteredItems(itemSearchTerms[item.id] || '');
+                                  const showNewOption = itemSearchTerms[item.id] &&
+                                    !filtered.some(i => i.item_name.toLowerCase() === itemSearchTerms[item.id].toLowerCase());
+
+                                  if (filtered.length === 0 && !showNewOption) {
+                                    return (
+                                      <div className="px-3 py-2 text-sm text-gray-500">
+                                        {masterItems.length === 0 ? 'No master items available yet' : 'Type to search items or add new'}
+                                      </div>
+                                    );
+                                  }
+
+                                  return (
+                                    <>
+                                      {filtered.map(masterItem => (
+                                        <button
+                                          key={masterItem.item_id}
+                                          type="button"
+                                          onClick={() => selectMasterItem(item.id, masterItem)}
+                                          className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors flex items-center justify-between group"
+                                        >
+                                          <div>
+                                            <div className="font-medium text-gray-900">{masterItem.item_name}</div>
+                                            {masterItem.description && (
+                                              <div className="text-xs text-gray-500 truncate">{masterItem.description}</div>
+                                            )}
+                                          </div>
+                                          <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            Select
+                                          </span>
+                                        </button>
+                                      ))}
+                                      {showNewOption && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            updateItem(item.id, 'item_name', itemSearchTerms[item.id]);
+                                            updateItem(item.id, 'is_new', true);
+                                            setItemDropdownOpen(prev => ({ ...prev, [item.id]: false }));
+                                          }}
+                                          className="w-full px-3 py-2 text-left text-sm bg-green-50 hover:bg-green-100 transition-colors border-t border-gray-200"
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            <PlusCircle className="w-4 h-4 text-green-600" />
+                                            <span className="font-medium text-green-700">
+                                              Add "{itemSearchTerms[item.id]}" as new item
+                                            </span>
+                                          </div>
+                                        </button>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-gray-600 font-medium">Qty:</span>
+                              <input
+                                type="number"
+                                value={item.quantity === 0 ? '' : item.quantity}
+                                onChange={(e) => {
+                                  const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                  updateItem(item.id, 'quantity', value);
+                                }}
+                                className="w-20 px-2 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                placeholder="1"
+                                min="0"
+                                step="0.01"
+                                disabled={isSubmitting}
+                              />
+                            </div>
+                            <ModernSelect
+                              value={item.unit || 'nos'}
+                              onChange={(value) => updateItem(item.id, 'unit', value)}
+                              options={UNIT_OPTIONS}
+                              disabled={isSubmitting}
+                              className="w-24"
+                            />
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-gray-600 font-medium">Rate:</span>
+                              <input
+                                type="number"
+                                value={item.rate === 0 ? '' : item.rate}
+                                onChange={(e) => {
+                                  const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                  updateItem(item.id, 'rate', value);
+                                }}
+                                className="w-28 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                placeholder="0.00"
+                                min="0"
+                                step="0.01"
+                                disabled={isSubmitting}
+                              />
+                            </div>
+                          </div>
                         </div>
-                        <input
-                          type="text"
-                          value={item.description}
-                          onChange={(e) => updateItem(item.id, 'description', e.target.value)}
-                          className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                          placeholder="Description (optional)"
-                          disabled={isSubmitting}
-                        />
-                      </div>
-                      <div className="flex items-center gap-3 ml-4">
-                        <span className="text-sm font-semibold text-gray-900">
-                          AED {calculateItemCost(item).sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => removeItem(item.id)}
-                          className="p-1 text-red-500 hover:bg-red-50 rounded"
-                          disabled={isSubmitting}
-                          aria-label="Remove item"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-3 ml-4">
+                          <span className="text-sm font-semibold text-gray-900">
+                            AED {((item.quantity || 0) * (item.rate || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeItem(item.id)}
+                            className="p-1 text-red-500 hover:bg-red-50 rounded"
+                            disabled={isSubmitting}
+                            aria-label="Remove item"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
 
                     {/* Item Details (Expandable) */}
                     {expandedItems.includes(item.id) && (
                       <div className="p-4 space-y-4 bg-gray-50/50">
-                        {/* Materials Section - Blue Theme like PM */}
-                        <div className="bg-gradient-to-r from-blue-50 to-blue-100/30 rounded-lg p-4 border border-blue-200">
+                        {/* Items Section - Green Theme */}
+                        <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
                           <div className="flex items-center justify-between mb-3">
-                            <h4 className="text-sm font-bold text-blue-900 flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-green-900 flex items-center gap-2">
                               <div className="p-1.5 bg-white rounded shadow-sm">
-                                <Package className="w-4 h-4 text-blue-600" />
+                                <FileText className="w-4 h-4 text-green-600" />
                               </div>
                               Sub Items
                             </h4>
                             <button
                               type="button"
-                              onClick={() => addMaterial(item.id)}
-                              className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                              onClick={() => addSubItem(item.id)}
+                              className="text-xs font-semibold text-green-700 hover:text-green-800"
                               disabled={isSubmitting}
                             >
-                              + Add Material
+                              + Add Sub Item
                             </button>
                           </div>
 
-                          {/* VAT Mode Toggle */}
-                          <div className="mb-3 pb-3 border-b border-blue-200">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={useMaterialVAT[item.id] || false}
-                                onChange={(e) => {
-                                  setUseMaterialVAT(prev => ({
-                                    ...prev,
-                                    [item.id]: e.target.checked
-                                  }));
-                                  // Initialize VAT to 0 for all materials when enabling
-                                  if (e.target.checked) {
-                                    setItems(items.map(itm =>
-                                      itm.id === item.id
-                                        ? {
-                                            ...itm,
-                                            materials: itm.materials.map(m => ({
-                                              ...m,
-                                              vat_percentage: m.vat_percentage || 0
-                                            }))
-                                          }
-                                        : itm
-                                    ));
-                                  }
-                                }}
-                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                disabled={isSubmitting}
-                              />
-                              <span className="text-xs text-blue-900 font-medium">
-                                Different VAT rates for materials
-                              </span>
-                              <span className="text-xs text-blue-600 italic">
-                                (Check this if materials have different VAT percentages)
-                              </span>
-                            </label>
-                          </div>
-
-                          <div className="space-y-2">
-                            {item.materials.map((material) => {
-                              const availableMaterials = getAvailableMaterials(item.id);
-                              const materialDropdownId = `${item.id}-${material.id}`;
-
-                              return (
-                                <div key={material.id} className="space-y-1">
-                                <div className="flex items-center gap-2">
-                                  <div className="flex-1 relative">
-                                    <input
-                                      type="text"
-                                      value={materialSearchTerms[materialDropdownId] || material.material_name}
-                                      onChange={(e) => {
-                                        setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: e.target.value }));
-                                        if (!material.is_from_master) {
-                                          updateMaterial(item.id, material.id, 'material_name', e.target.value);
-                                        }
-                                        if (availableMaterials.length > 0) {
-                                          setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
-                                        }
-                                      }}
-                                      onFocus={() => {
-                                        if (availableMaterials.length > 0) {
-                                          setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
-                                        }
-                                      }}
-                                      className={`w-full px-3 py-1.5 pr-8 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
-                                        material.is_from_master
-                                          ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                          : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
-                                      }`}
-                                      placeholder={availableMaterials.length > 0 ? "Search materials or type new" : "Material name"}
-                                      disabled={isSubmitting || material.is_from_master}
-                                      title={material.is_from_master ? 'Material name from master data cannot be edited' : ''}
-                                    />
-                                    {availableMaterials.length > 0 && (
-                                      <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
-                                    )}
-
-                                    {materialDropdownOpen[materialDropdownId] && availableMaterials.length > 0 && (
-                                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-32 overflow-y-auto">
-                                        {availableMaterials
-                                          .filter(mat =>
-                                            !materialSearchTerms[materialDropdownId] ||
-                                            mat.material_name.toLowerCase().includes(materialSearchTerms[materialDropdownId].toLowerCase())
-                                          )
-                                          .map(masterMaterial => (
-                                            <button
-                                              key={masterMaterial.material_id}
-                                              type="button"
-                                              onClick={() => {
-                                                selectMasterMaterial(item.id, material.id, masterMaterial);
-                                                setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
-                                                setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: masterMaterial.material_name }));
-                                              }}
-                                              className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors"
-                                            >
-                                              <div className="font-medium text-gray-900">{masterMaterial.material_name}</div>
-                                              <div className="text-xs text-gray-500">
-                                                AED{masterMaterial.current_market_price}/{masterMaterial.default_unit}
-                                              </div>
-                                            </button>
-                                          ))
-                                        }
-                                        {materialSearchTerms[materialDropdownId] &&
-                                         !availableMaterials.some(mat =>
-                                           mat.material_name.toLowerCase() === materialSearchTerms[materialDropdownId].toLowerCase()
-                                         ) && (
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              updateMaterial(item.id, material.id, 'material_name', materialSearchTerms[materialDropdownId]);
-                                              setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
-                                            }}
-                                            className="w-full px-3 py-2 text-left text-sm bg-green-50 hover:bg-green-100 transition-colors border-t border-gray-200"
-                                          >
-                                            <div className="flex items-center gap-2">
-                                              <PlusCircle className="w-3 h-3 text-green-600" />
-                                              <span className="text-green-700 font-medium">
-                                                Add "{materialSearchTerms[materialDropdownId]}" as new material
-                                              </span>
-                                            </div>
-                                          </button>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                <div className="relative">
-                                  <input
-                                    type="number"
-                                    value={material.quantity === 0 ? '' : material.quantity}
-                                    onChange={(e) => {
-                                      const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                      updateMaterial(item.id, material.id, 'quantity', value);
-                                    }}
-                                    className="w-24 px-3 py-1.5 pr-8 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    placeholder="1"
-                                    min="0"
-                                    step="0.01"
-                                    disabled={isSubmitting}
-                                  />
-                                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const newValue = (material.quantity || 0) + 1;
-                                        updateMaterial(item.id, material.id, 'quantity', newValue);
-                                      }}
-                                      className="px-1 hover:bg-blue-100 rounded text-blue-600"
-                                      disabled={isSubmitting}
-                                      title="Increase quantity"
-                                    >
-                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                      </svg>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const newValue = Math.max(0, (material.quantity || 0) - 1);
-                                        updateMaterial(item.id, material.id, 'quantity', newValue);
-                                      }}
-                                      className="px-1 hover:bg-blue-100 rounded text-blue-600"
-                                      disabled={isSubmitting}
-                                      title="Decrease quantity"
-                                    >
-                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                      </svg>
-                                    </button>
-                                  </div>
-                                </div>
-                                <ModernSelect
-                                  value={material.unit}
-                                  onChange={(value) => updateMaterial(item.id, material.id, 'unit', value)}
-                                  options={UNIT_OPTIONS}
-                                  disabled={isSubmitting}
-                                  className="w-24"
-                                />
-                                <div className="flex items-center gap-1">
-                                  <span className="text-sm text-gray-500 font-medium">AED</span>
-                                  <div className="relative">
-                                    <input
-                                      type="number"
-                                      value={material.unit_price === 0 ? '' : material.unit_price}
-                                      onChange={(e) => {
-                                        const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                        updateMaterial(item.id, material.id, 'unit_price', value);
-                                      }}
-                                      className="w-28 px-3 py-1.5 pr-8 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                      placeholder="0.00"
-                                      min="0"
-                                      step="0.01"
-                                      disabled={isSubmitting}
-                                    />
-                                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const newValue = (material.unit_price || 0) + 10;
-                                          updateMaterial(item.id, material.id, 'unit_price', newValue);
-                                        }}
-                                        className="px-1 hover:bg-blue-100 rounded text-blue-600"
-                                        disabled={isSubmitting}
-                                        title="Increase price"
-                                      >
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                        </svg>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const newValue = Math.max(0, (material.unit_price || 0) - 10);
-                                          updateMaterial(item.id, material.id, 'unit_price', newValue);
-                                        }}
-                                        className="px-1 hover:bg-blue-100 rounded text-blue-600"
-                                        disabled={isSubmitting}
-                                        title="Decrease price"
-                                      >
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                        </svg>
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                                <span className="w-24 px-2 py-1 text-xs text-gray-600 bg-gray-50 rounded text-center font-medium">
-                                  AED {(material.quantity * material.unit_price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => removeMaterial(item.id, material.id)}
-                                  className="p-1 text-red-500 hover:bg-red-50 rounded"
-                                  disabled={isSubmitting}
-                                  aria-label="Remove material"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-
-                              {/* Description and VAT fields below material row */}
-                              <div className="ml-0 mt-1 flex gap-2">
-                                <input
-                                  type="text"
-                                  value={material.description || ''}
-                                  onChange={(e) => updateMaterial(item.id, material.id, 'description', e.target.value)}
-                                  className="flex-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-gray-50"
-                                  placeholder="Description (optional)"
-                                  disabled={isSubmitting}
-                                />
-
-                                {/* Show VAT input only when per-material VAT is enabled */}
-                                {useMaterialVAT[item.id] && (
-                                  <div className="flex items-center gap-1 w-32">
-                                    <span className="text-xs text-gray-600">VAT</span>
-                                    <input
-                                      type="number"
-                                      value={material.vat_percentage === 0 ? '' : material.vat_percentage || ''}
-                                      onChange={(e) => {
-                                        const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                        updateMaterial(item.id, material.id, 'vat_percentage', value);
-                                      }}
-                                      className="w-16 px-2 py-1.5 text-xs border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white"
-                                      placeholder="0"
-                                      min="0"
-                                      step="0.1"
-                                      disabled={isSubmitting}
-                                    />
-                                    <span className="text-xs text-gray-600">%</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Labour Section - Orange Theme */}
-                        <div className="bg-gradient-to-r from-orange-50 to-orange-100/30 rounded-lg p-4 border border-orange-200">
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="text-sm font-bold text-orange-900 flex items-center gap-2">
-                              <div className="p-1.5 bg-white rounded shadow-sm">
-                                <Users className="w-4 h-4 text-orange-600" />
-                              </div>
-                              Labour
-                            </h4>
-                            <button
-                              type="button"
-                              onClick={() => addLabour(item.id)}
-                              className="text-xs font-semibold text-orange-700 hover:text-orange-800"
-                              disabled={isSubmitting}
-                            >
-                              + Add Labour
-                            </button>
-                          </div>
-                          <div className="space-y-2">
-                            {item.labour.map((labour) => {
-                              const availableLabour = getAvailableLabour(item.id);
-                              const labourDropdownId = `${item.id}-${labour.id}`;
-
-                              return (
-                                <div key={labour.id} className="flex items-center gap-2">
-                                  <div className="flex-1 relative">
-                                    <input
-                                      type="text"
-                                      value={labourSearchTerms[labourDropdownId] || labour.labour_role}
-                                      onChange={(e) => {
-                                        setLabourSearchTerms(prev => ({ ...prev, [labourDropdownId]: e.target.value }));
-                                        if (!labour.is_from_master) {
-                                          updateLabour(item.id, labour.id, 'labour_role', e.target.value);
-                                        }
-                                        if (availableLabour.length > 0) {
-                                          setLabourDropdownOpen(prev => ({ ...prev, [labourDropdownId]: true }));
-                                        }
-                                      }}
-                                      onFocus={() => {
-                                        if (availableLabour.length > 0) {
-                                          setLabourDropdownOpen(prev => ({ ...prev, [labourDropdownId]: true }));
-                                        }
-                                      }}
-                                      className={`w-full px-3 py-1.5 pr-8 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
-                                        labour.is_from_master
-                                          ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                          : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
-                                      }`}
-                                      placeholder={availableLabour.length > 0 ? "Search labour roles or type new" : "Labour role (e.g., Fabricator, Installer)"}
-                                      disabled={isSubmitting || labour.is_from_master}
-                                      title={labour.is_from_master ? 'Labour role from master data cannot be edited' : ''}
-                                    />
-                                    {availableLabour.length > 0 && (
-                                      <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
-                                    )}
-
-                                    {labourDropdownOpen[labourDropdownId] && availableLabour.length > 0 && (
-                                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-32 overflow-y-auto">
-                                        {availableLabour
-                                          .filter(lab =>
-                                            !labourSearchTerms[labourDropdownId] ||
-                                            lab.labour_role.toLowerCase().includes(labourSearchTerms[labourDropdownId].toLowerCase())
-                                          )
-                                          .map(masterLabour => (
-                                            <button
-                                              key={masterLabour.labour_id}
-                                              type="button"
-                                              onClick={() => {
-                                                selectMasterLabour(item.id, labour.id, masterLabour);
-                                                setLabourDropdownOpen(prev => ({ ...prev, [labourDropdownId]: false }));
-                                                setLabourSearchTerms(prev => ({ ...prev, [labourDropdownId]: masterLabour.labour_role }));
-                                              }}
-                                              className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors"
-                                            >
-                                              <div className="font-medium text-gray-900">{masterLabour.labour_role}</div>
-                                              <div className="text-xs text-gray-500">
-                                                AED{masterLabour.amount} ({masterLabour.work_type})
-                                              </div>
-                                            </button>
-                                          ))}
-                                        {labourSearchTerms[labourDropdownId] &&
-                                         !availableLabour.some(lab =>
-                                           lab.labour_role.toLowerCase() === labourSearchTerms[labourDropdownId].toLowerCase()
-                                         ) && (
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              updateLabour(item.id, labour.id, 'labour_role', labourSearchTerms[labourDropdownId]);
-                                              setLabourDropdownOpen(prev => ({ ...prev, [labourDropdownId]: false }));
-                                            }}
-                                            className="w-full px-3 py-2 text-left text-sm bg-green-50 hover:bg-green-100 transition-colors border-t border-gray-200"
-                                          >
-                                            <div className="flex items-center gap-2">
-                                              <PlusCircle className="w-3 h-3 text-green-600" />
-                                              <span className="text-green-700 font-medium">
-                                                Add "{labourSearchTerms[labourDropdownId]}" as new labour
-                                              </span>
-                                            </div>
-                                          </button>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                <div className="flex items-center gap-2">
-                                  <select
-                                    value={labour.work_type || 'piece_rate'}
-                                    onChange={(e) => updateLabour(item.id, labour.id, 'work_type', e.target.value)}
-                                    className="px-3 py-1.5 text-xs border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white"
+                          <div className="space-y-3">
+                            {item.sub_items.map((subItem, subIndex) => (
+                              <div key={subItem.id} className="bg-white rounded-lg p-3 border border-green-200">
+                                <div className="flex items-center justify-between mb-3">
+                                  <span className="text-xs font-semibold text-green-900">Sub Item #{subIndex + 1}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeSubItem(item.id, subItem.id)}
+                                    className="text-red-500 hover:text-red-700"
                                     disabled={isSubmitting}
                                   >
-                                    <option value="piece_rate">Piece Rate</option>
-                                    <option value="contract">Contract</option>
-                                    <option value="daily_wages">Daily Wages</option>
-                                  </select>
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
                                 </div>
-                                <div className="relative">
-                                  <input
-                                    type="number"
-                                    value={labour.hours === 0 ? '' : labour.hours}
-                                    onChange={(e) => {
-                                      const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                      updateLabour(item.id, labour.id, 'hours', value);
-                                    }}
-                                    className="w-24 px-3 py-1.5 pr-8 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    placeholder="8"
-                                    min="0"
-                                    step="0.5"
-                                    disabled={isSubmitting}
-                                  />
-                                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const newValue = (labour.hours || 0) + 1;
-                                        updateLabour(item.id, labour.id, 'hours', newValue);
-                                      }}
-                                      className="px-1 hover:bg-orange-100 rounded text-orange-600"
-                                      disabled={isSubmitting}
-                                      title="Increase hours"
-                                    >
-                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                      </svg>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const newValue = Math.max(0, (labour.hours || 0) - 1);
-                                        updateLabour(item.id, labour.id, 'hours', newValue);
-                                      }}
-                                      className="px-1 hover:bg-orange-100 rounded text-orange-600"
-                                      disabled={isSubmitting}
-                                      title="Decrease hours"
-                                    >
-                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                      </svg>
-                                    </button>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <span className="text-sm text-gray-500 font-medium">AED</span>
-                                  <div className="relative">
+
+                                {/* Sub-item Fields */}
+                                <div className="space-y-3">
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                                      Scope <span className="text-red-500">*</span>
+                                    </label>
                                     <input
-                                      type="number"
-                                      value={labour.rate_per_hour === 0 ? '' : labour.rate_per_hour}
-                                      onChange={(e) => {
-                                        const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                        updateLabour(item.id, labour.id, 'rate_per_hour', value);
-                                      }}
-                                      className="w-28 px-3 py-1.5 pr-8 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                      placeholder="0.00"
-                                      min="0"
-                                      step="0.01"
+                                      type="text"
+                                      value={subItem.scope}
+                                      onChange={(e) => updateSubItem(item.id, subItem.id, 'scope', e.target.value)}
+                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                                      placeholder="e.g., Tile flooring"
+                                      required
                                       disabled={isSubmitting}
                                     />
-                                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                                        Size <span className="text-gray-400 text-xs">(Optional)</span>
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={subItem.size || ''}
+                                        onChange={(e) => updateSubItem(item.id, subItem.id, 'size', e.target.value)}
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                                        placeholder="e.g., 120 cm X 60 cm"
+                                        disabled={isSubmitting}
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                                        Location <span className="text-gray-400 text-xs">(Optional)</span>
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={subItem.location || ''}
+                                        onChange={(e) => updateSubItem(item.id, subItem.id, 'location', e.target.value)}
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                                        placeholder="e.g., Living room"
+                                        disabled={isSubmitting}
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                                      Brand <span className="text-gray-400 text-xs">(Optional)</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={subItem.brand || ''}
+                                      onChange={(e) => updateSubItem(item.id, subItem.id, 'brand', e.target.value)}
+                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                                      placeholder="e.g., RAK / Equivalent"
+                                      disabled={isSubmitting}
+                                    />
+                                  </div>
+
+                                  <div className="grid grid-cols-4 gap-3">
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                                        Quantity <span className="text-red-500">*</span>
+                                      </label>
+                                      <input
+                                        type="number"
+                                        value={subItem.quantity}
+                                        onChange={(e) => updateSubItem(item.id, subItem.id, 'quantity', parseFloat(e.target.value) || 0)}
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                                        min="0"
+                                        step="0.01"
+                                        required
+                                        disabled={isSubmitting}
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                                        Unit <span className="text-red-500">*</span>
+                                      </label>
+                                      <select
+                                        value={subItem.unit}
+                                        onChange={(e) => updateSubItem(item.id, subItem.id, 'unit', e.target.value)}
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                                        required
+                                        disabled={isSubmitting}
+                                      >
+                                        {UNIT_OPTIONS.map(opt => (
+                                          <option key={opt.value} value={opt.value} className="bg-white">{opt.label}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                                        Rate <span className="text-red-500">*</span>
+                                      </label>
+                                      <input
+                                        type="number"
+                                        value={subItem.rate}
+                                        onChange={(e) => updateSubItem(item.id, subItem.id, 'rate', parseFloat(e.target.value) || 0)}
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                                        min="0"
+                                        step="0.01"
+                                        required
+                                        disabled={isSubmitting}
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-700 mb-1">Total</label>
+                                      <input
+                                        type="text"
+                                        value={(subItem.quantity * subItem.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 font-semibold text-gray-700"
+                                        disabled
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {/* Raw Materials Section for Sub-item */}
+                                  <div className="mt-4 pt-4 border-t border-gray-200">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <h5 className="text-xs font-bold text-blue-900 flex items-center gap-2">
+                                        <Package className="w-3.5 h-3.5 text-blue-600" />
+                                        Raw Materials
+                                      </h5>
+                                      <button
+                                        type="button"
+                                        onClick={() => addSubItemMaterial(item.id, subItem.id)}
+                                        className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                                        disabled={isSubmitting}
+                                      >
+                                        + Add Material
+                                      </button>
+                                    </div>
+
+                                    {/* VAT Mode Toggle */}
+                                    <div className="mb-3 pb-3 border-b border-blue-200">
+                                      <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={useSubItemMaterialVAT[`${item.id}-${subItem.id}`] || false}
+                                          onChange={(e) => {
+                                            setUseSubItemMaterialVAT(prev => ({
+                                              ...prev,
+                                              [`${item.id}-${subItem.id}`]: e.target.checked
+                                            }));
+                                          }}
+                                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                          disabled={isSubmitting}
+                                        />
+                                        <span className="text-xs text-blue-900 font-medium">
+                                          Different VAT rates for materials
+                                        </span>
+                                        <span className="text-xs text-blue-600 italic">
+                                          (Check this if materials have different VAT percentages)
+                                        </span>
+                                      </label>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      {/* Column Headers */}
+                                      {subItem.materials.length > 0 && (
+                                        <div className="flex items-center gap-2 pb-2 border-b border-blue-200">
+                                          <div className="flex-1 text-xs font-semibold text-gray-700">Material Name</div>
+                                          <div className="w-20 text-xs font-semibold text-gray-700">Qty</div>
+                                          <div className="w-24 text-xs font-semibold text-gray-700">Unit</div>
+                                          <div className="w-24 text-xs font-semibold text-gray-700">Rate (AED)</div>
+                                          {useSubItemMaterialVAT[`${item.id}-${subItem.id}`] && (
+                                            <div className="w-20 text-xs font-semibold text-gray-700">VAT %</div>
+                                          )}
+                                          <div className="w-24 text-xs font-semibold text-gray-700">Total (AED)</div>
+                                          <div className="w-4"></div>
+                                        </div>
+                                      )}
+
+                                      {subItem.materials.map((material) => {
+                                        const materialDropdownId = `${item.id}-${subItem.id}-${material.id}`;
+                                        const availableMaterials = getAvailableMaterials(item.id);
+
+                                        return (
+                                          <div key={material.id} className="space-y-1">
+                                            <div className="flex items-center gap-2">
+                                              <div className="flex-1 relative">
+                                                <input
+                                                  type="text"
+                                                  value={materialSearchTerms[materialDropdownId] || material.material_name}
+                                                  onChange={(e) => {
+                                                    setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: e.target.value }));
+                                                    if (!material.is_from_master) {
+                                                      updateSubItemMaterial(item.id, subItem.id, material.id, 'material_name', e.target.value);
+                                                    }
+                                                    if (availableMaterials.length > 0) {
+                                                      setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
+                                                    }
+                                                  }}
+                                                  onFocus={() => {
+                                                    if (availableMaterials.length > 0) {
+                                                      setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
+                                                    }
+                                                  }}
+                                                  className={`w-full px-3 py-1.5 pr-8 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
+                                                    material.is_from_master
+                                                      ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
+                                                      : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
+                                                  }`}
+                                                  placeholder={availableMaterials.length > 0 ? "Search materials or type new" : "Material name"}
+                                                  disabled={isSubmitting || material.is_from_master}
+                                                  title={material.is_from_master ? 'Material name from master data cannot be edited' : ''}
+                                                />
+                                                {availableMaterials.length > 0 && (
+                                                  <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                                                )}
+
+                                                {materialDropdownOpen[materialDropdownId] && availableMaterials.length > 0 && (
+                                                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-32 overflow-y-auto">
+                                                    {availableMaterials
+                                                      .filter(mat =>
+                                                        !materialSearchTerms[materialDropdownId] ||
+                                                        mat.material_name.toLowerCase().includes(materialSearchTerms[materialDropdownId].toLowerCase())
+                                                      )
+                                                      .map(masterMaterial => (
+                                                        <button
+                                                          key={masterMaterial.material_id}
+                                                          type="button"
+                                                          onClick={() => {
+                                                            // Update sub-item material with master data
+                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'material_name', masterMaterial.material_name);
+                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'unit', masterMaterial.default_unit);
+                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'unit_price', masterMaterial.current_market_price);
+                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'master_material_id', masterMaterial.material_id);
+                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'is_from_master', true);
+                                                            setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
+                                                            setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: masterMaterial.material_name }));
+                                                          }}
+                                                          className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors"
+                                                        >
+                                                          <div className="font-medium text-gray-900">{masterMaterial.material_name}</div>
+                                                          <div className="text-xs text-gray-500">
+                                                            AED{masterMaterial.current_market_price}/{masterMaterial.default_unit}
+                                                          </div>
+                                                        </button>
+                                                      ))
+                                                    }
+                                                  </div>
+                                                )}
+                                              </div>
+                                              <input
+                                                type="number"
+                                                value={material.quantity}
+                                                onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'quantity', parseFloat(e.target.value) || 0)}
+                                                className="w-20 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                placeholder="Qty"
+                                                min="0"
+                                                step="0.01"
+                                                disabled={isSubmitting}
+                                              />
+                                              <select
+                                                value={material.unit}
+                                                onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'unit', e.target.value)}
+                                                className="w-24 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                                disabled={isSubmitting}
+                                              >
+                                                {UNIT_OPTIONS.map(opt => (
+                                                  <option key={opt.value} value={opt.value} className="bg-white">{opt.label}</option>
+                                                ))}
+                                              </select>
+                                              <input
+                                                type="number"
+                                                value={material.unit_price}
+                                                onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'unit_price', parseFloat(e.target.value) || 0)}
+                                                className="w-24 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                placeholder="Rate"
+                                                min="0"
+                                                step="0.01"
+                                                disabled={isSubmitting}
+                                              />
+                                              {useSubItemMaterialVAT[`${item.id}-${subItem.id}`] && (
+                                                <input
+                                                  type="number"
+                                                  value={material.vat_percentage || 0}
+                                                  onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'vat_percentage', parseFloat(e.target.value) || 0)}
+                                                  className="w-20 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                  placeholder="VAT%"
+                                                  min="0"
+                                                  max="100"
+                                                  step="0.01"
+                                                  disabled={isSubmitting}
+                                                />
+                                              )}
+                                              <span className="w-24 text-sm font-medium text-gray-700">
+                                                {(material.quantity * material.unit_price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                              </span>
+                                              <button
+                                                type="button"
+                                                onClick={() => removeSubItemMaterial(item.id, subItem.id, material.id)}
+                                                className="text-red-500 hover:text-red-700"
+                                                disabled={isSubmitting}
+                                              >
+                                                <Trash2 className="w-4 h-4" />
+                                              </button>
+                                            </div>
+                                            {/* Description field */}
+                                            <div className="ml-0">
+                                              <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+                                              <input
+                                                type="text"
+                                                value={material.description || ''}
+                                                onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'description', e.target.value)}
+                                                className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50"
+                                                placeholder="Description (optional)"
+                                                disabled={isSubmitting}
+                                              />
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                      {subItem.materials.length === 0 && (
+                                        <div className="text-center py-3 text-xs text-gray-500 bg-blue-50/30 rounded-lg">
+                                          No materials added yet. Click "+ Add Material" to add one.
+                                        </div>
+                                      )}
+
+                                      {/* Raw Materials Total */}
+                                      {subItem.materials.length > 0 && (
+                                        <div className="mt-3 pt-3 border-t border-blue-200 flex justify-between items-center bg-blue-50/50 rounded-lg px-3 py-2">
+                                          <span className="text-sm font-bold text-blue-900">Raw Materials Total:</span>
+                                          <span className="text-sm font-bold text-blue-900">
+                                            AED {subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Labour Section for Sub-item */}
+                                  <div className="mt-4 pt-4 border-t border-gray-200">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <h5 className="text-xs font-bold text-orange-900 flex items-center gap-2">
+                                        <Users className="w-3.5 h-3.5 text-orange-600" />
+                                        Labour
+                                      </h5>
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          const newValue = (labour.rate_per_hour || 0) + 10;
-                                          updateLabour(item.id, labour.id, 'rate_per_hour', newValue);
+                                          const newLabour: BOQLabourForm = {
+                                            id: Date.now().toString(),
+                                            labour_role: '',
+                                            hours: 8,
+                                            rate_per_hour: 0,
+                                            is_new: true
+                                          };
+                                          setItems(items.map(itm =>
+                                            itm.id === item.id
+                                              ? {
+                                                  ...itm,
+                                                  sub_items: itm.sub_items.map(si =>
+                                                    si.id === subItem.id
+                                                      ? { ...si, labour: [...si.labour, newLabour] }
+                                                      : si
+                                                  )
+                                                }
+                                              : itm
+                                          ));
                                         }}
-                                        className="px-1 hover:bg-orange-100 rounded text-orange-600"
+                                        className="text-xs font-semibold text-orange-700 hover:text-orange-800"
                                         disabled={isSubmitting}
-                                        title="Increase rate"
                                       >
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                        </svg>
+                                        + Add Labour
                                       </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const newValue = Math.max(0, (labour.rate_per_hour || 0) - 10);
-                                          updateLabour(item.id, labour.id, 'rate_per_hour', newValue);
-                                        }}
-                                        className="px-1 hover:bg-orange-100 rounded text-orange-600"
-                                        disabled={isSubmitting}
-                                        title="Decrease rate"
-                                      >
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                        </svg>
-                                      </button>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      {/* Column Headers for Labour */}
+                                      {subItem.labour.length > 0 && (
+                                        <div className="flex items-center gap-2 pb-2 border-b border-orange-200">
+                                          <div className="flex-1 text-xs font-semibold text-gray-700">Labour Role</div>
+                                          <div className="w-[100px] text-xs font-semibold text-gray-700">Work Type</div>
+                                          <div className="w-20 text-xs font-semibold text-gray-700">Hours</div>
+                                          <div className="w-24 text-xs font-semibold text-gray-700">Rate/hr (AED)</div>
+                                          <div className="w-24 text-xs font-semibold text-gray-700">Total (AED)</div>
+                                          <div className="w-4"></div>
+                                        </div>
+                                      )}
+
+                                      {subItem.labour.map((labour) => (
+                                        <div key={labour.id} className="space-y-1">
+                                          <div className="flex items-center gap-2">
+                                            <input
+                                              type="text"
+                                              value={labour.labour_role}
+                                              onChange={(e) => {
+                                                setItems(items.map(itm =>
+                                                  itm.id === item.id
+                                                    ? {
+                                                        ...itm,
+                                                        sub_items: itm.sub_items.map(si =>
+                                                          si.id === subItem.id
+                                                            ? {
+                                                                ...si,
+                                                                labour: si.labour.map(l =>
+                                                                  l.id === labour.id ? { ...l, labour_role: e.target.value } : l
+                                                                )
+                                                              }
+                                                            : si
+                                                        )
+                                                      }
+                                                    : itm
+                                                ));
+                                              }}
+                                              className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                                              placeholder="Labour role (e.g., Fabricator, Installer)"
+                                              disabled={isSubmitting}
+                                            />
+                                            <select
+                                              value={labour.work_type || 'piece_rate'}
+                                              onChange={(e) => {
+                                                setItems(items.map(itm =>
+                                                  itm.id === item.id
+                                                    ? {
+                                                        ...itm,
+                                                        sub_items: itm.sub_items.map(si =>
+                                                          si.id === subItem.id
+                                                            ? {
+                                                                ...si,
+                                                                labour: si.labour.map(l =>
+                                                                  l.id === labour.id ? { ...l, work_type: e.target.value } : l
+                                                                )
+                                                              }
+                                                            : si
+                                                        )
+                                                      }
+                                                    : itm
+                                                ));
+                                              }}
+                                              className="px-3 py-1.5 text-xs border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white"
+                                              disabled={isSubmitting}
+                                            >
+                                              <option value="piece_rate">Piece Rate</option>
+                                              <option value="contract">Contract</option>
+                                              <option value="daily_wages">Daily Wages</option>
+                                            </select>
+                                            <input
+                                              type="number"
+                                              value={labour.hours}
+                                              onChange={(e) => {
+                                                setItems(items.map(itm =>
+                                                  itm.id === item.id
+                                                    ? {
+                                                        ...itm,
+                                                        sub_items: itm.sub_items.map(si =>
+                                                          si.id === subItem.id
+                                                            ? {
+                                                                ...si,
+                                                                labour: si.labour.map(l =>
+                                                                  l.id === labour.id ? { ...l, hours: parseFloat(e.target.value) || 0 } : l
+                                                                )
+                                                              }
+                                                            : si
+                                                        )
+                                                      }
+                                                    : itm
+                                                ));
+                                              }}
+                                              className="w-20 px-2 py-1.5 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
+                                              placeholder="Hours"
+                                              min="0"
+                                              step="0.5"
+                                              disabled={isSubmitting}
+                                            />
+                                            <input
+                                              type="number"
+                                              value={labour.rate_per_hour}
+                                              onChange={(e) => {
+                                                setItems(items.map(itm =>
+                                                  itm.id === item.id
+                                                    ? {
+                                                        ...itm,
+                                                        sub_items: itm.sub_items.map(si =>
+                                                          si.id === subItem.id
+                                                            ? {
+                                                                ...si,
+                                                                labour: si.labour.map(l =>
+                                                                  l.id === labour.id ? { ...l, rate_per_hour: parseFloat(e.target.value) || 0 } : l
+                                                                )
+                                                              }
+                                                            : si
+                                                        )
+                                                      }
+                                                    : itm
+                                                ));
+                                              }}
+                                              className="w-24 px-2 py-1.5 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
+                                              placeholder="Rate/hr"
+                                              min="0"
+                                              step="0.01"
+                                              disabled={isSubmitting}
+                                            />
+                                            <span className="w-24 text-sm font-medium text-gray-700">
+                                              {(labour.hours * labour.rate_per_hour).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setItems(items.map(itm =>
+                                                  itm.id === item.id
+                                                    ? {
+                                                        ...itm,
+                                                        sub_items: itm.sub_items.map(si =>
+                                                          si.id === subItem.id
+                                                            ? { ...si, labour: si.labour.filter(l => l.id !== labour.id) }
+                                                            : si
+                                                        )
+                                                      }
+                                                    : itm
+                                                ));
+                                              }}
+                                              className="text-red-500 hover:text-red-700"
+                                              disabled={isSubmitting}
+                                            >
+                                              <Trash2 className="w-4 h-4" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+                                      {subItem.labour.length === 0 && (
+                                        <div className="text-center py-3 text-xs text-gray-500 bg-orange-50/30 rounded-lg">
+                                          No labour added yet. Click "+ Add Labour" to add one.
+                                        </div>
+                                      )}
+
+                                      {/* Labour Total */}
+                                      {subItem.labour.length > 0 && (
+                                        <div className="mt-3 pt-3 border-t border-orange-200 flex justify-between items-center bg-orange-50/50 rounded-lg px-3 py-2">
+                                          <span className="text-sm font-bold text-orange-900">Labour Total:</span>
+                                          <span className="text-sm font-bold text-orange-900">
+                                            AED {subItem.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                          </span>
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
                                 </div>
-                                <span className="w-24 px-2 py-1 text-xs text-gray-600 bg-gray-50 rounded text-center font-medium">
-                                  AED {(labour.hours * labour.rate_per_hour).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => removeLabour(item.id, labour.id)}
-                                  className="p-1 text-red-500 hover:bg-red-50 rounded"
-                                  disabled={isSubmitting}
-                                  aria-label="Remove labour"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
                               </div>
-                              );
-                            })}
+                            ))}
+
+                            {item.sub_items.length === 0 && (
+                              <div className="text-center py-4 text-xs text-gray-500">
+                                No sub items added yet. Click "+ Add Sub Item" to add one.
+                              </div>
+                            )}
                           </div>
                         </div>
 
-                        {/* Overhead, Profit & Discount for this item - Green Theme */}
+                        {/* Miscellaneous, Overhead & Profit Margin, Discount */}
                         <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
                           <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
                             <div className="p-1.5 bg-white rounded shadow-sm">
                               <Calculator className="w-4 h-4 text-green-600" />
                             </div>
-                            Overheads, Profit & Discount
+                            Miscellaneous, Overhead & Profit Margin, Discount
                           </h5>
                           <div className={`grid gap-4 ${useMaterialVAT[item.id] ? 'grid-cols-3' : 'grid-cols-4'}`}>
                           <div>
-                            <label htmlFor={`overhead-${item.id}`} className="block text-xs text-gray-600 mb-1">Overhead %</label>
+                            <label htmlFor={`overhead-${item.id}`} className="block text-xs text-gray-600 mb-1">Miscellaneous %</label>
                             <div className="flex items-center gap-2">
                               <input
                                 id={`overhead-${item.id}`}
@@ -1826,7 +2077,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             </div>
                           </div>
                           <div>
-                            <label htmlFor={`profit-${item.id}`} className="block text-xs text-gray-600 mb-1">Profit Margin %</label>
+                            <label htmlFor={`profit-${item.id}`} className="block text-xs text-gray-600 mb-1">Overhead & Profit Margin %</label>
                             <div className="flex items-center gap-2">
                               <input
                                 id={`profit-${item.id}`}
@@ -1892,54 +2143,55 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           </div>
                         </div>
 
-                        {/* Cost Summary - Neutral like PM */}
+                        {/* Cost Summary for this Item */}
                         {(() => {
                           const costs = calculateItemCost(item);
                           return (
-                            <div className="mt-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                              <h5 className="text-sm font-bold text-gray-900 mb-3">Cost Summary</h5>
-                              <div className="space-y-1 text-xs">
+                            <div className="mt-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl p-4 border border-blue-200 shadow-md">
+                              <div className="flex items-center gap-2 mb-3">
+                                <div className="p-1.5 bg-white rounded shadow-sm">
+                                  <Calculator className="w-4 h-4 text-blue-600" />
+                                </div>
+                                <h5 className="text-sm font-bold text-blue-900">Cost Summary - {item.item_name || 'Item'}</h5>
+                              </div>
+                              <div className="bg-white rounded-lg p-3 space-y-1 text-sm">
                                 <div className="flex justify-between py-1">
-                                  <span className="text-gray-600">Materials:</span>
-                                  <span className="font-semibold text-gray-900">AED {costs.materialCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="text-gray-600">Sub Items Total:</span>
+                                  <span className="font-medium text-gray-900">AED {costs.itemTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex justify-between py-1">
-                                  <span className="text-gray-600">Labour:</span>
-                                  <span className="font-semibold text-gray-900">AED {costs.labourCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="text-gray-600">Miscellaneous ({item.overhead_percentage}%):</span>
+                                  <span className="font-medium text-gray-900">AED {costs.miscellaneousAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex justify-between py-1">
-                                  <span className="text-gray-600">Overhead:</span>
-                                  <span className="font-semibold text-gray-900">AED {costs.overheadAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="text-gray-600">Overhead & Profit ({item.profit_margin_percentage}%):</span>
+                                  <span className="font-medium text-gray-900">AED {costs.overheadProfitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex justify-between py-1">
-                                  <span className="text-gray-600">Profit:</span>
-                                  <span className="font-semibold text-gray-900">AED {costs.profitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="text-gray-700 font-medium">Subtotal:</span>
+                                  <span className="font-semibold text-gray-900">AED {costs.beforeDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
-                                {(item.discount_percentage || 0) > 0 && (
-                                  <div className="flex justify-between py-1">
-                                    <span className="text-red-600">Discount ({item.discount_percentage}%):</span>
-                                    <span className="font-semibold text-red-600">- AED {costs.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                  </div>
-                                )}
-                                {costs.vatAmount > 0 && (
-                                  <div className="flex justify-between py-1">
-                                    <span className="text-gray-600">
-                                      {useMaterialVAT[item.id]
-                                        ? 'VAT (Per Material):'
-                                        : `VAT (${item.vat_percentage}%):`
-                                      }
-                                    </span>
-                                    <span className="font-semibold text-gray-900">AED {costs.vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                  </div>
-                                )}
-                                <div className="flex justify-between font-bold border-t border-gray-300 pt-2 mt-2">
-                                  <span className="text-gray-900">Total Price:</span>
-                                  <span className="text-gray-900">AED {costs.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <div className="flex justify-between py-1">
+                                  <span className="text-red-600">Discount ({item.discount_percentage}%):</span>
+                                  <span className="font-medium text-red-600">- AED {costs.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                </div>
+                                <div className="flex justify-between py-1">
+                                  <span className="text-gray-700 font-medium">After Discount:</span>
+                                  <span className="font-semibold text-gray-900">AED {costs.afterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                </div>
+                                <div className="flex justify-between py-1">
+                                  <span className="text-gray-600">VAT ({item.vat_percentage}%):</span>
+                                  <span className="font-medium text-gray-900">AED {costs.vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                </div>
+                                <div className="flex justify-between py-2 border-t border-gray-200 pt-2 mt-2">
+                                  <span className="text-gray-900 font-bold">Item Total:</span>
+                                  <span className="text-lg font-bold text-gray-900">AED {costs.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                               </div>
                             </div>
                           );
                         })()}
+
                       </div>
                     )}
                   </div>
@@ -1955,22 +2207,29 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               )}
             </div>
 
-            {/* Total Summary */}
-            {items.length > 0 && (
-              <div className="mt-6 bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-5 border-2 border-green-300 shadow-xl">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-xl shadow-md">
-                      <Calculator className="w-6 h-6 text-green-600" />
+            {/* Grand Total Summary */}
+            {items.length > 0 && (() => {
+              const grandTotal = items.reduce((total, item) => {
+                const costs = calculateItemCost(item);
+                return total + costs.sellingPrice;
+              }, 0);
+
+              return (
+                <div className="mt-6 bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-6 border-2 border-green-300 shadow-xl">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-xl shadow-md">
+                        <Calculator className="w-6 h-6 text-green-600" />
+                      </div>
+                      <h3 className="text-xl font-bold text-green-900">Total Project Value</h3>
                     </div>
-                    <h3 className="text-lg font-bold text-green-900">Total Project Value</h3>
+                    <div className="text-3xl font-bold text-green-900">
+                      AED {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </div>
                   </div>
-                  <span className="text-3xl font-bold text-green-900">
-                    AED {calculateTotalCost().toLocaleString()}
-                  </span>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
 
           {/* Footer - Match TD Style */}

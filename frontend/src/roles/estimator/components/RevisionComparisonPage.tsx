@@ -5,6 +5,8 @@ import { estimatorService } from '../services/estimatorService';
 import { toast } from 'sonner';
 import { BOQ } from '../types';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import InternalRevisionTimeline from './InternalRevisionTimeline';
 
 interface RevisionComparisonPageProps {
   boqList: BOQ[];
@@ -276,8 +278,17 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Project Selection Dropdown */}
-      <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200">
+      <Tabs defaultValue="client" className="w-full">
+        {/* Sub-navigation Tabs */}
+        <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
+          <TabsTrigger value="client">Client Revisions</TabsTrigger>
+          <TabsTrigger value="internal">Internal Revisions</TabsTrigger>
+        </TabsList>
+
+        {/* Client Revisions Tab */}
+        <TabsContent value="client" className="space-y-6">
+          {/* Project Selection Dropdown */}
+          <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200">
         <h3 className="text-lg font-bold text-gray-900 mb-4">Select Project to View Revisions</h3>
 
         {/* Search/Select Dropdown */}
@@ -1051,6 +1062,13 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
           )}
         </div>
       )}
+        </TabsContent>
+
+        {/* Internal Revisions Tab */}
+        <TabsContent value="internal">
+          <InternalRevisionTimeline />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

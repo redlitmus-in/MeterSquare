@@ -235,6 +235,131 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
     return master_sub_item_ids
 
 
+def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
+    """Add sub-items to master tables with their materials and labour"""
+    master_sub_item_ids = []
+
+    for sub_item in sub_items:
+        sub_item_name = sub_item.get("sub_item_name")
+
+        # Check if sub-item already exists for this master item
+        master_sub_item = MasterSubItem.query.filter_by(
+            item_id=master_item_id,
+            sub_item_name=sub_item_name
+        ).first()
+
+        if not master_sub_item:
+            master_sub_item = MasterSubItem(
+                item_id=master_item_id,
+                sub_item_name=sub_item_name,
+                description=sub_item.get("description"),
+                location=sub_item.get("location"),
+                brand=sub_item.get("brand"),
+                unit=sub_item.get("unit"),
+                quantity=sub_item.get("quantity"),
+                per_unit_cost=sub_item.get("per_unit_cost"),
+                sub_item_total_cost=sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None,
+                created_by=created_by
+            )
+            db.session.add(master_sub_item)
+            db.session.flush()
+        else:
+            # Update existing sub-item
+            master_sub_item.description = sub_item.get("description")
+            master_sub_item.location = sub_item.get("location")
+            master_sub_item.brand = sub_item.get("brand")
+            master_sub_item.unit = sub_item.get("unit")
+            master_sub_item.quantity = sub_item.get("quantity")
+            master_sub_item.per_unit_cost = sub_item.get("per_unit_cost")
+            master_sub_item.sub_item_total_cost = sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None
+            db.session.flush()
+
+        master_sub_item_ids.append(master_sub_item.sub_item_id)
+
+        # Add materials for this sub-item
+        for mat_data in sub_item.get("materials", []):
+            material_name = mat_data.get("material_name")
+            unit_price = mat_data.get("unit_price", 0.0)
+
+            master_material = MasterMaterial.query.filter_by(material_name=material_name).first()
+            if not master_material:
+                master_material = MasterMaterial(
+                    material_name=material_name,
+                    item_id=master_item_id,
+                    sub_item_id=master_sub_item.sub_item_id,
+                    default_unit=mat_data.get("unit", "nos"),
+                    current_market_price=unit_price,
+                    created_by=created_by
+                )
+                db.session.add(master_material)
+                db.session.flush()
+            else:
+                # Update existing material
+                if master_material.sub_item_id is None:
+                    master_material.sub_item_id = master_sub_item.sub_item_id
+                if master_material.item_id is None:
+                    master_material.item_id = master_item_id
+                master_material.current_market_price = unit_price
+                master_material.default_unit = mat_data.get("unit", "nos")
+                db.session.flush()
+
+        # Add labour for this sub-item
+        for labour_data in sub_item.get("labour", []):
+            labour_role = labour_data.get("labour_role")
+            rate_per_hour = labour_data.get("rate_per_hour", 0.0)
+            hours = labour_data.get("hours", 0.0)
+            labour_amount = float(rate_per_hour) * float(hours)
+
+            master_labour = MasterLabour.query.filter_by(labour_role=labour_role).first()
+            if not master_labour:
+                master_labour = MasterLabour(
+                    labour_role=labour_role,
+                    item_id=master_item_id,
+                    sub_item_id=master_sub_item.sub_item_id,
+                    work_type="contract",
+                    hours=float(hours),
+                    rate_per_hour=float(rate_per_hour),
+                    amount=labour_amount,
+                    created_by=created_by
+                )
+                db.session.add(master_labour)
+                db.session.flush()
+            else:
+                # Update existing labour
+                if master_labour.sub_item_id is None:
+                    master_labour.sub_item_id = master_sub_item.sub_item_id
+                if master_labour.item_id is None:
+                    master_labour.item_id = master_item_id
+                master_labour.hours = float(hours)
+                master_labour.rate_per_hour = float(rate_per_hour)
+                master_labour.amount = labour_amount
+                db.session.flush()
+
+    return master_sub_item_ids
+
+
+def clean_numeric_value(value):
+    """Clean numeric values that might come wrapped in {source, parsedValue} objects"""
+    if value is None:
+        return 0.0
+
+    # If it's a dict with parsedValue, extract it
+    if isinstance(value, dict):
+        if 'parsedValue' in value:
+            return float(value['parsedValue']) if value['parsedValue'] is not None else 0.0
+        if 'source' in value:
+            try:
+                return float(value['source'])
+            except (ValueError, TypeError):
+                return 0.0
+        return 0.0
+
+    # If it's already a number, return it
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return 0.0
+
 def create_boq():
     """Create a new BOQ using master tables and JSON storage"""
     try:
@@ -461,42 +586,238 @@ def create_boq():
                 for idx, processed_sub_item in enumerate(processed_sub_items):
                     if idx < len(master_sub_item_ids):
                         processed_sub_item["master_sub_item_id"] = master_sub_item_ids[idx]
+            # Check if item has sub_items structure (new format)
+            has_sub_items = "sub_items" in item_data and item_data.get("sub_items")
 
-            # Process materials for BOQ details (from all_materials with master IDs)
-            item_materials = []
-            for i, mat_data in enumerate(all_materials):
-                quantity = mat_data.get("quantity", 1.0)
-                unit_price = mat_data.get("unit_price", 0.0)
-                total_price = quantity * unit_price
-                vat_pct = mat_data.get("vat_percentage", 0.0)
+            if has_sub_items:
+                # NEW FORMAT: Process items with sub_items structure
+                sub_items_list = []
+                item_total = 0
+                materials_count = 0
+                labour_count = 0
 
-                item_materials.append({
-                    "master_material_id": master_material_ids[i] if i < len(master_material_ids) else None,
-                    "material_name": mat_data.get("material_name"),
+                # Get item-level percentages (apply to all sub-items)
+                miscellaneous_percentage = clean_numeric_value(item_data.get("overhead_percentage", 10.0))
+                overhead_profit_percentage = clean_numeric_value(item_data.get("profit_margin_percentage", 15.0))
+                discount_percentage = clean_numeric_value(item_data.get("discount_percentage", 0.0))
+                vat_percentage = clean_numeric_value(item_data.get("vat_percentage", 0.0))
+
+                for sub_item_data in item_data.get("sub_items", []):
+                    # Get sub-item fields
+                    sub_item_quantity = clean_numeric_value(sub_item_data.get("quantity", 1.0))
+                    sub_item_unit = sub_item_data.get("unit", "nos")
+                    sub_item_rate = clean_numeric_value(sub_item_data.get("rate", 0.0))
+
+                    # Calculate sub-item total
+                    sub_item_base_total = sub_item_quantity * sub_item_rate
+
+                    # Apply overhead and profit
+                    miscellaneous_amount = (sub_item_base_total * miscellaneous_percentage) / 100
+                    overhead_profit_amount = (sub_item_base_total * overhead_profit_percentage) / 100
+                    before_discount = sub_item_base_total + miscellaneous_amount + overhead_profit_amount
+
+                    # Apply discount
+                    discount_amount = (before_discount * discount_percentage) / 100 if discount_percentage > 0 else 0.0
+                    after_discount = before_discount - discount_amount
+
+                    # Apply VAT
+                    vat_amount = (after_discount * vat_percentage) / 100 if vat_percentage > 0 else 0.0
+                    sub_item_selling_price = after_discount + vat_amount
+
+                    # Process materials for this sub-item
+                    sub_item_materials = []
+                    materials_cost = 0
+                    for mat_data in sub_item_data.get("materials", []):
+                        quantity = clean_numeric_value(mat_data.get("quantity", 1.0))
+                        unit_price = clean_numeric_value(mat_data.get("unit_price", 0.0))
+                        total_price = quantity * unit_price
+                        materials_cost += total_price
+
+                        sub_item_materials.append({
+                            "material_name": mat_data.get("material_name"),
+                            "location": mat_data.get("location", ""),
+                            "brand": mat_data.get("brand", ""),
+                            "description": mat_data.get("description", ""),
+                            "quantity": quantity,
+                            "unit": mat_data.get("unit", "nos"),
+                            "unit_price": unit_price,
+                            "total_price": total_price,
+                            "vat_percentage": clean_numeric_value(mat_data.get("vat_percentage", 0.0))
+                        })
+
+                    # Process labour for this sub-item
+                    sub_item_labour = []
+                    labour_cost = 0
+                    for labour_data_item in sub_item_data.get("labour", []):
+                        hours = clean_numeric_value(labour_data_item.get("hours", 0.0))
+                        rate_per_hour = clean_numeric_value(labour_data_item.get("rate_per_hour", 0.0))
+                        total_cost_labour = hours * rate_per_hour
+                        labour_cost += total_cost_labour
+
+                        sub_item_labour.append({
+                            "labour_role": labour_data_item.get("labour_role"),
+                            "hours": hours,
+                            "rate_per_hour": rate_per_hour,
+                            "total_cost": total_cost_labour
+                        })
+
+                    # Create sub-item JSON
+                    sub_item_json = {
+                        "sub_item_name": sub_item_data.get("sub_item_name"),
+                        "description": sub_item_data.get("description", ""),
+                        "location": sub_item_data.get("location", ""),
+                        "brand": sub_item_data.get("brand", ""),
+                        "quantity": sub_item_quantity,
+                        "unit": sub_item_unit,
+                        "rate": sub_item_rate,
+                        "base_total": sub_item_base_total,
+                        "miscellaneous_percentage": miscellaneous_percentage,
+                        "miscellaneous_amount": miscellaneous_amount,
+                        "overhead_profit_percentage": overhead_profit_percentage,
+                        "overhead_profit_amount": overhead_profit_amount,
+                        "before_discount": before_discount,
+                        "discount_percentage": discount_percentage,
+                        "discount_amount": discount_amount,
+                        "after_discount": after_discount,
+                        "vat_percentage": vat_percentage,
+                        "vat_amount": vat_amount,
+                        "selling_price": sub_item_selling_price,
+                        "materials_cost": materials_cost,
+                        "labour_cost": labour_cost,
+                        "materials": sub_item_materials,
+                        "labour": sub_item_labour
+                    }
+
+                    sub_items_list.append(sub_item_json)
+                    item_total += sub_item_selling_price
+                    materials_count += len(sub_item_materials)
+                    labour_count += len(sub_item_labour)
+
+                # Create parent item with sub_items
+                item_json = {
+                    "item_name": item_data.get("item_name"),
+                    "description": item_data.get("description", ""),
+                    "work_type": item_data.get("work_type", "contract"),
+                    "has_sub_items": True,
+                    "sub_items": sub_items_list,
+                    "total_selling_price": item_total,
+                    "miscellaneous_percentage": miscellaneous_percentage,
+                    "overhead_profit_percentage": overhead_profit_percentage,
+                    "discount_percentage": discount_percentage,
+                    "vat_percentage": vat_percentage,
+                    "total_materials": materials_count,
+                    "total_labour": labour_count
+                }
+
+                boq_items.append(item_json)
+                total_boq_cost += item_total
+                total_materials += materials_count
+                total_labour += labour_count
+
+            else:
+                # EXISTING FORMAT: Original flat structure (backwards compatible)
+                materials_data = item_data.get("materials", [])
+                labour_data = item_data.get("labour", [])
+
+                # Get item-level fields (quantity, unit, rate) - CLEAN wrapped values
+                item_quantity = clean_numeric_value(item_data.get("quantity", 1.0))
+                item_unit = item_data.get("unit", "nos")
+                item_rate = clean_numeric_value(item_data.get("rate", 0.0))
+
+                # Calculate item total from quantity × rate
+                item_total = item_quantity * item_rate
+
+                # Use provided percentages from frontend - CLEAN wrapped values
+                miscellaneous_percentage = clean_numeric_value(item_data.get("overhead_percentage", 10.0))
+                overhead_profit_percentage = clean_numeric_value(item_data.get("profit_margin_percentage", 15.0))
+
+                # NEW CALCULATION: miscellaneous and overhead & profit are based on ITEM TOTAL (qty × rate), NOT subitems
+                miscellaneous_amount = (item_total * miscellaneous_percentage) / 100
+                overhead_profit_amount = (item_total * overhead_profit_percentage) / 100
+                before_discount = item_total + miscellaneous_amount + overhead_profit_amount
+
+                # Handle discount after miscellaneous and overhead - CLEAN wrapped values
+                discount_percentage = clean_numeric_value(item_data.get("discount_percentage", 0.0))
+                discount_amount = 0.0
+                after_discount = before_discount
+
+                if discount_percentage > 0:
+                    discount_amount = (before_discount * discount_percentage) / 100
+                    after_discount = before_discount - discount_amount
+
+                # Handle VAT on final amount - CLEAN wrapped values
+                vat_percentage = clean_numeric_value(item_data.get("vat_percentage", 0.0))
+                vat_amount = 0.0
+                final_selling_price = after_discount
+
+                if vat_percentage > 0:
+                    vat_amount = (after_discount * vat_percentage) / 100
+                    final_selling_price = after_discount + vat_amount
+
+                # Also calculate sub-items cost for reference - CLEAN wrapped values
+                materials_cost = 0
+                for mat_data in materials_data:
+                    quantity = clean_numeric_value(mat_data.get("quantity", 1.0))
+                    unit_price = clean_numeric_value(mat_data.get("unit_price", 0.0))
+                    materials_cost += quantity * unit_price
+
+                labour_cost = 0
+                for labour_data_item in labour_data:
+                    hours = clean_numeric_value(labour_data_item.get("hours", 0.0))
+                    rate_per_hour = clean_numeric_value(labour_data_item.get("rate_per_hour", 0.0))
+                    labour_cost += hours * rate_per_hour
+
+                sub_items_total = materials_cost + labour_cost
+
+                # Now add to master tables with calculated values
+                master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
+                    item_data.get("item_name"),
+                    item_data.get("description"),
+                    item_data.get("work_type", "contract"),
+                    materials_data,
+                    labour_data,
+                    created_by,
+                    miscellaneous_percentage,
+                    miscellaneous_amount,
+                    overhead_profit_percentage,
+                    overhead_profit_amount
+                )
+
+                # Process materials for BOQ details (from all_materials with master IDs) - CLEAN wrapped values
+                item_materials = []
+                for i, mat_data in enumerate(all_materials):
+                    quantity = clean_numeric_value(mat_data.get("quantity", 1.0))
+                    unit_price = clean_numeric_value(mat_data.get("unit_price", 0.0))
+                    total_price = quantity * unit_price
+                    vat_pct = clean_numeric_value(mat_data.get("vat_percentage", 0.0))
+
+                    item_materials.append({
+                        "master_material_id": master_material_ids[i] if i < len(master_material_ids) else None,
+                        "material_name": mat_data.get("material_name"),
                     "location": mat_data.get("location", ""),
                     "brand": mat_data.get("brand", ""),
-                    "description": mat_data.get("description", ""),
-                    "quantity": quantity,
-                    "unit": mat_data.get("unit", "nos"),
-                    "unit_price": unit_price,
-                    "total_price": total_price,
-                    "vat_percentage": vat_pct if vat_pct else 0.0
-                })
+                        "description": mat_data.get("description", ""),
+                        "quantity": quantity,
+                        "unit": mat_data.get("unit", "nos"),
+                        "unit_price": unit_price,
+                        "total_price": total_price,
+                        "vat_percentage": vat_pct
+                    })
 
-            # Process labour for BOQ details (from all_labour with master IDs)
-            item_labour = []
-            for i, labour_data_item in enumerate(all_labour):
-                hours = labour_data_item.get("hours", 0.0)
-                rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
-                total_cost_labour = hours * rate_per_hour
+                # Process labour for BOQ details (from all_labour with master IDs) - CLEAN wrapped values
+                item_labour = []
+                for i, labour_data_item in enumerate(all_labour):
+                    hours = clean_numeric_value(labour_data_item.get("hours", 0.0))
+                    rate_per_hour = clean_numeric_value(labour_data_item.get("rate_per_hour", 0.0))
+                    total_cost_labour = hours * rate_per_hour
 
-                item_labour.append({
-                    "master_labour_id": master_labour_ids[i] if i < len(master_labour_ids) else None,
-                    "labour_role": labour_data_item.get("labour_role"),
-                    "hours": hours,
-                    "rate_per_hour": rate_per_hour,
-                    "total_cost": total_cost_labour
-                })
+                    item_labour.append({
+                        "master_labour_id": master_labour_ids[i] if i < len(master_labour_ids) else None,
+                        "labour_role": labour_data_item.get("labour_role"),
+                        "hours": hours,
+                        "rate_per_hour": rate_per_hour,
+                        "total_cost": total_cost_labour
+                    })
 
             # Create item JSON structure
             item_json = {
@@ -531,11 +852,39 @@ def create_boq():
                 "materials": item_materials,
                 "labour": item_labour
             }
+                # Create item JSON structure
+                item_json = {
+                    "master_item_id": master_item_id,
+                    "item_name": item_data.get("item_name"),
+                    "description": item_data.get("description"),
+                    "quantity": item_quantity,
+                    "unit": item_unit,
+                    "rate": item_rate,
+                    "work_type": item_data.get("work_type", "contract"),
+                    "has_sub_items": False,
+                    "item_total": item_total,  # Quantity × Rate (this is the base for misc and overhead)
+                    "miscellaneous_percentage": miscellaneous_percentage,
+                    "miscellaneous_amount": miscellaneous_amount,
+                    "overhead_profit_percentage": overhead_profit_percentage,
+                    "overhead_profit_amount": overhead_profit_amount,
+                    "before_discount": before_discount,  # Item total + misc + overhead&profit
+                    "discount_percentage": discount_percentage if discount_percentage is not None else 0.0,
+                    "discount_amount": discount_amount,
+                    "after_discount": after_discount,
+                    "vat_percentage": vat_percentage if vat_percentage is not None else 0.0,
+                    "vat_amount": vat_amount,
+                    "selling_price": final_selling_price,  # Final price after VAT
+                    "totalMaterialCost": materials_cost,  # For reference only
+                    "totalLabourCost": labour_cost,  # For reference only
+                    "subItemsTotal": sub_items_total,  # For reference only
+                    "materials": item_materials,
+                    "labour": item_labour
+                }
 
-            boq_items.append(item_json)
-            total_boq_cost += final_selling_price  # Add final price after discount to total
-            total_materials += len(item_materials)
-            total_labour += len(item_labour)
+                boq_items.append(item_json)
+                total_boq_cost += final_selling_price  # Add final price after discount to total
+                total_materials += len(item_materials)
+                total_labour += len(item_labour)
 
         # Get preliminaries from request data
         preliminaries = data.get("preliminaries", {})
