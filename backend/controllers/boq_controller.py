@@ -2472,56 +2472,136 @@ def delete_boq(boq_id):
         log.error(f"Error deleting BOQ: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-def get_item_material(item_id):
+def get_sub_item_material(sub_item_id):
+    """Get all materials for a given sub_item_id"""
     try:
-        boq_item = MasterItem.query.filter_by(item_id=item_id).first()
-        if not boq_item:
-            return jsonify({"error": "BOQ Item not found"}), 404
+        # Check if sub-item exists
+        boq_sub_item = MasterSubItem.query.filter_by(
+            sub_item_id=sub_item_id,
+            is_deleted=False
+        ).first()
+
+        if not boq_sub_item:
+            return jsonify({"error": "BOQ Sub-Item not found"}), 404
+
+        # Get parent item details
+        boq_item = MasterItem.query.filter_by(
+            item_id=boq_sub_item.item_id,
+            is_deleted=False
+        ).first()
+
+        # Get all materials for this sub-item
+        boq_materials = MasterMaterial.query.filter_by(
+            sub_item_id=sub_item_id,
+            is_active=True
+        ).all()
 
         material_details = []
-        boq_materials = MasterMaterial.query.filter_by(item_id=boq_item.item_id).all()
+        total_material_cost = 0
+
         for material in boq_materials:
+            material_cost = (material.current_market_price or 0)
+            total_material_cost += material_cost
+
             material_details.append({
                 "material_id": material.material_id,
-                "item_id" : material.item_id,
-                "item_name" : boq_item.item_name,
-                "material_name": material.material_name if hasattr(material, "material_name") else None,
-                "current_market_price": material.current_market_price if hasattr(material, "current_market_price") else None,
-                "default_unit": material.default_unit if material else None
+                "material_name": material.material_name,
+                "item_id": material.item_id,
+                "sub_item_id": material.sub_item_id,
+                "item_name": boq_item.item_name if boq_item else None,
+                "sub_item_name": boq_sub_item.sub_item_name,
+                "default_unit": material.default_unit,
+                "current_market_price": material.current_market_price,
+                "is_active": material.is_active,
+                "created_at": material.created_at.isoformat() if material.created_at else None,
+                "created_by": material.created_by
             })
 
         return jsonify({
+            "sub_item_id": boq_sub_item.sub_item_id,
+            "sub_item_name": boq_sub_item.sub_item_name,
+            "item_id": boq_sub_item.item_id,
+            "item_name": boq_item.item_name if boq_item else None,
+            "location": boq_sub_item.location,
+            "brand": boq_sub_item.brand,
+            "materials_count": len(material_details),
+            "total_material_cost": total_material_cost,
             "materials": material_details
         }), 200
 
     except Exception as e:
-        log.error(f"Error fetching material: {str(e)}")
+        log.error(f"Error fetching materials for sub_item {sub_item_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
-def get_item_labours(item_id):
+def get_sub_item_labours(sub_item_id):
+    """Get all labour for a given sub_item_id"""
     try:
-        boq_item = MasterItem.query.filter_by(item_id=item_id).first()
-        if not boq_item:
-            return jsonify({"error": "BOQ Item not found"}), 404
+        # Check if sub-item exists
+        boq_sub_item = MasterSubItem.query.filter_by(
+            sub_item_id=sub_item_id,
+            is_deleted=False
+        ).first()
+
+        if not boq_sub_item:
+            return jsonify({"error": "BOQ Sub-Item not found"}), 404
+
+        # Get parent item details
+        boq_item = MasterItem.query.filter_by(
+            item_id=boq_sub_item.item_id,
+            is_deleted=False
+        ).first()
+
+        # Get all labour for this sub-item
+        boq_labours = MasterLabour.query.filter_by(
+            sub_item_id=sub_item_id,
+            is_active=True
+        ).all()
 
         labour_details = []
-        boq_labours = MasterLabour.query.filter_by(item_id=boq_item.item_id).all()
+        total_labour_cost = 0
+        total_hours = 0
+
         for labour in boq_labours:
+            labour_amount = labour.amount or 0
+            labour_hours = labour.hours or 0
+            total_labour_cost += labour_amount
+            total_hours += labour_hours
+
             labour_details.append({
                 "labour_id": labour.labour_id,
-                "item_id" : labour.item_id,
-                "item_name" : boq_item.item_name,
-                "labour_role" : labour.labour_role,
-                "amount" : labour.amount,
-                "work_type": labour.work_type if labour else None,
+                "labour_role": labour.labour_role,
+                "item_id": labour.item_id,
+                "sub_item_id": labour.sub_item_id,
+                "item_name": boq_item.item_name if boq_item else None,
+                "sub_item_name": boq_sub_item.sub_item_name,
+                "work_type": labour.work_type,
+                "hours": labour.hours,
+                "rate_per_hour": labour.rate_per_hour,
+                "amount": labour.amount,
+                "is_active": labour.is_active,
+                "created_at": labour.created_at.isoformat() if labour.created_at else None,
+                "created_by": labour.created_by
             })
 
         return jsonify({
+            "sub_item_id": boq_sub_item.sub_item_id,
+            "sub_item_name": boq_sub_item.sub_item_name,
+            "item_id": boq_sub_item.item_id,
+            "item_name": boq_item.item_name if boq_item else None,
+            "location": boq_sub_item.location,
+            "brand": boq_sub_item.brand,
+            "labours_count": len(labour_details),
+            "total_hours": total_hours,
+            "total_labour_cost": total_labour_cost,
             "labours": labour_details
         }), 200
 
     except Exception as e:
-        log.error(f"Error fetching material: {str(e)}")
+        log.error(f"Error fetching labour for sub_item {sub_item_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 def get_all_item():
@@ -3072,4 +3152,98 @@ def get_estimator_dashboard():
         }), 200
     except Exception as e:
         log.error(f"Error fetching Estimator dashboard: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+def get_sub_item(item_id):
+    """Get all sub-items for a given item_id with their materials and labour"""
+    try:
+        # Check if the item exists
+        boq_item = MasterItem.query.filter_by(item_id=item_id, is_deleted=False).first()
+        if not boq_item:
+            return jsonify({"error": "BOQ Item not found"}), 404
+
+        # Get all sub-items for this item
+        boq_sub_items = MasterSubItem.query.filter_by(
+            item_id=item_id,
+            is_deleted=False
+        ).all()
+
+        sub_item_details = []
+        for sub_item in boq_sub_items:
+            # Get materials for this sub-item
+            materials = MasterMaterial.query.filter_by(
+                sub_item_id=sub_item.sub_item_id,
+                is_active=True
+            ).all()
+
+            material_list = []
+            for material in materials:
+                material_list.append({
+                    "material_id": material.material_id,
+                    "material_name": material.material_name,
+                    "location": None,  # Location is stored in sub_item, not material
+                    "brand": None,  # Brand is stored in sub_item, not material
+                    "unit": material.default_unit,
+                    "current_market_price": material.current_market_price,
+                    "is_active": material.is_active
+                })
+
+            # Get labour for this sub-item
+            labours = MasterLabour.query.filter_by(
+                sub_item_id=sub_item.sub_item_id,
+                is_active=True
+            ).all()
+
+            labour_list = []
+            for labour in labours:
+                labour_list.append({
+                    "labour_id": labour.labour_id,
+                    "labour_role": labour.labour_role,
+                    "work_type": labour.work_type,
+                    "hours": labour.hours,
+                    "rate_per_hour": labour.rate_per_hour,
+                    "amount": labour.amount,
+                    "is_active": labour.is_active
+                })
+
+            # Calculate total costs
+            total_materials_cost = sum(
+                (mat.current_market_price or 0) for mat in materials
+            )
+            total_labour_cost = sum(
+                (lab.amount or 0) for lab in labours
+            )
+
+            sub_item_details.append({
+                "sub_item_id": sub_item.sub_item_id,
+                "item_id": sub_item.item_id,
+                "sub_item_name": sub_item.sub_item_name,
+                "description": sub_item.description,
+                "location": sub_item.location,
+                "brand": sub_item.brand,
+                "unit": sub_item.unit,
+                "quantity": sub_item.quantity,
+                "per_unit_cost": sub_item.per_unit_cost,
+                "sub_item_total_cost": sub_item.sub_item_total_cost,
+                "materials": material_list,
+                "labour": labour_list,
+                "total_materials_cost": total_materials_cost,
+                "total_labour_cost": total_labour_cost,
+                "total_cost": total_materials_cost + total_labour_cost,
+                "created_at": sub_item.created_at.isoformat() if sub_item.created_at else None,
+                "created_by": sub_item.created_by
+            })
+
+        return jsonify({
+            "item_id": boq_item.item_id,
+            "item_name": boq_item.item_name,
+            "item_description": boq_item.description,
+            "sub_items_count": len(sub_item_details),
+            "sub_items": sub_item_details
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching sub-items for item {item_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
