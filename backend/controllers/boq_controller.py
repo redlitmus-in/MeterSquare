@@ -10,36 +10,53 @@ from models.role import Role
 
 log = get_logger()
 
-def add_to_master_tables(item_name, description, work_type, materials_data, labour_data, created_by, overhead_percentage=None, overhead_amount=None, profit_margin_percentage=None, profit_margin_amount=None):
+def add_to_master_tables(item_name, description, work_type, materials_data, labour_data, created_by, miscellaneous_percentage=None, miscellaneous_amount=None, overhead_profit_percentage=None, overhead_profit_amount=None, discount_percentage=None, discount_amount=None, vat_percentage=None, vat_amount=None, unit=None, quantity=None, per_unit_cost=None, total_amount=None, item_total_cost=None):
     """Add items, materials, and labour to master tables if they don't exist"""
     master_item_id = None
     master_material_ids = []
     master_labour_ids = []
-
     # Add to master items (prevent duplicates)
     master_item = MasterItem.query.filter_by(item_name=item_name).first()
     if not master_item:
         master_item = MasterItem(
             item_name=item_name,
             description=description,
-            overhead_percentage=overhead_percentage,
-            overhead_amount=overhead_amount,
-            profit_margin_percentage=profit_margin_percentage,
-            profit_margin_amount=profit_margin_amount,
+            unit=unit,
+            quantity=quantity,
+            per_unit_cost=per_unit_cost,
+            total_amount=total_amount,
+            item_total_cost=item_total_cost,
+            miscellaneous_percentage=miscellaneous_percentage,
+            miscellaneous_amount=miscellaneous_amount,
+            overhead_profit_percentage=overhead_profit_percentage,
+            overhead_profit_amount=overhead_profit_amount,
+            discount_percentage=discount_percentage,
+            discount_amount=discount_amount,
+            vat_percentage=vat_percentage,
+            vat_amount=vat_amount,
             created_by=created_by
         )
         db.session.add(master_item)
         db.session.flush()
     else:
-        # If item exists, update description and overhead/profit values
+        # If item exists, update description, cost fields, and miscellaneous/profit values
         if description:
             master_item.description = description
 
-        # Always update overhead and profit values with latest calculations
-        master_item.overhead_percentage = overhead_percentage
-        master_item.overhead_amount = overhead_amount
-        master_item.profit_margin_percentage = profit_margin_percentage
-        master_item.profit_margin_amount = profit_margin_amount
+        # Always update all fields with latest values (even if None)
+        master_item.unit = unit
+        master_item.quantity = quantity
+        master_item.per_unit_cost = per_unit_cost
+        master_item.total_amount = total_amount
+        master_item.item_total_cost = item_total_cost
+        master_item.miscellaneous_percentage = miscellaneous_percentage
+        master_item.miscellaneous_amount = miscellaneous_amount
+        master_item.overhead_profit_percentage = overhead_profit_percentage
+        master_item.overhead_profit_amount = overhead_profit_amount
+        master_item.discount_percentage = discount_percentage
+        master_item.discount_amount = discount_amount
+        master_item.vat_percentage = vat_percentage
+        master_item.vat_amount = vat_amount
 
         db.session.flush()
     master_item_id = master_item.item_id
@@ -115,6 +132,109 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
     return master_item_id, master_material_ids, master_labour_ids
 
 
+def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
+    """Add sub-items to master tables with their materials and labour"""
+    master_sub_item_ids = []
+
+    for sub_item in sub_items:
+        sub_item_name = sub_item.get("sub_item_name")
+
+        # Check if sub-item already exists for this master item
+        master_sub_item = MasterSubItem.query.filter_by(
+            item_id=master_item_id,
+            sub_item_name=sub_item_name
+        ).first()
+
+        if not master_sub_item:
+            master_sub_item = MasterSubItem(
+                item_id=master_item_id,
+                sub_item_name=sub_item_name,
+                description=sub_item.get("description"),
+                location=sub_item.get("location"),
+                brand=sub_item.get("brand"),
+                unit=sub_item.get("unit"),
+                quantity=sub_item.get("quantity"),
+                per_unit_cost=sub_item.get("per_unit_cost"),
+                sub_item_total_cost=sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None,
+                created_by=created_by
+            )
+            db.session.add(master_sub_item)
+            db.session.flush()
+        else:
+            # Update existing sub-item
+            master_sub_item.description = sub_item.get("description")
+            master_sub_item.location = sub_item.get("location")
+            master_sub_item.brand = sub_item.get("brand")
+            master_sub_item.unit = sub_item.get("unit")
+            master_sub_item.quantity = sub_item.get("quantity")
+            master_sub_item.per_unit_cost = sub_item.get("per_unit_cost")
+            master_sub_item.sub_item_total_cost = sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None
+            db.session.flush()
+
+        master_sub_item_ids.append(master_sub_item.sub_item_id)
+
+        # Add materials for this sub-item
+        for mat_data in sub_item.get("materials", []):
+            material_name = mat_data.get("material_name")
+            unit_price = mat_data.get("unit_price", 0.0)
+
+            master_material = MasterMaterial.query.filter_by(material_name=material_name).first()
+            if not master_material:
+                master_material = MasterMaterial(
+                    material_name=material_name,
+                    item_id=master_item_id,
+                    sub_item_id=master_sub_item.sub_item_id,
+                    default_unit=mat_data.get("unit", "nos"),
+                    current_market_price=unit_price,
+                    created_by=created_by
+                )
+                db.session.add(master_material)
+                db.session.flush()
+            else:
+                # Update existing material
+                if master_material.sub_item_id is None:
+                    master_material.sub_item_id = master_sub_item.sub_item_id
+                if master_material.item_id is None:
+                    master_material.item_id = master_item_id
+                master_material.current_market_price = unit_price
+                master_material.default_unit = mat_data.get("unit", "nos")
+                db.session.flush()
+
+        # Add labour for this sub-item
+        for labour_data in sub_item.get("labour", []):
+            labour_role = labour_data.get("labour_role")
+            rate_per_hour = labour_data.get("rate_per_hour", 0.0)
+            hours = labour_data.get("hours", 0.0)
+            labour_amount = float(rate_per_hour) * float(hours)
+
+            master_labour = MasterLabour.query.filter_by(labour_role=labour_role).first()
+            if not master_labour:
+                master_labour = MasterLabour(
+                    labour_role=labour_role,
+                    item_id=master_item_id,
+                    sub_item_id=master_sub_item.sub_item_id,
+                    work_type="contract",
+                    hours=float(hours),
+                    rate_per_hour=float(rate_per_hour),
+                    amount=labour_amount,
+                    created_by=created_by
+                )
+                db.session.add(master_labour)
+                db.session.flush()
+            else:
+                # Update existing labour
+                if master_labour.sub_item_id is None:
+                    master_labour.sub_item_id = master_sub_item.sub_item_id
+                if master_labour.item_id is None:
+                    master_labour.item_id = master_item_id
+                master_labour.hours = float(hours)
+                master_labour.rate_per_hour = float(rate_per_hour)
+                master_labour.amount = labour_amount
+                db.session.flush()
+
+    return master_sub_item_ids
+
+
 def create_boq():
     """Create a new BOQ using master tables and JSON storage"""
     try:
@@ -152,84 +272,199 @@ def create_boq():
         total_labour = 0
 
         for item_data in data.get("items", []):
-            materials_data = item_data.get("materials", [])
-            labour_data = item_data.get("labour", [])
+            # Get item-level materials and labour
+            item_level_materials = item_data.get("materials", [])
+            item_level_labour = item_data.get("labour", [])
 
-            # First calculate costs to get overhead and profit amounts
+            # Get sub-items
+            sub_items = item_data.get("sub_items", [])
+
+            # Extract item-level cost fields from payload
+            item_unit = item_data.get("unit")
+            item_quantity = item_data.get("quantity")
+            item_per_unit_cost = item_data.get("per_unit_cost")
+            item_rate = item_data.get("rate", item_per_unit_cost)  # rate is alias for per_unit_cost
+            item_total_amount = item_data.get("total_amount")  # Accept total_amount from payload
+
+            # Use rate if per_unit_cost not provided
+            if item_per_unit_cost is None and item_rate is not None:
+                item_per_unit_cost = item_rate
+
+            # Calculate base cost from materials and labour (item-level + sub-items)
             materials_cost = 0
-            for mat_data in materials_data:
+            labour_cost = 0
+
+            # Collect ALL materials from item-level
+            all_materials = []
+            for mat_data in item_level_materials:
+                all_materials.append(mat_data)
                 quantity = mat_data.get("quantity", 1.0)
                 unit_price = mat_data.get("unit_price", 0.0)
                 materials_cost += quantity * unit_price
 
-            labour_cost = 0
-            for labour_data_item in labour_data:
+            # Collect ALL labour from item-level
+            all_labour = []
+            for labour_data_item in item_level_labour:
+                all_labour.append(labour_data_item)
                 hours = labour_data_item.get("hours", 0.0)
                 rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
                 labour_cost += hours * rate_per_hour
 
-            # Calculate item costs
-            base_cost = materials_cost + labour_cost
+            # Process sub-items and collect their materials and labour
+            processed_sub_items = []
+            for sub_item_idx, sub_item in enumerate(sub_items):
+                sub_item_materials = []
+                sub_item_labour = []
+                sub_item_materials_cost = 0
+                sub_item_labour_cost = 0
 
-            # Use provided percentages, default to 10% overhead and 15% profit if not provided
-            overhead_percentage = item_data.get("overhead_percentage", 10.0)
-            profit_margin_percentage = item_data.get("profit_margin_percentage", 15.0)
+                # Process sub-item materials
+                for mat_data in sub_item.get("materials", []):
+                    all_materials.append(mat_data)
+                    quantity = mat_data.get("quantity", 1.0)
+                    unit_price = mat_data.get("unit_price", 0.0)
+                    total_price = quantity * unit_price
+                    materials_cost += total_price
+                    sub_item_materials_cost += total_price
 
-            # Calculate amounts based on percentages
-            overhead_amount = (base_cost * overhead_percentage) / 100
-            total_cost = base_cost + overhead_amount
+                    sub_item_materials.append({
+                        "material_name": mat_data.get("material_name"),
+                        "location": mat_data.get("location", ""),
+                        "brand": mat_data.get("brand", ""),
+                        "description": mat_data.get("description", ""),
+                        "quantity": quantity,
+                        "unit": mat_data.get("unit", "nos"),
+                        "unit_price": unit_price,
+                        "total_price": total_price
+                    })
 
-            # Profit margin should be calculated on cost AFTER overhead
-            profit_margin_amount = (total_cost * profit_margin_percentage) / 100
-            selling_price_before_discount = total_cost + profit_margin_amount
+                # Process sub-item labour
+                for labour_data_item in sub_item.get("labour", []):
+                    all_labour.append(labour_data_item)
+                    hours = labour_data_item.get("hours", 0.0)
+                    rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
+                    total_cost_labour = hours * rate_per_hour
+                    labour_cost += total_cost_labour
+                    sub_item_labour_cost += total_cost_labour
 
-            # Handle discount (can be null or a value)
-            discount_percentage = item_data.get("discount_percentage")
-            discount_amount = 0.0
-            after_discount = selling_price_before_discount
+                    sub_item_labour.append({
+                        "labour_role": labour_data_item.get("labour_role"),
+                        "hours": hours,
+                        "rate_per_hour": rate_per_hour,
+                        "total_cost": total_cost_labour
+                    })
 
-            if discount_percentage is not None and discount_percentage > 0:
-                discount_amount = (selling_price_before_discount * float(discount_percentage)) / 100
-                after_discount = selling_price_before_discount - discount_amount
+                # Store processed sub-item
+                processed_sub_items.append({
+                    "sub_item_name": sub_item.get("sub_item_name"),
+                    "description": sub_item.get("description", ""),
+                    "location": sub_item.get("location", ""),
+                    "brand": sub_item.get("brand", ""),
+                    "unit": sub_item.get("unit"),
+                    "quantity": sub_item.get("quantity"),
+                    "per_unit_cost": sub_item.get("per_unit_cost"),
+                    "materials": sub_item_materials,
+                    "labour": sub_item_labour,
+                    "total_materials_cost": sub_item_materials_cost,
+                    "total_labour_cost": sub_item_labour_cost,
+                    "total_cost": sub_item_materials_cost + sub_item_labour_cost
+                })
 
-            # Handle VAT - check if using per-material VAT or item-level VAT
+            # Calculate base_cost from sub-items or from item-level quantity * rate
+            sub_items_base_cost = materials_cost + labour_cost
+
+            # Determine base cost: Priority: total_amount > (quantity * rate) > sub-items
+            item_total_cost_field = None
+            if item_total_amount is not None:
+                # Use total_amount directly from payload
+                base_cost = float(item_total_amount)
+                item_total_cost_field = float(item_total_amount)
+            elif item_quantity is not None and item_per_unit_cost is not None:
+                # Calculate from quantity * rate
+                item_total_cost_field = float(item_quantity) * float(item_per_unit_cost)
+                base_cost = item_total_cost_field
+            else:
+                # Use sub-items cost
+                base_cost = sub_items_base_cost
+                item_total_cost_field = sub_items_base_cost
+
+            # Get percentages and amounts from payload
+            miscellaneous_percentage = item_data.get("miscellaneous_percentage", 0.0)
+            overhead_profit_percentage = item_data.get("overhead_profit_percentage", 0.0)
+            discount_percentage = item_data.get("discount_percentage", 0.0)
             vat_percentage = item_data.get("vat_percentage", 0.0)
-            vat_amount = 0.0
-            final_selling_price = after_discount
 
-            # Check if any material has VAT percentage defined (per-material mode)
-            has_material_vat = any(mat.get("vat_percentage") is not None and mat.get("vat_percentage", 0) > 0 for mat in materials_data)
+            # Check if amounts are provided in payload, if yes use them, else calculate
+            if item_data.get("miscellaneous_amount") is not None:
+                miscellaneous_amount = float(item_data.get("miscellaneous_amount"))
+            else:
+                miscellaneous_amount = (base_cost * float(miscellaneous_percentage)) / 100 if miscellaneous_percentage else 0.0
 
-            if has_material_vat:
-                # Per-material VAT mode: Calculate VAT for each material
-                for mat_data in materials_data:
-                    mat_vat_pct = mat_data.get("vat_percentage", 0.0)
-                    if mat_vat_pct and mat_vat_pct > 0:
-                        mat_total = mat_data.get("quantity", 0) * mat_data.get("unit_price", 0)
-                        vat_amount += (mat_total * float(mat_vat_pct)) / 100
-                final_selling_price = after_discount + vat_amount
-            elif vat_percentage is not None and vat_percentage > 0:
-                # Item-level VAT mode: Apply single VAT to after-discount amount
-                vat_amount = (after_discount * float(vat_percentage)) / 100
-                final_selling_price = after_discount + vat_amount
+            cost_after_misc = base_cost + miscellaneous_amount
 
-            # Now add to master tables with calculated values
+            # Overhead profit amount
+            if item_data.get("overhead_profit_amount") is not None:
+                overhead_profit_amount = float(item_data.get("overhead_profit_amount"))
+            else:
+                overhead_profit_amount = (cost_after_misc * float(overhead_profit_percentage)) / 100 if overhead_profit_percentage else 0.0
+
+            # Total after adding overhead profit
+            total_cost = cost_after_misc + overhead_profit_amount
+            selling_price_before_discount = total_cost
+
+            # Discount amount
+            if item_data.get("discount_amount") is not None:
+                discount_amount = float(item_data.get("discount_amount"))
+            else:
+                discount_amount = (selling_price_before_discount * float(discount_percentage)) / 100 if discount_percentage else 0.0
+
+            after_discount = selling_price_before_discount - discount_amount
+
+            # VAT - Apply on the final amount after discount (based on after_discount amount)
+            if item_data.get("vat_amount") is not None:
+                # Use provided VAT amount
+                vat_amount = float(item_data.get("vat_amount"))
+            else:
+                # Calculate VAT on after_discount amount
+                vat_amount = (after_discount * float(vat_percentage)) / 100 if vat_percentage else 0.0
+
+            final_selling_price = after_discount + vat_amount
+            # Now add to master tables with calculated values (using ALL materials and labour)
             master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
                 item_data.get("item_name"),
                 item_data.get("description"),
                 item_data.get("work_type", "contract"),
-                materials_data,
-                labour_data,
+                all_materials,
+                all_labour,
                 created_by,
-                overhead_percentage,
-                overhead_amount,
-                profit_margin_percentage,
-                profit_margin_amount
+                miscellaneous_percentage,
+                miscellaneous_amount,
+                overhead_profit_percentage,
+                overhead_profit_amount,
+                discount_percentage,
+                discount_amount,
+                vat_percentage,
+                vat_amount,
+                unit=item_unit,
+                quantity=item_quantity,
+                per_unit_cost=item_per_unit_cost,
+                total_amount=item_total_amount,
+                item_total_cost=item_total_cost_field
             )
 
-            # Process materials for BOQ details
+            # Add sub-items to master tables (if any) and update processed_sub_items with master IDs
+            master_sub_item_ids = []
+            if sub_items:
+                master_sub_item_ids = add_sub_items_to_master_tables(master_item_id, sub_items, created_by)
+
+                # Add master_sub_item_id to each processed sub-item
+                for idx, processed_sub_item in enumerate(processed_sub_items):
+                    if idx < len(master_sub_item_ids):
+                        processed_sub_item["master_sub_item_id"] = master_sub_item_ids[idx]
+
+            # Process materials for BOQ details (from all_materials with master IDs)
             item_materials = []
-            for i, mat_data in enumerate(materials_data):
+            for i, mat_data in enumerate(all_materials):
                 quantity = mat_data.get("quantity", 1.0)
                 unit_price = mat_data.get("unit_price", 0.0)
                 total_price = quantity * unit_price
@@ -238,6 +473,8 @@ def create_boq():
                 item_materials.append({
                     "master_material_id": master_material_ids[i] if i < len(master_material_ids) else None,
                     "material_name": mat_data.get("material_name"),
+                    "location": mat_data.get("location", ""),
+                    "brand": mat_data.get("brand", ""),
                     "description": mat_data.get("description", ""),
                     "quantity": quantity,
                     "unit": mat_data.get("unit", "nos"),
@@ -246,9 +483,9 @@ def create_boq():
                     "vat_percentage": vat_pct if vat_pct else 0.0
                 })
 
-            # Process labour for BOQ details
+            # Process labour for BOQ details (from all_labour with master IDs)
             item_labour = []
-            for i, labour_data_item in enumerate(labour_data):
+            for i, labour_data_item in enumerate(all_labour):
                 hours = labour_data_item.get("hours", 0.0)
                 rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
                 total_cost_labour = hours * rate_per_hour
@@ -267,11 +504,18 @@ def create_boq():
                 "item_name": item_data.get("item_name"),
                 "description": item_data.get("description"),
                 "work_type": item_data.get("work_type", "contract"),
+                "unit": item_unit,
+                "quantity": item_quantity,
+                "rate": item_per_unit_cost,
+                "per_unit_cost": item_per_unit_cost,
+                "total_amount": item_total_amount,
+                "item_total_cost": item_total_cost_field,
                 "base_cost": base_cost,
-                "overhead_percentage": overhead_percentage,
-                "overhead_amount": overhead_amount,
-                "profit_margin_percentage": profit_margin_percentage,
-                "profit_margin_amount": profit_margin_amount,
+                "sub_items_cost": sub_items_base_cost,
+                "miscellaneous_percentage": miscellaneous_percentage,
+                "miscellaneous_amount": miscellaneous_amount,
+                "overhead_profit_percentage": overhead_profit_percentage,
+                "overhead_profit_amount": overhead_profit_amount,
                 "discount_percentage": discount_percentage if discount_percentage is not None else 0.0,
                 "discount_amount": discount_amount,
                 "vat_percentage": vat_percentage if vat_percentage is not None else 0.0,
@@ -283,6 +527,7 @@ def create_boq():
                 "totalLabourCost": labour_cost,
                 "actualItemCost": base_cost,
                 "estimatedSellingPrice": final_selling_price,  # Use final_selling_price after discount and VAT
+                "sub_items": processed_sub_items,  # Add sub-items to JSON
                 "materials": item_materials,
                 "labour": item_labour
             }
@@ -349,8 +594,6 @@ def create_boq():
     except Exception as e:
         db.session.rollback()
         log.error(f"Error creating BOQ: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Error: {str(e)}"}), 500
 
 def get_boq(boq_id):
@@ -525,12 +768,10 @@ def get_boq(boq_id):
         elif boq_status == 'new_purchase_approved':
             # All roles can view when new purchase is approved
             can_view_new_purchase = True
-            log.info(f"BOQ {boq_id} - Access GRANTED: All roles can view 'new_purchase_approved'")
         elif boq_status == 'new_purchase_rejected':
             # Only Project Manager can view when new purchase is rejected
             if user_role in ['projectmanager', 'project_manager']:
                 can_view_new_purchase = True
-                log.info(f"BOQ {boq_id} - Access GRANTED: PM can view 'new_purchase_rejected'")
             else:
                 log.info(f"BOQ {boq_id} - Access DENIED: Only PM can view 'new_purchase_rejected', current role: '{user_role}'")
         else:
@@ -794,7 +1035,6 @@ def get_boq(boq_id):
                     'percentage': round(overhead_percentage, 2)
                 }
         except Exception as e:
-            log.warning(f"Could not load change request data for BOQ {boq_id}: {str(e)}")
             # Don't fail the entire request if change request data fails
             pass
 
@@ -967,7 +1207,7 @@ def update_boq(boq_id):
             # Keep the current status (don't change workflow statuses)
             pass
         else:
-            boq.status = "draft"
+            boq.status = boq.status
 
         # Update last modified by
         boq.last_modified_by = user_name
@@ -1352,8 +1592,6 @@ def update_boq(boq_id):
 
         db.session.commit()
 
-        log.info(f"✓ BOQ Update completed - BOQ ID: {boq_id}, Version: {next_version}, User: {user_name}, Role: {user_role}")
-
         # Return updated BOQ
         return jsonify({
             "message": "BOQ Updated successfully",
@@ -1379,8 +1617,6 @@ def revision_boq(boq_id):
         user_id = current_user.get('user_id') if current_user else None
         user_role = current_user.get('role', '').lower() if current_user else ''
         user_name = current_user.get('full_name') or current_user.get('username') or 'Unknown' if current_user else 'Unknown'
-
-        log.info(f"BOQ Revision Request - User role: {user_role}, User name: {user_name}, User ID: {user_id}, BOQ ID: {boq_id}")
 
         boq = BOQ.query.filter_by(boq_id=boq_id).first()
 
@@ -1435,7 +1671,6 @@ def revision_boq(boq_id):
 
         if is_revision and current_status in statuses_that_start_new_revision:
             boq.revision_number = (boq.revision_number or 0) + 1
-            log.info(f"📊 Revision number incremented: {(boq.revision_number or 0) - 1} → {boq.revision_number} (Starting new revision from status: {current_status})")
 
         new_revision_number = boq.revision_number or 0
 
@@ -1452,7 +1687,7 @@ def revision_boq(boq_id):
             # Keep the current status (don't change workflow statuses)
             pass
         else:
-            boq.status = "draft"
+            boq.status = boq.status
 
         # Update last modified by and timestamp
         boq.last_modified_by = user_name
@@ -1478,7 +1713,6 @@ def revision_boq(boq_id):
             created_by=user_name
         )
         db.session.add(boq_detail_history)
-        log.info(f"✓ BOQ history created - Version: {next_version}, User: {user_name} ({user_role})")
         # If items are provided, update the JSON structure
         if "items" in data:
             # Use the same current user logic for BOQ details
@@ -1847,8 +2081,6 @@ def revision_boq(boq_id):
 
         db.session.commit()
 
-        log.info(f"✓ BOQ Revision completed successfully - BOQ ID: {boq_id}, Revision: {new_revision_number}, Version: {next_version}, User: {user_name}")
-
         # Return updated BOQ
         return jsonify({
             "message": "BOQ Revision created successfully",
@@ -1952,10 +2184,10 @@ def get_all_item():
                 "item_id": item.item_id,
                 "item_name": item.item_name,
                 "description": item.description,
-                "overhead_percentage": item.overhead_percentage,
-                "overhead_amount": item.overhead_amount,
-                "profit_margin_percentage": item.profit_margin_percentage,
-                "profit_margin_amount": item.profit_margin_amount
+                "miscellaneous_percentage": item.miscellaneous_percentage,
+                "miscellaneous_amount": item.miscellaneous_amount,
+                "overhead_profit_percentage": item.overhead_profit_percentage,
+                "overhead_profit_amount": item.overhead_profit_amount
             })
 
         return jsonify({
@@ -1973,11 +2205,6 @@ def send_boq_email(boq_id):
         user_id = current_user.get('user_id') if current_user else None
         user_role = current_user.get('role', '').lower() if current_user else ''
         user_name = current_user.get('full_name') or current_user.get('username') or 'Unknown' if current_user else 'Unknown'
-        print("user_name:",user_name)
-        print("user_role:",user_role)
-        # Debug logging to verify current user
-        log.info(f"send_boq_email called by user_id={user_id}, role={user_role}, name={user_name}")
-        log.debug(f"Full user context: {current_user}")
         # Get BOQ data
         boq = BOQ.query.filter_by(boq_id=boq_id).first()
         if not boq:
@@ -2048,9 +2275,6 @@ def send_boq_email(boq_id):
                 # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, or Revision_Approved) or a new submission
                 is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved"]
                 new_status = "Pending_Revision" if is_revision else "Pending"
-
-                log.info(f"BOQ {boq_id} - Current status before email: {boq.status}, is_revision: {is_revision}, new_status: {new_status}")
-
                 boq.email_sent = True
                 boq.status = new_status
                 boq.last_modified_by = user_name
@@ -2197,8 +2421,6 @@ def send_boq_email(boq_id):
                 # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, or Revision_Approved) or a new submission
                 is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved"]
                 new_status = "Pending_Revision" if is_revision else "Pending"
-
-                log.info(f"BOQ {boq_id} (alternative method) - Current status before email: {boq.status}, is_revision: {is_revision}, new_status: {new_status}")
 
                 boq.email_sent = True
                 boq.status = new_status
@@ -2501,6 +2723,4 @@ def get_estimator_dashboard():
         }), 200
     except Exception as e:
         log.error(f"Error fetching Estimator dashboard: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500

@@ -257,16 +257,13 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                         </tr>
                       </thead>
                       <tbody>
-                        {item.materials.map((mat: any, mIdx: number) => mat.planned && (
+                        {item.materials
+                          .filter((mat: any) => mat.planned && !mat.is_from_change_request)
+                          .map((mat: any, mIdx: number) => (
                           <tr key={mIdx} className="border-t border-gray-100">
                             <td className="py-2 px-3 text-gray-700">
                               <div className="flex items-center gap-2">
                                 <span>{mat.sub_item_name || mat.material_name}</span>
-                                {mat.is_from_change_request && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-200">
-                                    NEW - CR #{mat.change_request_id}
-                                  </span>
-                                )}
                               </div>
                             </td>
                             <td className="py-2 px-3 text-right font-medium text-gray-900">
@@ -707,15 +704,12 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   </div>
                   <div className="text-right">
                     <p className="text-xs text-gray-600 font-semibold mb-1 uppercase">
-                      {data.summary.actual_total > data.summary.planned_total ? 'Extra Spent' :
-                       data.summary.actual_total < data.summary.planned_total ? 'Amount Saved' : 'On Budget'}
+                      {data.summary.status === 'on_budget' ? 'ON BUDGET' : data.summary.status === 'under_budget' ? 'UNDER BUDGET' : 'OVER BUDGET'}
                     </p>
                     <p className={`text-3xl font-bold ${
-                      data.summary.actual_total > data.summary.planned_total ? 'text-red-600' :
-                      data.summary.actual_total < data.summary.planned_total ? 'text-green-600' :
-                      'text-gray-900'
+                      (data.summary.total_actual_profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'
                     }`}>
-                      {formatCurrency(Math.abs(data.summary.actual_total - data.summary.planned_total))}
+                      AED{(data.summary.total_actual_profit || 0).toFixed(2)}
                     </p>
                   </div>
                 </div>

@@ -2,7 +2,7 @@ from flask import request, jsonify, g
 from sqlalchemy.exc import SQLAlchemyError
 from config.db import db
 from models.change_request import ChangeRequest
-from models.boq import BOQ, BOQDetails, BOQHistory, MaterialPurchaseTracking
+from models.boq import *
 from models.project import Project
 from models.user import User
 from config.logging import get_logger
@@ -627,72 +627,188 @@ def approve_change_request(cr_id):
             boq_json = boq_details.boq_details or {}
             existing_items = boq_json.get('items', [])
 
-            # Add materials as a new item entry
+            # Add materials as sub-items to the existing item (not as new item)
             materials = change_request.materials_data or []
 
-            # Create a new item for the extra materials
-            new_item = {
-                'item_name': f'Extra Materials - CR #{change_request.cr_id}',
-                'description': change_request.justification,
-                'work_type': 'extra_materials',
-                'materials': materials,
-                'labour': [],
-                'totalMaterialCost': change_request.materials_total_cost,
-                'totalLabourCost': 0,
-                'base_cost': change_request.materials_total_cost,
-                'overhead_percentage': change_request.original_overhead_percentage,
-                'overhead_amount': change_request.overhead_consumed,
-                'profit_margin_percentage': change_request.original_profit_percentage,
-                'profit_margin_amount': change_request.profit_impact,
-                'total_cost': change_request.materials_total_cost + change_request.overhead_consumed,
-                'selling_price': change_request.materials_total_cost + change_request.overhead_consumed + change_request.profit_impact,
-                'change_request_id': change_request.cr_id,  # Link back to change request
-                'is_extra_purchase': True  # Flag for identification
-            }
+            # Find the item to add materials to
+            target_item = None
+            item_id_str = str(change_request.item_id) if change_request.item_id else None
 
-            # Append new item
-            existing_items.append(new_item)
+            if item_id_str:
+                # Try to find the item by master_item_id or generated ID
+                for idx, item in enumerate(existing_items):
+                    # Check master_item_id
+                    if str(item.get('master_item_id', '')) == item_id_str:
+                        target_item = item
+                        break
+                    # Check generated ID format (item_boqid_index)
+                    generated_id = f"item_{change_request.boq_id}_{idx + 1}"
+                    if generated_id == item_id_str:
+                        target_item = item
+                        break
+
+            # If no target item found, create new item (fallback)
+            if not target_item:
+                new_item = {
+                    'item_name': f'Extra Materials - CR #{change_request.cr_id}',
+                    'description': change_request.justification,
+                    'work_type': 'extra_materials',
+                    'materials': [],
+                    'labour': [],
+                    'totalMaterialCost': 0,
+                    'totalLabourCost': 0,
+                    'base_cost': 0,
+                    'overhead_percentage': change_request.original_overhead_percentage or 10,
+                    'overhead_amount': 0,
+                    'profit_margin_percentage': change_request.original_profit_percentage or 15,
+                    'profit_margin_amount': 0,
+                    'total_cost': 0,
+                    'selling_price': 0
+                }
+                existing_items.append(new_item)
+                target_item = new_item
+                log.info(f"CR #{cr_id}: No target item found, created new item")
+            else:
+                log.info(f"CR #{cr_id}: Adding materials to existing item '{target_item.get('item_name')}'")
+
+            # Add each material as a sub-item with special marking
+            existing_materials = target_item.get('materials', [])
+
+            for material in materials:
+                # Mark this material as from change request with planned_quantity = 0
+                new_material = {
+                    'material_name': material.get('material_name'),
+                    'master_material_id': material.get('master_material_id'),
+                    'quantity': material.get('quantity', 0),
+                    'unit': material.get('unit', 'nos'),
+                    'unit_price': material.get('unit_price', 0),
+                    'total_price': material.get('total_price', 0),
+                    'is_from_change_request': True,
+                    'change_request_id': change_request.cr_id,
+                    'planned_quantity': 0,  # KEY: This marks it as unplanned
+                    'planned_unit_price': 0,
+                    'planned_total_price': 0,
+                    'justification': change_request.justification
+                }
+                existing_materials.append(new_material)
+
+            target_item['materials'] = existing_materials
+
+            # DON'T recalculate totals - keep original planned amounts
+            # The comparison view will show the variance
+            # Only flag that this item has change request materials
+            target_item['has_change_request_materials'] = True
 
             # Update BOQ details
             boq_json['items'] = existing_items
 
-            # Recalculate summary
-            total_material_cost = sum(item.get('totalMaterialCost', 0) for item in existing_items)
-            total_labour_cost = sum(item.get('totalLabourCost', 0) for item in existing_items)
-            total_cost = sum(item.get('selling_price', 0) for item in existing_items)
-
-            boq_json['summary'] = {
-                'total_items': len(existing_items),
-                'total_materials': sum(len(item.get('materials', [])) for item in existing_items),
-                'total_labour': sum(len(item.get('labour', [])) for item in existing_items),
-                'total_material_cost': total_material_cost,
-                'total_labour_cost': total_labour_cost,
-                'total_cost': total_cost,
-                'selling_price': total_cost
-            }
-
+            # DON'T recalculate summary totals - keep original planned amounts
+            # The BOQ comparison view will calculate actual costs dynamically
+            # Just update metadata
             boq_details.boq_details = boq_json
-            boq_details.total_cost = total_cost
-            boq_details.total_items = len(existing_items)
             boq_details.last_modified_by = approver_name
             boq_details.last_modified_at = datetime.utcnow()
 
             flag_modified(boq_details, 'boq_details')
+
+            # First, update or create materials in boq_material (MasterMaterial) table
+            from models.boq import MasterMaterial
+
+            # Extract numeric item_id from change_request.item_id
+            # change_request.item_id can be a string like "233" or need extraction from target_item
+            item_id_for_materials = None
+            if target_item and target_item.get('master_item_id'):
+                try:
+                    item_id_for_materials = int(target_item.get('master_item_id'))
+                    log.info(f"Using master_item_id {item_id_for_materials} from target item")
+                except (ValueError, TypeError):
+                    log.warning(f"Could not convert master_item_id to int: {target_item.get('master_item_id')}")
+
+            # Fallback: try to extract from change_request.item_id string
+            if not item_id_for_materials and change_request.item_id:
+                try:
+                    # Try direct conversion first
+                    item_id_for_materials = int(change_request.item_id)
+                    log.info(f"Converted change_request.item_id '{change_request.item_id}' to integer: {item_id_for_materials}")
+                except (ValueError, TypeError):
+                    # If it's a string like "item_233_1", extract the number
+                    if isinstance(change_request.item_id, str):
+                        parts = change_request.item_id.replace('item_', '').split('_')
+                        if parts and parts[0].isdigit():
+                            item_id_for_materials = int(parts[0])
+                            log.info(f"Extracted item_id {item_id_for_materials} from '{change_request.item_id}'")
+
+            for material in materials:
+                material_name = material.get('material_name')
+                unit_price = material.get('unit_price', 0)
+                unit = material.get('unit', 'nos')
+
+                # Check if material exists in boq_material table
+                existing_master_material = MasterMaterial.query.filter_by(
+                    material_name=material_name
+                ).first()
+
+                if existing_master_material:
+                    # Update existing material's price, unit, and item_id
+                    existing_master_material.current_market_price = unit_price
+                    existing_master_material.default_unit = unit
+                    if item_id_for_materials:
+                        existing_master_material.item_id = item_id_for_materials
+                    log.info(f"Updated MasterMaterial '{material_name}' (ID: {existing_master_material.material_id}) with price AED {unit_price}, item_id: {item_id_for_materials}")
+
+                    # Update material dict with the actual integer material_id
+                    material['master_material_id'] = existing_master_material.material_id
+                else:
+                    # Create new material in boq_material table
+                    new_master_material = MasterMaterial(
+                        material_name=material_name,
+                        item_id=item_id_for_materials,  # Store the extracted item_id
+                        default_unit=unit,
+                        current_market_price=unit_price,
+                        is_active=True,
+                        created_at=datetime.utcnow(),
+                        created_by=approver_name
+                    )
+                    db.session.add(new_master_material)
+                    db.session.flush()  # Get the new material_id
+                    log.info(f"Created new MasterMaterial '{material_name}' with ID {new_master_material.material_id}, item_id: {item_id_for_materials}")
+
+                    # Update material dict with the new integer master_material_id
+                    material['master_material_id'] = new_master_material.material_id
 
             # Create MaterialPurchaseTracking entries for each material in the change request
             # This marks them as "from change request" in the production management
             item_name = change_request.item_name or f'Extra Materials - CR #{change_request.cr_id}'
 
             for material in materials:
+                # Get master_material_id and convert to int if possible, otherwise None
+                master_mat_id = material.get('master_material_id')
+                if master_mat_id:
+                    try:
+                        master_mat_id = int(master_mat_id)
+                    except (ValueError, TypeError):
+                        # If it's a string like "mat_233_2_3" (generated ID), set to None
+                        master_mat_id = None
+
                 # Check if tracking entry already exists
-                existing_tracking = MaterialPurchaseTracking.query.filter_by(
-                    boq_id=change_request.boq_id,
-                    material_name=material.get('material_name'),
-                    master_material_id=material.get('master_material_id'),
-                    is_from_change_request=True,
-                    change_request_id=change_request.cr_id,
-                    is_deleted=False
-                ).first()
+                # For new materials (master_mat_id = None), only match by name
+                if master_mat_id:
+                    existing_tracking = MaterialPurchaseTracking.query.filter_by(
+                        boq_id=change_request.boq_id,
+                        material_name=material.get('material_name'),
+                        master_material_id=master_mat_id,
+                        is_from_change_request=True,
+                        change_request_id=change_request.cr_id,
+                        is_deleted=False
+                    ).first()
+                else:
+                    existing_tracking = MaterialPurchaseTracking.query.filter_by(
+                        boq_id=change_request.boq_id,
+                        material_name=material.get('material_name'),
+                        is_from_change_request=True,
+                        change_request_id=change_request.cr_id,
+                        is_deleted=False
+                    ).first()
 
                 if not existing_tracking:
                     # Create new tracking entry marked as from change request
@@ -701,7 +817,7 @@ def approve_change_request(cr_id):
                         project_id=change_request.project_id,
                         master_item_id=None,  # item_id in change_request is a string, but master_item_id expects integer
                         item_name=item_name,
-                        master_material_id=material.get('master_material_id'),
+                        master_material_id=master_mat_id,  # Use converted/validated ID
                         material_name=material.get('material_name'),
                         unit=material.get('unit', 'nos'),
                         purchase_history=[],

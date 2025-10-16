@@ -1,6 +1,6 @@
 from flask import request, jsonify, g
 from config.db import db
-from models.boq import MaterialPurchaseTracking, LabourTracking, BOQ, BOQDetails
+from models.boq import *
 from config.logging import get_logger
 from datetime import datetime
 from decimal import Decimal
@@ -32,8 +32,27 @@ def get_boq_planned_vs_actual(boq_id):
         boq_data = json.loads(boq_detail.boq_details) if isinstance(boq_detail.boq_details, str) else boq_detail.boq_details
 
         # Get actual material purchases from MaterialPurchaseTracking
-        actual_materials = MaterialPurchaseTracking.query.filter_by(
+        # Group by (master_item_id, master_material_id) and take only the latest entry for each group
+        from sqlalchemy import func
+
+        # Subquery to get the latest purchase_tracking_id for each (master_item_id, master_material_id) combination
+        latest_tracking_subquery = db.session.query(
+            MaterialPurchaseTracking.master_item_id,
+            MaterialPurchaseTracking.master_material_id,
+            MaterialPurchaseTracking.material_name,
+            func.max(MaterialPurchaseTracking.purchase_tracking_id).label('latest_id')
+        ).filter_by(
             boq_id=boq_id, is_deleted=False
+        ).group_by(
+            MaterialPurchaseTracking.master_item_id,
+            MaterialPurchaseTracking.master_material_id,
+            MaterialPurchaseTracking.material_name
+        ).subquery()
+
+        # Get only the latest MaterialPurchaseTracking records
+        actual_materials = db.session.query(MaterialPurchaseTracking).join(
+            latest_tracking_subquery,
+            MaterialPurchaseTracking.purchase_tracking_id == latest_tracking_subquery.c.latest_id
         ).all()
 
         # Get actual labour tracking from LabourTracking
@@ -120,8 +139,18 @@ def get_boq_planned_vs_actual(boq_id):
                             break
 
                 # Calculate planned total
-                planned_quantity = Decimal(str(planned_mat.get('quantity', 0)))
-                planned_unit_price = Decimal(str(planned_mat.get('unit_price', 0)))
+                # Check if this material is from a change request (planned_quantity: 0)
+                is_from_change_request = planned_mat.get('is_from_change_request', False)
+
+                if is_from_change_request:
+                    # Material from change request - use planned_quantity (should be 0)
+                    planned_quantity = Decimal(str(planned_mat.get('planned_quantity', 0)))
+                    planned_unit_price = Decimal(str(planned_mat.get('planned_unit_price', 0)))
+                else:
+                    # Regular planned material
+                    planned_quantity = Decimal(str(planned_mat.get('quantity', 0)))
+                    planned_unit_price = Decimal(str(planned_mat.get('unit_price', 0)))
+
                 planned_total = planned_quantity * planned_unit_price
 
                 # Calculate actual total from purchase history
@@ -199,13 +228,32 @@ def get_boq_planned_vs_actual(boq_id):
                     if actual_quantity > 0:
                         actual_avg_unit_price = actual_total / actual_quantity
 
+                # For change request materials without purchase_history yet,
+                # use the quantity/price from the CR data itself
+                if is_from_change_request and actual_quantity == 0:
+                    # Get actual values from the CR material data
+                    actual_quantity = Decimal(str(planned_mat.get('quantity', 0)))
+                    actual_avg_unit_price = Decimal(str(planned_mat.get('unit_price', 0)))
+                    actual_total = Decimal(str(planned_mat.get('total_price', 0)))
+
+                    # Add purchase history from CR
+                    purchase_history.append({
+                        "purchase_date": datetime.utcnow().isoformat(),
+                        "quantity": float(actual_quantity),
+                        "unit": planned_mat.get('unit'),
+                        "unit_price": float(actual_avg_unit_price),
+                        "total_price": float(actual_total),
+                        "purchased_by": f"Change Request #{planned_mat.get('change_request_id')}"
+                    })
+
                 planned_materials_total += planned_total
 
                 # For actual total: use actual if purchased, otherwise use planned (for pending items)
                 if actual_total > 0:
                     actual_materials_total += actual_total
-                else:
-                    # Material is pending - assume planned cost
+                elif not is_from_change_request:
+                    # Regular material is pending - assume planned cost
+                    # But don't add CR materials if no actual data
                     actual_materials_total += planned_total
 
                 # Calculate variances
@@ -215,15 +263,24 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # Determine status
                 material_status = "pending"
-                if actual_mat and actual_quantity > 0:
+                if actual_quantity > 0:
                     material_status = "completed"
+
+                # For change request materials, mark as "from_change_request"
+                if is_from_change_request:
+                    material_status = "from_change_request"
 
                 # Generate reason based on variance
                 variance_reason = None
                 variance_response = None
 
-                if actual_mat and actual_quantity > 0:
-                    if total_variance > 0:
+                if actual_quantity > 0:
+                    if is_from_change_request:
+                        # Special handling for CR materials
+                        variance_reason = f"Unplanned material from Change Request #{planned_mat.get('change_request_id')}: AED{float(total_variance):.2f}"
+                        if planned_mat.get('justification'):
+                            variance_reason += f" - {planned_mat.get('justification')}"
+                    elif total_variance > 0:
                         variance_reason = f"Cost overrun: AED{float(total_variance):.2f} over budget"
                         if price_variance > 0:
                             variance_reason += f" (Price increased by AED{float(price_variance):.2f})"
@@ -235,13 +292,12 @@ def get_boq_planned_vs_actual(boq_id):
                         variance_reason = "On budget"
 
                     # Response placeholder - can be updated later from tracking data
-                    variance_response = actual_mat.variance_response if hasattr(actual_mat, 'variance_response') else None
+                    if actual_mat:
+                        variance_response = actual_mat.variance_response if hasattr(actual_mat, 'variance_response') else None
 
                 # Check if this material is from a change request
-                is_from_cr = False
-                cr_id = None
-                if actual_mat:
-                    is_from_cr = getattr(actual_mat, 'is_from_change_request', False)
+                cr_id = planned_mat.get('change_request_id') if is_from_change_request else None
+                if actual_mat and not cr_id:
                     cr_id = getattr(actual_mat, 'change_request_id', None)
 
                 materials_comparison.append({
@@ -260,27 +316,54 @@ def get_boq_planned_vs_actual(boq_id):
                         "unit_price": float(actual_avg_unit_price),
                         "total": float(actual_total),
                         "purchase_history": purchase_history
-                    } if actual_mat and actual_quantity > 0 else None,
+                    } if actual_quantity > 0 else None,
                     "variance": {
                         "quantity": float(quantity_variance),
                         "unit": planned_mat.get('unit'),
                         "price": float(price_variance),
                         "total": float(total_variance),
-                        "percentage": (float(total_variance) / float(planned_total) * 100) if planned_total > 0 else 0,
-                        "status": "overrun" if total_variance > 0 else "saved" if total_variance < 0 else "on_budget"
-                    } if actual_mat and actual_quantity > 0 else None,
+                        "percentage": (float(total_variance) / float(planned_total) * 100) if planned_total > 0 else (100.0 if is_from_change_request else 0),
+                        "status": "unplanned" if is_from_change_request else ("overrun" if total_variance > 0 else "saved" if total_variance < 0 else "on_budget")
+                    } if actual_quantity > 0 else None,
                     "status": material_status,
                     "variance_reason": variance_reason,
                     "variance_response": variance_response,
-                    "is_from_change_request": is_from_cr,
+                    "is_from_change_request": is_from_change_request,
                     "change_request_id": cr_id,
-                    "source": "change_request" if is_from_cr else "original_boq"
+                    "source": "change_request" if is_from_change_request else "original_boq"
                 })
+
+            # Deduplicate change request materials with same master_material_id - keep only the latest
+            # Group materials by master_material_id for change request materials only
+            cr_materials_by_id = {}
+            non_cr_materials = []
+
+            for mat_comp in materials_comparison:
+                if mat_comp.get('is_from_change_request') and mat_comp.get('master_material_id'):
+                    mat_id = mat_comp.get('master_material_id')
+                    cr_id = mat_comp.get('change_request_id')
+
+                    # Keep the one with higher CR ID (latest change request)
+                    if mat_id not in cr_materials_by_id:
+                        cr_materials_by_id[mat_id] = mat_comp
+                    else:
+                        existing_cr_id = cr_materials_by_id[mat_id].get('change_request_id', 0)
+                        if cr_id and cr_id > existing_cr_id:
+                            # Replace with newer change request
+                            cr_materials_by_id[mat_id] = mat_comp
+                else:
+                    # Keep all non-CR materials as-is
+                    non_cr_materials.append(mat_comp)
+
+            # Rebuild materials_comparison with deduplicated CR materials
+            materials_comparison = non_cr_materials + list(cr_materials_by_id.values())
 
             # Check for unplanned materials (purchased but not in BOQ)
             # Build a set of all material IDs we've already processed
             processed_material_ids = set()
             processed_material_names = set()
+            # Track processed change request materials separately (cr_id + material_name)
+            processed_cr_materials = set()
 
             for planned_mat in planned_item.get('materials', []):
                 mat_id = planned_mat.get('master_material_id')
@@ -313,12 +396,24 @@ def get_boq_planned_vs_actual(boq_id):
                                 entry_mat_id = mat_entry.get('master_material_id')
                                 entry_mat_name = mat_entry.get('material_name', '').lower().strip()
 
+                                # Check if this unplanned material is from a change request
+                                is_from_cr = getattr(am, 'is_from_change_request', False)
+                                cr_id = getattr(am, 'change_request_id', None)
+
                                 # Check if this material is unplanned
                                 is_unplanned = True
-                                if entry_mat_id and entry_mat_id in processed_material_ids:
-                                    is_unplanned = False
-                                if entry_mat_name and entry_mat_name in processed_material_names:
-                                    is_unplanned = False
+
+                                # For change request materials, check by CR ID + name combination
+                                if is_from_cr and cr_id:
+                                    cr_material_key = f"{cr_id}_{entry_mat_name}"
+                                    if cr_material_key in processed_cr_materials:
+                                        is_unplanned = False
+                                else:
+                                    # For non-CR materials, check by ID or name as before
+                                    if entry_mat_id and entry_mat_id in processed_material_ids:
+                                        is_unplanned = False
+                                    if entry_mat_name and entry_mat_name in processed_material_names:
+                                        is_unplanned = False
 
                                 if is_unplanned:
                                     # Add this as an unplanned material
@@ -329,14 +424,16 @@ def get_boq_planned_vs_actual(boq_id):
                                     actual_materials_total += purchase_total
 
                                     # Mark as processed to avoid duplicates
-                                    if entry_mat_id:
-                                        processed_material_ids.add(entry_mat_id)
-                                    if entry_mat_name:
-                                        processed_material_names.add(entry_mat_name)
-
-                                    # Check if this unplanned material is from a change request
-                                    is_from_cr = getattr(am, 'is_from_change_request', False)
-                                    cr_id = getattr(am, 'change_request_id', None)
+                                    if is_from_cr and cr_id:
+                                        # Track CR materials by CR ID + name
+                                        cr_material_key = f"{cr_id}_{entry_mat_name}"
+                                        processed_cr_materials.add(cr_material_key)
+                                    else:
+                                        # Track non-CR materials by ID or name
+                                        if entry_mat_id:
+                                            processed_material_ids.add(entry_mat_id)
+                                        if entry_mat_name:
+                                            processed_material_names.add(entry_mat_name)
 
                                     materials_comparison.append({
                                         "material_name": mat_entry.get('material_name'),
@@ -484,11 +581,6 @@ def get_boq_planned_vs_actual(boq_id):
 
             # The selling price is FIXED - this is what we're selling to the client
             selling_price = Decimal(str(planned_item.get('selling_price', 0)))
-
-            # CONSUMPTION MODEL CALCULATION:
-            # Calculate ONLY the extra costs (overspend on planned items + unplanned items)
-            # These extra costs consume overhead and profit buffers
-
             # 1. Calculate extra costs from material/labour overruns and unplanned items
             extra_costs = Decimal('0')
 
@@ -499,8 +591,8 @@ def get_boq_planned_vs_actual(boq_id):
                     mat_variance = Decimal(str(mat_comp['variance'].get('total', 0)))
                     if mat_variance > 0:
                         extra_costs += mat_variance
-                elif mat_comp.get('status') == 'unplanned' and mat_comp.get('actual'):
-                    # Add full cost of unplanned materials
+                elif mat_comp.get('status') in ['unplanned', 'from_change_request'] and mat_comp.get('actual'):
+                    # Add full cost of unplanned materials or change request materials
                     unplanned_cost = Decimal(str(mat_comp['actual'].get('total', 0)))
                     extra_costs += unplanned_cost
 
@@ -651,6 +743,28 @@ def get_boq_planned_vs_actual(boq_id):
         total_planned_overhead = sum(float(item['planned']['overhead_amount']) for item in comparison['items'])
         total_actual_overhead = sum(float(item['actual']['overhead_amount']) for item in comparison['items'])
 
+        # Calculate total extra costs that exceeded buffers (losses)
+        total_extra_costs = Decimal('0')
+        total_overhead_consumed = Decimal('0')
+        total_profit_consumed = Decimal('0')
+
+        for item in comparison['items']:
+            consumption_flow = item.get('consumption_flow', {})
+            extra_costs = Decimal(str(consumption_flow.get('extra_costs', 0)))
+            overhead_consumed = Decimal(str(consumption_flow.get('overhead_consumed', 0)))
+            profit_consumed = Decimal(str(consumption_flow.get('profit_consumed', 0)))
+
+            total_extra_costs += extra_costs
+            total_overhead_consumed += overhead_consumed
+            total_profit_consumed += profit_consumed
+
+        # Calculate net loss (costs that exceeded all buffers)
+        total_loss_beyond_buffers = total_extra_costs - total_overhead_consumed - total_profit_consumed
+
+        # Adjust actual profit to account for losses beyond buffers
+        # If there are losses beyond buffers, reduce the actual profit further (can go negative)
+        adjusted_actual_profit = total_actual_profit - float(total_loss_beyond_buffers)
+
         comparison['summary'] = {
             "planned_total": float(total_planned),
             "actual_total": float(total_actual),
@@ -661,11 +775,15 @@ def get_boq_planned_vs_actual(boq_id):
             "total_actual_overhead": float(total_actual_overhead),
             "overhead_variance": float(abs(total_actual_overhead - total_planned_overhead)),
             "total_planned_profit": float(total_planned_profit),
-            "total_actual_profit": float(total_actual_profit),
-            "profit_variance": float(abs(total_actual_profit - total_planned_profit)),
-            "profit_status": "reduced" if total_actual_profit < total_planned_profit else "maintained" if total_actual_profit == total_planned_profit else "increased",
-            "total_overhead_plus_profit": float(total_actual_overhead + total_actual_profit),
-            "planned_overhead_plus_profit": float(total_planned_overhead + total_planned_profit)
+            "total_actual_profit": float(adjusted_actual_profit),  # Use adjusted profit
+            "profit_variance": float(abs(adjusted_actual_profit - total_planned_profit)),
+            "profit_status": "loss" if adjusted_actual_profit < 0 else ("reduced" if adjusted_actual_profit < total_planned_profit else "maintained" if adjusted_actual_profit == total_planned_profit else "increased"),
+            "total_overhead_plus_profit": float(total_actual_overhead + adjusted_actual_profit),
+            "planned_overhead_plus_profit": float(total_planned_overhead + total_planned_profit),
+            "total_extra_costs": float(total_extra_costs),
+            "total_overhead_consumed": float(total_overhead_consumed),
+            "total_profit_consumed": float(total_profit_consumed),
+            "total_loss_beyond_buffers": float(total_loss_beyond_buffers)
         }
 
         return jsonify(comparison), 200

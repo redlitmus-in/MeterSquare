@@ -29,14 +29,44 @@ class MasterItem(db.Model):
     item_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     item_name = db.Column(db.String(255), nullable=False, unique=True)
     description = db.Column(db.Text, nullable=True)
-    overhead_percentage = db.Column(db.Float, nullable=True)
-    overhead_amount = db.Column(db.Float, nullable=True)
-    profit_margin_percentage = db.Column(db.Float, nullable=True)
-    profit_margin_amount = db.Column(db.Float, nullable=True)
+    unit = db.Column(db.String(50), nullable=True)
+    quantity = db.Column(db.Float, nullable=True)
+    per_unit_cost = db.Column(db.Float, nullable=True)
+    total_amount = db.Column(db.Float, nullable=True)
+    item_total_cost = db.Column(db.Float, nullable=True)
+    miscellaneous_percentage = db.Column(db.Float, nullable=True)
+    miscellaneous_amount = db.Column(db.Float, nullable=True)
+    overhead_profit_percentage = db.Column(db.Float, nullable=True)
+    overhead_profit_amount = db.Column(db.Float, nullable=True)
+    discount_percentage = db.Column(db.Float, nullable=True)
+    discount_amount = db.Column(db.Float, nullable=True)
+    vat_percentage = db.Column(db.Float, nullable=True)
+    vat_amount = db.Column(db.Float, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
     is_deleted = db.Column(db.Boolean, default=False)
+
+
+class MasterSubItem(db.Model):
+    __tablename__ = "boq_sub_items"
+
+    sub_item_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("boq_items.item_id"), nullable=False)
+    sub_item_name = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    location = db.Column(db.String(255), nullable=True)
+    brand = db.Column(db.String(255), nullable=True)
+    unit = db.Column(db.String(50), nullable=True)
+    quantity = db.Column(db.Float, nullable=True)
+    per_unit_cost = db.Column(db.Float, nullable=True)
+    sub_item_total_cost = db.Column(db.Float, nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+    is_deleted = db.Column(db.Boolean, default=False)
+
+    item = db.relationship("MasterItem", backref=db.backref("sub_items", lazy=True))
 
 
 class MasterMaterial(db.Model):
@@ -45,11 +75,14 @@ class MasterMaterial(db.Model):
     material_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     material_name = db.Column(db.String(255), nullable=False, unique=True)
     item_id = db.Column(db.Integer)
+    sub_item_id = db.Column(db.Integer, db.ForeignKey("boq_sub_items.sub_item_id"), nullable=True)
     default_unit = db.Column(db.String(50), nullable=False)
     current_market_price = db.Column(db.Float, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
+
+    sub_item = db.relationship("MasterSubItem", backref=db.backref("materials", lazy=True))
 
 
 class MasterLabour(db.Model):
@@ -58,6 +91,7 @@ class MasterLabour(db.Model):
     labour_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     labour_role = db.Column(db.String(255), nullable=False, unique=True)
     item_id = db.Column(db.Integer)
+    sub_item_id = db.Column(db.Integer, db.ForeignKey("boq_sub_items.sub_item_id"), nullable=True)
     work_type = db.Column(db.String(100), nullable=True)  # Construction, Electrical, etc
     hours = db.Column(db.Float, nullable=True)  # Labour hours (changed to Float)
     rate_per_hour = db.Column(db.Float, nullable=True)  # Rate per hour (changed to Float)
@@ -65,6 +99,8 @@ class MasterLabour(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
+
+    sub_item = db.relationship("MasterSubItem", backref=db.backref("labour", lazy=True))
 
 
 # BOQ Details Table - Stores JSON data for each BOQ
