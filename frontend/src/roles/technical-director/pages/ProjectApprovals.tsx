@@ -27,6 +27,7 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQHistoryTimeline from '@/roles/estimator/components/BOQHistoryTimeline';
 import BOQRevisionHistory from '@/roles/estimator/components/BOQRevisionHistory';
 import TDRevisionComparisonPage from '@/roles/technical-director/components/TDRevisionComparisonPage';
+import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
 import {
   exportBOQToExcelInternal,
   exportBOQToExcelClient,
@@ -383,23 +384,48 @@ const ProjectApprovals: React.FC = () => {
           overhead_profit_percentage: ohProfitPercentage,
           overhead_profit_amount: ohProfitAmount,
           before_discount: beforeDiscount,
-          materials: item.materials?.map((mat: any) => ({
-            name: mat.material_name,
-            description: mat.description || '',
-            quantity: mat.quantity,
-            unit: mat.unit,
-            rate: mat.unit_price,
-            amount: mat.total_price,
-            vat_percentage: mat.vat_percentage || 0
-          })) || [],
-          labour: item.labour?.map((lab: any) => ({
-            type: lab.labour_role,
-            quantity: lab.hours,
-            unit: 'hrs',
-            rate: lab.rate_per_hour,
-            amount: lab.total_cost
-          })) || [],
-          laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+          sub_items: item.sub_items || [],
+          materials: item.sub_items?.length > 0
+            ? item.sub_items.flatMap((si: any) => si.materials?.map((mat: any) => ({
+                name: mat.material_name,
+                description: mat.description || '',
+                quantity: mat.quantity,
+                unit: mat.unit,
+                rate: mat.unit_price,
+                amount: mat.total_price,
+                vat_percentage: mat.vat_percentage || 0,
+                sub_item_name: si.scope || si.sub_item_name
+              })) || [])
+            : item.materials?.map((mat: any) => ({
+                name: mat.material_name,
+                description: mat.description || '',
+                quantity: mat.quantity,
+                unit: mat.unit,
+                rate: mat.unit_price,
+                amount: mat.total_price,
+                vat_percentage: mat.vat_percentage || 0
+              })) || [],
+          labour: item.sub_items?.length > 0
+            ? item.sub_items.flatMap((si: any) => si.labour?.map((lab: any) => ({
+                type: lab.labour_role,
+                quantity: lab.hours,
+                unit: 'hrs',
+                rate: lab.rate_per_hour,
+                amount: lab.total_cost || (lab.hours * lab.rate_per_hour),
+                sub_item_name: si.scope || si.sub_item_name
+              })) || [])
+            : item.labour?.map((lab: any) => ({
+                type: lab.labour_role,
+                quantity: lab.hours,
+                unit: 'hrs',
+                rate: lab.rate_per_hour,
+                amount: lab.total_cost
+              })) || [],
+          laborCost: item.sub_items?.length > 0
+            ? item.sub_items.reduce((sum: number, si: any) =>
+                sum + (si.labour?.reduce((lSum: number, l: any) =>
+                  lSum + (l.total_cost || (l.hours * l.rate_per_hour) || 0), 0) || 0), 0)
+            : item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
           estimatedSellingPrice: cleanValue(item.selling_price) || 0,
           overheadPercentage: miscPercentage, // Map miscellaneous to overhead for compatibility
           profitMarginPercentage: ohProfitPercentage, // Map overhead_profit to profitMargin for compatibility
@@ -455,23 +481,48 @@ const ProjectApprovals: React.FC = () => {
           overhead_profit_percentage: ohProfitPercentage,
           overhead_profit_amount: ohProfitAmount,
           before_discount: beforeDiscount,
-          materials: item.materials?.map((mat: any) => ({
-            name: mat.material_name,
-            description: mat.description || '',
-            quantity: mat.quantity,
-            unit: mat.unit,
-            rate: mat.unit_price,
-            amount: mat.total_price,
-            vat_percentage: mat.vat_percentage || 0
-          })) || [],
-          labour: item.labour?.map((lab: any) => ({
-            type: lab.labour_role,
-            quantity: lab.hours,
-            unit: 'hrs',
-            rate: lab.rate_per_hour,
-            amount: lab.total_cost
-          })) || [],
-          laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+          sub_items: item.sub_items || [],
+          materials: item.sub_items?.length > 0
+            ? item.sub_items.flatMap((si: any) => si.materials?.map((mat: any) => ({
+                name: mat.material_name,
+                description: mat.description || '',
+                quantity: mat.quantity,
+                unit: mat.unit,
+                rate: mat.unit_price,
+                amount: mat.total_price,
+                vat_percentage: mat.vat_percentage || 0,
+                sub_item_name: si.scope || si.sub_item_name
+              })) || [])
+            : item.materials?.map((mat: any) => ({
+                name: mat.material_name,
+                description: mat.description || '',
+                quantity: mat.quantity,
+                unit: mat.unit,
+                rate: mat.unit_price,
+                amount: mat.total_price,
+                vat_percentage: mat.vat_percentage || 0
+              })) || [],
+          labour: item.sub_items?.length > 0
+            ? item.sub_items.flatMap((si: any) => si.labour?.map((lab: any) => ({
+                type: lab.labour_role,
+                quantity: lab.hours,
+                unit: 'hrs',
+                rate: lab.rate_per_hour,
+                amount: lab.total_cost || (lab.hours * lab.rate_per_hour),
+                sub_item_name: si.scope || si.sub_item_name
+              })) || [])
+            : item.labour?.map((lab: any) => ({
+                type: lab.labour_role,
+                quantity: lab.hours,
+                unit: 'hrs',
+                rate: lab.rate_per_hour,
+                amount: lab.total_cost
+              })) || [],
+          laborCost: item.sub_items?.length > 0
+            ? item.sub_items.reduce((sum: number, si: any) =>
+                sum + (si.labour?.reduce((lSum: number, l: any) =>
+                  lSum + (l.total_cost || (l.hours * l.rate_per_hour) || 0), 0) || 0), 0)
+            : item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
           estimatedSellingPrice: cleanValue(item.selling_price) || 0,
           overheadPercentage: miscPercentage, // Map miscellaneous to overhead for compatibility
           profitMarginPercentage: ohProfitPercentage, // Map overhead_profit to profitMargin for compatibility
@@ -529,23 +580,48 @@ const ProjectApprovals: React.FC = () => {
             miscellaneous_amount: cleanValue(item.miscellaneous_amount) || (itemTotal * miscPct / 100),
             overhead_profit_percentage: ohProfitPct,
             overhead_profit_amount: cleanValue(item.overhead_profit_amount) || (itemTotal * ohProfitPct / 100),
-            materials: item.materials?.map((mat: any) => ({
-              name: mat.material_name,
-              description: mat.description || '',
-              quantity: mat.quantity,
-              unit: mat.unit,
-              rate: mat.unit_price,
-              amount: mat.total_price,
-              vat_percentage: mat.vat_percentage || 0
-            })) || [],
-            labour: item.labour?.map((lab: any) => ({
-              type: lab.labour_role,
-              quantity: lab.hours,
-              unit: 'hrs',
-              rate: lab.rate_per_hour,
-              amount: lab.total_cost
-            })) || [],
-            laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+            sub_items: item.sub_items || [],
+            materials: item.sub_items?.length > 0
+              ? item.sub_items.flatMap((si: any) => si.materials?.map((mat: any) => ({
+                  name: mat.material_name,
+                  description: mat.description || '',
+                  quantity: mat.quantity,
+                  unit: mat.unit,
+                  rate: mat.unit_price,
+                  amount: mat.total_price,
+                  vat_percentage: mat.vat_percentage || 0,
+                  sub_item_name: si.scope || si.sub_item_name
+                })) || [])
+              : item.materials?.map((mat: any) => ({
+                  name: mat.material_name,
+                  description: mat.description || '',
+                  quantity: mat.quantity,
+                  unit: mat.unit,
+                  rate: mat.unit_price,
+                  amount: mat.total_price,
+                  vat_percentage: mat.vat_percentage || 0
+                })) || [],
+            labour: item.sub_items?.length > 0
+              ? item.sub_items.flatMap((si: any) => si.labour?.map((lab: any) => ({
+                  type: lab.labour_role,
+                  quantity: lab.hours,
+                  unit: 'hrs',
+                  rate: lab.rate_per_hour,
+                  amount: lab.total_cost || (lab.hours * lab.rate_per_hour),
+                  sub_item_name: si.scope || si.sub_item_name
+                })) || [])
+              : item.labour?.map((lab: any) => ({
+                  type: lab.labour_role,
+                  quantity: lab.hours,
+                  unit: 'hrs',
+                  rate: lab.rate_per_hour,
+                  amount: lab.total_cost
+                })) || [],
+            laborCost: item.sub_items?.length > 0
+              ? item.sub_items.reduce((sum: number, si: any) =>
+                  sum + (si.labour?.reduce((lSum: number, l: any) =>
+                    lSum + (l.total_cost || (l.hours * l.rate_per_hour) || 0), 0) || 0), 0)
+              : item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
             estimatedSellingPrice: sellingPrice,
             overheadPercentage: miscPct, // Use cleaned miscellaneous as overhead
             profitMarginPercentage: ohProfitPct, // Use cleaned overhead_profit as profitMargin
@@ -601,23 +677,48 @@ const ProjectApprovals: React.FC = () => {
             miscellaneous_amount: cleanValue(item.miscellaneous_amount) || (itemTotal * miscPct / 100),
             overhead_profit_percentage: ohProfitPct,
             overhead_profit_amount: cleanValue(item.overhead_profit_amount) || (itemTotal * ohProfitPct / 100),
-            materials: item.materials?.map((mat: any) => ({
-              name: mat.material_name,
-              description: mat.description || '',
-              quantity: mat.quantity,
-              unit: mat.unit,
-              rate: mat.unit_price,
-              amount: mat.total_price,
-              vat_percentage: mat.vat_percentage || 0
-            })) || [],
-            labour: item.labour?.map((lab: any) => ({
-              type: lab.labour_role,
-              quantity: lab.hours,
-              unit: 'hrs',
-              rate: lab.rate_per_hour,
-              amount: lab.total_cost
-            })) || [],
-            laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+            sub_items: item.sub_items || [],
+            materials: item.sub_items?.length > 0
+              ? item.sub_items.flatMap((si: any) => si.materials?.map((mat: any) => ({
+                  name: mat.material_name,
+                  description: mat.description || '',
+                  quantity: mat.quantity,
+                  unit: mat.unit,
+                  rate: mat.unit_price,
+                  amount: mat.total_price,
+                  vat_percentage: mat.vat_percentage || 0,
+                  sub_item_name: si.scope || si.sub_item_name
+                })) || [])
+              : item.materials?.map((mat: any) => ({
+                  name: mat.material_name,
+                  description: mat.description || '',
+                  quantity: mat.quantity,
+                  unit: mat.unit,
+                  rate: mat.unit_price,
+                  amount: mat.total_price,
+                  vat_percentage: mat.vat_percentage || 0
+                })) || [],
+            labour: item.sub_items?.length > 0
+              ? item.sub_items.flatMap((si: any) => si.labour?.map((lab: any) => ({
+                  type: lab.labour_role,
+                  quantity: lab.hours,
+                  unit: 'hrs',
+                  rate: lab.rate_per_hour,
+                  amount: lab.total_cost || (lab.hours * lab.rate_per_hour),
+                  sub_item_name: si.scope || si.sub_item_name
+                })) || [])
+              : item.labour?.map((lab: any) => ({
+                  type: lab.labour_role,
+                  quantity: lab.hours,
+                  unit: 'hrs',
+                  rate: lab.rate_per_hour,
+                  amount: lab.total_cost
+                })) || [],
+            laborCost: item.sub_items?.length > 0
+              ? item.sub_items.reduce((sum: number, si: any) =>
+                  sum + (si.labour?.reduce((lSum: number, l: any) =>
+                    lSum + (l.total_cost || (l.hours * l.rate_per_hour) || 0), 0) || 0), 0)
+              : item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
             estimatedSellingPrice: sellingPrice,
             overheadPercentage: miscPct, // Use cleaned miscellaneous as overhead
             profitMarginPercentage: ohProfitPct, // Use cleaned overhead_profit as profitMargin
@@ -1685,8 +1786,17 @@ const ProjectApprovals: React.FC = () => {
           </div>
         )}
 
-        {/* BOQ Details Modal */}
-        {showBOQModal && selectedEstimation && (
+        {/* BOQ Details Modal - Using shared component */}
+        <BOQDetailsModal
+          isOpen={showBOQModal}
+          onClose={() => setShowBOQModal(false)}
+          boq={selectedEstimation ? { boq_id: selectedEstimation.id, boq_name: selectedEstimation.projectName } : null}
+          onDownload={() => setShowFormatModal(true)}
+          refreshTrigger={boqDetailsRefreshTrigger}
+        />
+
+        {/* OLD BOQ Modal - TO BE REMOVED - keeping temporarily for reference */}
+        {false && showBOQModal && selectedEstimation && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}

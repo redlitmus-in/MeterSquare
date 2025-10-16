@@ -48,6 +48,7 @@ interface BOQItemForm {
   sub_items: SubItemForm[]; // Sub-items with their own raw materials
   materials: BOQMaterialForm[];
   labour: BOQLabourForm[];
+  miscellaneous_percentage?: number;
   overhead_percentage: number;
   profit_margin_percentage: number;
   discount_percentage: number;
@@ -685,24 +686,24 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   };
 
   const calculateItemCost = (item: BOQItemForm) => {
-    // Calculate total from all sub-items (quantity × rate for each sub-item)
-    const subItemsTotal = item.sub_items.reduce((sum, subItem) => {
-      return sum + ((subItem.quantity || 0) * (subItem.rate || 0));
-    }, 0);
+    // IMPORTANT: Always use item-level quantity × rate for cost calculations
+    // Sub-items are just for material/labour breakdown, NOT for pricing
+    const itemTotal = (item.quantity || 0) * (item.rate || 0);
 
-    // If no sub-items, fall back to item-level quantity × rate
-    const itemTotal = item.sub_items.length > 0 ? subItemsTotal : ((item.quantity || 0) * (item.rate || 0));
-
-    // Calculate percentages based on itemTotal
+    // Calculate percentages based on itemTotal (all applied on base)
+    // overhead_percentage is labeled as "Miscellaneous" in UI
+    // profit_margin_percentage is labeled as "Overhead & Profit" in UI
     const miscellaneousAmount = itemTotal * (item.overhead_percentage / 100);
     const overheadProfitAmount = itemTotal * (item.profit_margin_percentage / 100);
-    const beforeDiscount = itemTotal + miscellaneousAmount + overheadProfitAmount;
 
-    // Calculate discount after miscellaneous and overhead
-    const discountAmount = beforeDiscount * (item.discount_percentage / 100);
-    const afterDiscount = beforeDiscount - discountAmount;
+    // Subtotal = base + miscellaneous + overhead&profit
+    const subtotal = itemTotal + miscellaneousAmount + overheadProfitAmount;
 
-    // Calculate VAT on final amount
+    // Calculate discount on subtotal
+    const discountAmount = subtotal * (item.discount_percentage / 100);
+    const afterDiscount = subtotal - discountAmount;
+
+    // Calculate VAT (ADDITIONAL/EXTRA on after-discount amount)
     const vatAmount = afterDiscount * (item.vat_percentage / 100);
     const sellingPrice = afterDiscount + vatAmount;
 
@@ -723,13 +724,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
     return {
       itemTotal, // Total from all sub-items
-      miscellaneousAmount, // Miscellaneous % on itemTotal
-      overheadProfitAmount, // Overhead & Profit % on itemTotal
-      beforeDiscount, // itemTotal + miscellaneous + overhead&profit
-      discountAmount, // Discount % on beforeDiscount
-      afterDiscount, // beforeDiscount - discount
-      vatAmount, // VAT % on afterDiscount
-      sellingPrice, // Final amount
+      miscellaneousAmount, // Miscellaneous (from overhead_percentage)
+      overheadProfitAmount, // Overhead & Profit (from profit_margin_percentage)
+      subtotal, // itemTotal + miscellaneous + overhead&profit
+      discountAmount, // Discount % on subtotal
+      afterDiscount, // subtotal - discount
+      vatAmount, // VAT % on afterDiscount (ADDITIONAL/EXTRA)
+      sellingPrice, // Final amount (afterDiscount + VAT)
       materialCost, // Raw materials cost
       labourCost, // Labour cost
       rawMaterialsTotal // Total raw materials + labour
@@ -917,8 +918,15 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         toast.error('Please fill in all item names');
         return;
       }
-      if (item.materials.length === 0 && item.labour.length === 0) {
-        toast.error('Each item must have at least one material or labour entry');
+
+      // Check if item has sub_items with materials/labour OR direct materials/labour
+      const hasSubItemsWithData = item.sub_items?.some((si: any) =>
+        si.materials?.length > 0 || si.labour?.length > 0
+      );
+      const hasDirectData = item.materials.length > 0 || item.labour.length > 0;
+
+      if (!hasSubItemsWithData && !hasDirectData) {
+        toast.error('Each item must have at least one material or labour entry (either in sub-items or at item level)');
         return;
       }
     }
@@ -933,32 +941,58 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
         const newPurchasePayload = {
           boq_id: existingBoqId,
-          items: items.map(item => ({
-            item_name: item.item_name,
-            description: item.description || '',
-            quantity: item.quantity,
-            unit: item.unit,
-            rate: item.rate,
-            work_type: item.work_type,
-            overhead_percentage: item.overhead_percentage,
-            profit_margin_percentage: item.profit_margin_percentage,
-            discount_percentage: item.discount_percentage,
-            vat_percentage: item.vat_percentage,
-            materials: item.materials.map(material => ({
-              material_name: material.material_name,
-              quantity: material.quantity,
-              unit: material.unit,
-              unit_price: material.unit_price,
-              description: material.description,
-              vat_percentage: material.vat_percentage
-            })),
-            labour: item.labour.map(labour => ({
-              labour_role: labour.labour_role,
-              hours: labour.hours,
-              rate_per_hour: labour.rate_per_hour,
-              work_type: labour.work_type || 'daily_wages'
-            }))
-          }))
+          items: items.map(item => {
+            const costs = calculateItemCost(item);
+            return {
+              item_name: item.item_name,
+              quantity: item.quantity,
+              unit: item.unit,
+              rate: item.rate,
+              overhead_percentage: item.overhead_percentage,
+              profit_margin_percentage: item.profit_margin_percentage,
+              discount_percentage: item.discount_percentage,
+              vat_percentage: item.vat_percentage,
+
+              // Add calculated amounts
+              item_total: costs.itemTotal,
+              overhead_amount: costs.miscellaneousAmount,  // "Miscellaneous" in UI
+              profit_margin_amount: costs.overheadProfitAmount,  // "Overhead & Profit" in UI
+              subtotal: costs.subtotal,
+              discount_amount: costs.discountAmount,
+              after_discount: costs.afterDiscount,
+              vat_amount: costs.vatAmount,
+              selling_price: costs.sellingPrice,
+
+              // Add sub_items structure
+              sub_items: item.sub_items.map(subItem => ({
+                sub_item_name: subItem.scope,
+                scope: subItem.scope,
+                size: subItem.size || null,
+                location: subItem.location || null,
+                brand: subItem.brand || null,
+                quantity: subItem.quantity,
+                unit: subItem.unit,
+                rate: subItem.rate,
+                per_unit_cost: subItem.rate,
+
+                materials: subItem.materials.map(material => ({
+                  material_name: material.material_name,
+                  quantity: material.quantity,
+                  unit: material.unit,
+                  unit_price: material.unit_price,
+                  description: material.description || null,
+                  vat_percentage: material.vat_percentage || 0
+                })),
+
+                labour: subItem.labour.map(labour => ({
+                  labour_role: labour.labour_role,
+                  work_type: labour.work_type || 'daily_wages',
+                  hours: labour.hours,
+                  rate_per_hour: labour.rate_per_hour
+                }))
+              }))
+            };
+          })
         };
 
         const response = await fetch(`${API_URL}/new_purchase`, {
@@ -995,31 +1029,87 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             })),
             notes: preliminaryNotes
           },
-          items: items.map(item => ({
-            item_name: item.item_name,
-            description: item.description || undefined,
-            quantity: item.quantity,
-            unit: item.unit,
-            rate: item.rate,
-            work_type: item.work_type,
-            overhead_percentage: item.overhead_percentage,
-            profit_margin_percentage: item.profit_margin_percentage,
-            discount_percentage: item.discount_percentage,
-            vat_percentage: item.vat_percentage,
-            materials: item.materials.map(material => ({
-              material_name: material.material_name,
-              quantity: material.quantity,
-              unit: material.unit,
-              unit_price: material.unit_price,
-              description: material.description,
-              vat_percentage: material.vat_percentage
-            })),
-            labour: item.labour.map(labour => ({
-              labour_role: labour.labour_role,
-              hours: labour.hours,
-              rate_per_hour: labour.rate_per_hour
-            }))
-          }))
+          items: items.map(item => {
+            const costs = calculateItemCost(item);
+            return {
+              item_name: item.item_name,
+              quantity: item.quantity,
+              unit: item.unit,
+              rate: item.rate,
+              overhead_percentage: item.overhead_percentage,
+              profit_margin_percentage: item.profit_margin_percentage,
+              discount_percentage: item.discount_percentage,
+              vat_percentage: item.vat_percentage,
+
+              // Add calculated amounts
+              item_total: costs.itemTotal,
+              overhead_amount: costs.miscellaneousAmount,  // "Miscellaneous" in UI
+              profit_margin_amount: costs.overheadProfitAmount,  // "Overhead & Profit" in UI
+              subtotal: costs.subtotal,
+              discount_amount: costs.discountAmount,
+              after_discount: costs.afterDiscount,
+              vat_amount: costs.vatAmount,
+              selling_price: costs.sellingPrice,
+
+              // Add sub_items structure (only if sub_items exist and have data)
+              sub_items: item.sub_items && item.sub_items.length > 0 ? item.sub_items.map(subItem => ({
+                sub_item_name: subItem.scope,  // Map scope to sub_item_name for backend
+                scope: subItem.scope,
+                size: subItem.size || null,
+                location: subItem.location || null,
+                brand: subItem.brand || null,
+                quantity: subItem.quantity,
+                unit: subItem.unit,
+                rate: subItem.rate,
+                per_unit_cost: subItem.rate,  // Alias for backend compatibility
+                sub_item_total: subItem.quantity * subItem.rate,
+
+                materials: subItem.materials?.map(material => ({
+                  material_name: material.material_name,
+                  quantity: material.quantity,
+                  unit: material.unit,
+                  unit_price: material.unit_price,
+                  total_price: material.quantity * material.unit_price,
+                  description: material.description || null,
+                  vat_percentage: material.vat_percentage || 0,
+                  master_material_id: material.master_material_id || null
+                })) || [],
+
+                labour: subItem.labour?.map(labour => ({
+                  labour_role: labour.labour_role,
+                  work_type: labour.work_type || 'daily_wages',
+                  hours: labour.hours,
+                  rate_per_hour: labour.rate_per_hour,
+                  total_amount: labour.hours * labour.rate_per_hour,
+                  master_labour_id: labour.master_labour_id || null
+                })) || []
+              })) : [],
+
+              // OLD FORMAT: Add materials/labour at item level for backward compatibility
+              materials: item.materials && item.materials.length > 0 ? item.materials.map(material => ({
+                material_name: material.material_name,
+                quantity: material.quantity,
+                unit: material.unit,
+                unit_price: material.unit_price,
+                total_price: material.quantity * material.unit_price,
+                description: material.description || null,
+                vat_percentage: material.vat_percentage || 0,
+                master_material_id: material.master_material_id || null
+              })) : [],
+
+              labour: item.labour && item.labour.length > 0 ? item.labour.map(labour => ({
+                labour_role: labour.labour_role,
+                work_type: labour.work_type || 'daily_wages',
+                hours: labour.hours,
+                rate_per_hour: labour.rate_per_hour,
+                total_amount: labour.hours * labour.rate_per_hour,
+                master_labour_id: labour.master_labour_id || null
+              })) : [],
+
+              master_item_id: item.master_item_id || null,
+              is_new: item.is_new || false
+            };
+          })
         };
 
         const result = await estimatorService.createBOQ(payload);
@@ -2169,7 +2259,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 </div>
                                 <div className="flex justify-between py-1">
                                   <span className="text-gray-700 font-medium">Subtotal:</span>
-                                  <span className="font-semibold text-gray-900">AED {costs.beforeDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="font-semibold text-gray-900">AED {costs.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex justify-between py-1">
                                   <span className="text-red-600">Discount ({item.discount_percentage}%):</span>

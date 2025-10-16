@@ -10,7 +10,7 @@ from models.role import Role
 
 log = get_logger()
 
-def add_to_master_tables(item_name, description, work_type, materials_data, labour_data, created_by, miscellaneous_percentage=None, miscellaneous_amount=None, overhead_profit_percentage=None, overhead_profit_amount=None, discount_percentage=None, discount_amount=None, vat_percentage=None, vat_amount=None, unit=None, quantity=None, per_unit_cost=None, total_amount=None, item_total_cost=None):
+def add_to_master_tables(item_name, description, work_type, materials_data, labour_data, created_by, miscellaneous_percentage=None, miscellaneous_amount=None, overhead_percentage=None, overhead_amount=None, profit_margin_percentage=None, profit_margin_amount=None, discount_percentage=None, discount_amount=None, vat_percentage=None, vat_amount=None, unit=None, quantity=None, per_unit_cost=None, total_amount=None, item_total_cost=None):
     """Add items, materials, and labour to master tables if they don't exist"""
     master_item_id = None
     master_material_ids = []
@@ -28,8 +28,10 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
             item_total_cost=item_total_cost,
             miscellaneous_percentage=miscellaneous_percentage,
             miscellaneous_amount=miscellaneous_amount,
-            overhead_profit_percentage=overhead_profit_percentage,
-            overhead_profit_amount=overhead_profit_amount,
+            overhead_percentage=overhead_percentage,
+            overhead_amount=overhead_amount,
+            profit_margin_percentage=profit_margin_percentage,
+            profit_margin_amount=profit_margin_amount,
             discount_percentage=discount_percentage,
             discount_amount=discount_amount,
             vat_percentage=vat_percentage,
@@ -51,8 +53,10 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
         master_item.item_total_cost = item_total_cost
         master_item.miscellaneous_percentage = miscellaneous_percentage
         master_item.miscellaneous_amount = miscellaneous_amount
-        master_item.overhead_profit_percentage = overhead_profit_percentage
-        master_item.overhead_profit_amount = overhead_profit_amount
+        master_item.overhead_percentage = overhead_percentage
+        master_item.overhead_amount = overhead_amount
+        master_item.profit_margin_percentage = profit_margin_percentage
+        master_item.profit_margin_amount = profit_margin_amount
         master_item.discount_percentage = discount_percentage
         master_item.discount_amount = discount_amount
         master_item.vat_percentage = vat_percentage
@@ -396,7 +400,22 @@ def create_boq():
         total_materials = 0
         total_labour = 0
 
-        for item_data in data.get("items", []):
+        # Track processed items to prevent duplicates
+        processed_item_names = set()
+
+        for idx, item_data in enumerate(data.get("items", [])):
+            item_name = item_data.get("item_name", "")
+
+            # Skip if this item name was already processed (prevent duplicates)
+            if item_name in processed_item_names:
+                log.warning(f"Skipping duplicate item: {item_name}")
+                continue
+
+            processed_item_names.add(item_name)
+            # Initialize variables for this item iteration
+            item_materials = []
+            item_labour = []
+
             # Get item-level materials and labour
             item_level_materials = item_data.get("materials", [])
             item_level_labour = item_data.get("labour", [])
@@ -515,7 +534,8 @@ def create_boq():
 
             # Get percentages and amounts from payload
             miscellaneous_percentage = item_data.get("miscellaneous_percentage", 0.0)
-            overhead_profit_percentage = item_data.get("overhead_profit_percentage", 0.0)
+            overhead_percentage = item_data.get("overhead_percentage", 0.0)
+            profit_margin_percentage = item_data.get("profit_margin_percentage", 0.0)
             discount_percentage = item_data.get("discount_percentage", 0.0)
             vat_percentage = item_data.get("vat_percentage", 0.0)
 
@@ -527,14 +547,20 @@ def create_boq():
 
             cost_after_misc = base_cost + miscellaneous_amount
 
-            # Overhead profit amount
-            if item_data.get("overhead_profit_amount") is not None:
-                overhead_profit_amount = float(item_data.get("overhead_profit_amount"))
+            # Overhead amount (separate from profit margin)
+            if item_data.get("overhead_amount") is not None:
+                overhead_amount = float(item_data.get("overhead_amount"))
             else:
-                overhead_profit_amount = (cost_after_misc * float(overhead_profit_percentage)) / 100 if overhead_profit_percentage else 0.0
+                overhead_amount = (base_cost * float(overhead_percentage)) / 100 if overhead_percentage else 0.0
 
-            # Total after adding overhead profit
-            total_cost = cost_after_misc + overhead_profit_amount
+            # Profit margin amount (separate from overhead)
+            if item_data.get("profit_margin_amount") is not None:
+                profit_margin_amount = float(item_data.get("profit_margin_amount"))
+            else:
+                profit_margin_amount = (base_cost * float(profit_margin_percentage)) / 100 if profit_margin_percentage else 0.0
+
+            # Total after adding overhead and profit
+            total_cost = base_cost + miscellaneous_amount + profit_margin_amount
             selling_price_before_discount = total_cost
 
             # Discount amount
@@ -564,8 +590,10 @@ def create_boq():
                 created_by,
                 miscellaneous_percentage,
                 miscellaneous_amount,
-                overhead_profit_percentage,
-                overhead_profit_amount,
+                overhead_percentage,
+                overhead_amount,
+                profit_margin_percentage,
+                profit_margin_amount,
                 discount_percentage,
                 discount_amount,
                 vat_percentage,
@@ -592,37 +620,40 @@ def create_boq():
             if has_sub_items:
                 # NEW FORMAT: Process items with sub_items structure
                 sub_items_list = []
-                item_total = 0
                 materials_count = 0
                 labour_count = 0
 
-                # Get item-level percentages (apply to all sub-items)
+                # Get item-level quantity and rate - THIS is the base for calculations!
+                item_quantity = clean_numeric_value(item_data.get("quantity", 1.0))
+                item_rate = clean_numeric_value(item_data.get("rate", 0.0))
+                item_unit = item_data.get("unit", "nos")
+
+                # Calculate item_total from item-level quantity × rate (NOT sub-items!)
+                item_total = item_quantity * item_rate
+
+                # Get item-level percentages
+                # overhead_percentage is labeled as "Miscellaneous" in UI
+                # profit_margin_percentage is labeled as "Overhead & Profit" in UI
                 miscellaneous_percentage = clean_numeric_value(item_data.get("overhead_percentage", 10.0))
                 overhead_profit_percentage = clean_numeric_value(item_data.get("profit_margin_percentage", 15.0))
                 discount_percentage = clean_numeric_value(item_data.get("discount_percentage", 0.0))
                 vat_percentage = clean_numeric_value(item_data.get("vat_percentage", 0.0))
 
+                # Calculate ALL amounts based on item-level total (NOT sub-items!)
+                total_miscellaneous_amount = (item_total * miscellaneous_percentage) / 100
+                total_overhead_profit_amount = (item_total * overhead_profit_percentage) / 100
+                total_subtotal = item_total + total_miscellaneous_amount + total_overhead_profit_amount
+                total_discount_amount = (total_subtotal * discount_percentage) / 100 if discount_percentage > 0 else 0.0
+                total_after_discount = total_subtotal - total_discount_amount
+                total_vat_amount = (total_after_discount * vat_percentage) / 100 if vat_percentage > 0 else 0.0
+                total_selling_price = total_after_discount + total_vat_amount
+
                 for sub_item_data in item_data.get("sub_items", []):
-                    # Get sub-item fields
+                    # Get sub-item fields (just for material/labour breakdown)
                     sub_item_quantity = clean_numeric_value(sub_item_data.get("quantity", 1.0))
                     sub_item_unit = sub_item_data.get("unit", "nos")
                     sub_item_rate = clean_numeric_value(sub_item_data.get("rate", 0.0))
-
-                    # Calculate sub-item total
                     sub_item_base_total = sub_item_quantity * sub_item_rate
-
-                    # Apply overhead and profit
-                    miscellaneous_amount = (sub_item_base_total * miscellaneous_percentage) / 100
-                    overhead_profit_amount = (sub_item_base_total * overhead_profit_percentage) / 100
-                    before_discount = sub_item_base_total + miscellaneous_amount + overhead_profit_amount
-
-                    # Apply discount
-                    discount_amount = (before_discount * discount_percentage) / 100 if discount_percentage > 0 else 0.0
-                    after_discount = before_discount - discount_amount
-
-                    # Apply VAT
-                    vat_amount = (after_discount * vat_percentage) / 100 if vat_percentage > 0 else 0.0
-                    sub_item_selling_price = after_discount + vat_amount
 
                     # Process materials for this sub-item
                     sub_item_materials = []
@@ -661,7 +692,7 @@ def create_boq():
                             "total_cost": total_cost_labour
                         })
 
-                    # Create sub-item JSON
+                    # Create sub-item JSON (stores only material/labour breakdown, NOT pricing)
                     sub_item_json = {
                         "sub_item_name": sub_item_data.get("sub_item_name"),
                         "description": sub_item_data.get("description", ""),
@@ -671,17 +702,6 @@ def create_boq():
                         "unit": sub_item_unit,
                         "rate": sub_item_rate,
                         "base_total": sub_item_base_total,
-                        "miscellaneous_percentage": miscellaneous_percentage,
-                        "miscellaneous_amount": miscellaneous_amount,
-                        "overhead_profit_percentage": overhead_profit_percentage,
-                        "overhead_profit_amount": overhead_profit_amount,
-                        "before_discount": before_discount,
-                        "discount_percentage": discount_percentage,
-                        "discount_amount": discount_amount,
-                        "after_discount": after_discount,
-                        "vat_percentage": vat_percentage,
-                        "vat_amount": vat_amount,
-                        "selling_price": sub_item_selling_price,
                         "materials_cost": materials_cost,
                         "labour_cost": labour_cost,
                         "materials": sub_item_materials,
@@ -689,9 +709,13 @@ def create_boq():
                     }
 
                     sub_items_list.append(sub_item_json)
-                    item_total += sub_item_selling_price
                     materials_count += len(sub_item_materials)
                     labour_count += len(sub_item_labour)
+
+                # Calculate total materials and labour costs from all sub-items
+                total_materials_cost = sum(si.get("materials_cost", 0) for si in sub_items_list)
+                total_labour_cost = sum(si.get("labour_cost", 0) for si in sub_items_list)
+                base_cost = total_materials_cost + total_labour_cost
 
                 # Create parent item with sub_items
                 item_json = {
@@ -700,17 +724,37 @@ def create_boq():
                     "work_type": item_data.get("work_type", "contract"),
                     "has_sub_items": True,
                     "sub_items": sub_items_list,
-                    "total_selling_price": item_total,
-                    "miscellaneous_percentage": miscellaneous_percentage,
-                    "overhead_profit_percentage": overhead_profit_percentage,
+                    "quantity": item_quantity,
+                    "unit": item_unit,
+                    "rate": item_rate,
+                    "item_total": item_total,
+                    "base_cost": base_cost,
+                    "sub_items_cost": base_cost,
+                    "total_selling_price": total_selling_price,
+                    "selling_price": total_selling_price,
+                    "estimatedSellingPrice": total_selling_price,
+                    "actualItemCost": base_cost,
+                    "total_cost": total_selling_price,
+                    "overhead_percentage": miscellaneous_percentage,  # Labeled as "Miscellaneous" in UI
+                    "overhead_amount": total_miscellaneous_amount,
+                    "profit_margin_percentage": overhead_profit_percentage,  # Labeled as "Overhead & Profit" in UI
+                    "profit_margin_amount": total_overhead_profit_amount,
+                    "subtotal": total_subtotal,
                     "discount_percentage": discount_percentage,
+                    "discount_amount": total_discount_amount,
                     "vat_percentage": vat_percentage,
+                    "vat_amount": total_vat_amount,
+                    "after_discount": total_after_discount,
                     "total_materials": materials_count,
-                    "total_labour": labour_count
+                    "total_labour": labour_count,
+                    "totalMaterialCost": total_materials_cost,
+                    "totalLabourCost": total_labour_cost,
+                    "materials": item_materials,
+                    "labour": item_labour
                 }
 
                 boq_items.append(item_json)
-                total_boq_cost += item_total
+                total_boq_cost += total_selling_price
                 total_materials += materials_count
                 total_labour += labour_count
 
@@ -729,12 +773,12 @@ def create_boq():
 
                 # Use provided percentages from frontend - CLEAN wrapped values
                 miscellaneous_percentage = clean_numeric_value(item_data.get("overhead_percentage", 10.0))
-                overhead_profit_percentage = clean_numeric_value(item_data.get("profit_margin_percentage", 15.0))
+                profit_margin_percentage = clean_numeric_value(item_data.get("profit_margin_percentage", 15.0))
 
-                # NEW CALCULATION: miscellaneous and overhead & profit are based on ITEM TOTAL (qty × rate), NOT subitems
+                # NEW CALCULATION: miscellaneous and profit margin are based on ITEM TOTAL (qty × rate), NOT subitems
                 miscellaneous_amount = (item_total * miscellaneous_percentage) / 100
-                overhead_profit_amount = (item_total * overhead_profit_percentage) / 100
-                before_discount = item_total + miscellaneous_amount + overhead_profit_amount
+                profit_margin_amount = (item_total * profit_margin_percentage) / 100
+                before_discount = item_total + miscellaneous_amount + profit_margin_amount
 
                 # Handle discount after miscellaneous and overhead - CLEAN wrapped values
                 discount_percentage = clean_numeric_value(item_data.get("discount_percentage", 0.0))
@@ -779,8 +823,10 @@ def create_boq():
                     created_by,
                     miscellaneous_percentage,
                     miscellaneous_amount,
-                    overhead_profit_percentage,
-                    overhead_profit_amount
+                    miscellaneous_percentage,  # overhead_percentage = miscellaneous
+                    miscellaneous_amount,  # overhead_amount = miscellaneous
+                    profit_margin_percentage,
+                    profit_margin_amount
                 )
 
                 # Process materials for BOQ details (from all_materials with master IDs) - CLEAN wrapped values
@@ -818,73 +864,6 @@ def create_boq():
                         "rate_per_hour": rate_per_hour,
                         "total_cost": total_cost_labour
                     })
-
-            # Create item JSON structure
-            item_json = {
-                "master_item_id": master_item_id,
-                "item_name": item_data.get("item_name"),
-                "description": item_data.get("description"),
-                "work_type": item_data.get("work_type", "contract"),
-                "unit": item_unit,
-                "quantity": item_quantity,
-                "rate": item_per_unit_cost,
-                "per_unit_cost": item_per_unit_cost,
-                "total_amount": item_total_amount,
-                "item_total_cost": item_total_cost_field,
-                "base_cost": base_cost,
-                "sub_items_cost": sub_items_base_cost,
-                "miscellaneous_percentage": miscellaneous_percentage,
-                "miscellaneous_amount": miscellaneous_amount,
-                "overhead_profit_percentage": overhead_profit_percentage,
-                "overhead_profit_amount": overhead_profit_amount,
-                "discount_percentage": discount_percentage if discount_percentage is not None else 0.0,
-                "discount_amount": discount_amount,
-                "vat_percentage": vat_percentage if vat_percentage is not None else 0.0,
-                "vat_amount": vat_amount,
-                "total_cost": total_cost,
-                "selling_price": final_selling_price,  # Use final_selling_price after discount and VAT
-                "selling_price_before_discount": selling_price_before_discount,  # Selling price before discount
-                "totalMaterialCost": materials_cost,
-                "totalLabourCost": labour_cost,
-                "actualItemCost": base_cost,
-                "estimatedSellingPrice": final_selling_price,  # Use final_selling_price after discount and VAT
-                "sub_items": processed_sub_items,  # Add sub-items to JSON
-                "materials": item_materials,
-                "labour": item_labour
-            }
-                # Create item JSON structure
-                item_json = {
-                    "master_item_id": master_item_id,
-                    "item_name": item_data.get("item_name"),
-                    "description": item_data.get("description"),
-                    "quantity": item_quantity,
-                    "unit": item_unit,
-                    "rate": item_rate,
-                    "work_type": item_data.get("work_type", "contract"),
-                    "has_sub_items": False,
-                    "item_total": item_total,  # Quantity × Rate (this is the base for misc and overhead)
-                    "miscellaneous_percentage": miscellaneous_percentage,
-                    "miscellaneous_amount": miscellaneous_amount,
-                    "overhead_profit_percentage": overhead_profit_percentage,
-                    "overhead_profit_amount": overhead_profit_amount,
-                    "before_discount": before_discount,  # Item total + misc + overhead&profit
-                    "discount_percentage": discount_percentage if discount_percentage is not None else 0.0,
-                    "discount_amount": discount_amount,
-                    "after_discount": after_discount,
-                    "vat_percentage": vat_percentage if vat_percentage is not None else 0.0,
-                    "vat_amount": vat_amount,
-                    "selling_price": final_selling_price,  # Final price after VAT
-                    "totalMaterialCost": materials_cost,  # For reference only
-                    "totalLabourCost": labour_cost,  # For reference only
-                    "subItemsTotal": sub_items_total,  # For reference only
-                    "materials": item_materials,
-                    "labour": item_labour
-                }
-
-                boq_items.append(item_json)
-                total_boq_cost += final_selling_price  # Add final price after discount to total
-                total_materials += len(item_materials)
-                total_labour += len(item_labour)
 
         # Get preliminaries from request data
         preliminaries = data.get("preliminaries", {})
@@ -2615,8 +2594,10 @@ def get_all_item():
                 "description": item.description,
                 "miscellaneous_percentage": item.miscellaneous_percentage,
                 "miscellaneous_amount": item.miscellaneous_amount,
-                "overhead_profit_percentage": item.overhead_profit_percentage,
-                "overhead_profit_amount": item.overhead_profit_amount
+                "overhead_percentage": item.overhead_percentage,
+                "overhead_amount": item.overhead_amount,
+                "profit_margin_percentage": item.profit_margin_percentage,
+                "profit_margin_amount": item.profit_margin_amount
             })
 
         return jsonify({

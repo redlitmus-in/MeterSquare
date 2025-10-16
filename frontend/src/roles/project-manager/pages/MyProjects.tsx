@@ -23,6 +23,7 @@ import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
 import BOQEditModal from '@/roles/estimator/components/BOQEditModal';
+import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
 import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
@@ -248,21 +249,44 @@ const MyProjects: React.FC = () => {
           quantity: 1,
           rate: item.base_cost || item.rate || 0,
           amount: item.total_cost || item.amount || 0,
-          materials: item.materials?.map((mat: any) => ({
-            name: mat.material_name,
-            quantity: mat.quantity,
-            unit: mat.unit,
-            rate: mat.unit_price,
-            amount: mat.total_price
-          })) || [],
-          labour: item.labour?.map((lab: any) => ({
-            type: lab.labour_role,
-            quantity: lab.hours,
-            unit: 'hours',
-            rate: lab.rate_per_hour,
-            amount: lab.total_cost
-          })) || [],
-          laborCost: item.totalLabourCost || item.labor_cost || 0,
+          sub_items: item.sub_items || [],
+          materials: item.sub_items?.length > 0
+            ? item.sub_items.flatMap((si: any) => si.materials?.map((mat: any) => ({
+                name: mat.material_name,
+                quantity: mat.quantity,
+                unit: mat.unit,
+                rate: mat.unit_price,
+                amount: mat.total_price,
+                sub_item_name: si.scope || si.sub_item_name
+              })) || [])
+            : item.materials?.map((mat: any) => ({
+                name: mat.material_name,
+                quantity: mat.quantity,
+                unit: mat.unit,
+                rate: mat.unit_price,
+                amount: mat.total_price
+              })) || [],
+          labour: item.sub_items?.length > 0
+            ? item.sub_items.flatMap((si: any) => si.labour?.map((lab: any) => ({
+                type: lab.labour_role,
+                quantity: lab.hours,
+                unit: 'hours',
+                rate: lab.rate_per_hour,
+                amount: lab.total_cost || (lab.hours * lab.rate_per_hour),
+                sub_item_name: si.scope || si.sub_item_name
+              })) || [])
+            : item.labour?.map((lab: any) => ({
+                type: lab.labour_role,
+                quantity: lab.hours,
+                unit: 'hours',
+                rate: lab.rate_per_hour,
+                amount: lab.total_cost
+              })) || [],
+          laborCost: item.sub_items?.length > 0
+            ? item.sub_items.reduce((sum: number, si: any) =>
+                sum + (si.labour?.reduce((lSum: number, l: any) =>
+                  lSum + (l.total_cost || (l.hours * l.rate_per_hour) || 0), 0) || 0), 0)
+            : item.totalLabourCost || item.labor_cost || 0,
           estimatedSellingPrice: item.selling_price || item.estimatedSellingPrice || item.estimated_selling_price || item.amount,
           purchaseType
         });
@@ -949,8 +973,20 @@ const MyProjects: React.FC = () => {
         </div>
       </div>
 
-      {/* BOQ Details Modal - TD Style */}
-      {showBOQModal && selectedProject && (
+      {/* BOQ Details Modal - Using shared component */}
+      <BOQDetailsModal
+        isOpen={showBOQModal}
+        onClose={() => setShowBOQModal(false)}
+        boq={selectedProject ? { boq_id: selectedProject.boq_id, boq_name: selectedProject.projectName } : null}
+        onEdit={() => {
+          setShowEditBOQModal(true);
+          setShowBOQModal(false);
+        }}
+        showNewPurchaseItems={true}
+      />
+
+      {/* OLD BOQ Modal - TO BE REMOVED - keeping temporarily for reference */}
+      {false && showBOQModal && selectedProject && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}

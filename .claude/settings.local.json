@@ -9,7 +9,8 @@
       "Bash(C:UsersadminAppDataLocalProgramsPythonPython312python migrations/create_change_requests_table.py)",
       "Bash(npx tsc:*)",
       "Bash(find:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []

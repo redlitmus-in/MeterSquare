@@ -275,7 +275,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
         // Get items from correct location (existing_purchase.items OR items)
         const items = (response.data.existing_purchase?.items || response.data.items) || [];
 
-        // Convert to editable format
+        // Convert to editable format - preserve sub_items structure
         const editableBoq: BOQUpdatePayload = {
           project_id: response.data.project_id,
           boq_id: response.data.boq_id,
@@ -291,7 +291,38 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
             discount_percentage: (item as any).discount_percentage || 0,
             vat_percentage: (item as any).vat_percentage || 0,
             status: 'Active',
-            materials: (item.materials || []).map(mat => ({
+            // Preserve sub_items structure if present
+            sub_items: (item as any).sub_items?.map((si: any) => ({
+              sub_item_id: si.sub_item_id,
+              sub_item_name: si.sub_item_name || si.scope,
+              scope: si.scope || si.sub_item_name,
+              size: si.size || '',
+              location: si.location || '',
+              brand: si.brand || '',
+              quantity: si.quantity || 1,
+              unit: si.unit || 'nos',
+              rate: si.rate || si.per_unit_cost || 0,
+              materials: (si.materials || []).map((mat: any) => ({
+                material_id: mat.master_material_id,
+                material_name: mat.material_name,
+                description: mat.description || '',
+                quantity: mat.quantity,
+                unit: mat.unit,
+                unit_price: mat.unit_price,
+                total_price: mat.total_price || (mat.quantity * mat.unit_price),
+                vat_percentage: mat.vat_percentage || 0
+              })),
+              labour: (si.labour || []).map((lab: any) => ({
+                labour_id: lab.master_labour_id,
+                labour_role: lab.labour_role,
+                hours: lab.hours,
+                rate_per_hour: lab.rate_per_hour,
+                total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour),
+                work_type: lab.work_type || 'contract'
+              }))
+            })) || [],
+            // Old format fallback - materials and labour at item level
+            materials: (item as any).sub_items?.length > 0 ? [] : (item.materials || []).map(mat => ({
               material_id: mat.master_material_id,
               material_name: mat.material_name,
               description: mat.description || '',
@@ -301,7 +332,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
               total_price: mat.total_price || (mat.quantity * mat.unit_price),
               vat_percentage: mat.vat_percentage || 0
             })),
-            labour: (item.labour || []).map(lab => ({
+            labour: (item as any).sub_items?.length > 0 ? [] : (item.labour || []).map(lab => ({
               labour_id: lab.master_labour_id,
               labour_role: lab.labour_role,
               hours: lab.hours,
@@ -551,9 +582,164 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
     });
   };
 
+  // Sub-item management functions
+  const addSubItem = (itemIndex: number) => {
+    const updatedItems = [...editedBoq.items];
+    if (!updatedItems[itemIndex].sub_items) {
+      updatedItems[itemIndex].sub_items = [];
+    }
+    updatedItems[itemIndex].sub_items.push({
+      scope: 'New Sub Item',
+      size: '',
+      location: '',
+      brand: '',
+      quantity: 1,
+      unit: 'nos',
+      rate: 0,
+      materials: [],
+      labour: []
+    });
+
+    setEditedBoq({
+      ...editedBoq,
+      items: updatedItems
+    });
+  };
+
+  const removeSubItem = (itemIndex: number, subItemIndex: number) => {
+    const updatedItems = [...editedBoq.items];
+    updatedItems[itemIndex].sub_items = updatedItems[itemIndex].sub_items.filter(
+      (_: any, index: number) => index !== subItemIndex
+    );
+
+    setEditedBoq({
+      ...editedBoq,
+      items: updatedItems
+    });
+  };
+
+  const handleSubItemChange = (itemIndex: number, subItemIndex: number, field: string, value: any) => {
+    const updatedItems = [...editedBoq.items];
+    updatedItems[itemIndex].sub_items[subItemIndex][field] = value;
+
+    setEditedBoq({
+      ...editedBoq,
+      items: updatedItems
+    });
+  };
+
+  const addSubItemMaterial = (itemIndex: number, subItemIndex: number) => {
+    const updatedItems = [...editedBoq.items];
+    updatedItems[itemIndex].sub_items[subItemIndex].materials.push({
+      material_name: 'New Material',
+      quantity: 1,
+      unit: 'nos',
+      unit_price: 0,
+      total_price: 0,
+      description: '',
+      vat_percentage: 0
+    });
+
+    setEditedBoq({
+      ...editedBoq,
+      items: updatedItems
+    });
+  };
+
+  const removeSubItemMaterial = (itemIndex: number, subItemIndex: number, materialIndex: number) => {
+    const updatedItems = [...editedBoq.items];
+    updatedItems[itemIndex].sub_items[subItemIndex].materials = updatedItems[itemIndex].sub_items[subItemIndex].materials.filter(
+      (_: any, index: number) => index !== materialIndex
+    );
+
+    setEditedBoq({
+      ...editedBoq,
+      items: updatedItems
+    });
+  };
+
+  const handleSubItemMaterialChange = (itemIndex: number, subItemIndex: number, materialIndex: number, field: string, value: any) => {
+    const updatedItems = [...editedBoq.items];
+    const material = updatedItems[itemIndex].sub_items[subItemIndex].materials[materialIndex];
+    material[field] = value;
+
+    // Recalculate total_price when quantity or unit_price changes
+    if (field === 'quantity' || field === 'unit_price') {
+      material.total_price = material.quantity * material.unit_price;
+    }
+
+    setEditedBoq({
+      ...editedBoq,
+      items: updatedItems
+    });
+  };
+
+  const addSubItemLabour = (itemIndex: number, subItemIndex: number) => {
+    const updatedItems = [...editedBoq.items];
+    updatedItems[itemIndex].sub_items[subItemIndex].labour.push({
+      labour_role: 'Worker',
+      hours: 8,
+      rate_per_hour: 50,
+      total_cost: 400,
+      work_type: 'contract'
+    });
+
+    setEditedBoq({
+      ...editedBoq,
+      items: updatedItems
+    });
+  };
+
+  const removeSubItemLabour = (itemIndex: number, subItemIndex: number, labourIndex: number) => {
+    const updatedItems = [...editedBoq.items];
+    updatedItems[itemIndex].sub_items[subItemIndex].labour = updatedItems[itemIndex].sub_items[subItemIndex].labour.filter(
+      (_: any, index: number) => index !== labourIndex
+    );
+
+    setEditedBoq({
+      ...editedBoq,
+      items: updatedItems
+    });
+  };
+
+  const handleSubItemLabourChange = (itemIndex: number, subItemIndex: number, labourIndex: number, field: string, value: any) => {
+    const updatedItems = [...editedBoq.items];
+    const labour = updatedItems[itemIndex].sub_items[subItemIndex].labour[labourIndex];
+    labour[field] = value;
+
+    // Recalculate total_cost when hours or rate_per_hour changes
+    if (field === 'hours' || field === 'rate_per_hour') {
+      labour.total_cost = labour.hours * labour.rate_per_hour;
+    }
+
+    setEditedBoq({
+      ...editedBoq,
+      items: updatedItems
+    });
+  };
+
   const calculateItemTotals = (item: any, itemIndex?: number) => {
-    const materialTotal = item.materials.reduce((sum: number, mat: any) => sum + (mat.total_price || 0), 0);
-    const labourTotal = item.labour.reduce((sum: number, lab: any) => sum + (lab.total_cost || 0), 0);
+    // Calculate from sub_items if they exist, otherwise from item-level materials/labour
+    let materialTotal = 0;
+    let labourTotal = 0;
+
+    if (item.sub_items?.length > 0) {
+      // New format: Calculate from sub_items
+      materialTotal = item.sub_items.reduce((sum: number, subItem: any) => {
+        const subMaterialTotal = subItem.materials?.reduce((mSum: number, mat: any) => mSum + (mat.total_price || 0), 0) || 0;
+        return sum + subMaterialTotal;
+      }, 0);
+
+      labourTotal = item.sub_items.reduce((sum: number, subItem: any) => {
+        const subLabourTotal = subItem.labour?.reduce((lSum: number, lab: any) => lSum + (lab.total_cost || 0), 0) || 0;
+        return sum + subLabourTotal;
+      }, 0);
+    } else {
+      // Old format: Calculate from item-level materials/labour
+      materialTotal = item.materials.reduce((sum: number, mat: any) => sum + (mat.total_price || 0), 0);
+      labourTotal = item.labour.reduce((sum: number, lab: any) => sum + (lab.total_cost || 0), 0);
+    }
+
     const baseTotal = materialTotal + labourTotal;
     const overheadAmount = baseTotal * (item.overhead_percentage || 0) / 100;
     const profitAmount = baseTotal * (item.profit_margin_percentage || 0) / 100;
@@ -872,21 +1058,21 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                           {expandedItems.has(itemIndex) && (
                             <div className="p-4 space-y-4 bg-gray-50/50">
                               {/* Sub Items Section */}
-                              <div className="bg-gradient-to-r from-blue-50 to-blue-100/30 rounded-lg p-4 border border-blue-200">
+                              <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-4 border border-purple-200">
                                 <div className="flex items-center justify-between mb-3">
-                                  <h4 className="text-sm font-bold text-blue-900 flex items-center gap-2">
+                                  <h4 className="text-sm font-bold text-purple-900 flex items-center gap-2">
                                     <div className="p-1.5 bg-white rounded shadow-sm">
-                                      <Package className="w-4 h-4 text-blue-600" />
+                                      <Package className="w-4 h-4 text-purple-600" />
                                     </div>
                                     Sub Items
                                   </h4>
                                   <button
                                     type="button"
-                                    onClick={() => addMaterial(itemIndex)}
-                                    className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                                    onClick={() => addSubItem(itemIndex)}
+                                    className="text-xs font-semibold text-purple-700 hover:text-purple-800 px-3 py-1.5 bg-purple-200 rounded-lg"
                                     disabled={isSaving}
                                   >
-                                    + Add Material
+                                    + Add Sub Item
                                   </button>
                                 </div>
 
