@@ -46,10 +46,10 @@ def revision_boq_route(boq_id):
 def delete_boq_route(boq_id):
     return delete_boq(boq_id)
 
-@boq_routes.route('/item_material/<int:item_id>', methods=['GET'])
+@boq_routes.route('/sub_item/<int:item_id>', methods=['GET'])
 @jwt_required
-def get_sub_item_material_route(item_id):
-    return get_sub_item_material(item_id)
+def get_sub_item_route(item_id):
+    return get_sub_item(item_id)
 
 @boq_routes.route('/item_labour/<int:item_id>', methods=['GET'])
 @jwt_required
@@ -121,7 +121,7 @@ def get_internal_revisions_route(boq_id):
 def get_all_boqs_with_internal_revisions_route():
     return get_all_boqs_with_internal_revisions()
 
-@boq_routes.route('/sub_item/<int:item_id>', methods=['GET'])
+@boq_routes.route('/material/<int:sub_item_id>', methods=['GET'])
 @jwt_required
-def get_sub_item_route(item_id):
-    return get_sub_item(item_id)
+def  get_sub_item_material_route(sub_item_id):
+    return  get_sub_item_material(sub_item_id)

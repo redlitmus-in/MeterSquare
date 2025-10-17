@@ -1076,7 +1076,7 @@ class EstimatorService {
     default_unit: string;
   }[]> {
     try {
-      const response = await apiClient.get(`/item_material/${itemId}`);
+      const response = await apiClient.get(`/sub_item/${itemId}`);
 
       if (response.data?.materials) {
         return response.data.materials.map((mat: any) => ({

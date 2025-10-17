@@ -1976,24 +1976,6 @@ def revision_boq(boq_id):
         # Set current_status BEFORE using it
         current_status = old_status
 
-        # Increment revision number when creating a new revision cycle AFTER sending to client
-        #
-        # CORRECT FLOW:
-        # 1. Original (rev=0) -> TD approves -> Send to client -> Status=Sent_for_Confirmation, Rev=0
-        # 2. "Revisions" button appears -> Estimator clicks "Make Revision" (FIRST time) -> INCREMENT to Rev=1, Status=Under_Revision
-        # 3. Edit and save -> Rev=1 (no change), Status=Under_Revision
-        # 4. Send to TD -> Rev=1, Status=Pending_Revision
-        # 5. TD approves -> Rev=1, Status=Revision_Approved
-        # 6. Send to client -> Rev=1, Status=Sent_for_Confirmation
-        # 7. "Revisions" button appears -> Estimator clicks "Make Revision" (SECOND time) -> INCREMENT to Rev=2, Status=Under_Revision
-        # 8. Continue cycle...
-        #
-        # KEY RULE: Increment when transitioning FROM Sent_for_Confirmation or Client_Rejected TO Under_Revision
-        # - The "Revisions" button ONLY shows when status = Sent_for_Confirmation (after sending to client)
-        # - So clicking "Make Revision" from this status means starting a NEW revision cycle
-        # - Each click on "Make Revision" from Sent_for_Confirmation = new revision number
-        # - Subsequent edits (already in Under_Revision) do NOT increment
-        #
         # This ensures revision increments each time estimator starts revising after sending to client
         statuses_that_start_new_revision = ["Client_Rejected", "Sent_for_Confirmation"]
 
@@ -2020,12 +2002,6 @@ def revision_boq(boq_id):
         # Update last modified by and timestamp
         boq.last_modified_by = user_name
         boq.last_modified_at = datetime.utcnow()
-
-        # Store BOQ details history for ALL revisions (not just admin)
-        # The version number should match the OLD revision number (state before update)
-        # - When old_revision_number = 0 (original), save as version 0
-        # - When old_revision_number = 1 (first revision), save as version 1
-        # - When old_revision_number = 2 (second revision), save as version 2, etc.
         next_version = old_revision_number
 
         # Create history entry with current BOQ details BEFORE updating
@@ -2459,9 +2435,9 @@ def get_sub_item_material(sub_item_id):
             sub_item_id=sub_item_id,
             is_deleted=False
         ).first()
-
+        print("boq_sub_item:",boq_sub_item)
         if not boq_sub_item:
-            return jsonify({"error": "BOQ Sub-Item not found"}), 404
+            return jsonify([]), 200
 
         # Get parent item details
         boq_item = MasterItem.query.filter_by(
@@ -2524,7 +2500,7 @@ def get_sub_item_labours(sub_item_id):
         ).first()
 
         if not boq_sub_item:
-            return jsonify({"error": "BOQ Sub-Item not found"}), 404
+            return jsonify([]), 200
 
         # Get parent item details
         boq_item = MasterItem.query.filter_by(
