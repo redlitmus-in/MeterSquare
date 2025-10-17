@@ -35,6 +35,8 @@ interface BOQWithInternalRevisions {
 }
 
 const InternalRevisionTimeline: React.FC = () => {
+  const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
+
   const [boqs, setBOQs] = useState<BOQWithInternalRevisions[]>([]);
   const [selectedBoq, setSelectedBoq] = useState<BOQWithInternalRevisions | null>(null);
   const [internalRevisions, setInternalRevisions] = useState<InternalRevision[]>([]);
@@ -55,9 +57,9 @@ const InternalRevisionTimeline: React.FC = () => {
   const loadBOQsWithInternalRevisions = async () => {
     setIsLoadingBOQs(true);
     try {
-      const response = await fetch('/api/boqs/internal_revisions', {
+      const response = await fetch(`${API_URL}/boqs/internal_revisions`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
       });
       const data = await response.json();
@@ -79,9 +81,9 @@ const InternalRevisionTimeline: React.FC = () => {
   const loadInternalRevisions = async (boqId: number) => {
     setIsLoadingRevisions(true);
     try {
-      const response = await fetch(`/api/boq/${boqId}/internal_revisions`, {
+      const response = await fetch(`${API_URL}/boq/${boqId}/internal_revisions`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
       });
       const data = await response.json();

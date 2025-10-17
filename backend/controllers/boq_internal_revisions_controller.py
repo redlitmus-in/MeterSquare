@@ -198,10 +198,11 @@ def get_all_boqs_with_internal_revisions():
         query = text("""
             SELECT
                 b.boq_id, b.boq_name, b.status, b.internal_revision_number,
-                b.revision_number, b.total_cost, b.created_at, b.created_by,
+                b.revision_number, bd.total_cost, b.created_at, b.created_by,
                 p.project_name, p.client, p.location
             FROM boq b
-            LEFT JOIN projects p ON b.project_id = p.project_id
+            LEFT JOIN project p ON b.project_id = p.project_id
+            LEFT JOIN boq_details bd ON b.boq_id = bd.boq_id AND bd.is_deleted = FALSE
             WHERE b.has_internal_revisions = TRUE
             AND b.is_deleted = FALSE
             ORDER BY b.internal_revision_number DESC, b.created_at DESC

@@ -281,6 +281,8 @@ const EstimatorHub: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [sendingToTD, setSendingToTD] = useState(false);
+  const [sendingProjectId, setSendingProjectId] = useState<number | null>(null);
+  const [sendingBOQId, setSendingBOQId] = useState<number | null>(null);
   const [boqs, setBOQs] = useState<BOQ[]>([]);
   const [filteredBOQs, setFilteredBOQs] = useState<BOQ[]>([]);
   const [filteredProjects, setFilteredProjects] = useState<any[]>([]);
@@ -701,6 +703,7 @@ const EstimatorHub: React.FC = () => {
 
   const handleSendToTD = async (project: any) => {
     setSendingToTD(true);
+    setSendingProjectId(project.project_id);
     try {
       // Find BOQs for this project
       const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
@@ -708,6 +711,7 @@ const EstimatorHub: React.FC = () => {
       if (projectBoqs.length === 0) {
         toast.error('No BOQ found for this project. Please create a BOQ first.');
         setSendingToTD(false);
+        setSendingProjectId(null);
         return;
       }
 
@@ -740,6 +744,7 @@ const EstimatorHub: React.FC = () => {
       toast.error('Failed to send BOQ to Technical Director');
     } finally {
       setSendingToTD(false);
+      setSendingProjectId(null);
     }
   };
 
@@ -1402,6 +1407,7 @@ const EstimatorHub: React.FC = () => {
                 className="text-blue-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm"
                 onClick={async () => {
                   setSendingToTD(true);
+                  setSendingBOQId(boq.boq_id!);
                   try {
                     const result = await estimatorService.sendBOQToTechnicalDirector(boq.boq_id!);
                     if (result.success) {
@@ -1414,14 +1420,15 @@ const EstimatorHub: React.FC = () => {
                     toast.error('Failed to send BOQ to TD');
                   } finally {
                     setSendingToTD(false);
+                    setSendingBOQId(null);
                   }
                 }}
-                disabled={sendingToTD}
+                disabled={sendingBOQId === boq.boq_id}
                 title="Send to Technical Director for final approval"
               >
                 <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                <span className="hidden sm:inline">{sendingToTD ? 'Sending...' : 'Send to TD'}</span>
-                <span className="sm:hidden">{sendingToTD ? '...' : 'TD'}</span>
+                <span className="hidden sm:inline">{sendingBOQId === boq.boq_id ? 'Sending...' : 'Send to TD'}</span>
+                <span className="sm:hidden">{sendingBOQId === boq.boq_id ? '...' : 'TD'}</span>
               </button>
             </>
           ) : isPendingRevision ? (
@@ -2133,10 +2140,10 @@ const EstimatorHub: React.FC = () => {
                               className="flex-1 min-w-[80px] text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
                               style={{ backgroundColor: 'rgb(22, 163, 74)' }}
                               onClick={() => handleSendToTD(project)}
-                              disabled={sendingToTD}
+                              disabled={sendingProjectId === project.project_id}
                               title="Send to Technical Director"
                             >
-                              {sendingToTD ? (
+                              {sendingProjectId === project.project_id ? (
                                 <>
                                   <div className="scale-50">
                                     <ModernLoadingSpinners variant="dots" size="sm" color="white" />
@@ -2155,7 +2162,7 @@ const EstimatorHub: React.FC = () => {
                             <button
                               className="flex-1 min-w-[80px] bg-gradient-to-r from-[#243d8a]/10 to-[#243d8a]/20 text-[#243d8a] text-[10px] sm:text-xs h-8 rounded hover:from-[#243d8a]/20 hover:to-[#243d8a]/30 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed border border-[#243d8a]/20"
                               onClick={() => handleSendToPM(project)}
-                              disabled={sendingToTD}
+                              disabled={sendingProjectId === project.project_id}
                               title="Send to Project Manager"
                             >
                               <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />

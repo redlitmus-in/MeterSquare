@@ -1464,6 +1464,20 @@ class EstimatorService {
         technical_director_id: technicalDirectorId
       });
 
+      // Track internal revision - Sent to TD
+      try {
+        await apiClient.post(`/boq/${boqId}/track_internal_revision`, {
+          action_type: 'SENT_TO_TD',
+          changes_summary: {
+            message: 'BOQ sent to Technical Director for approval',
+            technical_director_id: technicalDirectorId
+          }
+        });
+      } catch (trackError) {
+        console.warn('Failed to track internal revision:', trackError);
+        // Don't fail the main operation if tracking fails
+      }
+
       return {
         success: true,
         message: response.data.message || 'BOQ sent to Technical Director successfully'

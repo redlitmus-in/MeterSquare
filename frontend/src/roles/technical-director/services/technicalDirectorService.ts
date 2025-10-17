@@ -95,6 +95,21 @@ class TechnicalDirectorService {
         notes: comments
       });
 
+      // Track internal revision - TD Approved
+      try {
+        await apiClient.post(`/boq/${boqId}/track_internal_revision`, {
+          action_type: 'TD_APPROVED',
+          approval_comments: comments || 'BOQ approved by Technical Director',
+          changes_summary: {
+            message: 'BOQ approved by Technical Director',
+            status_changed_to: 'Approved'
+          }
+        });
+      } catch (trackError) {
+        console.warn('Failed to track internal revision:', trackError);
+        // Don't fail the main operation if tracking fails
+      }
+
       return {
         success: true,
         message: response.data.message || 'BOQ approved successfully'
@@ -140,6 +155,22 @@ class TechnicalDirectorService {
         status: 'Rejected',
         notes: reason
       });
+
+      // Track internal revision - TD Rejected
+      try {
+        await apiClient.post(`/boq/${boqId}/track_internal_revision`, {
+          action_type: 'TD_REJECTED',
+          rejection_reason: reason,
+          changes_summary: {
+            message: 'BOQ rejected by Technical Director',
+            status_changed_to: 'Rejected',
+            reason: reason
+          }
+        });
+      } catch (trackError) {
+        console.warn('Failed to track internal revision:', trackError);
+        // Don't fail the main operation if tracking fails
+      }
 
       return {
         success: true,
