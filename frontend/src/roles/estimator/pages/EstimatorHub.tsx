@@ -25,7 +25,6 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQPreview from '../components/BOQPreview';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
 import BOQDetailsModal from '../components/BOQDetailsModal';
-import BOQEditModal from '../components/BOQEditModal';
 import SendBOQEmailModal from '../components/SendBOQEmailModal';
 import RevisionCard from '../components/RevisionCard';
 import BOQRevisionHistory from '../components/BOQRevisionHistory';
@@ -3569,17 +3568,18 @@ const EstimatorHub: React.FC = () => {
         }}
       />
 
-      {/* BOQ Edit Modal */}
-      <BOQEditModal
+      {/* BOQ Edit Modal - Using BOQCreationForm in edit mode */}
+      <BOQCreationForm
         isOpen={showBoqEdit}
         onClose={() => {
           setShowBoqEdit(false);
           setEditingBoq(null);
           setIsRevisionEdit(false); // Reset revision flag
         }}
-        boq={editingBoq}
-        isRevision={isRevisionEdit} // Pass revision flag to modal
-        onSave={async () => {
+        editMode={!isRevisionEdit} // Edit mode when not creating revision
+        isRevision={isRevisionEdit} // Revision mode flag
+        existingBoqData={editingBoq}
+        onSubmit={async () => {
           await loadBOQs(); // Refresh the list
           setBoqDetailsRefreshTrigger(prev => prev + 1); // Trigger BOQ details modal refresh
           setShowBoqEdit(false);
@@ -3589,6 +3589,8 @@ const EstimatorHub: React.FC = () => {
           setEditingBoq(null);
           setIsRevisionEdit(false); // Reset revision flag
         }}
+        hideBulkUpload={true}
+        hideTemplate={true}
       />
 
       {/* Send BOQ Email Modal */}

@@ -18,6 +18,7 @@ import {
   Eye,
   Clock
 } from 'lucide-react';
+import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
 import { estimatorService } from '../services/estimatorService';
 import { BOQGetResponse, BOQItemDetailed } from '../types';
 import { toast } from 'sonner';
@@ -32,6 +33,8 @@ interface BOQDetailsModalProps {
   onEdit?: () => void;
   onDownload?: () => void;
   onPrint?: () => void;
+  onApprove?: () => void; // For TD/PM approval
+  onReject?: () => void; // For TD/PM rejection
   showNewPurchaseItems?: boolean; // Control whether to show new_purchase section (default: false for Projects, true for Change Requests)
   refreshTrigger?: number; // Add a trigger to force refresh from parent
 }
@@ -43,6 +46,8 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
   onEdit,
   onDownload,
   onPrint,
+  onApprove,
+  onReject,
   showNewPurchaseItems = false, // Default to false (Projects page won't show new items)
   refreshTrigger
 }) => {
@@ -151,6 +156,30 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* Approve Button - For TD/PM */}
+                    {onApprove && (
+                      <button
+                        onClick={onApprove}
+                        className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors flex items-center gap-2 font-medium"
+                        title="Approve BOQ"
+                      >
+                        <CheckCircleIcon className="w-5 h-5" />
+                        Approve
+                      </button>
+                    )}
+
+                    {/* Reject Button - For TD/PM */}
+                    {onReject && (
+                      <button
+                        onClick={onReject}
+                        className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors flex items-center gap-2 font-medium"
+                        title="Reject BOQ"
+                      >
+                        <XCircleIcon className="w-5 h-5" />
+                        Reject
+                      </button>
+                    )}
+
                     {onEdit && (() => {
                       const status = displayData?.status?.toLowerCase() || '';
                       // Estimator can edit if: draft, approved, revision_approved, sent_for_confirmation, under_revision, pending_revision

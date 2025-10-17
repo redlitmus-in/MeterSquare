@@ -1792,6 +1792,14 @@ const ProjectApprovals: React.FC = () => {
           onClose={() => setShowBOQModal(false)}
           boq={selectedEstimation ? { boq_id: selectedEstimation.id, boq_name: selectedEstimation.projectName } : null}
           onDownload={() => setShowFormatModal(true)}
+          onApprove={() => {
+            // Show approval modal (TD needs to review comparison first for pending, or direct approval for revisions)
+            setShowApprovalModal(true);
+          }}
+          onReject={() => {
+            // Show rejection modal
+            setShowRejectionModal(true);
+          }}
           refreshTrigger={boqDetailsRefreshTrigger}
         />
 

@@ -91,6 +91,9 @@ interface BOQCreationFormProps {
   hideTemplate?: boolean;
   isNewPurchase?: boolean; // For PM/SE adding extra BOQ
   existingBoqId?: number; // BOQ ID to add items to
+  editMode?: boolean; // For editing existing BOQ
+  existingBoqData?: any; // Existing BOQ data for edit mode
+  isRevision?: boolean; // For creating revision
 }
 
 // Master data interfaces
@@ -167,7 +170,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   hideBulkUpload = false,
   hideTemplate = false,
   isNewPurchase = false,
-  existingBoqId
+  existingBoqId,
+  editMode = false,
+  existingBoqData,
+  isRevision = false
 }) => {
   const [boqName, setBoqName] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
@@ -298,6 +304,144 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       setBoqName(`BOQ for ${selectedProject.project_name}`);
     }
   }, [selectedProject, isOpen]);
+
+  // Load existing BOQ data when in edit mode
+  useEffect(() => {
+    const loadExistingBoqData = async () => {
+      if (!isOpen || !editMode || !existingBoqData) return;
+
+      try {
+        // Fetch full BOQ details if we only have basic data
+        let boqDetails = existingBoqData;
+        if (existingBoqData.boq_id && !existingBoqData.boq_details) {
+          const response = await estimatorService.getBOQById(existingBoqData.boq_id);
+          if (response.success && response.data) {
+            boqDetails = response.data;
+          } else {
+            throw new Error(response.message || 'Failed to load BOQ');
+          }
+        }
+
+        // Set basic BOQ info
+        setBoqName(isRevision ? `${boqDetails.boq_name} - Revision` : boqDetails.boq_name);
+        setSelectedProjectId(boqDetails.project_id);
+
+        // Load preliminaries if available
+        const prelimsData = boqDetails.preliminaries || {};
+        if (prelimsData.items && Array.isArray(prelimsData.items)) {
+          const loadedPreliminaries = prelimsData.items.map((item: any, index: number) => ({
+            id: item.id || `prelim-${index}`,
+            description: item.description,
+            checked: item.checked || false,
+            isCustom: item.isCustom || false
+          }));
+          setPreliminaries(loadedPreliminaries);
+        }
+
+        // Load preliminary notes if available
+        if (prelimsData.notes) {
+          setPreliminaryNotes(prelimsData.notes);
+        }
+
+        // Get items from existing_purchase.items (backend structure)
+        const boqItems = boqDetails.existing_purchase?.items || [];
+
+        // Convert BOQ items to form format
+        if (boqItems && boqItems.length > 0) {
+          const formItems: BOQItemForm[] = boqItems.map((item: any, index: number) => {
+            // Convert sub-items
+            const subItems: SubItemForm[] = (item.sub_items || []).map((subItem: any, siIndex: number) => ({
+              id: `si-${index}-${siIndex}-${Date.now()}`,
+              scope: subItem.sub_item_name || subItem.scope || '',
+              size: subItem.size || '',
+              location: subItem.location || '',
+              brand: subItem.brand || '',
+              quantity: subItem.quantity || 1,
+              unit: subItem.unit || 'nos',
+              rate: subItem.rate || 0,
+              materials: (subItem.materials || []).map((mat: any, matIndex: number) => ({
+                id: `mat-si-${index}-${siIndex}-${matIndex}-${Date.now()}`,
+                material_name: mat.material_name,
+                quantity: mat.quantity || 1,
+                unit: mat.unit || 'nos',
+                unit_price: mat.unit_price || 0,
+                description: mat.description || '',
+                vat_percentage: mat.vat_percentage || 0,
+                master_material_id: mat.master_material_id,
+                is_from_master: !!mat.master_material_id,
+                is_new: !mat.master_material_id
+              })),
+              labour: (subItem.labour || []).map((lab: any, labIndex: number) => ({
+                id: `lab-si-${index}-${siIndex}-${labIndex}-${Date.now()}`,
+                labour_role: lab.labour_role,
+                hours: lab.hours || 8,
+                rate_per_hour: lab.rate_per_hour || 0,
+                work_type: lab.work_type || 'contract',
+                master_labour_id: lab.master_labour_id,
+                is_from_master: !!lab.master_labour_id,
+                is_new: !lab.master_labour_id
+              }))
+            }));
+
+            // Convert item-level materials and labour (for items without sub-items)
+            const materials: BOQMaterialForm[] = (item.materials || []).map((mat: any, matIndex: number) => ({
+              id: `mat-${index}-${matIndex}-${Date.now()}`,
+              material_name: mat.material_name,
+              quantity: mat.quantity || 1,
+              unit: mat.unit || 'nos',
+              unit_price: mat.unit_price || 0,
+              description: mat.description || '',
+              vat_percentage: mat.vat_percentage || 0,
+              master_material_id: mat.master_material_id,
+              is_from_master: !!mat.master_material_id,
+              is_new: !mat.master_material_id
+            }));
+
+            const labour: BOQLabourForm[] = (item.labour || []).map((lab: any, labIndex: number) => ({
+              id: `lab-${index}-${labIndex}-${Date.now()}`,
+              labour_role: lab.labour_role,
+              hours: lab.hours || 8,
+              rate_per_hour: lab.rate_per_hour || 0,
+              work_type: lab.work_type || 'contract',
+              master_labour_id: lab.master_labour_id,
+              is_from_master: !!lab.master_labour_id,
+              is_new: !lab.master_labour_id
+            }));
+
+            return {
+              id: `item-${index}-${Date.now()}`,
+              item_name: item.item_name,
+              description: item.description || '',
+              quantity: item.quantity || 1,
+              unit: item.unit || 'nos',
+              rate: item.rate || 0,
+              work_type: item.work_type || 'contract',
+              sub_items: subItems,
+              materials,
+              labour,
+              overhead_percentage: item.overhead_percentage || 10,
+              profit_margin_percentage: item.profit_margin_percentage || 15,
+              discount_percentage: item.discount_percentage || 0,
+              vat_percentage: item.vat_percentage || 0,
+              master_item_id: item.master_item_id,
+              is_new: !item.master_item_id
+            };
+          });
+
+          setItems(formItems);
+          // Expand all items by default in edit mode
+          setExpandedItems(formItems.map(item => item.id));
+        }
+
+        toast.success(editMode ? 'BOQ loaded for editing' : 'BOQ data loaded');
+      } catch (error) {
+        console.error('Failed to load BOQ data:', error);
+        toast.error('Failed to load BOQ data');
+      }
+    };
+
+    loadExistingBoqData();
+  }, [isOpen, editMode, existingBoqData, isRevision]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -934,8 +1078,127 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     setIsSubmitting(true);
 
     try {
+      // Edit mode - Update existing BOQ
+      if (editMode && existingBoqData?.boq_id) {
+        const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+        const token = localStorage.getItem('access_token');
+
+        const updatePayload = {
+          boq_id: existingBoqData.boq_id,
+          boq_name: boqName,
+          preliminaries: {
+            items: preliminaries.filter(p => p.checked).map(p => ({
+              description: p.description,
+              isCustom: p.isCustom || false
+            })),
+            notes: preliminaryNotes
+          },
+          items: items.map(item => {
+            const costs = calculateItemCost(item);
+            return {
+              item_name: item.item_name,
+              quantity: item.quantity,
+              unit: item.unit,
+              rate: item.rate,
+              overhead_percentage: item.overhead_percentage,
+              profit_margin_percentage: item.profit_margin_percentage,
+              discount_percentage: item.discount_percentage,
+              vat_percentage: item.vat_percentage,
+
+              // Add calculated amounts
+              item_total: costs.itemTotal,
+              overhead_amount: costs.miscellaneousAmount,
+              profit_margin_amount: costs.overheadProfitAmount,
+              subtotal: costs.subtotal,
+              discount_amount: costs.discountAmount,
+              after_discount: costs.afterDiscount,
+              vat_amount: costs.vatAmount,
+              selling_price: costs.sellingPrice,
+
+              // Add sub_items structure
+              sub_items: item.sub_items && item.sub_items.length > 0 ? item.sub_items.map(subItem => ({
+                sub_item_name: subItem.scope,
+                scope: subItem.scope,
+                size: subItem.size || null,
+                location: subItem.location || null,
+                brand: subItem.brand || null,
+                quantity: subItem.quantity,
+                unit: subItem.unit,
+                rate: subItem.rate,
+                per_unit_cost: subItem.rate,
+                sub_item_total: subItem.quantity * subItem.rate,
+
+                materials: subItem.materials?.map(material => ({
+                  material_name: material.material_name,
+                  quantity: material.quantity,
+                  unit: material.unit,
+                  unit_price: material.unit_price,
+                  total_price: material.quantity * material.unit_price,
+                  description: material.description || null,
+                  vat_percentage: material.vat_percentage || 0,
+                  master_material_id: material.master_material_id || null
+                })) || [],
+
+                labour: subItem.labour?.map(labour => ({
+                  labour_role: labour.labour_role,
+                  work_type: labour.work_type || 'daily_wages',
+                  hours: labour.hours,
+                  rate_per_hour: labour.rate_per_hour,
+                  total_amount: labour.hours * labour.rate_per_hour,
+                  master_labour_id: labour.master_labour_id || null
+                })) || []
+              })) : [],
+
+              // Item-level materials and labour for backward compatibility
+              materials: item.materials && item.materials.length > 0 ? item.materials.map(material => ({
+                material_name: material.material_name,
+                quantity: material.quantity,
+                unit: material.unit,
+                unit_price: material.unit_price,
+                total_price: material.quantity * material.unit_price,
+                description: material.description || null,
+                vat_percentage: material.vat_percentage || 0,
+                master_material_id: material.master_material_id || null
+              })) : [],
+
+              labour: item.labour && item.labour.length > 0 ? item.labour.map(labour => ({
+                labour_role: labour.labour_role,
+                work_type: labour.work_type || 'daily_wages',
+                hours: labour.hours,
+                rate_per_hour: labour.rate_per_hour,
+                total_amount: labour.hours * labour.rate_per_hour,
+                master_labour_id: labour.master_labour_id || null
+              })) : [],
+
+              master_item_id: item.master_item_id || null,
+              is_new: item.is_new || false
+            };
+          })
+        };
+
+        const response = await fetch(`${API_URL}/boq/${existingBoqData.boq_id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify(updatePayload)
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+          toast.success(result.message || 'BOQ updated successfully');
+          if (onSubmit) {
+            onSubmit(existingBoqData.boq_id);
+          }
+          onClose();
+        } else {
+          toast.error(result.error || 'Failed to update BOQ');
+        }
+      }
       // Use new_purchase endpoint for PM/SE adding extra items
-      if (isNewPurchase && existingBoqId) {
+      else if (isNewPurchase && existingBoqId) {
         const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
         const token = localStorage.getItem('access_token');
 
@@ -1150,8 +1413,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 <FileText className="w-8 h-8 text-blue-600" />
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-[#243d8a]">Create New BOQ</h2>
-                <p className="text-sm text-gray-600 mt-1">Build a detailed Bill of Quantities for your project</p>
+                <h2 className="text-2xl font-bold text-[#243d8a]">
+                  {editMode ? 'Edit BOQ' : isRevision ? 'Create BOQ Revision' : 'Create New BOQ'}
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  {editMode ? 'Update the Bill of Quantities details' : isRevision ? 'Create a new revision of the BOQ' : 'Build a detailed Bill of Quantities for your project'}
+                </p>
               </div>
             </div>
             <button
@@ -2385,12 +2652,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Creating BOQ...
+                    {editMode ? 'Updating BOQ...' : isRevision ? 'Creating Revision...' : isNewPurchase ? 'Adding Items...' : 'Creating BOQ...'}
                   </>
                 ) : (
                   <>
                     <Save className="w-4 h-4" />
-                    Create BOQ
+                    {editMode ? 'Update BOQ' : isRevision ? 'Create Revision' : isNewPurchase ? 'Add Items' : 'Create BOQ'}
                   </>
                 )}
               </button>
