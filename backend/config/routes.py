@@ -9,6 +9,7 @@ from routes.estimator_routes import estimator_routes
 from routes.purchase_route import purchase_routes
 from routes.change_request_routes import change_request_routes
 from routes.boq_tracking_routes import boq_tracking_routes
+from routes.preliminary_routes import preliminary_routes
 
 # Import and register the routes from the route blueprints
 
@@ -24,3 +25,4 @@ def initialize_routes(app):
     app.register_blueprint(change_request_routes)
     app.register_blueprint(admin_routes)
     app.register_blueprint(boq_tracking_routes)
+    app.register_blueprint(preliminary_routes)
