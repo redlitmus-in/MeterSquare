@@ -156,6 +156,9 @@ class EstimatorService {
 
   async updateBOQ(boqId: number, updateData: any): Promise<{ success: boolean; message: string }> {
     try {
+      console.log('=== UPDATE BOQ CALLED ===');
+      console.log('BOQ ID:', boqId);
+      console.log('API URL will be: /boq/update_boq/' + boqId);
       console.log('=== ORIGINAL PAYLOAD ===', JSON.stringify(updateData, null, 2));
 
       // Validate required fields
@@ -166,7 +169,7 @@ class EstimatorService {
         };
       }
 
-      if (!updateData.items || updateData.items.length === 0) {
+      if (!updateData.items || !Array.isArray(updateData.items) || updateData.items.length === 0) {
         return {
           success: false,
           message: 'At least one BOQ item is required'
@@ -177,32 +180,64 @@ class EstimatorService {
       const processedData = {
         ...updateData,
         items: updateData.items.map((item: any) => {
+          if (!item) {
+            throw new Error('Invalid item data');
+          }
           console.log('Processing item:', item.item_name);
-          return {
-            ...item,
-            materials: item.materials.map((mat: any) => {
-              const total_price = mat.total_price || (mat.quantity * mat.unit_price);
-              console.log(`Material ${mat.material_name}: qty=${mat.quantity}, price=${mat.unit_price}, total=${total_price}`);
-              return {
+
+          // Check if item has sub_items structure
+          const hasSubItems = item.sub_items && Array.isArray(item.sub_items) && item.sub_items.length > 0;
+
+          if (hasSubItems) {
+            // For items with sub_items, remove top-level materials, labour, master_item_id, is_new
+            const { materials, labour, master_item_id, is_new, ...cleanItem } = item;
+
+            // Process sub_items to ensure totals are calculated
+            const processedSubItems = item.sub_items.map((subItem: any) => ({
+              ...subItem,
+              materials: (subItem.materials || []).map((mat: any) => ({
                 ...mat,
-                total_price: total_price
-              };
-            }),
-            labour: item.labour.map((lab: any) => {
-              const total_cost = lab.total_cost || (lab.hours * lab.rate_per_hour);
-              console.log(`Labour ${lab.labour_role}: hours=${lab.hours}, rate=${lab.rate_per_hour}, total=${total_cost}`);
-              return {
+                total_price: mat.total_price || (mat.quantity * mat.unit_price)
+              })),
+              labour: (subItem.labour || []).map((lab: any) => ({
                 ...lab,
-                total_cost: total_cost
-              };
-            })
-          };
+                total_cost: lab.total_cost || lab.total_amount || (lab.hours * lab.rate_per_hour)
+              }))
+            }));
+
+            return {
+              ...cleanItem,
+              sub_items: processedSubItems
+            };
+          } else {
+            // For items without sub_items, process materials and labour at item level
+            return {
+              ...item,
+              materials: (item.materials || []).map((mat: any) => {
+                const total_price = mat.total_price || (mat.quantity * mat.unit_price);
+                console.log(`Material ${mat.material_name}: qty=${mat.quantity}, price=${mat.unit_price}, total=${total_price}`);
+                return {
+                  ...mat,
+                  total_price: total_price
+                };
+              }),
+              labour: (item.labour || []).map((lab: any) => {
+                const total_cost = lab.total_cost || (lab.hours * lab.rate_per_hour);
+                console.log(`Labour ${lab.labour_role}: hours=${lab.hours}, rate=${lab.rate_per_hour}, total=${total_cost}`);
+                return {
+                  ...lab,
+                  total_cost: total_cost
+                };
+              })
+            };
+          }
         })
       };
 
       console.log('=== PROCESSED PAYLOAD WITH TOTALS ===', JSON.stringify(processedData, null, 2));
+      console.log('=== MAKING API CALL ===');
 
-      const response = await apiClient.put(`/update_boq/${boqId}`, processedData);
+      const response = await apiClient.put(`/boq/update_boq/${boqId}`, processedData);
       console.log('BOQ update response:', response.data);
 
       return {
@@ -210,28 +245,41 @@ class EstimatorService {
         message: response.data.message || 'BOQ updated successfully'
       };
     } catch (error: any) {
-      console.error('BOQ update error:', error.response?.data || error.message);
+      console.error('BOQ update error:', error);
+      console.error('Error response:', error.response?.data);
+      console.error('Error config URL:', error.config?.url);
+      console.error('Error status:', error.response?.status);
+      console.error('Error message:', error.message);
 
-      if (error.response?.status === 404) {
+      // If it's a network/API error
+      if (error.response) {
+        if (error.response?.status === 404) {
+          return {
+            success: false,
+            message: 'BOQ not found'
+          };
+        } else if (error.response?.status === 400) {
+          return {
+            success: false,
+            message: error.response?.data?.error || 'Invalid BOQ data provided'
+          };
+        } else if (error.response?.status === 500) {
+          return {
+            success: false,
+            message: 'Server error occurred while updating BOQ. Please try again.'
+          };
+        }
+
         return {
           success: false,
-          message: 'BOQ not found'
-        };
-      } else if (error.response?.status === 400) {
-        return {
-          success: false,
-          message: error.response?.data?.error || 'Invalid BOQ data provided'
-        };
-      } else if (error.response?.status === 500) {
-        return {
-          success: false,
-          message: 'Server error occurred while updating BOQ. Please try again.'
+          message: error.response?.data?.error || error.response?.data?.message || 'Failed to update BOQ'
         };
       }
 
+      // If it's a JavaScript error (no response)
       return {
         success: false,
-        message: error.response?.data?.error || 'Failed to update BOQ'
+        message: `Error: ${error.message || 'Failed to update BOQ'}`
       };
     }
   }
@@ -335,7 +383,7 @@ class EstimatorService {
   // BOQ Status Management
   async updateBOQStatus(boqId: number, status: BOQStatus): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await apiClient.put(`/update_boq/${boqId}`, { status });
+      const response = await apiClient.put(`/boq/update_boq/${boqId}`, { status });
       return {
         success: true,
         message: response.data.message || 'BOQ status updated successfully'
@@ -364,7 +412,7 @@ class EstimatorService {
 
   async approveBOQ(boqId: number, notes?: string): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await apiClient.put(`/update_boq/${boqId}`, {
+      const response = await apiClient.put(`/boq/update_boq/${boqId}`, {
         status: 'Approved',
         notes: notes
       });
@@ -403,7 +451,7 @@ class EstimatorService {
         };
       }
 
-      const response = await apiClient.put(`/update_boq/${boqId}`, {
+      const response = await apiClient.put(`/boq/update_boq/${boqId}`, {
         status: 'Rejected',
         notes: reason
       });
@@ -435,7 +483,7 @@ class EstimatorService {
 
   async sendBOQForConfirmation(boqId: number): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await apiClient.put(`/update_boq/${boqId}`, {
+      const response = await apiClient.put(`/boq/update_boq/${boqId}`, {
         status: 'Sent_for_Confirmation'
       });
       return {
