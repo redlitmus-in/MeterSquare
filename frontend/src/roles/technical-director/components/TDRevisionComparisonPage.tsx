@@ -207,6 +207,30 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
     return prevRevision.boq_details.items.find((item: any) => item.item_name === itemName);
   };
 
+  // Calculate total price from items
+  const calculateTotalFromItems = (boqData: any) => {
+    if (!boqData?.boq_details?.items || boqData.boq_details.items.length === 0) return 0;
+
+    return boqData.boq_details.items.reduce((total: number, item: any) => {
+      // Calculate item total from sub_items or direct materials/labour
+      const itemTotal = item.sub_items && item.sub_items.length > 0
+        ? item.sub_items.reduce((sum: number, si: any) =>
+            sum + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
+        : (item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) || 0) +
+          (item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0);
+
+      const miscellaneousAmount = (itemTotal * (item.overhead_percentage || 0)) / 100;
+      const overheadProfitAmount = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
+      const subtotal = itemTotal + miscellaneousAmount + overheadProfitAmount;
+      const discountAmount = (subtotal * (item.discount_percentage || 0)) / 100;
+      const afterDiscount = subtotal - discountAmount;
+      const vatAmount = (afterDiscount * (item.vat_percentage || 0)) / 100;
+      const finalTotalPrice = afterDiscount + vatAmount;
+
+      return total + finalTotalPrice;
+    }, 0);
+  };
+
   return (
     <div className="space-y-6">
       <Tabs defaultValue="client" className="w-full">
@@ -347,7 +371,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                 </div>
                 <div className="text-right">
                   <div className="text-2xl font-bold text-green-900">
-                    {formatCurrency(currentRevisionData?.total_cost || getTotalCost(selectedBoq))}
+                    {formatCurrency(calculateTotalFromItems(currentRevisionData))}
                   </div>
                 </div>
               </div>
@@ -749,7 +773,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                           </div>
                           <div className="text-right">
                             <div className="text-lg font-bold text-gray-900">
-                              {formatCurrency(revision.total_cost || 0)}
+                              {formatCurrency(calculateTotalFromItems(revision))}
                             </div>
                             {change.percentage !== 0 && (
                               <div className={`flex items-center gap-1 text-xs font-semibold ${

@@ -993,7 +993,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                           </div>
                           <div className="text-right">
                             <div className="text-lg font-bold text-gray-900">
-                              {formatCurrency(revision.total_cost || 0)}
+                              {formatCurrency(calculateTotalFromItems(revision))}
                             </div>
                             {change.percentage !== 0 && (
                               <div className={`flex items-center gap-1 text-xs font-semibold ${
