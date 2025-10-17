@@ -187,6 +187,26 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
     return { value: change, percentage: parseFloat(percentage) };
   };
 
+  // Get previous revision for comparison (the immediate previous one)
+  const getPreviousRevisionForComparison = () => {
+    if (previousRevisions.length > 0) {
+      // Sort by version descending and get the first one (most recent previous)
+      const sorted = [...previousRevisions].sort((a, b) => {
+        const aNum = typeof a.version === 'number' ? a.version : parseInt(a.version || '0');
+        const bNum = typeof b.version === 'number' ? b.version : parseInt(b.version || '0');
+        return bNum - aNum;
+      });
+      return sorted[0];
+    }
+    return null;
+  };
+
+  // Find matching item in previous revision
+  const findPreviousItem = (itemName: string, prevRevision: any) => {
+    if (!prevRevision?.boq_details?.items) return null;
+    return prevRevision.boq_details.items.find((item: any) => item.item_name === itemName);
+  };
+
   return (
     <div className="space-y-6">
       <Tabs defaultValue="client" className="w-full">
@@ -363,15 +383,98 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                 </div>
 
                 {/* Items */}
-                {currentRevisionData.boq_details?.items?.map((item: any, index: number) => (
-                  <div key={index} className="bg-white border border-gray-200 rounded-lg p-4">
-                    <h5 className="font-semibold text-gray-900 mb-2">{item.item_name}</h5>
-                    {item.description && (
-                      <p className="text-sm text-gray-600 mb-3">{item.description}</p>
+                {currentRevisionData.boq_details?.items?.map((item: any, index: number) => {
+                  const prevRevision = getPreviousRevisionForComparison();
+                  const prevItem = prevRevision ? findPreviousItem(item.item_name, prevRevision) : null;
+
+                  return (
+                    <div key={index} className="bg-white border border-gray-200 rounded-lg p-4">
+                      <h5 className="font-semibold text-gray-900 mb-2">{item.item_name}</h5>
+                      {item.description && (
+                        <p className="text-sm text-gray-600 mb-3">{item.description}</p>
+                      )}
+
+                      {/* Sub Items */}
+                      {item.sub_items && item.sub_items.length > 0 && (
+                        <div className="mb-3 space-y-2">
+                          <p className="text-xs font-semibold text-gray-700 mb-2">📋 Sub Items:</p>
+                          {item.sub_items.map((subItem: any, subIdx: number) => {
+                            // Find previous sub-item for comparison
+                            const prevSubItem = prevItem?.sub_items?.find((ps: any) => ps.sub_item_name === subItem.sub_item_name);
+
+                          return (
+                            <div key={subIdx} className="bg-green-50 border border-green-200 rounded-lg p-3">
+                              <div className="flex justify-between items-start mb-2">
+                                <div>
+                                  <p className="font-semibold text-sm text-gray-900">{subItem.sub_item_name}</p>
+                                  {subItem.scope && <p className="text-xs text-gray-600">{subItem.scope}</p>}
+                                </div>
+                                <div className="text-right text-xs text-gray-600">
+                                  {subItem.size && <div>Size: {subItem.size}</div>}
+                                  {subItem.location && <div>Location: {subItem.location}</div>}
+                                  {subItem.brand && <div>Brand: {subItem.brand}</div>}
+                                </div>
+                              </div>
+
+                              {/* Sub Item Materials */}
+                              {subItem.materials && subItem.materials.length > 0 && (
+                                <div className="mb-2">
+                                  <p className="text-xs font-semibold text-gray-700 mb-1">📦 Materials:</p>
+                                  <div className="space-y-1">
+                                    {subItem.materials.map((mat: any, matIdx: number) => {
+                                      const prevMat = prevSubItem?.materials?.find((pm: any) => pm.material_name === mat.material_name);
+                                      const quantityChanged = prevMat ? mat.quantity !== prevMat.quantity : !prevMat;
+                                      const priceChanged = prevMat ? (mat.quantity * mat.unit_price) !== (prevMat.quantity * prevMat.unit_price) : !prevMat;
+                                      const isNew = !prevMat;
+
+                                      return (
+                                        <div key={matIdx} className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${isNew ? 'bg-yellow-100' : 'bg-white'}`}>
+                                          <span className={quantityChanged ? 'bg-yellow-200 px-1 rounded' : ''}>
+                                            {mat.material_name} ({mat.quantity} {mat.unit})
+                                          </span>
+                                          <span className={`font-semibold ${priceChanged ? 'bg-yellow-200 px-1 rounded' : ''}`}>
+                                            AED {(mat.quantity * mat.unit_price).toFixed(2)}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Sub Item Labour */}
+                              {subItem.labour && subItem.labour.length > 0 && (
+                                <div>
+                                  <p className="text-xs font-semibold text-gray-700 mb-1">👷 Labour:</p>
+                                  <div className="space-y-1">
+                                    {subItem.labour.map((lab: any, labIdx: number) => {
+                                      const prevLab = prevSubItem?.labour?.find((pl: any) => pl.labour_role === lab.labour_role);
+                                      const hoursChanged = prevLab ? lab.hours !== prevLab.hours : !prevLab;
+                                      const costChanged = prevLab ? (lab.hours * lab.rate_per_hour) !== (prevLab.hours * prevLab.rate_per_hour) : !prevLab;
+                                      const isNew = !prevLab;
+
+                                      return (
+                                        <div key={labIdx} className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${isNew ? 'bg-yellow-100' : 'bg-white'}`}>
+                                          <span className={hoursChanged ? 'bg-yellow-200 px-1 rounded' : ''}>
+                                            {lab.labour_role} ({lab.hours}h @ AED {lab.rate_per_hour}/h)
+                                          </span>
+                                          <span className={`font-semibold ${costChanged ? 'bg-yellow-200 px-1 rounded' : ''}`}>
+                                            AED {(lab.hours * lab.rate_per_hour).toFixed(2)}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
 
-                    {/* Materials */}
-                    {item.materials && item.materials.length > 0 && (
+                    {/* Direct Materials (for items without sub_items) */}
+                    {(!item.sub_items || item.sub_items.length === 0) && item.materials && item.materials.length > 0 && (
                       <div className="mb-3">
                         <p className="text-xs font-semibold text-gray-700 mb-1">📦 Materials:</p>
                         <div className="space-y-1">
@@ -385,8 +488,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                       </div>
                     )}
 
-                    {/* Labour */}
-                    {item.labour && item.labour.length > 0 && (
+                    {/* Direct Labour (for items without sub_items) */}
+                    {(!item.sub_items || item.sub_items.length === 0) && item.labour && item.labour.length > 0 && (
                       <div className="mb-3">
                         <p className="text-xs font-semibold text-gray-700 mb-1">👷 Labour:</p>
                         <div className="space-y-1">
@@ -402,39 +505,71 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
 
                     {/* Additional Details: Overhead, Profit, Discount, VAT */}
                     <div className="mt-3 pt-2 border-t border-gray-200 space-y-1">
-                      {item.overhead_percentage > 0 && (
-                        <div className="text-xs text-gray-600 flex justify-between">
-                          <span>Overhead ({item.overhead_percentage}%):</span>
-                          <span className="font-semibold">AED {((item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) + item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0)) * item.overhead_percentage / 100).toFixed(2)}</span>
-                        </div>
-                      )}
-                      {item.profit_margin_percentage > 0 && (
-                        <div className="text-xs text-gray-600 flex justify-between">
-                          <span>Profit Margin ({item.profit_margin_percentage}%):</span>
-                          <span className="font-semibold">AED {((item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) + item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0)) * item.profit_margin_percentage / 100).toFixed(2)}</span>
-                        </div>
-                      )}
-                      {item.discount_percentage > 0 && (
-                        <div className="text-xs text-red-600 flex justify-between">
-                          <span>Discount ({item.discount_percentage}%):</span>
-                          <span className="font-semibold">- AED {(item.selling_price * item.discount_percentage / 100).toFixed(2)}</span>
-                        </div>
-                      )}
-                      {item.vat_percentage > 0 && (
-                        <div className="text-xs text-gray-600 flex justify-between">
-                          <span>VAT ({item.vat_percentage}%):</span>
-                          <span className="font-semibold">AED {(item.selling_price * item.vat_percentage / 100).toFixed(2)}</span>
-                        </div>
-                      )}
-                    </div>
+                      {/* Calculate costs with correct labels */}
+                      {(() => {
+                        const itemTotal = item.sub_items && item.sub_items.length > 0
+                          ? item.sub_items.reduce((sum: number, si: any) =>
+                              sum + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
+                          : (item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) || 0) +
+                            (item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0);
 
-                    {/* Selling Price */}
-                    <div className="pt-2 border-t border-gray-300 flex justify-between mt-2">
-                      <span className="font-semibold text-gray-900">Selling Price:</span>
-                      <span className="font-bold text-green-600">AED {item.selling_price}</span>
+                        const miscellaneousAmount = (itemTotal * (item.overhead_percentage || 0)) / 100;
+                        const overheadProfitAmount = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
+                        const subtotal = itemTotal + miscellaneousAmount + overheadProfitAmount;
+                        const discountAmount = (subtotal * (item.discount_percentage || 0)) / 100;
+                        const afterDiscount = subtotal - discountAmount;
+                        const vatAmount = (afterDiscount * (item.vat_percentage || 0)) / 100;
+                        const finalTotalPrice = afterDiscount + vatAmount;
+
+                        return (
+                          <>
+                            <div className="text-xs text-gray-600 flex justify-between rounded px-2 py-1">
+                              <span>Item Total (Qty × Rate):</span>
+                              <span className="font-semibold">AED {itemTotal.toFixed(2)}</span>
+                            </div>
+                            {item.overhead_percentage > 0 && (
+                              <div className="text-xs text-gray-600 flex justify-between">
+                                <span>Miscellaneous ({item.overhead_percentage}%):</span>
+                                <span className="font-semibold">AED {miscellaneousAmount.toFixed(2)}</span>
+                              </div>
+                            )}
+                            {item.profit_margin_percentage > 0 && (
+                              <div className="text-xs text-gray-600 flex justify-between">
+                                <span>Overhead & Profit ({item.profit_margin_percentage}%):</span>
+                                <span className="font-semibold">AED {overheadProfitAmount.toFixed(2)}</span>
+                              </div>
+                            )}
+                            <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1 bg-gray-100 font-semibold">
+                              <span>Subtotal:</span>
+                              <span>AED {subtotal.toFixed(2)}</span>
+                            </div>
+                            {item.discount_percentage > 0 && (
+                              <div className="text-xs text-red-600 flex justify-between">
+                                <span>Discount ({item.discount_percentage}%):</span>
+                                <span className="font-semibold">- AED {discountAmount.toFixed(2)}</span>
+                              </div>
+                            )}
+                            <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1">
+                              <span>After Discount:</span>
+                              <span className="font-semibold">AED {afterDiscount.toFixed(2)}</span>
+                            </div>
+                            {item.vat_percentage > 0 && (
+                              <div className="text-xs text-green-600 flex justify-between">
+                                <span>VAT ({item.vat_percentage}%) [ADDITIONAL]:</span>
+                                <span className="font-semibold">+ AED {vatAmount.toFixed(2)}</span>
+                              </div>
+                            )}
+                            <div className="text-sm font-bold text-gray-900 flex justify-between bg-green-50 rounded px-2 py-1 mt-2">
+                              <span>Final Total Price:</span>
+                              <span>AED {finalTotalPrice.toFixed(2)}</span>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="p-8 text-center text-gray-500">No data available</div>
@@ -642,8 +777,60 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                                 <p className="text-xs text-gray-600 mb-3">{item.description}</p>
                               )}
 
-                              {/* Materials */}
-                              {item.materials && item.materials.length > 0 && (
+                              {/* Sub Items */}
+                              {item.sub_items && item.sub_items.length > 0 && (
+                                <div className="mb-3 space-y-2">
+                                  <p className="text-xs font-semibold text-gray-700 mb-2">📋 Sub Items:</p>
+                                  {item.sub_items.map((subItem: any, subIdx: number) => (
+                                    <div key={subIdx} className="bg-red-100 border border-red-300 rounded-lg p-2">
+                                      <div className="flex justify-between items-start mb-2">
+                                        <div>
+                                          <p className="font-semibold text-xs text-gray-900">{subItem.sub_item_name}</p>
+                                          {subItem.scope && <p className="text-xs text-gray-600">{subItem.scope}</p>}
+                                        </div>
+                                        <div className="text-right text-xs text-gray-600">
+                                          {subItem.size && <div>Size: {subItem.size}</div>}
+                                          {subItem.location && <div>Loc: {subItem.location}</div>}
+                                          {subItem.brand && <div>Brand: {subItem.brand}</div>}
+                                        </div>
+                                      </div>
+
+                                      {/* Sub Item Materials */}
+                                      {subItem.materials && subItem.materials.length > 0 && (
+                                        <div className="mb-2">
+                                          <p className="text-xs font-semibold text-gray-700 mb-1">📦 Materials:</p>
+                                          <div className="space-y-1">
+                                            {subItem.materials.map((mat: any, matIdx: number) => (
+                                              <div key={matIdx} className="text-xs text-gray-600 flex justify-between bg-white rounded px-2 py-1">
+                                                <span>{mat.material_name} ({mat.quantity} {mat.unit})</span>
+                                                <span className="font-semibold">AED {(mat.quantity * mat.unit_price).toFixed(2)}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Sub Item Labour */}
+                                      {subItem.labour && subItem.labour.length > 0 && (
+                                        <div>
+                                          <p className="text-xs font-semibold text-gray-700 mb-1">👷 Labour:</p>
+                                          <div className="space-y-1">
+                                            {subItem.labour.map((lab: any, labIdx: number) => (
+                                              <div key={labIdx} className="text-xs text-gray-600 flex justify-between bg-white rounded px-2 py-1">
+                                                <span>{lab.labour_role} ({lab.hours}h)</span>
+                                                <span className="font-semibold">AED {(lab.hours * lab.rate_per_hour).toFixed(2)}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Direct Materials (for items without sub_items) */}
+                              {(!item.sub_items || item.sub_items.length === 0) && item.materials && item.materials.length > 0 && (
                                 <div className="mb-3">
                                   <p className="text-xs font-semibold text-gray-700 mb-1">📦 Materials:</p>
                                   <div className="space-y-1">
@@ -657,8 +844,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                                 </div>
                               )}
 
-                              {/* Labour */}
-                              {item.labour && item.labour.length > 0 && (
+                              {/* Direct Labour (for items without sub_items) */}
+                              {(!item.sub_items || item.sub_items.length === 0) && item.labour && item.labour.length > 0 && (
                                 <div className="mb-3">
                                   <p className="text-xs font-semibold text-gray-700 mb-1">👷 Labour:</p>
                                   <div className="space-y-1">
@@ -674,36 +861,67 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
 
                               {/* Additional Details: Overhead, Profit, Discount, VAT */}
                               <div className="mt-3 pt-2 border-t border-red-200 space-y-1">
-                                {item.overhead_percentage > 0 && (
-                                  <div className="text-xs text-gray-600 flex justify-between">
-                                    <span>Overhead ({item.overhead_percentage}%):</span>
-                                    <span className="font-semibold">AED {((item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) + item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0)) * item.overhead_percentage / 100).toFixed(2)}</span>
-                                  </div>
-                                )}
-                                {item.profit_margin_percentage > 0 && (
-                                  <div className="text-xs text-gray-600 flex justify-between">
-                                    <span>Profit Margin ({item.profit_margin_percentage}%):</span>
-                                    <span className="font-semibold">AED {((item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) + item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0)) * item.profit_margin_percentage / 100).toFixed(2)}</span>
-                                  </div>
-                                )}
-                                {item.discount_percentage > 0 && (
-                                  <div className="text-xs text-red-600 flex justify-between">
-                                    <span>Discount ({item.discount_percentage}%):</span>
-                                    <span className="font-semibold">- AED {(item.selling_price * item.discount_percentage / 100).toFixed(2)}</span>
-                                  </div>
-                                )}
-                                {item.vat_percentage > 0 && (
-                                  <div className="text-xs text-gray-600 flex justify-between">
-                                    <span>VAT ({item.vat_percentage}%):</span>
-                                    <span className="font-semibold">AED {(item.selling_price * item.vat_percentage / 100).toFixed(2)}</span>
-                                  </div>
-                                )}
-                              </div>
+                                {/* Calculate costs with correct labels */}
+                                {(() => {
+                                  const itemTotal = item.sub_items && item.sub_items.length > 0
+                                    ? item.sub_items.reduce((sum: number, si: any) =>
+                                        sum + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
+                                    : (item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) || 0) +
+                                      (item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0);
 
-                              {/* Selling Price */}
-                              <div className="pt-2 border-t border-red-300 flex justify-between mt-2">
-                                <span className="font-semibold text-gray-900 text-sm">Selling Price:</span>
-                                <span className="font-bold text-red-600 text-sm">AED {item.selling_price}</span>
+                                  const miscellaneousAmount = (itemTotal * (item.overhead_percentage || 0)) / 100;
+                                  const overheadProfitAmount = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
+                                  const subtotal = itemTotal + miscellaneousAmount + overheadProfitAmount;
+                                  const discountAmount = (subtotal * (item.discount_percentage || 0)) / 100;
+                                  const afterDiscount = subtotal - discountAmount;
+                                  const vatAmount = (afterDiscount * (item.vat_percentage || 0)) / 100;
+                                  const finalTotalPrice = afterDiscount + vatAmount;
+
+                                  return (
+                                    <>
+                                      <div className="text-xs text-gray-600 flex justify-between rounded px-2 py-1">
+                                        <span>Item Total (Qty × Rate):</span>
+                                        <span className="font-semibold">AED {itemTotal.toFixed(2)}</span>
+                                      </div>
+                                      {item.overhead_percentage > 0 && (
+                                        <div className="text-xs text-gray-600 flex justify-between">
+                                          <span>Miscellaneous ({item.overhead_percentage}%):</span>
+                                          <span className="font-semibold">AED {miscellaneousAmount.toFixed(2)}</span>
+                                        </div>
+                                      )}
+                                      {item.profit_margin_percentage > 0 && (
+                                        <div className="text-xs text-gray-600 flex justify-between">
+                                          <span>Overhead & Profit ({item.profit_margin_percentage}%):</span>
+                                          <span className="font-semibold">AED {overheadProfitAmount.toFixed(2)}</span>
+                                        </div>
+                                      )}
+                                      <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1 bg-gray-100 font-semibold">
+                                        <span>Subtotal:</span>
+                                        <span>AED {subtotal.toFixed(2)}</span>
+                                      </div>
+                                      {item.discount_percentage > 0 && (
+                                        <div className="text-xs text-red-600 flex justify-between">
+                                          <span>Discount ({item.discount_percentage}%):</span>
+                                          <span className="font-semibold">- AED {discountAmount.toFixed(2)}</span>
+                                        </div>
+                                      )}
+                                      <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1">
+                                        <span>After Discount:</span>
+                                        <span className="font-semibold">AED {afterDiscount.toFixed(2)}</span>
+                                      </div>
+                                      {item.vat_percentage > 0 && (
+                                        <div className="text-xs text-green-600 flex justify-between">
+                                          <span>VAT ({item.vat_percentage}%) [ADDITIONAL]:</span>
+                                          <span className="font-semibold">+ AED {vatAmount.toFixed(2)}</span>
+                                        </div>
+                                      )}
+                                      <div className="text-sm font-bold text-gray-900 flex justify-between bg-red-50 rounded px-2 py-1 mt-2">
+                                        <span>Final Total Price:</span>
+                                        <span>AED {finalTotalPrice.toFixed(2)}</span>
+                                      </div>
+                                    </>
+                                  );
+                                })()}
                               </div>
                             </div>
                           ))}

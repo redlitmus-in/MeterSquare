@@ -3497,11 +3497,19 @@ const EstimatorHub: React.FC = () => {
           <div className="space-y-3 mt-4">
             <Button
               className="w-full bg-gradient-to-r from-red-50 to-red-100 text-red-900 hover:from-red-100 hover:to-red-200 border border-red-200 shadow-sm"
-              onClick={() => {
+              onClick={async () => {
                 setShowRevisionModal(false);
-                setEditingBoq(selectedBoqForRevision);
-                setIsRevisionEdit(true); // Set flag for revision edit
-                setShowBoqEdit(true);
+                // Load full BOQ data with sub_items before opening form
+                if (selectedBoqForRevision?.boq_id) {
+                  const result = await estimatorService.getBOQById(selectedBoqForRevision.boq_id);
+                  if (result.success && result.data) {
+                    setEditingBoq(result.data);
+                    setIsRevisionEdit(true); // Set flag for revision edit
+                    setShowBoqEdit(true);
+                  } else {
+                    toast.error('Failed to load BOQ details');
+                  }
+                }
               }}
             >
               <Edit className="h-4 w-4 mr-2" />
@@ -3579,13 +3587,17 @@ const EstimatorHub: React.FC = () => {
         editMode={!isRevisionEdit} // Edit mode when not creating revision
         isRevision={isRevisionEdit} // Revision mode flag
         existingBoqData={editingBoq}
-        onSubmit={async () => {
+        onSubmit={async (boqId) => {
           await loadBOQs(); // Refresh the list
           setBoqDetailsRefreshTrigger(prev => prev + 1); // Trigger BOQ details modal refresh
           setShowBoqEdit(false);
-          // Show Send to TD popup after save
-          setBoqToSendToTD(editingBoq);
-          setShowSendToTDPopup(true);
+
+          // After revision, show send to TD popup
+          if (isRevisionEdit && editingBoq) {
+            setBoqToSendToTD(editingBoq);
+            setShowSendToTDPopup(true);
+          }
+
           setEditingBoq(null);
           setIsRevisionEdit(false); // Reset revision flag
         }}

@@ -1096,6 +1096,56 @@ class EstimatorService {
     }
   }
 
+  // Get sub-items for a specific item with materials and labour
+  async getItemSubItems(itemId: number): Promise<{
+    sub_items: Array<{
+      sub_item_id: number;
+      item_id: number;
+      sub_item_name: string;
+      description?: string;
+      location?: string;
+      brand?: string;
+      unit: string;
+      quantity: number;
+      per_unit_cost: number;
+      sub_item_total_cost: number;
+      materials: Array<{
+        material_id: number;
+        material_name: string;
+        unit: string;
+        current_market_price: number;
+        is_active: boolean;
+      }>;
+      labour: Array<{
+        labour_id: number;
+        labour_role: string;
+        work_type: string;
+        hours: number;
+        rate_per_hour: number;
+        amount: number;
+        is_active: boolean;
+      }>;
+      total_materials_cost: number;
+      total_labour_cost: number;
+      total_cost: number;
+    }>;
+  }> {
+    try {
+      const response = await apiClient.get(`/sub_item/${itemId}`);
+
+      if (response.data?.sub_items) {
+        return {
+          sub_items: response.data.sub_items
+        };
+      }
+
+      return { sub_items: [] };
+    } catch (error) {
+      console.error(`Failed to fetch sub-items for item ${itemId}:`, error);
+      return { sub_items: [] };
+    }
+  }
+
   // Get labour for a specific item
   async getItemLabours(itemId: number): Promise<{
     labour_id: number;

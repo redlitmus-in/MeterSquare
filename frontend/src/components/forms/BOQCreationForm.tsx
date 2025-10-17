@@ -320,10 +320,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     }
   }, [selectedProject, isOpen]);
 
-  // Load existing BOQ data when in edit mode
+  // Load existing BOQ data when in edit mode or revision mode
   useEffect(() => {
     const loadExistingBoqData = async () => {
-      if (!isOpen || !editMode || !existingBoqData) return;
+      if (!isOpen || (!editMode && !isRevision) || !existingBoqData) return;
 
       try {
         // Fetch full BOQ details if we only have basic data
@@ -517,34 +517,42 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     setLoadingItemData(prev => ({ ...prev, [itemId]: true }));
 
     try {
-      // Load materials and labour for this item
-      const [materials, labours] = await Promise.all([
-        loadItemMaterials(masterItem.item_id),
-        loadItemLabours(masterItem.item_id)
-      ]);
+      // Load sub-items with materials and labour for this item
+      const subItemsData = await estimatorService.getItemSubItems(masterItem.item_id);
 
       // Update the item with master data
     setItems(items.map(item => {
       if (item.id === itemId) {
-        // Convert master materials to form materials
-        const formMaterials: BOQMaterialForm[] = materials.map(mat => ({
-          id: `mat-${mat.material_id}-${Date.now()}`,
-          material_name: mat.material_name,
-          quantity: 1,
-          unit: mat.default_unit,
-          unit_price: mat.current_market_price,
-          master_material_id: mat.material_id,
-          is_from_master: true
-        }));
-
-        // Convert master labours to form labours
-        const formLabours: BOQLabourForm[] = labours.map(lab => ({
-          id: `lab-${lab.labour_id}-${Date.now()}`,
-          labour_role: lab.labour_role,
-          hours: 8, // Default hours
-          rate_per_hour: lab.amount / 8, // Calculate hourly rate from amount
-          master_labour_id: lab.labour_id,
-          is_from_master: true
+        // Convert master sub-items to form sub-items
+        const formSubItems: SubItemForm[] = subItemsData.sub_items.map((subItem, index) => ({
+          id: `si-${itemId}-${index}-${Date.now()}`,
+          sub_item_name: subItem.sub_item_name || '',
+          scope: subItem.description || '',
+          size: '',
+          location: subItem.location || '',
+          brand: subItem.brand || '',
+          quantity: subItem.quantity || 1,
+          unit: subItem.unit || 'nos',
+          rate: subItem.per_unit_cost || 0,
+          materials: subItem.materials.map((mat, matIndex) => ({
+            id: `mat-si-${itemId}-${index}-${matIndex}-${Date.now()}`,
+            material_name: mat.material_name,
+            quantity: 1,
+            unit: mat.unit || 'nos',
+            unit_price: mat.current_market_price || 0,
+            description: '',
+            master_material_id: mat.material_id,
+            is_from_master: true
+          })),
+          labour: subItem.labour.map((lab, labIndex) => ({
+            id: `lab-si-${itemId}-${index}-${labIndex}-${Date.now()}`,
+            labour_role: lab.labour_role,
+            hours: lab.hours || 8,
+            rate_per_hour: lab.rate_per_hour || 0,
+            master_labour_id: lab.labour_id,
+            is_from_master: true,
+            work_type: (lab.work_type || 'contract') as 'piece_rate' | 'contract' | 'daily_wages'
+          }))
         }));
 
         return {
@@ -554,19 +562,25 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           master_item_id: masterItem.item_id,
           overhead_percentage: masterItem.default_overhead_percentage || item.overhead_percentage,
           profit_margin_percentage: masterItem.default_profit_percentage || item.profit_margin_percentage,
-          sub_items: item.sub_items || [], // Preserve existing sub_items
-          materials: formMaterials,
-          labour: formLabours,
+          sub_items: formSubItems.length > 0 ? formSubItems : item.sub_items, // Use fetched sub-items or preserve existing
+          materials: item.materials || [], // Keep existing materials at item level
+          labour: item.labour || [], // Keep existing labour at item level
           is_new: false
         };
       }
       return item;
     }));
 
-      // Close dropdown
+      // Close dropdown and update search term
       setItemDropdownOpen(prev => ({ ...prev, [itemId]: false }));
       setItemSearchTerms(prev => ({ ...prev, [itemId]: masterItem.item_name }));
+
+      // Show success message if sub-items were loaded
+      if (subItemsData.sub_items.length > 0) {
+        toast.success(`Loaded ${subItemsData.sub_items.length} sub-item(s) with materials and labour`);
+      }
     } catch (error) {
+      console.error('Failed to load item details:', error);
       toast.error('Failed to load item details');
     } finally {
       setLoadingItemData(prev => ({ ...prev, [itemId]: false }));
@@ -576,10 +590,15 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const handleItemNameChange = (itemId: string, value: string) => {
     setItemSearchTerms(prev => ({ ...prev, [itemId]: value }));
 
-    // Update item name if it's a new item or if user is typing a custom name
+    // Update item name for any item being edited
     setItems(items.map(item => {
-      if (item.id === itemId && item.is_new) {
-        return { ...item, item_name: value, master_item_id: undefined };
+      if (item.id === itemId) {
+        return {
+          ...item,
+          item_name: value,
+          master_item_id: undefined, // Clear master reference when manually editing
+          is_new: true // Mark as new/custom when manually edited
+        };
       }
       return item;
     }));
@@ -1125,8 +1144,122 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     setIsSubmitting(true);
 
     try {
+      // Revision mode - Create a new revision of the BOQ
+      if (isRevision && existingBoqData?.boq_id) {
+        const revisionPayload = {
+          boq_name: boqName,
+          preliminaries: {
+            items: preliminaries.map(p => ({
+              id: p.id,
+              description: p.description,
+              checked: p.checked,
+              isCustom: p.isCustom || false
+            })),
+            cost_details: {
+              quantity: costQuantity,
+              unit: costUnit,
+              rate: costRate,
+              amount: costAmount
+            },
+            notes: preliminaryNotes
+          },
+          items: items.map(item => {
+            const costs = calculateItemCost(item);
+            return {
+              item_name: item.item_name,
+              quantity: item.quantity,
+              unit: item.unit,
+              rate: item.rate,
+              overhead_percentage: item.overhead_percentage,
+              profit_margin_percentage: item.profit_margin_percentage,
+              discount_percentage: item.discount_percentage,
+              vat_percentage: item.vat_percentage,
+
+              // Add calculated amounts
+              item_total: costs.itemTotal,
+              overhead_amount: costs.miscellaneousAmount,
+              profit_margin_amount: costs.overheadProfitAmount,
+              subtotal: costs.subtotal,
+              discount_amount: costs.discountAmount,
+              after_discount: costs.afterDiscount,
+              vat_amount: costs.vatAmount,
+              selling_price: costs.sellingPrice,
+
+              // Add sub_items structure
+              sub_items: item.sub_items && item.sub_items.length > 0 ? item.sub_items.map(subItem => ({
+                sub_item_name: subItem.sub_item_name,
+                scope: subItem.scope,
+                size: subItem.size || null,
+                location: subItem.location || null,
+                brand: subItem.brand || null,
+                quantity: subItem.quantity,
+                unit: subItem.unit,
+                rate: subItem.rate,
+                per_unit_cost: subItem.rate,
+                sub_item_total: subItem.quantity * subItem.rate,
+
+                materials: subItem.materials?.map(material => ({
+                  material_name: material.material_name,
+                  quantity: material.quantity,
+                  unit: material.unit,
+                  unit_price: material.unit_price,
+                  total_price: material.quantity * material.unit_price,
+                  description: material.description || null,
+                  vat_percentage: material.vat_percentage || 0,
+                  master_material_id: material.master_material_id || null
+                })) || [],
+
+                labour: subItem.labour?.map(labour => ({
+                  labour_role: labour.labour_role,
+                  work_type: labour.work_type || 'daily_wages',
+                  hours: labour.hours,
+                  rate_per_hour: labour.rate_per_hour,
+                  total_amount: labour.hours * labour.rate_per_hour,
+                  master_labour_id: labour.master_labour_id || null
+                })) || []
+              })) : [],
+
+              // Item-level materials and labour for backward compatibility
+              materials: item.materials && item.materials.length > 0 ? item.materials.map(material => ({
+                material_name: material.material_name,
+                quantity: material.quantity,
+                unit: material.unit,
+                unit_price: material.unit_price,
+                total_price: material.quantity * material.unit_price,
+                description: material.description || null,
+                vat_percentage: material.vat_percentage || 0,
+                master_material_id: material.master_material_id || null
+              })) : [],
+
+              labour: item.labour && item.labour.length > 0 ? item.labour.map(labour => ({
+                labour_role: labour.labour_role,
+                work_type: labour.work_type || 'daily_wages',
+                hours: labour.hours,
+                rate_per_hour: labour.rate_per_hour,
+                total_amount: labour.hours * labour.rate_per_hour,
+                master_labour_id: labour.master_labour_id || null
+              })) : [],
+
+              master_item_id: item.master_item_id || null,
+              is_new: item.is_new || false
+            };
+          })
+        };
+
+        const result = await estimatorService.revisionBOQ(existingBoqData.boq_id, revisionPayload);
+
+        if (result.success) {
+          toast.success(result.message || 'BOQ revision created successfully');
+          if (onSubmit) {
+            onSubmit(existingBoqData.boq_id);
+          }
+          onClose();
+        } else {
+          toast.error(result.message || 'Failed to create BOQ revision');
+        }
+      }
       // Edit mode - Update existing BOQ
-      if (editMode && existingBoqData?.boq_id) {
+      else if (editMode && existingBoqData?.boq_id) {
         const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
         const token = localStorage.getItem('access_token');
 

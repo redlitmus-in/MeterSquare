@@ -1721,23 +1721,23 @@ def update_boq(boq_id):
                     materials_data = item_data.get("materials", [])
                     labour_data = item_data.get("labour", [])
 
-                # Calculate costs first to get overhead and profit amounts
-                materials_cost = 0
-                labour_cost = 0
+                    # Calculate costs first to get overhead and profit amounts
+                    materials_cost = 0
+                    labour_cost = 0
 
-                # Calculate material and labour costs
-                for mat_data in materials_data:
-                    quantity = mat_data.get("quantity", 1.0)
-                    unit_price = mat_data.get("unit_price", 0.0)
-                    materials_cost += quantity * unit_price
+                    # Calculate material and labour costs
+                    for mat_data in materials_data:
+                        quantity = mat_data.get("quantity", 1.0)
+                        unit_price = mat_data.get("unit_price", 0.0)
+                        materials_cost += quantity * unit_price
 
-                for labour_data_item in labour_data:
-                    hours = labour_data_item.get("hours", 0.0)
-                    rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
-                    labour_cost += hours * rate_per_hour
+                    for labour_data_item in labour_data:
+                        hours = labour_data_item.get("hours", 0.0)
+                        rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
+                        labour_cost += hours * rate_per_hour
 
-                # Calculate item costs
-                base_cost = materials_cost + labour_cost
+                    # Calculate item costs
+                    base_cost = materials_cost + labour_cost
 
                 # Use provided percentages, default to 10% overhead and 15% profit if not provided
                 overhead_percentage = item_data.get("overhead_percentage", 10.0)
@@ -2160,6 +2160,7 @@ def revision_boq(boq_id):
             created_by=user_name
         )
         db.session.add(boq_detail_history)
+
         # If items are provided, update the JSON structure
         if "items" in data:
             # Use the same current user logic for BOQ details
@@ -2318,142 +2319,142 @@ def revision_boq(boq_id):
                     materials_data = item_data.get("materials", [])
                     labour_data = item_data.get("labour", [])
 
-                # Calculate costs first to get overhead and profit amounts
-                materials_cost = 0
-                labour_cost = 0
+                    # Calculate costs first to get overhead and profit amounts
+                    materials_cost = 0
+                    labour_cost = 0
 
-                # Calculate material and labour costs
-                for mat_data in materials_data:
-                    quantity = mat_data.get("quantity", 1.0)
-                    unit_price = mat_data.get("unit_price", 0.0)
-                    materials_cost += quantity * unit_price
-
-                for labour_data_item in labour_data:
-                    hours = labour_data_item.get("hours", 0.0)
-                    rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
-                    labour_cost += hours * rate_per_hour
-
-                # Calculate item costs
-                base_cost = materials_cost + labour_cost
-
-                # Use provided percentages, default to 10% overhead and 15% profit if not provided
-                overhead_percentage = item_data.get("overhead_percentage", 10.0)
-                profit_margin_percentage = item_data.get("profit_margin_percentage", 15.0)
-
-                # Calculate amounts based on percentages
-                overhead_amount = (base_cost * overhead_percentage) / 100
-                profit_margin_amount = (base_cost * profit_margin_percentage) / 100
-                total_cost = base_cost + overhead_amount
-                selling_price = total_cost + profit_margin_amount
-
-                # Handle discount (can be null or a value)
-                discount_percentage = item_data.get("discount_percentage")
-                discount_amount = 0.0
-                after_discount = selling_price
-
-                if discount_percentage is not None and discount_percentage > 0:
-                    discount_amount = (selling_price * float(discount_percentage)) / 100
-                    after_discount = selling_price - discount_amount
-
-                # Handle VAT - check if using per-material VAT or item-level VAT
-                vat_percentage = item_data.get("vat_percentage", 0.0)
-                vat_amount = 0.0
-                final_selling_price = after_discount
-
-                # Check if any material has VAT percentage defined (per-material mode)
-                has_material_vat = any(mat.get("vat_percentage") is not None and mat.get("vat_percentage", 0) > 0 for mat in materials_data)
-
-                if has_material_vat:
-                    # Per-material VAT mode: Calculate VAT for each material
+                    # Calculate material and labour costs
                     for mat_data in materials_data:
-                        mat_vat_pct = mat_data.get("vat_percentage", 0.0)
-                        if mat_vat_pct and mat_vat_pct > 0:
-                            mat_total = mat_data.get("quantity", 0) * mat_data.get("unit_price", 0)
-                            vat_amount += (mat_total * float(mat_vat_pct)) / 100
-                    final_selling_price = after_discount + vat_amount
-                elif vat_percentage is not None and vat_percentage > 0:
-                    # Item-level VAT mode: Apply single VAT to after-discount amount
-                    vat_amount = (after_discount * float(vat_percentage)) / 100
-                    final_selling_price = after_discount + vat_amount
+                        quantity = mat_data.get("quantity", 1.0)
+                        unit_price = mat_data.get("unit_price", 0.0)
+                        materials_cost += quantity * unit_price
 
-                # Add new items/materials/labour to master tables with calculated values
-                master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
-                    item_data.get("item_name"),
-                    item_data.get("description"),
-                    item_data.get("work_type", "contract"),
-                    materials_data,
-                    labour_data,
-                    created_by,
-                    overhead_percentage,
-                    overhead_amount,
-                    profit_margin_percentage,
-                    profit_margin_amount
-                )
+                    for labour_data_item in labour_data:
+                        hours = labour_data_item.get("hours", 0.0)
+                        rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
+                        labour_cost += hours * rate_per_hour
 
-                # Process materials with master IDs
-                processed_materials = []
-                for i, mat_data in enumerate(materials_data):
-                    quantity = mat_data.get("quantity", 1.0)
-                    unit_price = mat_data.get("unit_price", 0.0)
-                    total_price = quantity * unit_price
-                    vat_pct = mat_data.get("vat_percentage", 0.0)
+                    # Calculate item costs
+                    base_cost = materials_cost + labour_cost
 
-                    processed_materials.append({
-                        "master_material_id": master_material_ids[i] if i < len(master_material_ids) else None,
-                        "material_name": mat_data.get("material_name"),
-                        "description": mat_data.get("description", ""),
-                        "quantity": quantity,
-                        "unit": mat_data.get("unit", "nos"),
-                        "unit_price": unit_price,
-                        "total_price": total_price,
-                        "vat_percentage": vat_pct if vat_pct else 0.0
-                    })
+                    # Use provided percentages, default to 10% overhead and 15% profit if not provided
+                    overhead_percentage = item_data.get("overhead_percentage", 10.0)
+                    profit_margin_percentage = item_data.get("profit_margin_percentage", 15.0)
 
-                # Process labour with master IDs
-                processed_labour = []
-                for i, labour_data_item in enumerate(labour_data):
-                    hours = labour_data_item.get("hours", 0.0)
-                    rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
-                    total_cost_labour = hours * rate_per_hour
+                    # Calculate amounts based on percentages
+                    overhead_amount = (base_cost * overhead_percentage) / 100
+                    profit_margin_amount = (base_cost * profit_margin_percentage) / 100
+                    total_cost = base_cost + overhead_amount
+                    selling_price = total_cost + profit_margin_amount
 
-                    processed_labour.append({
-                        "master_labour_id": master_labour_ids[i] if i < len(master_labour_ids) else None,
-                        "labour_role": labour_data_item.get("labour_role"),
-                        "hours": hours,
-                        "rate_per_hour": rate_per_hour,
-                        "total_cost": total_cost_labour
-                    })
+                    # Handle discount (can be null or a value)
+                    discount_percentage = item_data.get("discount_percentage")
+                    discount_amount = 0.0
+                    after_discount = selling_price
 
-                # Build updated item JSON
-                item_json = {
-                    "master_item_id": master_item_id,
-                    "item_name": item_data.get("item_name"),
-                    "description": item_data.get("description"),
-                    "work_type": item_data.get("work_type"),
-                    "base_cost": base_cost,
-                    "overhead_percentage": overhead_percentage,
-                    "overhead_amount": overhead_amount,
-                    "profit_margin_percentage": profit_margin_percentage,
-                    "profit_margin_amount": profit_margin_amount,
-                    "discount_percentage": discount_percentage if discount_percentage is not None else 0.0,
-                    "discount_amount": discount_amount,
-                    "vat_percentage": vat_percentage if vat_percentage is not None else 0.0,
-                    "vat_amount": vat_amount,
-                    "total_cost": total_cost,
-                    "selling_price": final_selling_price,  # Use final_selling_price after discount and VAT
-                    "selling_price_before_discount": selling_price,  # Original selling price
-                    "totalMaterialCost": materials_cost,
-                    "totalLabourCost": labour_cost,
-                    "actualItemCost": base_cost,
-                    "estimatedSellingPrice": final_selling_price,  # Use final_selling_price after discount and VAT
-                    "materials": processed_materials,
-                    "labour": processed_labour
-                }
+                    if discount_percentage is not None and discount_percentage > 0:
+                        discount_amount = (selling_price * float(discount_percentage)) / 100
+                        after_discount = selling_price - discount_amount
 
-                boq_items.append(item_json)
-                total_boq_cost += final_selling_price  # Add final price after discount to total
-                total_materials += len(materials_data)
-                total_labour += len(labour_data)
+                    # Handle VAT - check if using per-material VAT or item-level VAT
+                    vat_percentage = item_data.get("vat_percentage", 0.0)
+                    vat_amount = 0.0
+                    final_selling_price = after_discount
+
+                    # Check if any material has VAT percentage defined (per-material mode)
+                    has_material_vat = any(mat.get("vat_percentage") is not None and mat.get("vat_percentage", 0) > 0 for mat in materials_data)
+
+                    if has_material_vat:
+                        # Per-material VAT mode: Calculate VAT for each material
+                        for mat_data in materials_data:
+                            mat_vat_pct = mat_data.get("vat_percentage", 0.0)
+                            if mat_vat_pct and mat_vat_pct > 0:
+                                mat_total = mat_data.get("quantity", 0) * mat_data.get("unit_price", 0)
+                                vat_amount += (mat_total * float(mat_vat_pct)) / 100
+                        final_selling_price = after_discount + vat_amount
+                    elif vat_percentage is not None and vat_percentage > 0:
+                        # Item-level VAT mode: Apply single VAT to after-discount amount
+                        vat_amount = (after_discount * float(vat_percentage)) / 100
+                        final_selling_price = after_discount + vat_amount
+
+                    # Add new items/materials/labour to master tables with calculated values
+                    master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
+                        item_data.get("item_name"),
+                        item_data.get("description"),
+                        item_data.get("work_type", "contract"),
+                        materials_data,
+                        labour_data,
+                        created_by,
+                        overhead_percentage,
+                        overhead_amount,
+                        profit_margin_percentage,
+                        profit_margin_amount
+                    )
+
+                    # Process materials with master IDs
+                    processed_materials = []
+                    for i, mat_data in enumerate(materials_data):
+                        quantity = mat_data.get("quantity", 1.0)
+                        unit_price = mat_data.get("unit_price", 0.0)
+                        total_price = quantity * unit_price
+                        vat_pct = mat_data.get("vat_percentage", 0.0)
+
+                        processed_materials.append({
+                            "master_material_id": master_material_ids[i] if i < len(master_material_ids) else None,
+                            "material_name": mat_data.get("material_name"),
+                            "description": mat_data.get("description", ""),
+                            "quantity": quantity,
+                            "unit": mat_data.get("unit", "nos"),
+                            "unit_price": unit_price,
+                            "total_price": total_price,
+                            "vat_percentage": vat_pct if vat_pct else 0.0
+                        })
+
+                    # Process labour with master IDs
+                    processed_labour = []
+                    for i, labour_data_item in enumerate(labour_data):
+                        hours = labour_data_item.get("hours", 0.0)
+                        rate_per_hour = labour_data_item.get("rate_per_hour", 0.0)
+                        total_cost_labour = hours * rate_per_hour
+
+                        processed_labour.append({
+                            "master_labour_id": master_labour_ids[i] if i < len(master_labour_ids) else None,
+                            "labour_role": labour_data_item.get("labour_role"),
+                            "hours": hours,
+                            "rate_per_hour": rate_per_hour,
+                            "total_cost": total_cost_labour
+                        })
+
+                    # Build updated item JSON
+                    item_json = {
+                        "master_item_id": master_item_id,
+                        "item_name": item_data.get("item_name"),
+                        "description": item_data.get("description"),
+                        "work_type": item_data.get("work_type"),
+                        "base_cost": base_cost,
+                        "overhead_percentage": overhead_percentage,
+                        "overhead_amount": overhead_amount,
+                        "profit_margin_percentage": profit_margin_percentage,
+                        "profit_margin_amount": profit_margin_amount,
+                        "discount_percentage": discount_percentage if discount_percentage is not None else 0.0,
+                        "discount_amount": discount_amount,
+                        "vat_percentage": vat_percentage if vat_percentage is not None else 0.0,
+                        "vat_amount": vat_amount,
+                        "total_cost": total_cost,
+                        "selling_price": final_selling_price,  # Use final_selling_price after discount and VAT
+                        "selling_price_before_discount": selling_price,  # Original selling price
+                        "totalMaterialCost": materials_cost,
+                        "totalLabourCost": labour_cost,
+                        "actualItemCost": base_cost,
+                        "estimatedSellingPrice": final_selling_price,  # Use final_selling_price after discount and VAT
+                        "materials": processed_materials,
+                        "labour": processed_labour
+                    }
+
+                    boq_items.append(item_json)
+                    total_boq_cost += final_selling_price  # Add final price after discount to total
+                    total_materials += len(materials_data)
+                    total_labour += len(labour_data)
 
             # Get preliminaries from request data
             preliminaries = data.get("preliminaries", {})
