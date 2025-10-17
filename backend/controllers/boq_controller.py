@@ -1579,6 +1579,10 @@ def update_boq(boq_id):
             total_labour = 0
 
             for item_data in data["items"]:
+                # Initialize variables for both formats
+                materials_data = []
+                labour_data = []
+
                 # Check if item has sub_items structure (new format)
                 has_sub_items = "sub_items" in item_data and item_data.get("sub_items")
 
@@ -2066,6 +2070,7 @@ def update_boq(boq_id):
         # Return updated BOQ
         return jsonify({
             "message": "BOQ Updated successfully",
+            "success": True,
             "boq_id": boq_id,
             "version": next_version,
             "status": boq.status,
@@ -2177,6 +2182,10 @@ def revision_boq(boq_id):
             total_labour = 0
 
             for item_data in data["items"]:
+                # Initialize variables for both formats
+                materials_data = []
+                labour_data = []
+
                 # Check if item has sub_items structure (new format)
                 has_sub_items = "sub_items" in item_data and item_data.get("sub_items")
 
