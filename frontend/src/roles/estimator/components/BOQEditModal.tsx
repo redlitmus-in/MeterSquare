@@ -804,15 +804,12 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
         ? await estimatorService.revisionBOQ(editedBoq.boq_id, payload)
         : await estimatorService.updateBOQ(editedBoq.boq_id, payload);
 
-      console.log('=== BOQ UPDATE RESULT ===', result);
-
-      if (result && result.success) {
+      if (result.success) {
         toast.success(isRevision ? 'BOQ revision saved successfully' : 'BOQ updated successfully');
         onSave();
         onClose();
       } else {
-        console.error('Update failed:', result);
-        toast.error(result?.message || 'Failed to update BOQ');
+        toast.error(result.message || 'Failed to update BOQ');
       }
     } catch (error) {
       toast.error('Failed to save BOQ changes');

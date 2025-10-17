@@ -31,7 +31,7 @@ def get_all_boq_route():
 def get_boq_route(boq_id):
     return get_boq(boq_id)
 
-@boq_routes.route('/boq/update_boq/<int:boq_id>', methods=['PUT'])
+@boq_routes.route('/update_boq/<int:boq_id>', methods=['PUT'])
 @jwt_required
 def update_boq_route(boq_id):
     return update_boq(boq_id)

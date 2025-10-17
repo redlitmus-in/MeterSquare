@@ -1337,36 +1337,34 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 })) || []
               })) : [],
 
-              // Item-level materials and labour - only include if there are NO sub_items
-              ...(item.sub_items && item.sub_items.length > 0 ? {} : {
-                materials: item.materials && item.materials.length > 0 ? item.materials.map(material => ({
-                  material_name: material.material_name,
-                  quantity: material.quantity,
-                  unit: material.unit,
-                  unit_price: material.unit_price,
-                  total_price: material.quantity * material.unit_price,
-                  description: material.description || null,
-                  vat_percentage: material.vat_percentage || 0,
-                  master_material_id: material.master_material_id || null
-                })) : [],
+              // Item-level materials and labour for backward compatibility
+              materials: item.materials && item.materials.length > 0 ? item.materials.map(material => ({
+                material_name: material.material_name,
+                quantity: material.quantity,
+                unit: material.unit,
+                unit_price: material.unit_price,
+                total_price: material.quantity * material.unit_price,
+                description: material.description || null,
+                vat_percentage: material.vat_percentage || 0,
+                master_material_id: material.master_material_id || null
+              })) : [],
 
-                labour: item.labour && item.labour.length > 0 ? item.labour.map(labour => ({
-                  labour_role: labour.labour_role,
-                  work_type: labour.work_type || 'daily_wages',
-                  hours: labour.hours,
-                  rate_per_hour: labour.rate_per_hour,
-                  total_amount: labour.hours * labour.rate_per_hour,
-                  master_labour_id: labour.master_labour_id || null
-                })) : [],
+              labour: item.labour && item.labour.length > 0 ? item.labour.map(labour => ({
+                labour_role: labour.labour_role,
+                work_type: labour.work_type || 'daily_wages',
+                hours: labour.hours,
+                rate_per_hour: labour.rate_per_hour,
+                total_amount: labour.hours * labour.rate_per_hour,
+                master_labour_id: labour.master_labour_id || null
+              })) : [],
 
-                master_item_id: item.master_item_id || null,
-                is_new: item.is_new || false
-              })
+              master_item_id: item.master_item_id || null,
+              is_new: item.is_new || false
             };
           })
         };
 
-        const response = await fetch(`${API_URL}/boq/update_boq/${existingBoqData.boq_id}`, {
+        const response = await fetch(`${API_URL}/boq/${existingBoqData.boq_id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
