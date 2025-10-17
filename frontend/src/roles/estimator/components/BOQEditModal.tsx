@@ -589,6 +589,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       updatedItems[itemIndex].sub_items = [];
     }
     updatedItems[itemIndex].sub_items.push({
+      sub_item_name: '',
       scope: 'New Sub Item',
       size: '',
       location: '',

@@ -26,6 +26,7 @@ import { ModernSelect } from '@/components/ui/modern-select';
 // Backend-aligned interfaces
 interface SubItemForm {
   id: string;
+  sub_item_name: string; // Sub-item name
   scope: string; // Item scope/title
   size?: string; // Optional
   location?: string; // Optional
@@ -80,6 +81,10 @@ interface PreliminaryItem {
   description: string;
   checked: boolean;
   isCustom?: boolean; // Track if this is a custom added item
+  quantity?: number;
+  unit?: string;
+  rate?: number;
+  amount?: number;
 }
 
 interface BOQCreationFormProps {
@@ -222,7 +227,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           id: `prelim-${index}`,
           description: item.description,
           checked: false,
-          isCustom: false
+          isCustom: false,
+          quantity: 1,
+          unit: 'nos',
+          rate: 0,
+          amount: 0
         }));
         setPreliminaries(initialPreliminaries);
       }
@@ -333,7 +342,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             id: item.id || `prelim-${index}`,
             description: item.description,
             checked: item.checked || false,
-            isCustom: item.isCustom || false
+            isCustom: item.isCustom || false,
+            quantity: item.quantity || 1,
+            unit: item.unit || 'nos',
+            rate: item.rate || 0,
+            amount: item.amount || 0
           }));
           setPreliminaries(loadedPreliminaries);
         }
@@ -352,7 +365,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             // Convert sub-items
             const subItems: SubItemForm[] = (item.sub_items || []).map((subItem: any, siIndex: number) => ({
               id: `si-${index}-${siIndex}-${Date.now()}`,
-              scope: subItem.sub_item_name || subItem.scope || '',
+              sub_item_name: subItem.sub_item_name || '',
+              scope: subItem.scope || '',
               size: subItem.size || '',
               location: subItem.location || '',
               brand: subItem.brand || '',
@@ -595,6 +609,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const addSubItem = (itemId: string) => {
     const newSubItem: SubItemForm = {
       id: Date.now().toString(),
+      sub_item_name: '',
       scope: '',
       size: '',
       location: '',
@@ -898,7 +913,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       id: newId,
       description: '',
       checked: false,
-      isCustom: true
+      isCustom: true,
+      quantity: 1,
+      unit: 'nos',
+      rate: 0,
+      amount: 0
     }]);
   };
 
@@ -906,6 +925,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     setPreliminaries(preliminaries.map(item =>
       item.id === id ? { ...item, description } : item
     ));
+  };
+
+  const updatePreliminaryField = (id: string, field: keyof PreliminaryItem, value: any) => {
+    setPreliminaries(preliminaries.map(item => {
+      if (item.id === id) {
+        const updated = { ...item, [field]: value };
+        // Auto-calculate amount when quantity or rate changes
+        if (field === 'quantity' || field === 'rate') {
+          updated.amount = (updated.quantity || 0) * (updated.rate || 0);
+        }
+        return updated;
+      }
+      return item;
+    }));
   };
 
   const removePreliminary = (id: string) => {
@@ -1089,7 +1122,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           preliminaries: {
             items: preliminaries.filter(p => p.checked).map(p => ({
               description: p.description,
-              isCustom: p.isCustom || false
+              isCustom: p.isCustom || false,
+              quantity: p.quantity || 1,
+              unit: p.unit || 'nos',
+              rate: p.rate || 0,
+              amount: p.amount || 0
             })),
             notes: preliminaryNotes
           },
@@ -1288,7 +1325,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           preliminaries: {
             items: preliminaries.filter(p => p.checked).map(p => ({
               description: p.description,
-              isCustom: p.isCustom || false
+              isCustom: p.isCustom || false,
+              quantity: p.quantity || 1,
+              unit: p.unit || 'nos',
+              rate: p.rate || 0,
+              amount: p.amount || 0
             })),
             notes: preliminaryNotes
           },
@@ -1593,6 +1634,98 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                     Add Custom Item
                   </button>
 
+                  {/* Quantity, Unit, Rate, Amount Section */}
+                  <div className="mb-6">
+                    <h4 className="text-sm font-semibold text-gray-800 mb-3">Cost Details</h4>
+                    <div className="grid grid-cols-4 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Quantity
+                        </label>
+                        <input
+                          type="number"
+                          value={preliminaries.reduce((sum, item) => item.checked ? sum + (item.quantity || 0) : sum, 0)}
+                          onChange={(e) => {
+                            const totalQty = parseFloat(e.target.value) || 0;
+                            const checkedCount = preliminaries.filter(p => p.checked).length;
+                            const qtyPerItem = checkedCount > 0 ? totalQty / checkedCount : 0;
+                            preliminaries.forEach(item => {
+                              if (item.checked) {
+                                updatePreliminaryField(item.id, 'quantity', qtyPerItem);
+                              }
+                            });
+                          }}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          min="0"
+                          step="0.01"
+                          disabled={isSubmitting}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Unit
+                        </label>
+                        <select
+                          value="nos"
+                          onChange={(e) => {
+                            preliminaries.forEach(item => {
+                              if (item.checked) {
+                                updatePreliminaryField(item.id, 'unit', e.target.value);
+                              }
+                            });
+                          }}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                          disabled={isSubmitting}
+                        >
+                          <option value="nos">Nos</option>
+                          <option value="sqft">Sqft</option>
+                          <option value="sqm">Sqm</option>
+                          <option value="rft">Rft</option>
+                          <option value="rm">Rm</option>
+                          <option value="cum">Cum</option>
+                          <option value="kg">Kg</option>
+                          <option value="ltr">Ltr</option>
+                          <option value="bag">Bag</option>
+                          <option value="ton">Ton</option>
+                          <option value="ls">LS</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Rate
+                        </label>
+                        <input
+                          type="number"
+                          value={preliminaries.find(p => p.checked)?.rate || 0}
+                          onChange={(e) => {
+                            const rate = parseFloat(e.target.value) || 0;
+                            preliminaries.forEach(item => {
+                              if (item.checked) {
+                                updatePreliminaryField(item.id, 'rate', rate);
+                              }
+                            });
+                          }}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          min="0"
+                          step="0.01"
+                          disabled={isSubmitting}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Amount
+                        </label>
+                        <input
+                          type="number"
+                          value={preliminaries.reduce((sum, item) => item.checked ? sum + (item.amount || 0) : sum, 0)}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-gray-100"
+                          disabled
+                          readOnly
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Notes Section */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1849,6 +1982,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
                                 {/* Sub-item Fields */}
                                 <div className="space-y-3">
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                                      Sub Item Name <span className="text-red-500">*</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={subItem.sub_item_name}
+                                      onChange={(e) => updateSubItem(item.id, subItem.id, 'sub_item_name', e.target.value)}
+                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                                      placeholder="e.g., Flooring Work"
+                                      required
+                                      disabled={isSubmitting}
+                                    />
+                                  </div>
+
                                   <div>
                                     <label className="block text-xs font-medium text-gray-700 mb-1">
                                       Scope <span className="text-red-500">*</span>
