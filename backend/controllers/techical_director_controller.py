@@ -16,10 +16,13 @@ def get_all_td_boqs():
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 10, type=int), 100)
 
-        # Build query - get ALL BOQs for TD (pending, sent, assigned, rejected)
+        # Build query - get ONLY BOQs for TD (not PM pending ones)
+        # TD should see: Pending_TD_Approval, approved, rejected, sent_for_review, new_purchase_create
+        # TD should NOT see: Pending_PM_Approval (those are for PM only)
         query = db.session.query(BOQ).filter(
             BOQ.is_deleted == False,
-            BOQ.email_sent == True
+            BOQ.email_sent == True,
+            BOQ.status != 'Pending_PM_Approval'  # Exclude BOQs pending PM approval
         ).order_by(BOQ.created_at.desc())
         # Paginate
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)

@@ -216,6 +216,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [preliminariesExpanded, setPreliminariesExpanded] = useState(false);
   const [preliminaryNotes, setPreliminaryNotes] = useState('Note: All authority charges & deposit are excluded (Approximate cost 10,000/-)');
 
+  // Separate cost details state (independent from checkboxes)
+  const [costQuantity, setCostQuantity] = useState<number>(1);
+  const [costUnit, setCostUnit] = useState<string>('nos');
+  const [costRate, setCostRate] = useState<number>(0);
+  const [costAmount, setCostAmount] = useState<number>(0);
+
   // Load projects and master items on mount
   useEffect(() => {
     if (isOpen) {
@@ -349,6 +355,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             amount: item.amount || 0
           }));
           setPreliminaries(loadedPreliminaries);
+        }
+
+        // Load cost details if available
+        if (prelimsData.cost_details) {
+          setCostQuantity(prelimsData.cost_details.quantity || 1);
+          setCostUnit(prelimsData.cost_details.unit || 'nos');
+          setCostRate(prelimsData.cost_details.rate || 0);
+          setCostAmount(prelimsData.cost_details.amount || 0);
         }
 
         // Load preliminary notes if available
@@ -1120,14 +1134,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           boq_id: existingBoqData.boq_id,
           boq_name: boqName,
           preliminaries: {
-            items: preliminaries.filter(p => p.checked).map(p => ({
+            items: preliminaries.map(p => ({
+              id: p.id,
               description: p.description,
-              isCustom: p.isCustom || false,
-              quantity: p.quantity || 1,
-              unit: p.unit || 'nos',
-              rate: p.rate || 0,
-              amount: p.amount || 0
+              checked: p.checked,
+              isCustom: p.isCustom || false
             })),
+            cost_details: {
+              quantity: costQuantity,
+              unit: costUnit,
+              rate: costRate,
+              amount: costAmount
+            },
             notes: preliminaryNotes
           },
           items: items.map(item => {
@@ -1154,7 +1172,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
               // Add sub_items structure
               sub_items: item.sub_items && item.sub_items.length > 0 ? item.sub_items.map(subItem => ({
-                sub_item_name: subItem.scope,
+                sub_item_name: subItem.sub_item_name,
                 scope: subItem.scope,
                 size: subItem.size || null,
                 location: subItem.location || null,
@@ -1265,7 +1283,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
               // Add sub_items structure
               sub_items: item.sub_items.map(subItem => ({
-                sub_item_name: subItem.scope,
+                sub_item_name: subItem.sub_item_name,
                 scope: subItem.scope,
                 size: subItem.size || null,
                 location: subItem.location || null,
@@ -1323,14 +1341,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           status: 'Draft',
           created_by: 'Estimator',
           preliminaries: {
-            items: preliminaries.filter(p => p.checked).map(p => ({
+            items: preliminaries.map(p => ({
+              id: p.id,
               description: p.description,
-              isCustom: p.isCustom || false,
-              quantity: p.quantity || 1,
-              unit: p.unit || 'nos',
-              rate: p.rate || 0,
-              amount: p.amount || 0
+              checked: p.checked,
+              isCustom: p.isCustom || false
             })),
+            cost_details: {
+              quantity: costQuantity,
+              unit: costUnit,
+              rate: costRate,
+              amount: costAmount
+            },
             notes: preliminaryNotes
           },
           items: items.map(item => {
@@ -1357,7 +1379,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
               // Add sub_items structure (only if sub_items exist and have data)
               sub_items: item.sub_items && item.sub_items.length > 0 ? item.sub_items.map(subItem => ({
-                sub_item_name: subItem.scope,  // Map scope to sub_item_name for backend
+                sub_item_name: subItem.sub_item_name,
                 scope: subItem.scope,
                 size: subItem.size || null,
                 location: subItem.location || null,
@@ -1634,9 +1656,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                     Add Custom Item
                   </button>
 
-                  {/* Quantity, Unit, Rate, Amount Section */}
-                  <div className="mb-6">
-                    <h4 className="text-sm font-semibold text-gray-800 mb-3">Cost Details</h4>
+                  {/* Cost Details Section - Separate independent section */}
+                  <div className="mb-6 p-4 bg-purple-50/50 rounded-lg border border-purple-200">
+                    <h4 className="text-sm font-semibold text-purple-900 mb-3">Cost Details</h4>
                     <div className="grid grid-cols-4 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1644,21 +1666,17 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                         </label>
                         <input
                           type="number"
-                          value={preliminaries.reduce((sum, item) => item.checked ? sum + (item.quantity || 0) : sum, 0)}
-                          onChange={(e) => {
-                            const totalQty = parseFloat(e.target.value) || 0;
-                            const checkedCount = preliminaries.filter(p => p.checked).length;
-                            const qtyPerItem = checkedCount > 0 ? totalQty / checkedCount : 0;
-                            preliminaries.forEach(item => {
-                              if (item.checked) {
-                                updatePreliminaryField(item.id, 'quantity', qtyPerItem);
-                              }
-                            });
-                          }}
+                          placeholder="Enter quantity"
+                          value={costQuantity}
                           className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                           min="0"
                           step="0.01"
                           disabled={isSubmitting}
+                          onChange={(e) => {
+                            const qty = parseFloat(e.target.value) || 0;
+                            setCostQuantity(qty);
+                            setCostAmount(qty * costRate);
+                          }}
                         />
                       </div>
                       <div>
@@ -1666,16 +1684,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           Unit
                         </label>
                         <select
-                          value="nos"
-                          onChange={(e) => {
-                            preliminaries.forEach(item => {
-                              if (item.checked) {
-                                updatePreliminaryField(item.id, 'unit', e.target.value);
-                              }
-                            });
-                          }}
                           className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                          value={costUnit}
                           disabled={isSubmitting}
+                          onChange={(e) => setCostUnit(e.target.value)}
                         >
                           <option value="nos">Nos</option>
                           <option value="sqft">Sqft</option>
@@ -1696,19 +1708,17 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                         </label>
                         <input
                           type="number"
-                          value={preliminaries.find(p => p.checked)?.rate || 0}
-                          onChange={(e) => {
-                            const rate = parseFloat(e.target.value) || 0;
-                            preliminaries.forEach(item => {
-                              if (item.checked) {
-                                updatePreliminaryField(item.id, 'rate', rate);
-                              }
-                            });
-                          }}
+                          placeholder="Enter rate"
+                          value={costRate}
                           className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                           min="0"
                           step="0.01"
                           disabled={isSubmitting}
+                          onChange={(e) => {
+                            const rate = parseFloat(e.target.value) || 0;
+                            setCostRate(rate);
+                            setCostAmount(costQuantity * rate);
+                          }}
                         />
                       </div>
                       <div>
@@ -1717,7 +1727,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                         </label>
                         <input
                           type="number"
-                          value={preliminaries.reduce((sum, item) => item.checked ? sum + (item.amount || 0) : sum, 0)}
+                          value={costAmount}
                           className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-gray-100"
                           disabled
                           readOnly

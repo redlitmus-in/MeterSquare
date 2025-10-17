@@ -501,6 +501,8 @@ def create_boq():
                 # Store processed sub-item
                 processed_sub_items.append({
                     "sub_item_name": sub_item.get("sub_item_name"),
+                    "scope": sub_item.get("scope", ""),
+                    "size": sub_item.get("size", ""),
                     "description": sub_item.get("description", ""),
                     "location": sub_item.get("location", ""),
                     "brand": sub_item.get("brand", ""),
@@ -695,6 +697,8 @@ def create_boq():
                     # Create sub-item JSON (stores only material/labour breakdown, NOT pricing)
                     sub_item_json = {
                         "sub_item_name": sub_item_data.get("sub_item_name"),
+                        "scope": sub_item_data.get("scope", ""),
+                        "size": sub_item_data.get("size", ""),
                         "description": sub_item_data.get("description", ""),
                         "location": sub_item_data.get("location", ""),
                         "brand": sub_item_data.get("brand", ""),
@@ -1575,8 +1579,147 @@ def update_boq(boq_id):
             total_labour = 0
 
             for item_data in data["items"]:
-                materials_data = item_data.get("materials", [])
-                labour_data = item_data.get("labour", [])
+                # Check if item has sub_items structure (new format)
+                has_sub_items = "sub_items" in item_data and item_data.get("sub_items")
+
+                if has_sub_items:
+                    # NEW FORMAT: Item with sub_items structure - preserve scope and size
+                    sub_items_list = []
+                    materials_count = 0
+                    labour_count = 0
+
+                    # Get item-level quantity and rate
+                    item_quantity = clean_numeric_value(item_data.get("quantity", 1.0))
+                    item_rate = clean_numeric_value(item_data.get("rate", 0.0))
+                    item_unit = item_data.get("unit", "nos")
+                    item_total = item_quantity * item_rate
+
+                    # Get percentages
+                    miscellaneous_percentage = clean_numeric_value(item_data.get("overhead_percentage", 10.0))
+                    overhead_profit_percentage = clean_numeric_value(item_data.get("profit_margin_percentage", 15.0))
+                    discount_percentage = clean_numeric_value(item_data.get("discount_percentage", 0.0))
+                    vat_percentage = clean_numeric_value(item_data.get("vat_percentage", 0.0))
+
+                    # Calculate amounts
+                    total_miscellaneous_amount = (item_total * miscellaneous_percentage) / 100
+                    total_overhead_profit_amount = (item_total * overhead_profit_percentage) / 100
+                    total_subtotal = item_total + total_miscellaneous_amount + total_overhead_profit_amount
+                    total_discount_amount = (total_subtotal * discount_percentage) / 100 if discount_percentage > 0 else 0.0
+                    total_after_discount = total_subtotal - total_discount_amount
+                    total_vat_amount = (total_after_discount * vat_percentage) / 100 if vat_percentage > 0 else 0.0
+                    total_selling_price = total_after_discount + total_vat_amount
+
+                    # Process sub_items
+                    for sub_item_data in item_data.get("sub_items", []):
+                        sub_item_quantity = clean_numeric_value(sub_item_data.get("quantity", 1.0))
+                        sub_item_unit = sub_item_data.get("unit", "nos")
+                        sub_item_rate = clean_numeric_value(sub_item_data.get("rate", 0.0))
+                        sub_item_base_total = sub_item_quantity * sub_item_rate
+
+                        # Process materials for this sub-item
+                        sub_item_materials = []
+                        materials_cost = 0
+                        for mat_data in sub_item_data.get("materials", []):
+                            quantity = clean_numeric_value(mat_data.get("quantity", 1.0))
+                            unit_price = clean_numeric_value(mat_data.get("unit_price", 0.0))
+                            total_price = quantity * unit_price
+                            materials_cost += total_price
+
+                            sub_item_materials.append({
+                                "material_name": mat_data.get("material_name"),
+                                "location": mat_data.get("location", ""),
+                                "brand": mat_data.get("brand", ""),
+                                "description": mat_data.get("description", ""),
+                                "quantity": quantity,
+                                "unit": mat_data.get("unit", "nos"),
+                                "unit_price": unit_price,
+                                "total_price": total_price,
+                                "vat_percentage": clean_numeric_value(mat_data.get("vat_percentage", 0.0))
+                            })
+
+                        # Process labour for this sub-item
+                        sub_item_labour = []
+                        labour_cost = 0
+                        for labour_data_item in sub_item_data.get("labour", []):
+                            hours = clean_numeric_value(labour_data_item.get("hours", 0.0))
+                            rate_per_hour = clean_numeric_value(labour_data_item.get("rate_per_hour", 0.0))
+                            total_cost_labour = hours * rate_per_hour
+                            labour_cost += total_cost_labour
+
+                            sub_item_labour.append({
+                                "labour_role": labour_data_item.get("labour_role"),
+                                "hours": hours,
+                                "rate_per_hour": rate_per_hour,
+                                "total_cost": total_cost_labour
+                            })
+
+                        # Create sub-item JSON with scope and size
+                        sub_item_json = {
+                            "sub_item_name": sub_item_data.get("sub_item_name"),
+                            "scope": sub_item_data.get("scope", ""),
+                            "size": sub_item_data.get("size", ""),
+                            "description": sub_item_data.get("description", ""),
+                            "location": sub_item_data.get("location", ""),
+                            "brand": sub_item_data.get("brand", ""),
+                            "quantity": sub_item_quantity,
+                            "unit": sub_item_unit,
+                            "rate": sub_item_rate,
+                            "base_total": sub_item_base_total,
+                            "materials_cost": materials_cost,
+                            "labour_cost": labour_cost,
+                            "materials": sub_item_materials,
+                            "labour": sub_item_labour
+                        }
+
+                        sub_items_list.append(sub_item_json)
+                        materials_count += len(sub_item_materials)
+                        labour_count += len(sub_item_labour)
+
+                    # Calculate total materials and labour costs from all sub-items
+                    total_materials_cost = sum(si.get("materials_cost", 0) for si in sub_items_list)
+                    total_labour_cost = sum(si.get("labour_cost", 0) for si in sub_items_list)
+                    base_cost = total_materials_cost + total_labour_cost
+
+                    # Create item JSON with sub_items
+                    item_json = {
+                        "item_name": item_data.get("item_name"),
+                        "description": item_data.get("description", ""),
+                        "work_type": item_data.get("work_type", "contract"),
+                        "has_sub_items": True,
+                        "sub_items": sub_items_list,
+                        "quantity": item_quantity,
+                        "unit": item_unit,
+                        "rate": item_rate,
+                        "item_total": item_total,
+                        "base_cost": base_cost,
+                        "sub_items_cost": base_cost,
+                        "total_selling_price": total_selling_price,
+                        "selling_price": total_selling_price,
+                        "estimatedSellingPrice": total_selling_price,
+                        "actualItemCost": base_cost,
+                        "total_cost": total_selling_price,
+                        "overhead_percentage": miscellaneous_percentage,
+                        "overhead_amount": total_miscellaneous_amount,
+                        "profit_margin_percentage": overhead_profit_percentage,
+                        "profit_margin_amount": total_overhead_profit_amount,
+                        "subtotal": total_subtotal,
+                        "discount_percentage": discount_percentage,
+                        "discount_amount": total_discount_amount,
+                        "vat_percentage": vat_percentage,
+                        "vat_amount": total_vat_amount,
+                        "totalMaterialCost": total_materials_cost,
+                        "totalLabourCost": total_labour_cost
+                    }
+
+                    boq_items.append(item_json)
+                    total_boq_cost += total_selling_price
+                    total_materials += materials_count
+                    total_labour += labour_count
+
+                else:
+                    # OLD FORMAT: Item without sub_items (materials/labour directly on item)
+                    materials_data = item_data.get("materials", [])
+                    labour_data = item_data.get("labour", [])
 
                 # Calculate costs first to get overhead and profit amounts
                 materials_cost = 0
@@ -2033,8 +2176,147 @@ def revision_boq(boq_id):
             total_labour = 0
 
             for item_data in data["items"]:
-                materials_data = item_data.get("materials", [])
-                labour_data = item_data.get("labour", [])
+                # Check if item has sub_items structure (new format)
+                has_sub_items = "sub_items" in item_data and item_data.get("sub_items")
+
+                if has_sub_items:
+                    # NEW FORMAT: Item with sub_items structure - preserve scope and size
+                    sub_items_list = []
+                    materials_count = 0
+                    labour_count = 0
+
+                    # Get item-level quantity and rate
+                    item_quantity = clean_numeric_value(item_data.get("quantity", 1.0))
+                    item_rate = clean_numeric_value(item_data.get("rate", 0.0))
+                    item_unit = item_data.get("unit", "nos")
+                    item_total = item_quantity * item_rate
+
+                    # Get percentages
+                    miscellaneous_percentage = clean_numeric_value(item_data.get("overhead_percentage", 10.0))
+                    overhead_profit_percentage = clean_numeric_value(item_data.get("profit_margin_percentage", 15.0))
+                    discount_percentage = clean_numeric_value(item_data.get("discount_percentage", 0.0))
+                    vat_percentage = clean_numeric_value(item_data.get("vat_percentage", 0.0))
+
+                    # Calculate amounts
+                    total_miscellaneous_amount = (item_total * miscellaneous_percentage) / 100
+                    total_overhead_profit_amount = (item_total * overhead_profit_percentage) / 100
+                    total_subtotal = item_total + total_miscellaneous_amount + total_overhead_profit_amount
+                    total_discount_amount = (total_subtotal * discount_percentage) / 100 if discount_percentage > 0 else 0.0
+                    total_after_discount = total_subtotal - total_discount_amount
+                    total_vat_amount = (total_after_discount * vat_percentage) / 100 if vat_percentage > 0 else 0.0
+                    total_selling_price = total_after_discount + total_vat_amount
+
+                    # Process sub_items
+                    for sub_item_data in item_data.get("sub_items", []):
+                        sub_item_quantity = clean_numeric_value(sub_item_data.get("quantity", 1.0))
+                        sub_item_unit = sub_item_data.get("unit", "nos")
+                        sub_item_rate = clean_numeric_value(sub_item_data.get("rate", 0.0))
+                        sub_item_base_total = sub_item_quantity * sub_item_rate
+
+                        # Process materials for this sub-item
+                        sub_item_materials = []
+                        materials_cost = 0
+                        for mat_data in sub_item_data.get("materials", []):
+                            quantity = clean_numeric_value(mat_data.get("quantity", 1.0))
+                            unit_price = clean_numeric_value(mat_data.get("unit_price", 0.0))
+                            total_price = quantity * unit_price
+                            materials_cost += total_price
+
+                            sub_item_materials.append({
+                                "material_name": mat_data.get("material_name"),
+                                "location": mat_data.get("location", ""),
+                                "brand": mat_data.get("brand", ""),
+                                "description": mat_data.get("description", ""),
+                                "quantity": quantity,
+                                "unit": mat_data.get("unit", "nos"),
+                                "unit_price": unit_price,
+                                "total_price": total_price,
+                                "vat_percentage": clean_numeric_value(mat_data.get("vat_percentage", 0.0))
+                            })
+
+                        # Process labour for this sub-item
+                        sub_item_labour = []
+                        labour_cost = 0
+                        for labour_data_item in sub_item_data.get("labour", []):
+                            hours = clean_numeric_value(labour_data_item.get("hours", 0.0))
+                            rate_per_hour = clean_numeric_value(labour_data_item.get("rate_per_hour", 0.0))
+                            total_cost_labour = hours * rate_per_hour
+                            labour_cost += total_cost_labour
+
+                            sub_item_labour.append({
+                                "labour_role": labour_data_item.get("labour_role"),
+                                "hours": hours,
+                                "rate_per_hour": rate_per_hour,
+                                "total_cost": total_cost_labour
+                            })
+
+                        # Create sub-item JSON with scope and size
+                        sub_item_json = {
+                            "sub_item_name": sub_item_data.get("sub_item_name"),
+                            "scope": sub_item_data.get("scope", ""),
+                            "size": sub_item_data.get("size", ""),
+                            "description": sub_item_data.get("description", ""),
+                            "location": sub_item_data.get("location", ""),
+                            "brand": sub_item_data.get("brand", ""),
+                            "quantity": sub_item_quantity,
+                            "unit": sub_item_unit,
+                            "rate": sub_item_rate,
+                            "base_total": sub_item_base_total,
+                            "materials_cost": materials_cost,
+                            "labour_cost": labour_cost,
+                            "materials": sub_item_materials,
+                            "labour": sub_item_labour
+                        }
+
+                        sub_items_list.append(sub_item_json)
+                        materials_count += len(sub_item_materials)
+                        labour_count += len(sub_item_labour)
+
+                    # Calculate total materials and labour costs from all sub-items
+                    total_materials_cost = sum(si.get("materials_cost", 0) for si in sub_items_list)
+                    total_labour_cost = sum(si.get("labour_cost", 0) for si in sub_items_list)
+                    base_cost = total_materials_cost + total_labour_cost
+
+                    # Create item JSON with sub_items
+                    item_json = {
+                        "item_name": item_data.get("item_name"),
+                        "description": item_data.get("description", ""),
+                        "work_type": item_data.get("work_type", "contract"),
+                        "has_sub_items": True,
+                        "sub_items": sub_items_list,
+                        "quantity": item_quantity,
+                        "unit": item_unit,
+                        "rate": item_rate,
+                        "item_total": item_total,
+                        "base_cost": base_cost,
+                        "sub_items_cost": base_cost,
+                        "total_selling_price": total_selling_price,
+                        "selling_price": total_selling_price,
+                        "estimatedSellingPrice": total_selling_price,
+                        "actualItemCost": base_cost,
+                        "total_cost": total_selling_price,
+                        "overhead_percentage": miscellaneous_percentage,
+                        "overhead_amount": total_miscellaneous_amount,
+                        "profit_margin_percentage": overhead_profit_percentage,
+                        "profit_margin_amount": total_overhead_profit_amount,
+                        "subtotal": total_subtotal,
+                        "discount_percentage": discount_percentage,
+                        "discount_amount": total_discount_amount,
+                        "vat_percentage": vat_percentage,
+                        "vat_amount": total_vat_amount,
+                        "totalMaterialCost": total_materials_cost,
+                        "totalLabourCost": total_labour_cost
+                    }
+
+                    boq_items.append(item_json)
+                    total_boq_cost += total_selling_price
+                    total_materials += materials_count
+                    total_labour += labour_count
+
+                else:
+                    # OLD FORMAT: Item without sub_items (materials/labour directly on item)
+                    materials_data = item_data.get("materials", [])
+                    labour_data = item_data.get("labour", [])
 
                 # Calculate costs first to get overhead and profit amounts
                 materials_cost = 0

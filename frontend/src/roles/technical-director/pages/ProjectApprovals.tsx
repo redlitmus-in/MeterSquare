@@ -20,6 +20,7 @@ import {
   Squares2X2Icon,
   TrashIcon
 } from '@heroicons/react/24/outline';
+import { FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { tdService } from '@/roles/technical-director/services/tdService';
@@ -1792,14 +1793,22 @@ const ProjectApprovals: React.FC = () => {
           onClose={() => setShowBOQModal(false)}
           boq={selectedEstimation ? { boq_id: selectedEstimation.id, boq_name: selectedEstimation.projectName } : null}
           onDownload={() => setShowFormatModal(true)}
-          onApprove={() => {
-            // Show approval modal (TD needs to review comparison first for pending, or direct approval for revisions)
-            setShowApprovalModal(true);
-          }}
-          onReject={() => {
-            // Show rejection modal
-            setShowRejectionModal(true);
-          }}
+          onApprove={
+            selectedEstimation && (selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision')
+              ? () => {
+                  // Show approval modal (TD needs to review comparison first for pending, or direct approval for revisions)
+                  setShowApprovalModal(true);
+                }
+              : undefined
+          }
+          onReject={
+            selectedEstimation && (selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision')
+              ? () => {
+                  // Show rejection modal
+                  setShowRejectionModal(true);
+                }
+              : undefined
+          }
           refreshTrigger={boqDetailsRefreshTrigger}
         />
 
@@ -1889,7 +1898,7 @@ const ProjectApprovals: React.FC = () => {
                         {(selectedEstimation as any).preliminaries.items &&
                          (selectedEstimation as any).preliminaries.items.length > 0 && (
                           <div className="space-y-2 mb-4">
-                            {(selectedEstimation as any).preliminaries.items.map((item: any, index: number) => (
+                            {(selectedEstimation as any).preliminaries.items.filter((item: any) => item.checked).map((item: any, index: number) => (
                               <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
                                 <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
                                   <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2872,50 +2881,123 @@ const ProjectApprovals: React.FC = () => {
                     <span className="text-xs text-gray-600">(What TD sees)</span>
                   </div>
 
-                  {/* BOQ Items - Internal */}
+                  {/* BOQ Items - Internal (with Sub-Items) */}
                   <div className="space-y-3 mb-4">
                     {(selectedEstimation.boqItems || []).map((item, index) => {
-                      const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
+                      const hasSubItems = (item as any).sub_items && (item as any).sub_items.length > 0;
+
+                      // Get item final selling price (should match Cost Breakdown Total)
+                      const itemTotalCost = (item as any).total_selling_price || (item as any).selling_price || (item as any).estimatedSellingPrice || item.amount || 0;
+
                       return (
                         <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                          <h4 className="font-bold text-gray-900 mb-2">{index + 1}. {item.description}</h4>
+                          <div className="flex justify-between items-start mb-3">
+                            <h4 className="font-bold text-gray-900">{index + 1}. {(item as any).item_name || item.description}</h4>
+                            <span className="font-semibold text-orange-600">AED{formatCurrency(itemTotalCost)}</span>
+                          </div>
 
-                          {/* Materials */}
-                          {item.materials.length > 0 && (
-                            <div className="mb-3">
-                              <p className="text-xs font-semibold text-gray-700 mb-1">+ RAW MATERIALS</p>
-                              <div className="space-y-1">
-                                {item.materials.map((mat, mIdx) => (
-                                  <div key={mIdx} className="flex justify-between text-xs">
-                                    <span className="text-gray-600">{mat.name} ({mat.quantity} {mat.unit})</span>
-                                    <span className="font-medium">AED{formatCurrency(mat.amount)}</span>
-                                  </div>
-                                ))}
-                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
-                                  <span>Total Materials:</span>
-                                  <span>AED{formatCurrency(materialTotal)}</span>
-                                </div>
-                              </div>
-                            </div>
-                          )}
+                          {hasSubItems ? (
+                            /* Show Sub-Items with their materials and labour */
+                            <div className="space-y-3 ml-4">
+                              {(item as any).sub_items.map((subItem: any, sIdx: number) => {
+                                const subMaterialTotal = (subItem.materials || []).reduce((sum: number, m: any) => sum + (m.total_price || m.amount || 0), 0);
+                                const subLabourTotal = (subItem.labour || []).reduce((sum: number, l: any) => sum + (l.total_cost || l.amount || 0), 0);
 
-                          {/* Labor */}
-                          {item.labour && item.labour.length > 0 && (
-                            <div className="mb-2">
-                              <p className="text-xs font-semibold text-gray-700 mb-1">+ LABOUR</p>
-                              <div className="space-y-1">
-                                {item.labour.map((lab, lIdx) => (
-                                  <div key={lIdx} className="flex justify-between text-xs">
-                                    <span className="text-gray-600">{lab.type} ({lab.quantity} {lab.unit})</span>
-                                    <span className="font-medium">AED{formatCurrency(lab.amount)}</span>
+                                return (
+                                  <div key={sIdx} className="bg-green-50/50 rounded-lg p-3 border border-green-200">
+                                    <h5 className="font-semibold text-green-900 text-sm mb-2">
+                                      Sub Item {sIdx + 1}: {subItem.sub_item_name || subItem.scope}
+                                    </h5>
+                                    {subItem.scope && (
+                                      <p className="text-xs text-gray-600 mb-2"><strong>Scope:</strong> {subItem.scope}</p>
+                                    )}
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-600 mb-3">
+                                      {subItem.size && <div><span className="font-medium">Size:</span> {subItem.size}</div>}
+                                      {subItem.location && <div><span className="font-medium">Location:</span> {subItem.location}</div>}
+                                      {subItem.brand && <div><span className="font-medium">Brand:</span> {subItem.brand}</div>}
+                                      <div><span className="font-medium">Qty:</span> {subItem.quantity} {subItem.unit}</div>
+                                    </div>
+
+                                    {/* Sub-item Materials */}
+                                    {subItem.materials && subItem.materials.length > 0 && (
+                                      <div className="mb-2">
+                                        <p className="text-xs font-semibold text-blue-700 mb-1">+ RAW MATERIALS</p>
+                                        <div className="space-y-1">
+                                          {subItem.materials.map((mat: any, mIdx: number) => (
+                                            <div key={mIdx} className="flex justify-between text-xs">
+                                              <span className="text-gray-600">{mat.material_name} ({mat.quantity} {mat.unit})</span>
+                                              <span className="font-medium">AED{formatCurrency(mat.total_price || mat.amount || 0)}</span>
+                                            </div>
+                                          ))}
+                                          <div className="flex justify-between text-xs font-semibold pt-1 border-t border-blue-200">
+                                            <span>Total Materials:</span>
+                                            <span>AED{formatCurrency(subMaterialTotal)}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Sub-item Labour */}
+                                    {subItem.labour && subItem.labour.length > 0 && (
+                                      <div className="mb-2">
+                                        <p className="text-xs font-semibold text-purple-700 mb-1">+ LABOUR</p>
+                                        <div className="space-y-1">
+                                          {subItem.labour.map((lab: any, lIdx: number) => (
+                                            <div key={lIdx} className="flex justify-between text-xs">
+                                              <span className="text-gray-600">{lab.labour_role} ({lab.hours} hrs)</span>
+                                              <span className="font-medium">AED{formatCurrency(lab.total_cost || lab.amount || 0)}</span>
+                                            </div>
+                                          ))}
+                                          <div className="flex justify-between text-xs font-semibold pt-1 border-t border-purple-200">
+                                            <span>Total Labour:</span>
+                                            <span>AED{formatCurrency(subLabourTotal)}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
-                                ))}
-                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
-                                  <span>Total Labour:</span>
-                                  <span>AED{formatCurrency(item.laborCost)}</span>
-                                </div>
-                              </div>
+                                );
+                              })}
                             </div>
+                          ) : (
+                            /* Fallback: Show item-level materials and labour if no sub-items */
+                            <>
+                              {item.materials && item.materials.length > 0 && (
+                                <div className="mb-3">
+                                  <p className="text-xs font-semibold text-gray-700 mb-1">+ RAW MATERIALS</p>
+                                  <div className="space-y-1">
+                                    {item.materials.map((mat, mIdx) => (
+                                      <div key={mIdx} className="flex justify-between text-xs">
+                                        <span className="text-gray-600">{mat.name} ({mat.quantity} {mat.unit})</span>
+                                        <span className="font-medium">AED{formatCurrency(mat.amount)}</span>
+                                      </div>
+                                    ))}
+                                    <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                      <span>Total Materials:</span>
+                                      <span>AED{formatCurrency(item.materials.reduce((sum, m) => sum + m.amount, 0))}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {item.labour && item.labour.length > 0 && (
+                                <div className="mb-2">
+                                  <p className="text-xs font-semibold text-gray-700 mb-1">+ LABOUR</p>
+                                  <div className="space-y-1">
+                                    {item.labour.map((lab, lIdx) => (
+                                      <div key={lIdx} className="flex justify-between text-xs">
+                                        <span className="text-gray-600">{lab.type} ({lab.quantity} {lab.unit})</span>
+                                        <span className="font-medium">AED{formatCurrency(lab.amount)}</span>
+                                      </div>
+                                    ))}
+                                    <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                      <span>Total Labour:</span>
+                                      <span>AED{formatCurrency(item.laborCost)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       );
@@ -3006,6 +3088,91 @@ const ProjectApprovals: React.FC = () => {
                       })()}
                     </div>
                   </div>
+
+                  {/* Preliminaries & Approval Works - Internal Version */}
+                  {(selectedEstimation as any).preliminaries && (
+                    (selectedEstimation as any).preliminaries.items?.length > 0 ||
+                    (selectedEstimation as any).preliminaries.cost_details ||
+                    (selectedEstimation as any).preliminaries.notes
+                  ) && (
+                    <div className="bg-white rounded-lg shadow-sm border border-orange-200 p-4 mb-4">
+                      <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-purple-600" />
+                        Preliminaries & Approval Works
+                      </h3>
+
+                      {/* Selected Items */}
+                      {(selectedEstimation as any).preliminaries.items?.filter((item: any) => item.checked).length > 0 && (
+                        <div className="mb-3">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
+                          <div className="space-y-2">
+                            {(selectedEstimation as any).preliminaries.items.filter((item: any) => item.checked).map((item: any, index: number) => (
+                              <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
+                                <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
+                                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </div>
+                                <div className="flex-1 text-sm text-gray-700">
+                                  {item.description}
+                                  {item.isCustom && (
+                                    <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Cost Details */}
+                      {(selectedEstimation as any).preliminaries.cost_details && (
+                        (selectedEstimation as any).preliminaries.cost_details.quantity ||
+                        (selectedEstimation as any).preliminaries.cost_details.rate ||
+                        (selectedEstimation as any).preliminaries.cost_details.amount
+                      ) && (
+                        <div className="mb-3 bg-orange-50 rounded-lg border border-orange-200 p-3">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Cost Details</h4>
+                          <div className="grid grid-cols-4 gap-3 text-sm">
+                            <div>
+                              <p className="text-xs text-gray-600 mb-1">Quantity</p>
+                              <p className="font-medium text-gray-900">
+                                {(selectedEstimation as any).preliminaries.cost_details.quantity || 0}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600 mb-1">Unit</p>
+                              <p className="font-medium text-gray-900">
+                                {(selectedEstimation as any).preliminaries.cost_details.unit || 'nos'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600 mb-1">Rate</p>
+                              <p className="font-medium text-gray-900">
+                                AED{formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600 mb-1">Amount</p>
+                              <p className="font-semibold text-orange-700">
+                                AED{formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Additional Notes */}
+                      {(selectedEstimation as any).preliminaries.notes && (
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Additional Notes</h4>
+                          <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                            {(selectedEstimation as any).preliminaries.notes}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Client Version (Right) */}
@@ -3017,70 +3184,71 @@ const ProjectApprovals: React.FC = () => {
                     <span className="text-xs text-gray-600">(What Client sees)</span>
                   </div>
 
-                  {/* BOQ Items - Client (with distributed markup) */}
+                  {/* BOQ Items - Client (Items and Sub-Items only, no raw materials/labour) */}
                   <div className="space-y-3 mb-4">
                     {(selectedEstimation.boqItems || []).map((item, index) => {
-                      const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
-                      const itemBaseCost = materialTotal + item.laborCost;
+                      const hasSubItems = (item as any).sub_items && (item as any).sub_items.length > 0;
 
-                      // Calculate item's overhead and profit
-                      const itemOverhead = itemBaseCost * selectedEstimation.overheadPercentage / 100;
-                      const itemProfit = itemBaseCost * selectedEstimation.profitMargin / 100;
-                      const itemTotalMarkup = itemOverhead + itemProfit;
-
-                      // Calculate distribution ratios
-                      const materialRatio = itemBaseCost > 0 ? materialTotal / itemBaseCost : 0;
-                      const laborRatio = itemBaseCost > 0 ? item.laborCost / itemBaseCost : 0;
-                      const materialMarkupShare = itemTotalMarkup * materialRatio;
-                      const laborMarkupShare = itemTotalMarkup * laborRatio;
+                      // Get item final selling price (after all markups, discount, VAT)
+                      const itemTotalAmount = (item as any).total_selling_price || (item as any).selling_price || (item as any).estimatedSellingPrice || item.amount || 0;
 
                       return (
                         <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                          <h4 className="font-bold text-gray-900 mb-2">{index + 1}. {item.description}</h4>
+                          <div className="flex justify-between items-start mb-3">
+                            <h4 className="font-bold text-gray-900">{index + 1}. {(item as any).item_name || item.description}</h4>
+                            <span className="font-semibold text-blue-600">AED{formatCurrency(itemTotalAmount)}</span>
+                          </div>
 
-                          {/* Materials with distributed markup */}
-                          {item.materials.length > 0 && (
-                            <div className="mb-3">
-                              <p className="text-xs font-semibold text-gray-700 mb-1">+ RAW MATERIALS</p>
-                              <div className="space-y-1">
-                                {item.materials.map((mat, mIdx) => {
-                                  const matShare = materialTotal > 0 ? (mat.amount / materialTotal) * materialMarkupShare : 0;
-                                  const adjustedAmount = mat.amount + matShare;
-                                  return (
-                                    <div key={mIdx} className="flex justify-between text-xs">
-                                      <span className="text-gray-600">{mat.name} ({mat.quantity} {mat.unit})</span>
-                                      <span className="font-medium">AED{formatCurrency(adjustedAmount)}</span>
+                          {hasSubItems ? (
+                            /* Show Sub-Items with final prices (includes misc + overhead + profit baked in) */
+                            <div className="space-y-2 ml-4">
+                              {(item as any).sub_items.map((subItem: any, sIdx: number) => {
+                                // Calculate sub-item base cost from materials + labour
+                                const subMaterialTotal = (subItem.materials || []).reduce((sum: number, m: any) => sum + (m.total_price || m.amount || 0), 0);
+                                const subLabourTotal = (subItem.labour || []).reduce((sum: number, l: any) => sum + (l.total_cost || l.amount || 0), 0);
+                                const subBaseCost = subMaterialTotal + subLabourTotal;
+
+                                // Get item-level percentages (misc, overhead, profit)
+                                const itemMiscPct = (item as any).miscellaneous_percentage || 0;
+                                const itemOverheadPct = (item as any).overhead_percentage || selectedEstimation.overheadPercentage || 0;
+                                const itemProfitPct = (item as any).profit_margin_percentage || selectedEstimation.profitMargin || 0;
+
+                                // Apply misc + overhead + profit to sub-item base cost
+                                const miscAmount = subBaseCost * (itemMiscPct / 100);
+                                const overheadAmount = subBaseCost * (itemOverheadPct / 100);
+                                const profitAmount = subBaseCost * (itemProfitPct / 100);
+
+                                // Final sub-item total (base + misc + overhead + profit)
+                                const subItemTotal = subBaseCost + miscAmount + overheadAmount + profitAmount;
+
+                                return (
+                                  <div key={sIdx} className="bg-blue-50/30 rounded-lg p-3 border border-blue-200">
+                                    <div className="flex justify-between items-start mb-2">
+                                      <h5 className="font-medium text-gray-900 text-sm">
+                                        Sub Item {sIdx + 1}: {subItem.sub_item_name || subItem.scope}
+                                      </h5>
+                                      <div className="font-semibold text-blue-600 ml-4">
+                                        AED{formatCurrency(subItemTotal)}
+                                      </div>
                                     </div>
-                                  );
-                                })}
-                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
-                                  <span>Total Materials:</span>
-                                  <span>AED{formatCurrency(materialTotal + materialMarkupShare)}</span>
-                                </div>
-                              </div>
+                                    {subItem.scope && (
+                                      <p className="text-xs text-gray-600 mb-2"><strong>Scope:</strong> {subItem.scope}</p>
+                                    )}
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-600">
+                                      {subItem.size && <div><span className="font-medium">Size:</span> {subItem.size}</div>}
+                                      {subItem.location && <div><span className="font-medium">Location:</span> {subItem.location}</div>}
+                                      {subItem.brand && <div><span className="font-medium">Brand:</span> {subItem.brand}</div>}
+                                      <div><span className="font-medium">Qty:</span> {subItem.quantity} {subItem.unit}</div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
-                          )}
-
-                          {/* Labor with distributed markup */}
-                          {item.labour && item.labour.length > 0 && (
-                            <div className="mb-2">
-                              <p className="text-xs font-semibold text-gray-700 mb-1">+ LABOUR</p>
-                              <div className="space-y-1">
-                                {item.labour.map((lab, lIdx) => {
-                                  const labShare = item.laborCost > 0 ? (lab.amount / item.laborCost) * laborMarkupShare : 0;
-                                  const adjustedAmount = lab.amount + labShare;
-                                  return (
-                                    <div key={lIdx} className="flex justify-between text-xs">
-                                      <span className="text-gray-600">{lab.type} ({lab.quantity} {lab.unit})</span>
-                                      <span className="font-medium">AED{formatCurrency(adjustedAmount)}</span>
-                                    </div>
-                                  );
-                                })}
-                                <div className="flex justify-between text-xs font-semibold pt-1 border-t">
-                                  <span>Total Labour:</span>
-                                  <span>AED{formatCurrency(item.laborCost + laborMarkupShare)}</span>
-                                </div>
-                              </div>
+                          ) : (
+                            /* No sub-items: Just show brief item info */
+                            <div className="text-xs text-gray-600">
+                              {item.briefDescription && <p>{item.briefDescription}</p>}
+                              <p className="mt-1">Qty: {item.quantity} {item.unit}</p>
                             </div>
                           )}
                         </div>
@@ -3132,26 +3300,17 @@ const ProjectApprovals: React.FC = () => {
 
                         return (
                           <>
-                            <div className="flex justify-between">
-                              <span className="text-gray-600">Material Cost:</span>
-                              <span className="font-semibold">AED{formatCurrency(adjustedMaterialCost)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-600">Labour Cost:</span>
-                              <span className="font-semibold">AED{formatCurrency(adjustedLaborCost)}</span>
-                            </div>
+                            {/* Client sees base cost with misc/overhead/profit already included in sub-items */}
                             <div className="flex justify-between pt-2 border-t">
-                              <span className="text-gray-600">Base Cost:</span>
+                              <span className="text-gray-700 font-medium">Base Cost:</span>
                               <span className="font-semibold">AED{formatCurrency(subtotalBeforeDiscount)}</span>
                             </div>
-                            <div className="flex justify-between bg-gray-100 p-2 rounded opacity-40">
-                              <span className="text-gray-500 line-through">Overhead & Profit:</span>
-                              <span className="text-gray-500 line-through">Hidden from client</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className={`${totalDiscount > 0 ? 'text-red-600' : 'text-gray-700'}`}>Discount ({avgDiscountPct.toFixed(0)}%):</span>
-                              <span className={`font-semibold ${totalDiscount > 0 ? 'text-red-600' : 'text-gray-900'}`}>{totalDiscount > 0 ? '- ' : ''}AED{formatCurrency(totalDiscount)}</span>
-                            </div>
+                            {totalDiscount > 0 && (
+                              <div className="flex justify-between">
+                                <span className="text-red-600">Discount ({avgDiscountPct.toFixed(0)}%):</span>
+                                <span className="font-semibold text-red-600">- AED{formatCurrency(totalDiscount)}</span>
+                              </div>
+                            )}
                             {totalVAT > 0 && (
                               <div className="flex justify-between">
                                 <span className="text-blue-600">VAT:</span>
@@ -3167,13 +3326,98 @@ const ProjectApprovals: React.FC = () => {
                       })()}
                     </div>
                   </div>
+
+                  {/* Preliminaries & Approval Works - Client Version */}
+                  {(selectedEstimation as any).preliminaries && (
+                    (selectedEstimation as any).preliminaries.items?.length > 0 ||
+                    (selectedEstimation as any).preliminaries.cost_details ||
+                    (selectedEstimation as any).preliminaries.notes
+                  ) && (
+                    <div className="bg-white rounded-lg shadow-sm border border-blue-200 p-4 mb-4">
+                      <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-purple-600" />
+                        Preliminaries & Approval Works
+                      </h3>
+
+                      {/* Selected Items */}
+                      {(selectedEstimation as any).preliminaries.items?.filter((item: any) => item.checked).length > 0 && (
+                        <div className="mb-3">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
+                          <div className="space-y-2">
+                            {(selectedEstimation as any).preliminaries.items.filter((item: any) => item.checked).map((item: any, index: number) => (
+                              <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
+                                <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
+                                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </div>
+                                <div className="flex-1 text-sm text-gray-700">
+                                  {item.description}
+                                  {item.isCustom && (
+                                    <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Cost Details */}
+                      {(selectedEstimation as any).preliminaries.cost_details && (
+                        (selectedEstimation as any).preliminaries.cost_details.quantity ||
+                        (selectedEstimation as any).preliminaries.cost_details.rate ||
+                        (selectedEstimation as any).preliminaries.cost_details.amount
+                      ) && (
+                        <div className="mb-3 bg-blue-50 rounded-lg border border-blue-200 p-3">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Cost Details</h4>
+                          <div className="grid grid-cols-4 gap-3 text-sm">
+                            <div>
+                              <p className="text-xs text-gray-600 mb-1">Quantity</p>
+                              <p className="font-medium text-gray-900">
+                                {(selectedEstimation as any).preliminaries.cost_details.quantity || 0}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600 mb-1">Unit</p>
+                              <p className="font-medium text-gray-900">
+                                {(selectedEstimation as any).preliminaries.cost_details.unit || 'nos'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600 mb-1">Rate</p>
+                              <p className="font-medium text-gray-900">
+                                AED{formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600 mb-1">Amount</p>
+                              <p className="font-semibold text-blue-700">
+                                AED{formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Additional Notes */}
+                      {(selectedEstimation as any).preliminaries.notes && (
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Additional Notes</h4>
+                          <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                            {(selectedEstimation as any).preliminaries.notes}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="bg-gradient-to-r from-gray-50 to-white border-t border-gray-200 px-6 py-4">
                 <div className="flex items-center justify-between">
                   <div className="text-sm text-gray-600">
-                    <strong>Key Difference:</strong> Internal version shows overhead & profit breakdown, Client version shows final price only
+                    <strong>Key Difference:</strong> Internal version shows sub-items with complete material & labour breakdown. Client version shows sub-items with final prices (misc/overhead/profit included), discount, and VAT only.
                   </div>
                   <div className="flex items-center gap-3">
                     <button

@@ -326,45 +326,62 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                         </div>
 
                         {boqData.preliminaries.items && boqData.preliminaries.items.length > 0 && (
-                          <div className="space-y-2 mb-4">
-                            {boqData.preliminaries.items.map((item: any, index: number) => (
-                              <div key={index} className="p-3 bg-white rounded-lg border border-purple-200">
-                                <div className="flex items-start gap-3 mb-2">
-                                  <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
-                                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
-                                    </svg>
+                          <>
+                            {/* Selected Items List */}
+                            <div className="mb-4 bg-white rounded-lg border border-purple-200 p-4">
+                              <h5 className="text-sm font-semibold text-purple-900 mb-3">Selected conditions and terms</h5>
+                              <div className="space-y-2">
+                                {boqData.preliminaries.items.filter((item: any) => item.checked).map((item: any, index: number) => (
+                                  <div key={index} className="flex items-start gap-3">
+                                    <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
+                                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    </div>
+                                    <div className="flex-1 text-sm text-gray-700">
+                                      {item.description}
+                                      {item.isCustom && (
+                                        <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
+                                      )}
+                                    </div>
                                   </div>
-                                  <div className="flex-1 text-sm text-gray-700">
-                                    {item.description}
-                                    {item.isCustom && (
-                                      <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
-                                    )}
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Cost Details Summary - Separate from conditions */}
+                            {boqData.preliminaries.cost_details && (boqData.preliminaries.cost_details.quantity || boqData.preliminaries.cost_details.rate || boqData.preliminaries.cost_details.amount) && (
+                              <div className="mb-4 bg-white rounded-lg border border-purple-200 p-4">
+                                <h5 className="text-sm font-semibold text-purple-900 mb-3">Cost Details</h5>
+                                <div className="grid grid-cols-4 gap-4">
+                                  <div>
+                                    <p className="text-xs text-gray-600 mb-1">Quantity</p>
+                                    <p className="text-sm font-medium text-gray-900">
+                                      {boqData.preliminaries.cost_details.quantity || 0}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-gray-600 mb-1">Unit</p>
+                                    <p className="text-sm font-medium text-gray-900">
+                                      {boqData.preliminaries.cost_details.unit || 'nos'}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-gray-600 mb-1">Rate</p>
+                                    <p className="text-sm font-medium text-gray-900">
+                                      ₹{boqData.preliminaries.cost_details.rate || 0}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-gray-600 mb-1">Amount</p>
+                                    <p className="text-sm font-semibold text-purple-700">
+                                      ₹{boqData.preliminaries.cost_details.amount || 0}
+                                    </p>
                                   </div>
                                 </div>
-                                {(item.quantity || item.unit || item.rate || item.amount) && (
-                                  <div className="ml-7 grid grid-cols-4 gap-3 mt-2 pt-2 border-t border-purple-100">
-                                    <div>
-                                      <p className="text-xs text-gray-500 mb-1">Quantity</p>
-                                      <p className="text-sm font-medium text-gray-900">{item.quantity || 0}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs text-gray-500 mb-1">Unit</p>
-                                      <p className="text-sm font-medium text-gray-900">{item.unit || 'nos'}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs text-gray-500 mb-1">Rate</p>
-                                      <p className="text-sm font-medium text-gray-900">₹{item.rate || 0}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs text-gray-500 mb-1">Amount</p>
-                                      <p className="text-sm font-semibold text-purple-700">₹{item.amount || 0}</p>
-                                    </div>
-                                  </div>
-                                )}
                               </div>
-                            ))}
-                          </div>
+                            )}
+                          </>
                         )}
 
                         {boqData.preliminaries.notes && (
@@ -455,14 +472,15 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                 </div>
                                                 Sub Item #{subIndex + 1}: {subItem.sub_item_name || subItem.scope}
                                               </h4>
-                                              {subItem.sub_item_name && subItem.scope && (
-                                                <p className="text-xs text-gray-600 mt-1 ml-8">Scope: {subItem.scope}</p>
+                                              {subItem.scope && (
+                                                <p className="text-xs text-gray-600 mt-1 ml-8"><strong>Scope:</strong> {subItem.scope}</p>
                                               )}
-                                              <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                                              <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
                                                 {subItem.size && <div><span className="text-gray-600">Size:</span> <span className="font-medium">{subItem.size}</span></div>}
                                                 {subItem.location && <div><span className="text-gray-600">Location:</span> <span className="font-medium">{subItem.location}</span></div>}
                                                 {subItem.brand && <div><span className="text-gray-600">Brand:</span> <span className="font-medium">{subItem.brand}</span></div>}
                                                 <div><span className="text-gray-600">Qty:</span> <span className="font-medium">{subItem.quantity} {subItem.unit}</span></div>
+                                                {subItem.rate && <div><span className="text-gray-600">Rate:</span> <span className="font-medium">₹{subItem.rate}</span></div>}
                                               </div>
                                             </div>
 
@@ -870,14 +888,15 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                             </div>
                                             Sub Item #{subIndex + 1}: {subItem.sub_item_name || subItem.scope}
                                           </h4>
-                                          {subItem.sub_item_name && subItem.scope && (
-                                            <p className="text-xs text-gray-600 mt-1 ml-8">Scope: {subItem.scope}</p>
+                                          {subItem.scope && (
+                                            <p className="text-xs text-gray-600 mt-1 ml-8"><strong>Scope:</strong> {subItem.scope}</p>
                                           )}
-                                          <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                                          <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
                                             {subItem.size && <div><span className="text-gray-600">Size:</span> <span className="font-medium">{subItem.size}</span></div>}
                                             {subItem.location && <div><span className="text-gray-600">Location:</span> <span className="font-medium">{subItem.location}</span></div>}
                                             {subItem.brand && <div><span className="text-gray-600">Brand:</span> <span className="font-medium">{subItem.brand}</span></div>}
                                             <div><span className="text-gray-600">Qty:</span> <span className="font-medium">{subItem.quantity} {subItem.unit}</span></div>
+                                            {subItem.rate && <div><span className="text-gray-600">Rate:</span> <span className="font-medium">₹{subItem.rate}</span></div>}
                                           </div>
                                         </div>
 
