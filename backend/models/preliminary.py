@@ -18,3 +18,25 @@ class Preliminary(db.Model):
     created_by = db.Column(db.String(255), nullable=False)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_modified_by = db.Column(db.String(255), nullable=True)
+
+# BOQ Internal Revisions Table - Tracks internal approval cycles (PM edits, TD rejections)
+class BOQInternalRevision(db.Model):
+    __tablename__ = "boq_internal_revisions"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id", ondelete="CASCADE"), nullable=False)
+    internal_revision_number = db.Column(db.Integer, nullable=False)
+    action_type = db.Column(db.String(50), nullable=False)  # PM_EDITED, TD_REJECTED, TD_APPROVED, SENT_TO_TD, SENT_TO_PM, ESTIMATOR_RESUBMIT, INTERNAL_REVISION_EDIT
+    actor_role = db.Column(db.String(50), nullable=False)
+    actor_name = db.Column(db.String(100), nullable=True)
+    actor_user_id = db.Column(db.Integer, nullable=True)
+    status_before = db.Column(db.String(50), nullable=True)
+    status_after = db.Column(db.String(50), nullable=True)
+    changes_summary = db.Column(JSONB, nullable=True)  # JSON with change details
+    rejection_reason = db.Column(db.Text, nullable=True)
+    approval_comments = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    is_deleted = db.Column(db.Boolean, default=False)
+
+    # Relationship
+    boq = db.relationship("BOQ", backref=db.backref("internal_revisions", lazy=True))

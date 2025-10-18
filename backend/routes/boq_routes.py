@@ -7,11 +7,7 @@ from controllers.boq_controller import *
 from controllers.boq_upload_controller import *
 from controllers.boq_bulk_controller import bulk_upload_boq
 from controllers.boq_revisions import get_revision_tabs, get_projects_by_revision, get_revision_statistics
-from controllers.boq_internal_revisions_controller import (
-    track_internal_revision,
-    get_internal_revisions,
-    get_all_boqs_with_internal_revisions
-)
+from controllers.boq_internal_revisions_controller import *
 
 boq_routes = Blueprint('boq_routes', __name__, url_prefix='/api')
 
@@ -105,23 +101,23 @@ def get_projects_by_revision_route(revision_number):
 def get_revision_statistics_route():
     return get_revision_statistics()
 
-# BOQ Internal Revisions (PM edits, TD rejections before client)
-@boq_routes.route('/boq/<int:boq_id>/track_internal_revision', methods=['POST'])
-@jwt_required
-def track_internal_revision_route(boq_id):
-    return track_internal_revision()
-
 @boq_routes.route('/boq/<int:boq_id>/internal_revisions', methods=['GET'])
 @jwt_required
 def get_internal_revisions_route(boq_id):
     return get_internal_revisions(boq_id)
 
-@boq_routes.route('/boqs/internal_revisions', methods=['GET'])
-@jwt_required
-def get_all_boqs_with_internal_revisions_route():
-    return get_all_boqs_with_internal_revisions()
-
 @boq_routes.route('/material/<int:sub_item_id>', methods=['GET'])
 @jwt_required
 def  get_sub_item_material_route(sub_item_id):
     return  get_sub_item_material(sub_item_id)
+
+@boq_routes.route('/update_internal_boq/<int:boq_id>', methods=['PUT'])
+@jwt_required
+def update_internal_revision_boq_route(boq_id):
+    return update_internal_revision_boq(boq_id)
+
+@boq_routes.route('/boqs/internal_revisions', methods=['GET'])
+@jwt_required
+def get_all_internal_revision_route():
+    return get_all_internal_revision()
+

@@ -11,6 +11,8 @@ class BOQ(db.Model):
     boq_name = db.Column(db.String(255), nullable=False)
     status = db.Column(db.String(50), default="Draft")
     revision_number = db.Column(db.Integer, default=0, nullable=False)  # 0 = original, 1+ = revision cycles
+    internal_revision_number = db.Column(db.Integer, default=0, nullable=True)  # Tracks internal revisions before client submission
+    has_internal_revisions = db.Column(db.Boolean, default=False)  # Flag to indicate if BOQ has internal revisions
     client_rejection_reason = db.Column(db.Text, nullable=True)  # For client rejection/cancellation reasons
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
