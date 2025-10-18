@@ -109,6 +109,7 @@ const ProjectApprovals: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [loadingBOQDetails, setLoadingBOQDetails] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyTab, setHistoryTab] = useState<'full' | 'revisions'>('full');
   const [showFormatModal, setShowFormatModal] = useState(false);
@@ -860,6 +861,9 @@ const ProjectApprovals: React.FC = () => {
           return;
         }
 
+        // Set rejecting state to show loading
+        setIsRejecting(true);
+
         // Optimistic update: immediately update UI before API call
         const optimisticBOQs = boqs.map(boq =>
           boq.boq_id === id
@@ -893,6 +897,9 @@ const ProjectApprovals: React.FC = () => {
       toast.error('An error occurred while processing the request');
       // Revert optimistic update on error
       await loadBOQs(false);
+    } finally {
+      // Reset rejecting state
+      setIsRejecting(false);
     }
     setShowRejectionModal(false);
     setApprovalNotes('');
@@ -1776,10 +1783,27 @@ const ProjectApprovals: React.FC = () => {
                         toast.error('Please provide a rejection reason');
                       }
                     }}
-                    className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                    disabled={isRejecting}
+                    className={`px-4 py-2 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                      isRejecting
+                        ? 'bg-red-400 cursor-not-allowed'
+                        : 'bg-red-500 hover:bg-red-600'
+                    }`}
                   >
-                    <XCircleIcon className="w-5 h-5" />
-                    Reject Project
+                    {isRejecting ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Rejecting...
+                      </>
+                    ) : (
+                      <>
+                        <XCircleIcon className="w-5 h-5" />
+                        Reject Project
+                      </>
+                    )}
                   </button>
                 </div>
               </div>

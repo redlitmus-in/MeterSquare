@@ -25,6 +25,7 @@ import { toast } from 'sonner';
 import BOQHistoryTimeline from './BOQHistoryTimeline';
 import BOQRevisionHistory from './BOQRevisionHistory';
 import BOQComparisonView from './BOQComparisonView';
+import ModernLoadingSpinners from '../../../components/ui/ModernLoadingSpinners';
 
 interface BOQDetailsModalProps {
   isOpen: boolean;
@@ -258,11 +259,9 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
               {/* Content */}
               <div className="overflow-y-auto max-h-[calc(90vh-200px)] p-6">
                 {isLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <div className="text-center">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                      <p className="mt-4 text-gray-600">Loading BOQ details...</p>
-                    </div>
+                  <div className="flex flex-col items-center justify-center py-20">
+                    <ModernLoadingSpinners size="lg" />
+                    <p className="mt-6 text-gray-600 text-sm font-medium">Loading BOQ details...</p>
                   </div>
                 ) : activeTab === 'history' ? (
                   <BOQHistoryTimeline boqId={displayData?.boq_id || boq?.boq_id} />
@@ -464,7 +463,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                     {item.sub_items?.length > 0 && (
                                       <div className="space-y-4">
                                         {item.sub_items.map((subItem: any, subIndex: number) => (
-                                          <div key={subIndex} className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
+                                          <div key={subIndex} className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border-2 border-green-400 shadow-sm">
                                             <div className="mb-3">
                                               <h4 className="text-sm font-bold text-green-900 flex items-center gap-2">
                                                 <div className="p-1.5 bg-white rounded shadow-sm">
@@ -486,7 +485,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
 
                                             {/* Sub-item Materials */}
                                             {subItem.materials?.length > 0 && (
-                                              <div className="mb-3 bg-blue-50/50 rounded-lg p-3 border border-blue-200">
+                                              <div className="mb-3 bg-red-50/20 rounded-lg p-3 border border-red-300 hover:border-red-400 transition-all duration-200">
                                                 <h5 className="text-xs font-bold text-blue-900 mb-2 flex items-center gap-2">
                                                   <Package className="w-3.5 h-3.5" />
                                                   Raw Materials
@@ -500,26 +499,64 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                         <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Unit</th>
                                                         <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Rate</th>
                                                         <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Total</th>
+                                                        {subItem.materials.some((m: any) => m.vat_percentage > 0) && (
+                                                          <>
+                                                            <th className="text-center py-1.5 px-2 font-semibold text-blue-900">VAT %</th>
+                                                            <th className="text-right py-1.5 px-2 font-semibold text-blue-900">VAT Amt</th>
+                                                            <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Total w/ VAT</th>
+                                                          </>
+                                                        )}
                                                       </tr>
                                                     </thead>
                                                     <tbody>
-                                                      {subItem.materials.map((material: any, mIndex: number) => (
-                                                        <tr key={mIndex} className={`border-b border-blue-100 ${mIndex % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
-                                                          <td className="py-1.5 px-2 text-gray-900">
-                                                            <div>{material.material_name}</div>
-                                                            {material.description && <div className="text-xs text-gray-500">{material.description}</div>}
-                                                          </td>
-                                                          <td className="py-1.5 px-2 text-center text-gray-700">{material.quantity}</td>
-                                                          <td className="py-1.5 px-2 text-center text-gray-700 uppercase">{material.unit}</td>
-                                                          <td className="py-1.5 px-2 text-right text-gray-700">{formatCurrency(material.unit_price)}</td>
-                                                          <td className="py-1.5 px-2 text-right font-semibold text-blue-700">{formatCurrency(material.total_price || material.quantity * material.unit_price)}</td>
-                                                        </tr>
-                                                      ))}
+                                                      {subItem.materials.map((material: any, mIndex: number) => {
+                                                        const hasVAT = subItem.materials.some((m: any) => m.vat_percentage > 0);
+                                                        const materialTotal = material.total_price || (material.quantity * material.unit_price);
+                                                        const vatAmount = material.vat_amount || (materialTotal * ((material.vat_percentage || 0) / 100));
+                                                        return (
+                                                          <tr key={mIndex} className={`border-b border-blue-100 ${mIndex % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
+                                                            <td className="py-1.5 px-2 text-gray-900">
+                                                              <div>{material.material_name}</div>
+                                                              {material.description && <div className="text-xs text-gray-500">{material.description}</div>}
+                                                            </td>
+                                                            <td className="py-1.5 px-2 text-center text-gray-700">{material.quantity}</td>
+                                                            <td className="py-1.5 px-2 text-center text-gray-700 uppercase">{material.unit}</td>
+                                                            <td className="py-1.5 px-2 text-right text-gray-700">{formatCurrency(material.unit_price)}</td>
+                                                            <td className="py-1.5 px-2 text-right font-semibold text-blue-700">{formatCurrency(materialTotal)}</td>
+                                                            {hasVAT && (
+                                                              <>
+                                                                <td className="py-1.5 px-2 text-center text-gray-700">{material.vat_percentage || 0}%</td>
+                                                                <td className="py-1.5 px-2 text-right text-green-700 font-semibold">{formatCurrency(vatAmount)}</td>
+                                                                <td className="py-1.5 px-2 text-right text-indigo-700 font-bold">{formatCurrency(materialTotal + vatAmount)}</td>
+                                                              </>
+                                                            )}
+                                                          </tr>
+                                                        );
+                                                      })}
                                                       <tr className="bg-blue-200 border-t-2 border-blue-400">
-                                                        <td colSpan={4} className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">Materials Total:</td>
+                                                        <td colSpan={subItem.materials.some((m: any) => m.vat_percentage > 0) ? 4 : 4} className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">Materials Total:</td>
                                                         <td className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">
                                                           {formatCurrency(subItem.materials.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0))}
                                                         </td>
+                                                        {subItem.materials.some((m: any) => m.vat_percentage > 0) && (
+                                                          <>
+                                                            <td className="py-1.5 px-2 font-bold text-blue-900 text-center text-xs">-</td>
+                                                            <td className="py-1.5 px-2 font-bold text-green-900 text-right text-xs">
+                                                              {formatCurrency(subItem.materials.reduce((sum: number, m: any) => {
+                                                                const matTotal = m.total_price || (m.quantity * m.unit_price);
+                                                                const matVAT = m.vat_amount || (matTotal * ((m.vat_percentage || 0) / 100));
+                                                                return sum + matVAT;
+                                                              }, 0))}
+                                                            </td>
+                                                            <td className="py-1.5 px-2 font-bold text-indigo-900 text-right text-xs">
+                                                              {formatCurrency(subItem.materials.reduce((sum: number, m: any) => {
+                                                                const matTotal = m.total_price || (m.quantity * m.unit_price);
+                                                                const matVAT = m.vat_amount || (matTotal * ((m.vat_percentage || 0) / 100));
+                                                                return sum + matTotal + matVAT;
+                                                              }, 0))}
+                                                            </td>
+                                                          </>
+                                                        )}
                                                       </tr>
                                                     </tbody>
                                                   </table>
@@ -529,7 +566,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
 
                                             {/* Sub-item Labour */}
                                             {subItem.labour?.length > 0 && (
-                                              <div className="bg-orange-50/50 rounded-lg p-3 border border-orange-200">
+                                              <div className="bg-red-50/20 rounded-lg p-3 border border-red-300 hover:border-red-400 transition-all duration-200">
                                                 <h5 className="text-xs font-bold text-orange-900 mb-2 flex items-center gap-2">
                                                   <Users className="w-3.5 h-3.5" />
                                                   Labour
@@ -601,16 +638,57 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                             </div>
                                           </>
                                         )}
-                                        {(item.vat_percentage || 0) > 0 && (
-                                          <div className="flex justify-between py-1 border-t border-gray-200 pt-1">
-                                            <span className="text-gray-700 font-medium">VAT ({item.vat_percentage}%) <span className="text-xs text-green-600">[ADDITIONAL]</span>:</span>
-                                            <span className="font-semibold text-green-600">+ {formatCurrency(item.vat_amount || 0)}</span>
-                                          </div>
-                                        )}
-                                        <div className="flex justify-between pt-2 border-t-2 border-gray-400 font-bold">
-                                          <span className="text-gray-900">Final Total Price:</span>
-                                          <span className="text-green-600">{formatCurrency(item.selling_price || item.estimatedSellingPrice || 0)}</span>
-                                        </div>
+                                        {(() => {
+                                          // Check if individual material VAT is being used
+                                          const hasIndividualVAT = item.sub_items?.some((si: any) =>
+                                            si.materials?.some((m: any) => (m.vat_percentage || 0) > 0)
+                                          );
+
+                                          // Calculate total individual material VAT
+                                          const individualVATTotal = item.sub_items?.reduce((total: number, si: any) => {
+                                            return total + (si.materials?.reduce((sum: number, m: any) => {
+                                              const matTotal = m.total_price || (m.quantity * m.unit_price);
+                                              const matVAT = m.vat_amount || (matTotal * ((m.vat_percentage || 0) / 100));
+                                              return sum + matVAT;
+                                            }, 0) || 0);
+                                          }, 0) || 0;
+
+                                          // Store for use in Final Total calculation
+                                          (window as any)._tempIndividualVAT = hasIndividualVAT ? individualVATTotal : 0;
+
+                                          if (hasIndividualVAT && individualVATTotal > 0) {
+                                            return (
+                                              <div className="flex justify-between py-1 border-t border-gray-200 pt-1">
+                                                <span className="text-gray-700 font-medium">VAT (Individual Material VAT) <span className="text-xs text-green-600">[ADDITIONAL]</span>:</span>
+                                                <span className="font-semibold text-green-600">+ {formatCurrency(individualVATTotal)}</span>
+                                              </div>
+                                            );
+                                          } else if ((item.vat_percentage || 0) > 0) {
+                                            return (
+                                              <div className="flex justify-between py-1 border-t border-gray-200 pt-1">
+                                                <span className="text-gray-700 font-medium">VAT ({item.vat_percentage}%) <span className="text-xs text-green-600">[ADDITIONAL]</span>:</span>
+                                                <span className="font-semibold text-green-600">+ {formatCurrency(item.vat_amount || 0)}</span>
+                                              </div>
+                                            );
+                                          }
+                                          return null;
+                                        })()}
+                                        {(() => {
+                                          const individualVAT = (window as any)._tempIndividualVAT || 0;
+                                          const hasIndividualVAT = individualVAT > 0;
+
+                                          // If individual VAT is used, recalculate final total
+                                          const finalTotal = hasIndividualVAT
+                                            ? ((item.after_discount || (item.subtotal || 0) - (item.discount_amount || 0)) + individualVAT)
+                                            : (item.selling_price || item.estimatedSellingPrice || ((item.after_discount || 0) + (item.vat_amount || 0)));
+
+                                          return (
+                                            <div className="flex justify-between pt-2 border-t-2 border-gray-400 font-bold">
+                                              <span className="text-gray-900">Final Total Price:</span>
+                                              <span className="text-green-600">{formatCurrency(finalTotal)}</span>
+                                            </div>
+                                          );
+                                        })()}
                                         {(item.subItemsTotal || item.totalMaterialCost || item.totalLabourCost) && (item.subItemsTotal > 0 || item.totalMaterialCost > 0 || item.totalLabourCost > 0) && (
                                           <div className="mt-3 pt-3 border-t border-gray-300">
                                             <div className="text-xs text-gray-500 mb-2 font-medium">Raw Materials Breakdown:</div>
@@ -691,7 +769,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                   <div className="p-4 space-y-4">
                                     {/* Materials - Purple Theme */}
                                     {item.materials?.length > 0 && (
-                                      <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-4 border border-purple-200">
+                                      <div className="bg-red-50/20 rounded-lg p-4 border border-red-300 hover:border-red-400 transition-all duration-200">
                                         <h4 className="text-sm font-bold text-purple-900 mb-3 flex items-center gap-2">
                                           <div className="p-1.5 bg-white rounded shadow-sm">
                                             <Package className="w-4 h-4 text-purple-600" />
@@ -733,7 +811,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
 
                                     {/* Labour - Orange Theme */}
                                     {item.labour?.length > 0 && (
-                                      <div className="bg-gradient-to-r from-orange-50 to-orange-100/30 rounded-lg p-4 border border-orange-200">
+                                      <div className="bg-red-50/20 rounded-lg p-4 border border-red-300 hover:border-red-400 transition-all duration-200">
                                         <h4 className="text-sm font-bold text-orange-900 mb-3 flex items-center gap-2">
                                           <div className="p-1.5 bg-white rounded shadow-sm">
                                             <Users className="w-4 h-4 text-orange-600" />
@@ -772,7 +850,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                     )}
 
                                     {/* Overheads & Profit - Green Theme */}
-                                    <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
+                                    <div className="bg-red-50/20 rounded-lg p-4 border border-red-300 hover:border-red-400 transition-all duration-200">
                                       <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
                                         <div className="p-1.5 bg-white rounded shadow-sm">
                                           <Calculator className="w-4 h-4 text-green-600" />
@@ -880,7 +958,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 {item.sub_items?.length > 0 && (
                                   <div className="space-y-4">
                                     {item.sub_items.map((subItem: any, subIndex: number) => (
-                                      <div key={subIndex} className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
+                                      <div key={subIndex} className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border-2 border-green-400 shadow-sm">
                                         <div className="mb-3">
                                           <h4 className="text-sm font-bold text-green-900 flex items-center gap-2">
                                             <div className="p-1.5 bg-white rounded shadow-sm">
@@ -902,7 +980,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
 
                                         {/* Sub-item Materials */}
                                         {subItem.materials?.length > 0 && (
-                                          <div className="mb-3 bg-blue-50/50 rounded-lg p-3 border border-blue-200">
+                                          <div className="mb-3 bg-red-50/20 rounded-lg p-3 border border-red-300 hover:border-red-400 transition-all duration-200">
                                             <h5 className="text-xs font-bold text-blue-900 mb-2 flex items-center gap-2">
                                               <Package className="w-3.5 h-3.5" />
                                               Raw Materials
@@ -945,7 +1023,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
 
                                         {/* Sub-item Labour */}
                                         {subItem.labour?.length > 0 && (
-                                          <div className="bg-orange-50/50 rounded-lg p-3 border border-orange-200">
+                                          <div className="bg-red-50/20 rounded-lg p-3 border border-red-300 hover:border-red-400 transition-all duration-200">
                                             <h5 className="text-xs font-bold text-orange-900 mb-2 flex items-center gap-2">
                                               <Users className="w-3.5 h-3.5" />
                                               Labour
@@ -986,7 +1064,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 )}
 
                                 {/* Overheads & Profit - Green Theme */}
-                                <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
+                                <div className="bg-red-50/20 rounded-lg p-4 border border-red-300 hover:border-red-400 transition-all duration-200">
                                   <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
                                     <div className="p-1.5 bg-white rounded shadow-sm">
                                       <Calculator className="w-4 h-4 text-green-600" />
@@ -1172,11 +1250,47 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 const totalOverheadProfit = allItems.reduce((sum, item) => sum + (item.profit_margin_amount || 0), 0);
                                 const totalSubtotal = allItems.reduce((sum, item) => sum + (item.subtotal || 0), 0);
                                 const totalDiscount = allItems.reduce((sum, item) => sum + (item.discount_amount || 0), 0);
-                                const totalAfterDiscount = allItems.reduce((sum, item) => sum + (item.after_discount || 0), 0);
-                                const totalVAT = allItems.reduce((sum, item) => sum + (item.vat_amount || 0), 0);
-                                const grandTotal = boqData.combined_summary?.selling_price ||
-                                                 boqData.summary?.selling_price ||
-                                                 allItems.reduce((sum, item) => sum + (item.selling_price || item.total_cost || 0), 0);
+                                const totalAfterDiscount = allItems.reduce((sum, item) => {
+                                  // Calculate after discount if not provided
+                                  return sum + (item.after_discount || (item.subtotal || 0) - (item.discount_amount || 0));
+                                }, 0);
+
+                                // Calculate total VAT (including individual material VAT)
+                                const totalVAT = allItems.reduce((sum, item) => {
+                                  // Check if individual material VAT is used
+                                  const hasIndividualVAT = item.sub_items?.some((si: any) =>
+                                    si.materials?.some((m: any) => (m.vat_percentage || 0) > 0)
+                                  );
+
+                                  if (hasIndividualVAT) {
+                                    // Calculate individual material VAT total
+                                    const individualVAT = item.sub_items?.reduce((total: number, si: any) => {
+                                      return total + (si.materials?.reduce((mSum: number, m: any) => {
+                                        const matTotal = m.total_price || (m.quantity * m.unit_price);
+                                        const matVAT = m.vat_amount || (matTotal * ((m.vat_percentage || 0) / 100));
+                                        return mSum + matVAT;
+                                      }, 0) || 0);
+                                    }, 0) || 0;
+                                    return sum + individualVAT;
+                                  } else {
+                                    // Use item-level VAT
+                                    return sum + (item.vat_amount || 0);
+                                  }
+                                }, 0);
+
+                                // Check if any item uses individual material VAT
+                                const hasAnyIndividualVAT = allItems.some(item =>
+                                  item.sub_items?.some((si: any) =>
+                                    si.materials?.some((m: any) => (m.vat_percentage || 0) > 0)
+                                  )
+                                );
+
+                                // If individual VAT is used, always recalculate grand total
+                                const grandTotal = hasAnyIndividualVAT
+                                  ? (totalAfterDiscount + totalVAT)
+                                  : (boqData.combined_summary?.selling_price ||
+                                     boqData.summary?.selling_price ||
+                                     (totalAfterDiscount + totalVAT));
 
                                 return (
                                   <>

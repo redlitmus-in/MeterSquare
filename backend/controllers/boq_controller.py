@@ -2624,6 +2624,8 @@ def get_sub_item_material(sub_item_id):
         return jsonify({
             "sub_item_id": boq_sub_item.sub_item_id,
             "sub_item_name": boq_sub_item.sub_item_name,
+            "scope": boq_sub_item.description,
+            "size": boq_sub_item.size,
             "item_id": boq_sub_item.item_id,
             "item_name": boq_item.item_name if boq_item else None,
             "location": boq_sub_item.location,

@@ -528,7 +528,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           id: `si-${itemId}-${index}-${Date.now()}`,
           sub_item_name: subItem.sub_item_name || '',
           scope: subItem.description || '',
-          size: '',
+          size: subItem.size || '',
           location: subItem.location || '',
           brand: subItem.brand || '',
           quantity: subItem.quantity || 1,
@@ -896,7 +896,31 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     const afterDiscount = subtotal - discountAmount;
 
     // Calculate VAT (ADDITIONAL/EXTRA on after-discount amount)
-    const vatAmount = afterDiscount * (item.vat_percentage / 100);
+    // Check if using individual material VAT
+    let vatAmount = 0;
+    let individualMaterialVATTotal = 0;
+
+    // Calculate individual material VAT from sub-items if enabled
+    item.sub_items.forEach(subItem => {
+      if (useSubItemMaterialVAT[`${item.id}-${subItem.id}`]) {
+        subItem.materials.forEach(m => {
+          const materialTotal = m.quantity * m.unit_price;
+          const materialVAT = materialTotal * ((m.vat_percentage || 0) / 100);
+          individualMaterialVATTotal += materialVAT;
+        });
+      }
+    });
+
+    // If any sub-item has individual material VAT enabled, use that instead of overall VAT
+    const hasIndividualVAT = item.sub_items.some(subItem => useSubItemMaterialVAT[`${item.id}-${subItem.id}`]);
+
+    if (hasIndividualVAT) {
+      vatAmount = individualMaterialVATTotal;
+    } else {
+      // Use overall VAT percentage
+      vatAmount = afterDiscount * (item.vat_percentage / 100);
+    }
+
     const sellingPrice = afterDiscount + vatAmount;
 
     // Calculate raw materials and labour cost from sub-items
@@ -921,11 +945,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       subtotal, // itemTotal + miscellaneous + overhead&profit
       discountAmount, // Discount % on subtotal
       afterDiscount, // subtotal - discount
-      vatAmount, // VAT % on afterDiscount (ADDITIONAL/EXTRA)
+      vatAmount, // VAT % on afterDiscount (ADDITIONAL/EXTRA) or sum of individual material VAT
       sellingPrice, // Final amount (afterDiscount + VAT)
       materialCost, // Raw materials cost
       labourCost, // Labour cost
-      rawMaterialsTotal // Total raw materials + labour
+      rawMaterialsTotal, // Total raw materials + labour
+      individualMaterialVATTotal, // Total VAT from individual materials
+      hasIndividualVAT // Flag to indicate if individual VAT is used
     };
   };
 
@@ -1198,16 +1224,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 per_unit_cost: subItem.rate,
                 sub_item_total: subItem.quantity * subItem.rate,
 
-                materials: subItem.materials?.map(material => ({
-                  material_name: material.material_name,
-                  quantity: material.quantity,
-                  unit: material.unit,
-                  unit_price: material.unit_price,
-                  total_price: material.quantity * material.unit_price,
-                  description: material.description || null,
-                  vat_percentage: material.vat_percentage || 0,
-                  master_material_id: material.master_material_id || null
-                })) || [],
+                materials: subItem.materials?.map(material => {
+                  const materialTotal = material.quantity * material.unit_price;
+                  const materialVAT = materialTotal * ((material.vat_percentage || 0) / 100);
+                  return {
+                    material_name: material.material_name,
+                    quantity: material.quantity,
+                    unit: material.unit,
+                    unit_price: material.unit_price,
+                    total_price: materialTotal,
+                    description: material.description || null,
+                    vat_percentage: material.vat_percentage || 0,
+                    vat_amount: materialVAT,
+                    master_material_id: material.master_material_id || null
+                  };
+                }) || [],
 
                 labour: subItem.labour?.map(labour => ({
                   labour_role: labour.labour_role,
@@ -1220,16 +1251,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               })) : [],
 
               // Item-level materials and labour for backward compatibility
-              materials: item.materials && item.materials.length > 0 ? item.materials.map(material => ({
-                material_name: material.material_name,
-                quantity: material.quantity,
-                unit: material.unit,
-                unit_price: material.unit_price,
-                total_price: material.quantity * material.unit_price,
-                description: material.description || null,
-                vat_percentage: material.vat_percentage || 0,
-                master_material_id: material.master_material_id || null
-              })) : [],
+              materials: item.materials && item.materials.length > 0 ? item.materials.map(material => {
+                const materialTotal = material.quantity * material.unit_price;
+                const materialVAT = materialTotal * ((material.vat_percentage || 0) / 100);
+                return {
+                  material_name: material.material_name,
+                  quantity: material.quantity,
+                  unit: material.unit,
+                  unit_price: material.unit_price,
+                  total_price: materialTotal,
+                  description: material.description || null,
+                  vat_percentage: material.vat_percentage || 0,
+                  vat_amount: materialVAT,
+                  master_material_id: material.master_material_id || null
+                };
+              }) : [],
 
               labour: item.labour && item.labour.length > 0 ? item.labour.map(labour => ({
                 labour_role: labour.labour_role,
@@ -1316,16 +1352,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 per_unit_cost: subItem.rate,
                 sub_item_total: subItem.quantity * subItem.rate,
 
-                materials: subItem.materials?.map(material => ({
-                  material_name: material.material_name,
-                  quantity: material.quantity,
-                  unit: material.unit,
-                  unit_price: material.unit_price,
-                  total_price: material.quantity * material.unit_price,
-                  description: material.description || null,
-                  vat_percentage: material.vat_percentage || 0,
-                  master_material_id: material.master_material_id || null
-                })) || [],
+                materials: subItem.materials?.map(material => {
+                  const materialTotal = material.quantity * material.unit_price;
+                  const materialVAT = materialTotal * ((material.vat_percentage || 0) / 100);
+                  return {
+                    material_name: material.material_name,
+                    quantity: material.quantity,
+                    unit: material.unit,
+                    unit_price: material.unit_price,
+                    total_price: materialTotal,
+                    description: material.description || null,
+                    vat_percentage: material.vat_percentage || 0,
+                    vat_amount: materialVAT,
+                    master_material_id: material.master_material_id || null
+                  };
+                }) || [],
 
                 labour: subItem.labour?.map(labour => ({
                   labour_role: labour.labour_role,
@@ -1338,16 +1379,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               })) : [],
 
               // Item-level materials and labour for backward compatibility
-              materials: item.materials && item.materials.length > 0 ? item.materials.map(material => ({
-                material_name: material.material_name,
-                quantity: material.quantity,
-                unit: material.unit,
-                unit_price: material.unit_price,
-                total_price: material.quantity * material.unit_price,
-                description: material.description || null,
-                vat_percentage: material.vat_percentage || 0,
-                master_material_id: material.master_material_id || null
-              })) : [],
+              materials: item.materials && item.materials.length > 0 ? item.materials.map(material => {
+                const materialTotal = material.quantity * material.unit_price;
+                const materialVAT = materialTotal * ((material.vat_percentage || 0) / 100);
+                return {
+                  material_name: material.material_name,
+                  quantity: material.quantity,
+                  unit: material.unit,
+                  unit_price: material.unit_price,
+                  total_price: materialTotal,
+                  description: material.description || null,
+                  vat_percentage: material.vat_percentage || 0,
+                  vat_amount: materialVAT,
+                  master_material_id: material.master_material_id || null
+                };
+              }) : [],
 
               labour: item.labour && item.labour.length > 0 ? item.labour.map(labour => ({
                 labour_role: labour.labour_role,
@@ -1523,16 +1569,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 per_unit_cost: subItem.rate,  // Alias for backend compatibility
                 sub_item_total: subItem.quantity * subItem.rate,
 
-                materials: subItem.materials?.map(material => ({
-                  material_name: material.material_name,
-                  quantity: material.quantity,
-                  unit: material.unit,
-                  unit_price: material.unit_price,
-                  total_price: material.quantity * material.unit_price,
-                  description: material.description || null,
-                  vat_percentage: material.vat_percentage || 0,
-                  master_material_id: material.master_material_id || null
-                })) || [],
+                materials: subItem.materials?.map(material => {
+                  const materialTotal = material.quantity * material.unit_price;
+                  const materialVAT = materialTotal * ((material.vat_percentage || 0) / 100);
+                  return {
+                    material_name: material.material_name,
+                    quantity: material.quantity,
+                    unit: material.unit,
+                    unit_price: material.unit_price,
+                    total_price: materialTotal,
+                    description: material.description || null,
+                    vat_percentage: material.vat_percentage || 0,
+                    vat_amount: materialVAT,
+                    master_material_id: material.master_material_id || null
+                  };
+                }) || [],
 
                 labour: subItem.labour?.map(labour => ({
                   labour_role: labour.labour_role,
@@ -2044,13 +2095,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 disabled={isSubmitting}
                               />
                             </div>
-                            <ModernSelect
-                              value={item.unit || 'nos'}
-                              onChange={(value) => updateItem(item.id, 'unit', value)}
-                              options={UNIT_OPTIONS}
-                              disabled={isSubmitting}
-                              className="w-24"
-                            />
                             <div className="flex items-center gap-1">
                               <span className="text-xs text-gray-600 font-medium">Rate:</span>
                               <input
@@ -2089,8 +2133,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                     {/* Item Details (Expandable) */}
                     {expandedItems.includes(item.id) && (
                       <div className="p-4 space-y-4 bg-gray-50/50">
-                        {/* Items Section - Green Theme */}
-                        <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
+                        {/* Items Section - Green Theme (Client-Facing) */}
+                        <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border-2 border-green-400 shadow-sm">
                           <div className="flex items-center justify-between mb-3">
                             <h4 className="text-sm font-bold text-green-900 flex items-center gap-2">
                               <div className="p-1.5 bg-white rounded shadow-sm">
@@ -2260,8 +2304,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     </div>
                                   </div>
 
-                                  {/* Raw Materials Section for Sub-item */}
-                                  <div className="mt-4 pt-4 border-t border-gray-200">
+                                  {/* Raw Materials Section for Sub-item (Internal) */}
+                                  <div className="mt-4 pt-4 border-t border-gray-200 border-2 border-red-300 rounded-lg p-3 bg-red-50/20">
                                     <div className="flex items-center justify-between mb-3">
                                       <h5 className="text-xs font-bold text-blue-900 flex items-center gap-2">
                                         <Package className="w-3.5 h-3.5 text-blue-600" />
@@ -2309,10 +2353,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           <div className="w-20 text-xs font-semibold text-gray-700">Qty</div>
                                           <div className="w-24 text-xs font-semibold text-gray-700">Unit</div>
                                           <div className="w-24 text-xs font-semibold text-gray-700">Rate (AED)</div>
-                                          {useSubItemMaterialVAT[`${item.id}-${subItem.id}`] && (
-                                            <div className="w-20 text-xs font-semibold text-gray-700">VAT %</div>
-                                          )}
                                           <div className="w-24 text-xs font-semibold text-gray-700">Total (AED)</div>
+                                          {useSubItemMaterialVAT[`${item.id}-${subItem.id}`] && (
+                                            <>
+                                              <div className="w-20 text-xs font-semibold text-gray-700">VAT %</div>
+                                              <div className="w-24 text-xs font-semibold text-gray-700">VAT Amt</div>
+                                            </>
+                                          )}
                                           <div className="w-4"></div>
                                         </div>
                                       )}
@@ -2418,22 +2465,27 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 step="0.01"
                                                 disabled={isSubmitting}
                                               />
-                                              {useSubItemMaterialVAT[`${item.id}-${subItem.id}`] && (
-                                                <input
-                                                  type="number"
-                                                  value={material.vat_percentage || 0}
-                                                  onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'vat_percentage', parseFloat(e.target.value) || 0)}
-                                                  className="w-20 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                  placeholder="VAT%"
-                                                  min="0"
-                                                  max="100"
-                                                  step="0.01"
-                                                  disabled={isSubmitting}
-                                                />
-                                              )}
                                               <span className="w-24 text-sm font-medium text-gray-700">
                                                 {(material.quantity * material.unit_price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                               </span>
+                                              {useSubItemMaterialVAT[`${item.id}-${subItem.id}`] && (
+                                                <>
+                                                  <input
+                                                    type="number"
+                                                    value={material.vat_percentage || 0}
+                                                    onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'vat_percentage', parseFloat(e.target.value) || 0)}
+                                                    className="w-20 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                    placeholder="VAT%"
+                                                    min="0"
+                                                    max="100"
+                                                    step="0.01"
+                                                    disabled={isSubmitting}
+                                                  />
+                                                  <span className="w-24 text-sm font-medium text-green-700">
+                                                    {((material.quantity * material.unit_price) * ((material.vat_percentage || 0) / 100)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                                  </span>
+                                                </>
+                                              )}
                                               <button
                                                 type="button"
                                                 onClick={() => removeSubItemMaterial(item.id, subItem.id, material.id)}
@@ -2466,18 +2518,28 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
                                       {/* Raw Materials Total */}
                                       {subItem.materials.length > 0 && (
-                                        <div className="mt-3 pt-3 border-t border-blue-200 flex justify-between items-center bg-blue-50/50 rounded-lg px-3 py-2">
-                                          <span className="text-sm font-bold text-blue-900">Raw Materials Total:</span>
-                                          <span className="text-sm font-bold text-blue-900">
-                                            AED {subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                          </span>
+                                        <div className="mt-3 pt-3 border-t border-blue-200 bg-blue-50/50 rounded-lg px-3 py-2">
+                                          <div className="flex justify-between items-center">
+                                            <span className="text-sm font-bold text-blue-900">Raw Materials Total:</span>
+                                            <span className="text-sm font-bold text-blue-900">
+                                              AED {subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                            </span>
+                                          </div>
+                                          {useSubItemMaterialVAT[`${item.id}-${subItem.id}`] && (
+                                            <div className="flex justify-between items-center mt-2 pt-2 border-t border-blue-200">
+                                              <span className="text-sm font-bold text-green-900">Total VAT Amount:</span>
+                                              <span className="text-sm font-bold text-green-900">
+                                                AED {subItem.materials.reduce((sum, m) => sum + ((m.quantity * m.unit_price) * ((m.vat_percentage || 0) / 100)), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                              </span>
+                                            </div>
+                                          )}
                                         </div>
                                       )}
                                     </div>
                                   </div>
 
-                                  {/* Labour Section for Sub-item */}
-                                  <div className="mt-4 pt-4 border-t border-gray-200">
+                                  {/* Labour Section for Sub-item (Internal) */}
+                                  <div className="mt-4 pt-4 border-t border-gray-200 border-2 border-red-300 rounded-lg p-3 bg-red-50/20">
                                     <div className="flex items-center justify-between mb-3">
                                       <h5 className="text-xs font-bold text-orange-900 flex items-center gap-2">
                                         <Users className="w-3.5 h-3.5 text-orange-600" />
@@ -2696,16 +2758,17 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                         </div>
 
                         {/* Miscellaneous, Overhead & Profit Margin, Discount */}
-                        <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
-                          <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
+                        <div className="bg-gradient-to-r from-gray-50 to-gray-100/30 rounded-lg p-4 shadow-sm">
+                          <h5 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
                             <div className="p-1.5 bg-white rounded shadow-sm">
-                              <Calculator className="w-4 h-4 text-green-600" />
+                              <Calculator className="w-4 h-4 text-gray-600" />
                             </div>
                             Miscellaneous, Overhead & Profit Margin, Discount
                           </h5>
-                          <div className={`grid gap-4 ${useMaterialVAT[item.id] ? 'grid-cols-3' : 'grid-cols-4'}`}>
-                          <div>
-                            <label htmlFor={`overhead-${item.id}`} className="block text-xs text-gray-600 mb-1">Miscellaneous %</label>
+                          <div className={`grid gap-3 ${item.sub_items.some(subItem => useSubItemMaterialVAT[`${item.id}-${subItem.id}`]) ? 'grid-cols-3' : 'grid-cols-4'}`}>
+                          {/* Miscellaneous - Internal */}
+                          <div className="border border-red-300 rounded-lg p-3 hover:border-red-400 hover:bg-red-50/30 transition-all duration-200">
+                            <label htmlFor={`overhead-${item.id}`} className="block text-xs text-gray-600 mb-1.5">Miscellaneous %</label>
                             <div className="flex items-center gap-2">
                               <input
                                 id={`overhead-${item.id}`}
@@ -2715,7 +2778,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                   const value = e.target.value === '' ? 0 : Number(e.target.value);
                                   updateItem(item.id, 'overhead_percentage', value);
                                 }}
-                                className="flex-1 px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+                                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white"
                                 min="0"
                                 step="0.1"
                                 disabled={isSubmitting}
@@ -2724,8 +2787,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               <span className="text-sm text-gray-500">%</span>
                             </div>
                           </div>
-                          <div>
-                            <label htmlFor={`profit-${item.id}`} className="block text-xs text-gray-600 mb-1">Overhead & Profit Margin %</label>
+                          {/* Overhead & Profit - Internal */}
+                          <div className="border border-red-300 rounded-lg p-3 hover:border-red-400 hover:bg-red-50/30 transition-all duration-200">
+                            <label htmlFor={`profit-${item.id}`} className="block text-xs text-gray-600 mb-1.5">Overhead & Profit Margin %</label>
                             <div className="flex items-center gap-2">
                               <input
                                 id={`profit-${item.id}`}
@@ -2735,7 +2799,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                   const value = e.target.value === '' ? 0 : Number(e.target.value);
                                   updateItem(item.id, 'profit_margin_percentage', value);
                                 }}
-                                className="flex-1 px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+                                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white"
                                 min="0"
                                 step="0.1"
                                 disabled={isSubmitting}
@@ -2744,8 +2808,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               <span className="text-sm text-gray-500">%</span>
                             </div>
                           </div>
-                          <div>
-                            <label htmlFor={`discount-${item.id}`} className="block text-xs text-gray-600 mb-1">Discount %</label>
+                          {/* Discount - Client */}
+                          <div className="border border-green-400 rounded-lg p-3 hover:border-green-500 hover:bg-green-50/30 transition-all duration-200">
+                            <label htmlFor={`discount-${item.id}`} className="block text-xs text-gray-600 mb-1.5">Discount %</label>
                             <div className="flex items-center gap-2">
                               <input
                                 id={`discount-${item.id}`}
@@ -2755,7 +2820,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                   const value = e.target.value === '' ? 0 : Number(e.target.value);
                                   updateItem(item.id, 'discount_percentage', value);
                                 }}
-                                className="flex-1 px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+                                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
                                 min="0"
                                 max="100"
                                 step="0.1"
@@ -2765,10 +2830,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               <span className="text-sm text-gray-500">%</span>
                             </div>
                           </div>
-                          {/* Show item-level VAT only when per-material VAT is disabled */}
-                          {!useMaterialVAT[item.id] && (
-                            <div>
-                              <label htmlFor={`vat-${item.id}`} className="block text-xs text-gray-600 mb-1">VAT %</label>
+                          {/* VAT - Client (Only show if no sub-items have individual VAT enabled) */}
+                          {!item.sub_items.some(subItem => useSubItemMaterialVAT[`${item.id}-${subItem.id}`]) && (
+                            <div className="border border-green-400 rounded-lg p-3 hover:border-green-500 hover:bg-green-50/30 transition-all duration-200">
+                              <label htmlFor={`vat-${item.id}`} className="block text-xs text-gray-600 mb-1.5">VAT %</label>
                               <div className="flex items-center gap-2">
                                 <input
                                   id={`vat-${item.id}`}
@@ -2778,7 +2843,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     const value = e.target.value === '' ? 0 : Number(e.target.value);
                                     updateItem(item.id, 'vat_percentage', value);
                                   }}
-                                  className="flex-1 px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
+                                  className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
                                   min="0"
                                   step="0.1"
                                   disabled={isSubmitting}
@@ -2827,10 +2892,17 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                   <span className="text-gray-700 font-medium">After Discount:</span>
                                   <span className="font-semibold text-gray-900">AED {costs.afterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                 </div>
-                                <div className="flex justify-between py-1">
-                                  <span className="text-gray-600">VAT ({item.vat_percentage}%):</span>
-                                  <span className="font-medium text-gray-900">AED {costs.vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                </div>
+                                {costs.hasIndividualVAT ? (
+                                  <div className="flex justify-between py-1">
+                                    <span className="text-gray-600">VAT (Individual Material VAT):</span>
+                                    <span className="font-medium text-gray-900">AED {costs.individualMaterialVATTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex justify-between py-1">
+                                    <span className="text-gray-600">VAT ({item.vat_percentage}%):</span>
+                                    <span className="font-medium text-gray-900">AED {costs.vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                )}
                                 <div className="flex justify-between py-2 border-t border-gray-200 pt-2 mt-2">
                                   <span className="text-gray-900 font-bold">Item Total:</span>
                                   <span className="text-lg font-bold text-gray-900">AED {costs.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
