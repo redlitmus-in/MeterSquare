@@ -79,11 +79,18 @@ class MasterMaterial(db.Model):
     material_name = db.Column(db.String(255), nullable=False, unique=True)
     item_id = db.Column(db.Integer)
     sub_item_id = db.Column(db.Integer, db.ForeignKey("boq_sub_items.sub_item_id"), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    quantity = db.Column(db.Float, nullable=True)
     default_unit = db.Column(db.String(50), nullable=False)
     current_market_price = db.Column(db.Float, nullable=True)
+    total_price = db.Column(db.Float, nullable=True)
+    vat_percentage = db.Column(db.Float, nullable=True)
+    vat_amount = db.Column(db.Float, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
+    last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    last_modified_by = db.Column(db.String(255), nullable=False)
 
     sub_item = db.relationship("MasterSubItem", backref=db.backref("materials", lazy=True))
 

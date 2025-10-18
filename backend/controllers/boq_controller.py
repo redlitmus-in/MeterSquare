@@ -68,15 +68,26 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
     # Add to master materials (prevent duplicates) with item_id reference
     for mat_data in materials_data:
         material_name = mat_data.get("material_name")
+        quantity = mat_data.get("quantity", 0.0)
         unit_price = mat_data.get("unit_price", 0.0)
+        total_price = mat_data.get("total_price", quantity * unit_price)
+        vat_percentage = mat_data.get("vat_percentage", 0.0)
+        vat_amount = mat_data.get("vat_amount", 0.0)
+
         master_material = MasterMaterial.query.filter_by(material_name=material_name).first()
         if not master_material:
             master_material = MasterMaterial(
                 material_name=material_name,
                 item_id=master_item_id,  # Set the item_id reference
+                description=mat_data.get("description"),
+                quantity=quantity,
                 default_unit=mat_data.get("unit", "nos"),
                 current_market_price=unit_price,
-                created_by=created_by
+                total_price=total_price,
+                vat_percentage=vat_percentage,
+                vat_amount=vat_amount,
+                created_by=created_by,
+                last_modified_by=created_by
             )
             db.session.add(master_material)
             db.session.flush()
@@ -86,7 +97,13 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
                 master_material.item_id = master_item_id
 
             # Always update current_market_price with the new unit_price from BOQ
+            master_material.description = mat_data.get("description")
+            master_material.quantity = quantity
             master_material.current_market_price = unit_price
+            master_material.total_price = total_price
+            master_material.vat_percentage = vat_percentage
+            master_material.vat_amount = vat_amount
+            master_material.last_modified_by = created_by
 
             # Update unit if different
             new_unit = mat_data.get("unit", "nos")
@@ -182,7 +199,11 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
         # Add materials for this sub-item
         for mat_data in sub_item.get("materials", []):
             material_name = mat_data.get("material_name")
+            quantity = mat_data.get("quantity", 0.0)
             unit_price = mat_data.get("unit_price", 0.0)
+            total_price = mat_data.get("total_price", quantity * unit_price)
+            vat_percentage = mat_data.get("vat_percentage", 0.0)
+            vat_amount = mat_data.get("vat_amount", 0.0)
 
             master_material = MasterMaterial.query.filter_by(material_name=material_name).first()
             if not master_material:
@@ -190,9 +211,15 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     material_name=material_name,
                     item_id=master_item_id,
                     sub_item_id=master_sub_item.sub_item_id,
+                    description=mat_data.get("description"),
+                    quantity=quantity,
                     default_unit=mat_data.get("unit", "nos"),
                     current_market_price=unit_price,
-                    created_by=created_by
+                    total_price=total_price,
+                    vat_percentage=vat_percentage,
+                    vat_amount=vat_amount,
+                    created_by=created_by,
+                    last_modified_by=created_by
                 )
                 db.session.add(master_material)
                 db.session.flush()
@@ -202,8 +229,14 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     master_material.sub_item_id = master_sub_item.sub_item_id
                 if master_material.item_id is None:
                     master_material.item_id = master_item_id
+                master_material.description = mat_data.get("description")
+                master_material.quantity = quantity
                 master_material.current_market_price = unit_price
+                master_material.total_price = total_price
+                master_material.vat_percentage = vat_percentage
+                master_material.vat_amount = vat_amount
                 master_material.default_unit = mat_data.get("unit", "nos")
+                master_material.last_modified_by = created_by
                 db.session.flush()
 
         # Add labour for this sub-item
@@ -287,7 +320,11 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
         # Add materials for this sub-item
         for mat_data in sub_item.get("materials", []):
             material_name = mat_data.get("material_name")
+            quantity = mat_data.get("quantity", 0.0)
             unit_price = mat_data.get("unit_price", 0.0)
+            total_price = mat_data.get("total_price", quantity * unit_price)
+            vat_percentage = mat_data.get("vat_percentage", 0.0)
+            vat_amount = mat_data.get("vat_amount", 0.0)
 
             master_material = MasterMaterial.query.filter_by(material_name=material_name).first()
             if not master_material:
@@ -295,9 +332,15 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     material_name=material_name,
                     item_id=master_item_id,
                     sub_item_id=master_sub_item.sub_item_id,
+                    description=mat_data.get("description"),
+                    quantity=quantity,
                     default_unit=mat_data.get("unit", "nos"),
                     current_market_price=unit_price,
-                    created_by=created_by
+                    total_price=total_price,
+                    vat_percentage=vat_percentage,
+                    vat_amount=vat_amount,
+                    created_by=created_by,
+                    last_modified_by=created_by
                 )
                 db.session.add(master_material)
                 db.session.flush()
@@ -307,8 +350,14 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     master_material.sub_item_id = master_sub_item.sub_item_id
                 if master_material.item_id is None:
                     master_material.item_id = master_item_id
+                master_material.description = mat_data.get("description")
+                master_material.quantity = quantity
                 master_material.current_market_price = unit_price
+                master_material.total_price = total_price
+                master_material.vat_percentage = vat_percentage
+                master_material.vat_amount = vat_amount
                 master_material.default_unit = mat_data.get("unit", "nos")
+                master_material.last_modified_by = created_by
                 db.session.flush()
 
         # Add labour for this sub-item
@@ -412,7 +461,6 @@ def create_boq():
 
             # Skip if this item name was already processed (prevent duplicates)
             if item_name in processed_item_names:
-                log.warning(f"Skipping duplicate item: {item_name}")
                 continue
 
             processed_item_names.add(item_name)
@@ -1717,6 +1765,50 @@ def update_boq(boq_id):
                         "totalLabourCost": total_labour_cost
                     }
 
+                    # Add/Update to master tables
+                    # Collect all materials and labour from sub-items for master tables
+                    all_materials = []
+                    all_labour = []
+                    for sub_item in item_data.get("sub_items", []):
+                        all_materials.extend(sub_item.get("materials", []))
+                        all_labour.extend(sub_item.get("labour", []))
+
+                    # Add to master tables
+                    log.info(f"Updating master tables for item: {item_data.get('item_name')}, materials: {len(all_materials)}")
+                    master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
+                        item_data.get("item_name"),
+                        item_data.get("description", ""),
+                        item_data.get("work_type", "contract"),
+                        all_materials,
+                        all_labour,
+                        created_by,
+                        miscellaneous_percentage,
+                        total_miscellaneous_amount,
+                        overhead_profit_percentage,
+                        total_overhead_profit_amount,
+                        overhead_profit_percentage,
+                        total_overhead_profit_amount,
+                        discount_percentage,
+                        total_discount_amount,
+                        vat_percentage,
+                        total_vat_amount,
+                        unit=item_unit,
+                        quantity=item_quantity,
+                        per_unit_cost=item_rate,
+                        total_amount=item_total,
+                        item_total_cost=item_total
+                    )
+                    log.info(f"Master tables updated: item_id={master_item_id}, materials={len(master_material_ids)}, labour={len(master_labour_ids)}")
+
+                    # Add sub-items to master tables
+                    master_sub_item_ids = []
+                    if item_data.get("sub_items"):
+                        master_sub_item_ids = add_sub_items_to_master_tables(
+                            master_item_id,
+                            item_data.get("sub_items"),
+                            created_by
+                        )
+
                     boq_items.append(item_json)
                     total_boq_cost += total_selling_price
                     total_materials += materials_count
@@ -2624,8 +2716,6 @@ def get_sub_item_material(sub_item_id):
         return jsonify({
             "sub_item_id": boq_sub_item.sub_item_id,
             "sub_item_name": boq_sub_item.sub_item_name,
-            "scope": boq_sub_item.description,
-            "size": boq_sub_item.size,
             "item_id": boq_sub_item.item_id,
             "item_name": boq_item.item_name if boq_item else None,
             "location": boq_sub_item.location,
