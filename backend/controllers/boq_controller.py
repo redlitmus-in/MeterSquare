@@ -153,7 +153,8 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             master_sub_item = MasterSubItem(
                 item_id=master_item_id,
                 sub_item_name=sub_item_name,
-                description=sub_item.get("description"),
+                description=sub_item.get("scope"),
+                size=sub_item.get("size"),
                 location=sub_item.get("location"),
                 brand=sub_item.get("brand"),
                 unit=sub_item.get("unit"),
@@ -166,7 +167,8 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             db.session.flush()
         else:
             # Update existing sub-item
-            master_sub_item.description = sub_item.get("description")
+            master_sub_item.description = sub_item.get("scope")
+            master_sub_item.size = sub_item.get("size")
             master_sub_item.location = sub_item.get("location")
             master_sub_item.brand = sub_item.get("brand")
             master_sub_item.unit = sub_item.get("unit")
@@ -256,7 +258,8 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             master_sub_item = MasterSubItem(
                 item_id=master_item_id,
                 sub_item_name=sub_item_name,
-                description=sub_item.get("description"),
+                description=sub_item.get("scope"),
+                size=sub_item.get("size"),
                 location=sub_item.get("location"),
                 brand=sub_item.get("brand"),
                 unit=sub_item.get("unit"),
@@ -269,7 +272,8 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             db.session.flush()
         else:
             # Update existing sub-item
-            master_sub_item.description = sub_item.get("description")
+            master_sub_item.description = sub_item.get("scope")
+            master_sub_item.size = sub_item.get("size")
             master_sub_item.location = sub_item.get("location")
             master_sub_item.brand = sub_item.get("brand")
             master_sub_item.unit = sub_item.get("unit")
@@ -501,9 +505,8 @@ def create_boq():
                 # Store processed sub-item
                 processed_sub_items.append({
                     "sub_item_name": sub_item.get("sub_item_name"),
-                    "scope": sub_item.get("scope", ""),
+                    "description": sub_item.get("scope", ""),
                     "size": sub_item.get("size", ""),
-                    "description": sub_item.get("description", ""),
                     "location": sub_item.get("location", ""),
                     "brand": sub_item.get("brand", ""),
                     "unit": sub_item.get("unit"),
@@ -3321,6 +3324,8 @@ def get_sub_item(item_id):
                 "sub_item_id": sub_item.sub_item_id,
                 "item_id": sub_item.item_id,
                 "sub_item_name": sub_item.sub_item_name,
+                "scope" : sub_item.description,
+                "size" : sub_item.size,
                 "description": sub_item.description,
                 "location": sub_item.location,
                 "brand": sub_item.brand,
@@ -3340,6 +3345,8 @@ def get_sub_item(item_id):
         return jsonify({
             "item_id": boq_item.item_id,
             "item_name": boq_item.item_name,
+            "scope" : sub_item.description,
+            "size" : sub_item.size,
             "item_description": boq_item.description,
             "sub_items_count": len(sub_item_details),
             "sub_items": sub_item_details
