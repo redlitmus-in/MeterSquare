@@ -3323,13 +3323,14 @@ const EstimatorHub: React.FC = () => {
         if (!open) {
           setShowSendToTDPopup(false);
           setBoqToSendToTD(null);
+          setEditingBoq(null); // Clear editingBoq when popup is closed
         }
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
               <CheckCircle className="h-5 w-5" />
-              BOQ Revision Saved Successfully!
+              BOQ Saved Successfully!
             </DialogTitle>
             <DialogDescription>
               Your changes to "{boqToSendToTD?.title || boqToSendToTD?.boq_name}" have been saved.
@@ -3337,25 +3338,26 @@ const EstimatorHub: React.FC = () => {
           </DialogHeader>
           <div className="space-y-3 mt-4">
             <p className="text-sm text-gray-600">
-              Would you like to send this revision to the Technical Director for approval now?
+              Would you like to send this BOQ to the Technical Director for approval now?
             </p>
             <Button
               className="w-full bg-gradient-to-r from-red-50 to-red-100 text-red-900 hover:from-red-100 hover:to-red-200 border border-red-200 shadow-sm"
               onClick={async () => {
                 setIsSendingToTD(true);
                 try {
-                  const result = await estimatorService.sendBOQEmail(boqToSendToTD?.boq_id!, { comments: 'Sending revised BOQ for review' });
+                  const result = await estimatorService.sendBOQEmail(boqToSendToTD?.boq_id!, { comments: 'Sending BOQ for review' });
                   if (result.success) {
                     setShowSendToTDPopup(false);
-                    toast.success('Revision sent to Technical Director successfully!');
+                    toast.success('BOQ sent to Technical Director successfully!');
                     await loadBOQs();
                     setActiveTab('revisions'); // Auto-switch to Revisions tab
                   } else {
-                    toast.error(result.message || 'Failed to send revision');
+                    toast.error(result.message || 'Failed to send BOQ');
                   }
                 } finally {
                   setIsSendingToTD(false);
                   setBoqToSendToTD(null);
+                  setEditingBoq(null); // Clear editingBoq after sending
                 }
               }}
               disabled={isSendingToTD}
@@ -3380,7 +3382,8 @@ const EstimatorHub: React.FC = () => {
                 onClick={() => {
                   setShowSendToTDPopup(false);
                   setBoqToSendToTD(null);
-                  toast.success('Revision saved! You can send it to TD later.');
+                  setEditingBoq(null); // Clear editingBoq after "Send Later"
+                  toast.success('BOQ saved! You can send it to TD later.');
                 }}
               >
                 Send Later
@@ -3599,14 +3602,18 @@ const EstimatorHub: React.FC = () => {
           setBoqDetailsRefreshTrigger(prev => prev + 1); // Trigger BOQ details modal refresh
           setShowBoqEdit(false);
 
-          // After revision, show send to TD popup
-          if (isRevisionEdit && editingBoq) {
-            setBoqToSendToTD(editingBoq);
-            setShowSendToTDPopup(true);
-          }
-
+          // Show Send to TD popup after save
+          const boqToSend = editingBoq;
           setEditingBoq(null);
           setIsRevisionEdit(false); // Reset revision flag
+
+          // Show popup with slight delay to ensure edit modal is closed
+          if (boqToSend) {
+            setTimeout(() => {
+              setBoqToSendToTD(boqToSend);
+              setShowSendToTDPopup(true);
+            }, 200);
+          }
         }}
         hideBulkUpload={true}
         hideTemplate={true}

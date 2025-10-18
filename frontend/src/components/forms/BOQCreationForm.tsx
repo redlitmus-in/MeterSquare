@@ -1364,7 +1364,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           })
         };
 
-        const response = await fetch(`${API_URL}/boq/${existingBoqData.boq_id}`, {
+        const response = await fetch(`${API_URL}/boq/update_boq/${existingBoqData.boq_id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',

@@ -202,7 +202,7 @@ class EstimatorService {
 
       console.log('=== PROCESSED PAYLOAD WITH TOTALS ===', JSON.stringify(processedData, null, 2));
 
-      const response = await apiClient.put(`/update_boq/${boqId}`, processedData);
+      const response = await apiClient.put(`/boq/update_boq/${boqId}`, processedData);
       console.log('BOQ update response:', response.data);
 
       return {
@@ -335,7 +335,7 @@ class EstimatorService {
   // BOQ Status Management
   async updateBOQStatus(boqId: number, status: BOQStatus): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await apiClient.put(`/update_boq/${boqId}`, { status });
+      const response = await apiClient.put(`/boq/update_boq/${boqId}`, { status });
       return {
         success: true,
         message: response.data.message || 'BOQ status updated successfully'
@@ -364,7 +364,7 @@ class EstimatorService {
 
   async approveBOQ(boqId: number, notes?: string): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await apiClient.put(`/update_boq/${boqId}`, {
+      const response = await apiClient.put(`/boq/update_boq/${boqId}`, {
         status: 'Approved',
         notes: notes
       });
@@ -403,7 +403,7 @@ class EstimatorService {
         };
       }
 
-      const response = await apiClient.put(`/update_boq/${boqId}`, {
+      const response = await apiClient.put(`/boq/update_boq/${boqId}`, {
         status: 'Rejected',
         notes: reason
       });
@@ -435,7 +435,7 @@ class EstimatorService {
 
   async sendBOQForConfirmation(boqId: number): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await apiClient.put(`/update_boq/${boqId}`, {
+      const response = await apiClient.put(`/boq/update_boq/${boqId}`, {
         status: 'Sent_for_Confirmation'
       });
       return {
