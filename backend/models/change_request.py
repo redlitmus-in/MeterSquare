@@ -102,6 +102,15 @@ class ChangeRequest(db.Model):
     approved_by_name = db.Column(db.String(255), nullable=True)
     approval_date = db.Column(db.DateTime, nullable=True)
 
+    # Buyer Purchase Completion
+    assigned_to_buyer_user_id = db.Column(db.Integer, nullable=True)
+    assigned_to_buyer_name = db.Column(db.String(255), nullable=True)
+    assigned_to_buyer_date = db.Column(db.DateTime, nullable=True)
+    purchase_completed_by_user_id = db.Column(db.Integer, nullable=True)
+    purchase_completed_by_name = db.Column(db.String(255), nullable=True)
+    purchase_completion_date = db.Column(db.DateTime, nullable=True)
+    purchase_notes = db.Column(db.Text, nullable=True)
+
     # Rejection
     rejection_reason = db.Column(db.Text, nullable=True)
     rejected_by_user_id = db.Column(db.Integer, nullable=True)
@@ -198,6 +207,15 @@ class ChangeRequest(db.Model):
             'approved_by_user_id': self.approved_by_user_id,
             'approved_by_name': self.approved_by_name,
             'approval_date': self.approval_date.isoformat() if self.approval_date else None,
+
+            # Buyer Purchase
+            'assigned_to_buyer_user_id': self.assigned_to_buyer_user_id,
+            'assigned_to_buyer_name': self.assigned_to_buyer_name,
+            'assigned_to_buyer_date': self.assigned_to_buyer_date.isoformat() if self.assigned_to_buyer_date else None,
+            'purchase_completed_by_user_id': self.purchase_completed_by_user_id,
+            'purchase_completed_by_name': self.purchase_completed_by_name,
+            'purchase_completion_date': self.purchase_completion_date.isoformat() if self.purchase_completion_date else None,
+            'purchase_notes': self.purchase_notes,
 
             # Rejection
             'rejection_reason': self.rejection_reason,

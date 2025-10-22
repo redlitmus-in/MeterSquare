@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Package, DollarSign, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Send, Edit } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
@@ -52,6 +52,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   };
 
   const getStatusLabel = (status: string) => {
+    if (!status) return 'UNKNOWN';
     const labels = {
       pending: 'PENDING',
       under_review: 'UNDER REVIEW',
@@ -76,9 +77,12 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     ? canApproveFromParent
     : (userIsEstimator || userIsTechnicalDirector) && changeRequest.status !== 'approved' && changeRequest.status !== 'rejected';
 
-  // Can edit if the request is pending and user is either the requester, PM, or Estimator
-  const canEdit = changeRequest.status === 'pending' &&
-                  (changeRequest.requested_by_user_id === user?.user_id || userIsProjectManager || userIsEstimator);
+  // Can edit if:
+  // 1. Status is pending/approved_by_pm AND user is requester, PM, or Estimator
+  // 2. OR user can approve/reject (which means they need to review it)
+  const canEdit = ((changeRequest.status === 'pending' || changeRequest.status === 'approved_by_pm') &&
+                  (changeRequest.requested_by_user_id === user?.user_id || userIsProjectManager || userIsEstimator)) ||
+                  canApproveReject;
 
   // Can send for review if the request is pending and user is the requester
   const canSendForReview = changeRequest.status === 'pending' &&
@@ -133,10 +137,10 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   </div>
                   <div className="min-w-0 flex-1">
                     <h2 className="text-lg sm:text-2xl font-bold text-white truncate">
-                      CR-{changeRequest.cr_id}
+                      CR-{changeRequest.cr_id || 'N/A'}
                     </h2>
                     <p className="text-xs sm:text-sm text-white/90 mt-0.5 sm:mt-1 truncate">
-                      BOQ #{changeRequest.boq_id}
+                      BOQ {changeRequest.boq_name ? `#${changeRequest.boq_name}` : (changeRequest.boq_id ? `#${changeRequest.boq_id}` : 'N/A')}
                     </p>
                   </div>
                 </div>
@@ -155,26 +159,26 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
                 <div className="bg-gray-50 rounded-lg p-3 sm:p-4 border border-gray-200">
                   <p className="text-xs text-gray-600 mb-1">Status</p>
-                  <div className={`inline-flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-semibold border ${getStatusColor(changeRequest.status)}`}>
-                    {getStatusIcon(changeRequest.status)}
-                    {getStatusLabel(changeRequest.status)}
+                  <div className={`inline-flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-semibold border ${getStatusColor(changeRequest.status || 'pending')}`}>
+                    {getStatusIcon(changeRequest.status || 'pending')}
+                    {getStatusLabel(changeRequest.status || 'pending')}
                   </div>
                 </div>
 
                 <div className="bg-gray-50 rounded-lg p-3 sm:p-4 border border-gray-200">
                   <p className="text-xs text-gray-600 mb-1">Requested By</p>
-                  <p className="text-sm sm:text-lg font-bold text-gray-900 truncate">{changeRequest.requested_by_name}</p>
-                  <p className="text-xs text-gray-500 capitalize">{changeRequest.requested_by_role?.replace('_', ' ')}</p>
+                  <p className="text-sm sm:text-lg font-bold text-gray-900 truncate">{changeRequest.requested_by_name || 'N/A'}</p>
+                  <p className="text-xs text-gray-500 capitalize">{changeRequest.requested_by_role?.replace('_', ' ').replace('siteEngineer', 'Site Engineer') || 'N/A'}</p>
                 </div>
 
                 <div className="bg-gray-50 rounded-lg p-3 sm:p-4 border border-gray-200 sm:col-span-2 lg:col-span-1">
                   <p className="text-xs text-gray-600 mb-1">Request Date</p>
                   <p className="text-sm sm:text-lg font-bold text-gray-900">
-                    {new Date(changeRequest.created_at).toLocaleDateString('en-US', {
+                    {changeRequest.created_at ? new Date(changeRequest.created_at).toLocaleDateString('en-US', {
                       day: '2-digit',
                       month: 'short',
                       year: 'numeric'
-                    })}
+                    }) : 'N/A'}
                   </p>
                 </div>
               </div>
@@ -322,17 +326,17 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                 </div>
               </div>
 
-              {/* Overhead Budget Tracking - Responsive */}
+              {/* Miscellaneous Budget Tracking - Responsive */}
               {changeRequest.overhead_analysis && (
                 <div className="mb-4 sm:mb-6">
                   <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3 flex items-center gap-2">
                     <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
-                    Overhead Budget Analysis
+                    Miscellaneous Budget Analysis
                   </h3>
                   <div className={`rounded-lg p-3 sm:p-5 border-2 ${isOverBudget ? 'bg-red-50 border-red-300' : 'bg-green-50 border-green-300'}`}>
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-3 sm:mb-4">
                       <div>
-                        <p className="text-[10px] sm:text-xs text-gray-600 mb-1">Total Overhead Allocated</p>
+                        <p className="text-[10px] sm:text-xs text-gray-600 mb-1">Total Miscellaneous Allocated</p>
                         <p className="text-sm sm:text-lg font-bold text-gray-900 break-words">
                           {formatCurrency(changeRequest.overhead_analysis.original_allocated)}
                         </p>
@@ -363,9 +367,9 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         <>
                           <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 flex-shrink-0 mt-0.5" />
                           <div className="flex-1 min-w-0">
-                            <p className="font-bold text-red-900 text-xs sm:text-sm">⚠️ OVERHEAD BUDGET EXCEEDED</p>
+                            <p className="font-bold text-red-900 text-xs sm:text-sm">⚠️ MISCELLANEOUS BUDGET EXCEEDED</p>
                             <p className="text-[10px] sm:text-xs text-red-700 mt-1 break-words">
-                              This request exceeds the allocated overhead budget by {formatCurrency(Math.abs(changeRequest.overhead_analysis.remaining_after_approval))}
+                              This request exceeds the allocated miscellaneous budget by {formatCurrency(Math.abs(changeRequest.overhead_analysis.remaining_after_approval))}
                             </p>
                           </div>
                         </>
@@ -373,9 +377,9 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         <>
                           <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 flex-shrink-0 mt-0.5" />
                           <div className="flex-1 min-w-0">
-                            <p className="font-bold text-green-900 text-xs sm:text-sm">✓ WITHIN OVERHEAD BUDGET</p>
+                            <p className="font-bold text-green-900 text-xs sm:text-sm">✓ WITHIN MISCELLANEOUS BUDGET</p>
                             <p className="text-[10px] sm:text-xs text-green-700 mt-1 break-words">
-                              Sufficient overhead budget available. Remaining: {formatCurrency(changeRequest.overhead_analysis.remaining_after_approval)}
+                              Sufficient miscellaneous budget available. Remaining: {formatCurrency(changeRequest.overhead_analysis.remaining_after_approval)}
                             </p>
                           </div>
                         </>
@@ -385,40 +389,60 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                 </div>
               )}
 
-              {/* Budget Impact - Responsive */}
-              {changeRequest.budget_impact && (
-                <div className="mb-4 sm:mb-6">
-                  <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3 flex items-center gap-2">
-                    <DollarSign className="w-3 h-3 sm:w-4 sm:h-4" />
-                    Budget Impact Summary
-                  </h3>
-                  <div className="bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-300 rounded-lg p-3 sm:p-5">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">
-                      <div>
-                        <p className="text-xs text-purple-700 mb-1">Original BOQ Total</p>
-                        <p className="text-lg sm:text-xl font-bold text-purple-900 break-words">
-                          {formatCurrency(changeRequest.budget_impact.original_total)}
+              {/* Request Cost Breakdown - Responsive */}
+              <div className="mb-4 sm:mb-6">
+                <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3 flex items-center gap-2">
+                  <DollarSign className="w-3 h-3 sm:w-4 sm:h-4" />
+                  Request Cost Breakdown
+                </h3>
+                <div className="bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-300 rounded-lg p-3 sm:p-5">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+                    <div>
+                      <p className="text-xs text-purple-700 mb-1">Total Materials Cost</p>
+                      <p className="text-lg sm:text-xl font-bold text-purple-900 break-words">
+                        {formatCurrency(changeRequest.materials_total_cost)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-purple-700 mb-1">Number of Materials</p>
+                      <p className="text-lg sm:text-xl font-bold text-purple-900 break-words">
+                        {changeRequest.materials_data?.length || 0} {changeRequest.materials_data?.length === 1 ? 'item' : 'items'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-purple-700 mb-1">Miscellaneous Budget Used</p>
+                      <p className="text-lg sm:text-xl font-bold text-purple-900 break-words">
+                        {changeRequest.overhead_analysis?.consumed_by_this_request
+                          ? formatCurrency(changeRequest.overhead_analysis.consumed_by_this_request)
+                          : formatCurrency(changeRequest.materials_total_cost)}
+                      </p>
+                      {changeRequest.overhead_analysis?.original_allocated && (
+                        <p className="text-xs sm:text-sm font-semibold text-purple-700">
+                          ({((changeRequest.materials_total_cost / changeRequest.overhead_analysis.original_allocated) * 100).toFixed(1)}% of allocated)
                         </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-purple-700 mb-1">New Total (If Approved)</p>
-                        <p className="text-lg sm:text-xl font-bold text-purple-900 break-words">
-                          {formatCurrency(changeRequest.budget_impact.new_total_if_approved)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-red-700 mb-1">Cost Increase</p>
-                        <p className="text-lg sm:text-xl font-bold text-red-600 break-words">
-                          +{formatCurrency(changeRequest.budget_impact.increase_amount)}
-                        </p>
-                        <p className="text-xs sm:text-sm font-semibold text-red-600">
-                          (+{changeRequest.budget_impact.increase_percentage.toFixed(2)}%)
-                        </p>
-                      </div>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-xs text-purple-700 mb-1">Budget Status</p>
+                      {changeRequest.overhead_analysis?.balance_type === 'negative' ? (
+                        <div className="flex items-center gap-1">
+                          <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-600 flex-shrink-0" />
+                          <p className="text-sm sm:text-base font-bold text-red-600 break-words">
+                            Over Budget
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 flex-shrink-0" />
+                          <p className="text-sm sm:text-base font-bold text-green-600 break-words">
+                            Within Budget
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
 
               {/* Approval Info */}
               {isHighValue && (

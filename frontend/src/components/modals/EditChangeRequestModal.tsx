@@ -255,9 +255,9 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Overhead Summary */}
+                  {/* Miscellaneous Summary */}
                   <div className="mb-6 p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200">
-                    <h4 className="text-sm font-semibold text-purple-900 mb-3">Overhead Budget Summary</h4>
+                    <h4 className="text-sm font-semibold text-purple-900 mb-3">Miscellaneous Budget Summary</h4>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                       <div>
                         <span className="text-purple-700 text-xs">Original Allocated:</span>
@@ -280,7 +280,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                     </div>
                     <div className="mt-3 pt-3 border-t border-purple-300">
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-purple-700">Total Overhead Consumption After Edit:</span>
+                        <span className="text-sm text-purple-700">Total Miscellaneous Consumption After Edit:</span>
                         <span className={`text-lg font-bold ${overheadInfo.percentageOfOverhead > 40 ? 'text-red-600' : 'text-green-600'}`}>
                           {overheadInfo.percentageOfOverhead.toFixed(1)}%
                         </span>
@@ -469,7 +469,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                       <div>
                         <p className="text-sm font-medium text-yellow-900">Important Notes:</p>
                         <ul className="text-xs text-yellow-800 mt-2 space-y-1 list-disc list-inside">
-                          <li>Changes will reset the approval workflow based on the new overhead percentage</li>
+                          <li>Changes will reset the approval workflow based on the new miscellaneous percentage</li>
                           <li>Unit field is fixed and cannot be changed</li>
                           <li>Total amount is automatically calculated from quantity × unit price</li>
                           <li>All approvers will need to review the updated request</li>

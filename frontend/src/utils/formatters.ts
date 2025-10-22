@@ -8,7 +8,10 @@
  * @param value - Number to format
  * @returns Formatted currency string
  */
-export const formatCurrency = (value: number): string => {
+export const formatCurrency = (value?: number | null): string => {
+  if (value === undefined || value === null || isNaN(value)) {
+    return 'AED 0.00';
+  }
   return `AED ${value.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2

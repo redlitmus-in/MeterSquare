@@ -495,22 +495,64 @@ def get_assigned_projects():
                         "sub_items": []
                     }
 
-                    # Add materials as sub-items
-                    materials = item.get('materials', [])
-                    for mat_idx, material in enumerate(materials):
-                        # Use master_material_id if available, otherwise generate one
-                        material_id = material.get('master_material_id', '')
-                        if not material_id:
-                            material_id = f"mat_{boq.boq_id}_{idx + 1}_{mat_idx + 1}"
+                    # Check if item has sub_items (newer BOQ structure with sub-items)
+                    sub_items = item.get('sub_items', [])
+                    if sub_items:
+                        # Return sub-items as actual sub-items, each with their materials
+                        print(f"DEBUG: Item '{item.get('item_name', '')}' has {len(sub_items)} sub-items")
+                        for sub_item_idx, sub_item in enumerate(sub_items):
+                            # Generate sub-item ID
+                            sub_item_id = f"subitem_{boq.boq_id}_{idx + 1}_{sub_item_idx + 1}"
 
-                        sub_item_info = {
-                            "sub_item_id": str(material_id),
-                            "name": material.get('material_name', ''),
-                            "unit": material.get('unit', ''),
-                            "unit_price": material.get('unit_price', 0),
-                            "default_qty": material.get('quantity', 0)
-                        }
-                        item_info["sub_items"].append(sub_item_info)
+                            # Extract materials for this sub-item
+                            materials = sub_item.get('materials', [])
+                            materials_list = []
+
+                            for mat_idx, material in enumerate(materials):
+                                # Use master_material_id if available, otherwise generate one
+                                material_id = material.get('master_material_id', '')
+                                if not material_id:
+                                    material_id = f"mat_{boq.boq_id}_{idx + 1}_{sub_item_idx + 1}_{mat_idx + 1}"
+
+                                material_info = {
+                                    "material_id": str(material_id),
+                                    "material_name": material.get('material_name', ''),
+                                    "unit": material.get('unit', ''),
+                                    "unit_price": material.get('unit_price', 0),
+                                    "quantity": material.get('quantity', 0)
+                                }
+                                materials_list.append(material_info)
+
+                            sub_item_info = {
+                                "sub_item_id": sub_item_id,
+                                "sub_item_name": sub_item.get('sub_item_name', ''),
+                                "materials": materials_list
+                            }
+                            print(f"DEBUG: Adding sub-item '{sub_item.get('sub_item_name', '')}' with {len(materials_list)} materials")
+                            item_info["sub_items"].append(sub_item_info)
+                    else:
+                        # Fallback: for items without sub_items, treat materials as direct sub-items
+                        materials = item.get('materials', [])
+                        print(f"DEBUG: Item '{item.get('item_name', '')}' has {len(materials)} materials (no sub-items)")
+                        for mat_idx, material in enumerate(materials):
+                            # Use master_material_id if available, otherwise generate one
+                            material_id = material.get('master_material_id', '')
+                            if not material_id:
+                                material_id = f"mat_{boq.boq_id}_{idx + 1}_{mat_idx + 1}"
+
+                            # Create a pseudo sub-item for this material
+                            sub_item_info = {
+                                "sub_item_id": f"subitem_{boq.boq_id}_{idx + 1}_{mat_idx + 1}",
+                                "sub_item_name": material.get('material_name', ''),
+                                "materials": [{
+                                    "material_id": str(material_id),
+                                    "material_name": material.get('material_name', ''),
+                                    "unit": material.get('unit', ''),
+                                    "unit_price": material.get('unit_price', 0),
+                                    "quantity": material.get('quantity', 0)
+                                }]
+                            }
+                            item_info["sub_items"].append(sub_item_info)
 
                     boq_info["items"].append(item_info)
 

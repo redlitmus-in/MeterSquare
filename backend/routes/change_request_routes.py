@@ -8,7 +8,9 @@ from controllers.change_request_controller import (
     reject_change_request,
     update_change_request,
     get_boq_change_requests,
-    send_for_review
+    send_for_review,
+    complete_purchase_and_merge_to_boq,
+    get_all_buyers
 )
 
 change_request_routes = Blueprint('change_request_routes', __name__, url_prefix='/api')
@@ -152,6 +154,31 @@ def get_item_overhead_route(boq_id, item_id):
     """
     from controllers.change_request_controller import get_item_overhead
     return get_item_overhead(boq_id, item_id)
+
+
+# Complete purchase (Buyer completes purchase and merges to BOQ)
+@change_request_routes.route('/change-request/<int:cr_id>/complete-purchase', methods=['POST'])
+@jwt_required
+def complete_purchase_route(cr_id):
+    """
+    Buyer completes purchase and materials are merged into BOQ
+    Request body:
+    {
+        "purchase_notes": "Materials purchased from Supplier XYZ on 2025-10-18"
+    }
+    """
+    return complete_purchase_and_merge_to_boq(cr_id)
+
+
+# Get all buyers (for Estimator/TD to select when approving)
+@change_request_routes.route('/buyers', methods=['GET'])
+@jwt_required
+def get_all_buyers_route():
+    """
+    Get all active buyers in the system
+    Used by Estimator/TD to select buyer when approving change requests
+    """
+    return get_all_buyers()
 
 
 # REMOVED: Extra Material Endpoints - DEPRECATED

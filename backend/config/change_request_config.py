@@ -22,6 +22,7 @@ class ChangeRequestConfig:
     ROLE_PROJECT_MANAGER = 'project_manager'
     ROLE_ESTIMATOR = 'estimator'
     ROLE_TECHNICAL_DIRECTOR = 'technical_director'
+    ROLE_BUYER = 'buyer'
 
     # Status Constants
     STATUS_PENDING = 'pending'
@@ -29,6 +30,8 @@ class ChangeRequestConfig:
     STATUS_APPROVED_BY_PM = 'approved_by_pm'
     STATUS_APPROVED_BY_TD = 'approved_by_td'
     STATUS_APPROVED = 'approved'
+    STATUS_ASSIGNED_TO_BUYER = 'assigned_to_buyer'
+    STATUS_PURCHASE_COMPLETE = 'purchase_complete'
     STATUS_REJECTED = 'rejected'
 
     # Request Types
@@ -45,7 +48,8 @@ class ChangeRequestConfig:
                 'site_engineer': cls.ROLE_SITE_ENGINEER,
                 'project_manager': cls.ROLE_PROJECT_MANAGER,
                 'estimator': cls.ROLE_ESTIMATOR,
-                'technical_director': cls.ROLE_TECHNICAL_DIRECTOR
+                'technical_director': cls.ROLE_TECHNICAL_DIRECTOR,
+                'buyer': cls.ROLE_BUYER
             },
             'statuses': {
                 'pending': cls.STATUS_PENDING,
@@ -53,6 +57,8 @@ class ChangeRequestConfig:
                 'approved_by_pm': cls.STATUS_APPROVED_BY_PM,
                 'approved_by_td': cls.STATUS_APPROVED_BY_TD,
                 'approved': cls.STATUS_APPROVED,
+                'assigned_to_buyer': cls.STATUS_ASSIGNED_TO_BUYER,
+                'purchase_complete': cls.STATUS_PURCHASE_COMPLETE,
                 'rejected': cls.STATUS_REJECTED
             }
         }

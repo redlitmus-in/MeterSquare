@@ -69,24 +69,27 @@ class OverheadCalculator:
 
             # Calculate overhead consumed by new materials
             # The extra material cost directly consumes from the overhead budget
+            # IMPORTANT: Extra materials are purchased at actual cost from overhead budget
+            # They do NOT add overhead or profit markup
             overhead_consumed = new_materials_cost
 
-            # Calculate new overhead remaining
+            # Calculate new overhead remaining after deducting extra materials
             new_overhead_remaining = original_overhead_remaining - overhead_consumed
             is_over_budget = new_overhead_remaining < 0
 
-            # Calculate new totals
-            new_base_cost = original_base_cost + new_materials_cost
+            # CRITICAL: Extra materials DO NOT change the total BOQ cost
+            # They are purchased from the overhead budget at actual cost
+            # The original BOQ totals remain unchanged
+            new_base_cost = original_base_cost  # Base cost stays the same
             new_overhead_total = original_overhead_allocated  # Overhead allocation doesn't change
-            new_profit = (new_base_cost * profit_percentage) / 100
-            new_total_cost = new_base_cost + new_overhead_total + new_profit
-
-            # Calculate cost increase
-            cost_increase_amount = new_total_cost - original_base_cost
-            cost_increase_percentage = (cost_increase_amount / original_base_cost * 100) if original_base_cost > 0 else 0
-
-            # Original profit for comparison
             original_profit = (original_base_cost * profit_percentage) / 100
+            new_profit = original_profit  # Profit stays the same
+            new_total_cost = original_base_cost  # Total cost stays the same
+
+            # CRITICAL: There is NO cost increase for extra materials
+            # They are absorbed by the overhead budget
+            cost_increase_amount = 0.0  # No increase in BOQ total
+            cost_increase_percentage = 0.0  # No percentage increase
 
             return {
                 'original_overhead_allocated': round(original_overhead_allocated, 2),

@@ -226,10 +226,17 @@ const ChangeRequestsPage: React.FC = () => {
 
     let matchesTab = false;
     if (isExtraMaterial) {
-      // Extra Material tab filtering - PM sees requests (pending = not sent yet, under_review/approved_by_pm = in progress)
+      // Extra Material tab filtering
+      // Separate SE requests (Requested tab) from PM's own requests (Pending tab)
+      const isPMRequest = req.requested_by_user_id === user?.user_id;
+      const isPMApprovedAndSent = req.status === 'under_review' && ['estimator', 'technical_director'].includes(req.approval_required_from || '');
+
       matchesTab = (
-        (activeTab === 'requested' && ['pending', 'under_review', 'approved_by_pm'].includes(req.status)) ||
-        (activeTab === 'approved' && req.status === 'approved')
+        (activeTab === 'requested' && req.status === 'under_review' && req.approval_required_from === 'project_manager' && !isPMRequest) ||  // SE requests waiting for PM approval
+        (activeTab === 'pending' && req.status === 'pending' && isPMRequest) ||  // PM's own requests only
+        (activeTab === 'accepted' && (req.status === 'approved_by_pm' || isPMApprovedAndSent)) ||  // PM approved and sent to Est/TD
+        (activeTab === 'completed' && req.status === 'approved') ||  // Only Estimator/TD final approval
+        (activeTab === 'rejected' && req.status === 'rejected')  // Rejected requests
       );
     } else {
       // Change Requests tab filtering - show requests that need PM action or PM created
@@ -245,12 +252,14 @@ const ChangeRequestsPage: React.FC = () => {
 
   const stats = {
     pending: changeRequests.filter(r => ['pending', 'under_review'].includes(r.status)).length,
-    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td'].includes(r.status)).length,  // PM or TD approved, not final yet
-    completed: changeRequests.filter(r => r.status === 'approved').length,  // Final approved by Estimator = completed
+    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'approved'].includes(r.status)).length,
+    completed: changeRequests.filter(r => r.status === 'approved').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length,
-    // For Extra Material counts
-    requested: changeRequests.filter(r => r.status === 'pending').length,
-    under_review: changeRequests.filter(r => r.status === 'under_review').length
+    // For Extra Material - separate SE requests from PM requests
+    my_requests: changeRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'project_manager' && r.requested_by_user_id !== user?.user_id).length,  // SE requests waiting for PM (Requested tab)
+    pending_approval: changeRequests.filter(r => r.status === 'pending' && r.requested_by_user_id === user?.user_id).length,  // PM's own requests (Pending tab)
+    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || (r.status === 'under_review' && ['estimator', 'technical_director'].includes(r.approval_required_from || ''))).length,  // PM approved and sent
+    completed_extra: changeRequests.filter(r => r.status === 'approved').length  // Final approval only (Completed tab)
   };
 
   if (initialLoad) {
@@ -278,43 +287,77 @@ const ChangeRequestsPage: React.FC = () => {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {requests.map((request) => (
-            <TableRow key={request.cr_id}>
-              <TableCell className="font-semibold">{request.project_name || request.boq_name}</TableCell>
-              <TableCell>{request.requested_by_name}</TableCell>
-              <TableCell>{new Date(request.created_at).toLocaleDateString()}</TableCell>
-              <TableCell>{request.materials_data?.length || 0}</TableCell>
-              <TableCell className="font-semibold">{formatCurrency(request.materials_total_cost)}</TableCell>
-              <TableCell>
-                <span className={`font-semibold ${getPercentageColor(request.budget_impact?.increase_percentage || 0)}`}>
-                  +{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%
-                </span>
-              </TableCell>
-              <TableCell>
-                <Badge className={getStatusColor(request.status)}>
-                  {getStatusLabel(request.status)}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-right">
-                <div className="flex items-center justify-end gap-2">
-                  <Button size="sm" variant="outline" onClick={() => handleReview(request.cr_id)}>
-                    <Eye className="h-3.5 w-3.5 mr-1" />
-                    View
-                  </Button>
-                  {request.approval_required_from === 'estimator' && request.status !== 'approved' && request.status !== 'rejected' && (
-                    <>
-                      <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(request.cr_id)}>
-                        <Check className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="sm" variant="destructive" onClick={() => handleReject(request.cr_id)}>
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
+          {requests.map((request) => {
+            const isPMRequest = request.requested_by_user_id === user?.user_id;
+            const showEditApproveReject = isExtraMaterial && activeTab === 'requested' && request.approval_required_from === 'project_manager';
+            const showEditAndSend = isExtraMaterial && activeTab === 'pending' && isPMRequest && request.status === 'pending';
+            const showOnlyView = (isExtraMaterial && (activeTab === 'accepted' || activeTab === 'completed' || activeTab === 'rejected')) || (!isExtraMaterial && (activeTab === 'approved' || activeTab === 'completed' || activeTab === 'rejected'));
+
+            return (
+              <TableRow key={request.cr_id}>
+                <TableCell className="font-semibold">{request.project_name || request.boq_name}</TableCell>
+                <TableCell>{request.requested_by_name}</TableCell>
+                <TableCell>{new Date(request.created_at).toLocaleDateString()}</TableCell>
+                <TableCell>{request.materials_data?.length || 0}</TableCell>
+                <TableCell className="font-semibold">{formatCurrency(request.materials_total_cost)}</TableCell>
+                <TableCell>
+                  <span className={`font-semibold ${getPercentageColor(request.budget_impact?.increase_percentage || request.percentage_of_item_overhead || 0)}`}>
+                    +{(request.budget_impact?.increase_percentage || request.percentage_of_item_overhead || 0).toFixed(1)}%
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <Badge className={getStatusColor(request.status)}>
+                    {getStatusLabel(request.status)}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <Button size="sm" variant="outline" onClick={() => handleReview(request.cr_id)}>
+                      <Eye className="h-3.5 w-3.5 mr-1" />
+                      View
+                    </Button>
+
+                    {/* Requested tab: Show Edit, Approve, Reject */}
+                    {showEditApproveReject && (
+                      <>
+                        <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => handleEdit(request.cr_id)}>
+                          <Pencil className="h-3.5 w-3.5 mr-1" />
+                          Edit
+                        </Button>
+                        <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(request.cr_id)}>
+                          <Check className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button size="sm" variant="destructive" onClick={() => handleReject(request.cr_id)}>
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
+
+                    {/* Pending tab: Show Edit and Send buttons */}
+                    {showEditAndSend && (
+                      <>
+                        <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => handleEdit(request.cr_id)}>
+                          <Pencil className="h-3.5 w-3.5 mr-1" />
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          className={`${(request.percentage_of_item_overhead || 0) > 40 ? 'bg-orange-600 hover:bg-orange-700' : 'bg-purple-600 hover:bg-purple-700'}`}
+                          onClick={() => {
+                            const overheadPercent = request.percentage_of_item_overhead || 0;
+                            const routeTo = overheadPercent > 40 ? 'technical_director' : 'estimator';
+                            handleSendForReview(request.cr_id, routeTo);
+                          }}
+                        >
+                          Send {(request.percentage_of_item_overhead || 0) > 40 ? 'TD' : 'Est'}
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>
@@ -402,25 +445,41 @@ const ChangeRequestsPage: React.FC = () => {
                     value="requested"
                     className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
                   >
-                    <FileText className="w-4 h-4 mr-2" />
+                    <Box className="w-4 h-4 mr-2" />
                     Requested
-                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.requested})</span>
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.my_requests})</span>
                   </TabsTrigger>
                   <TabsTrigger
-                    value="under_review"
+                    value="pending"
                     className="rounded-none border-b-2 border-transparent data-[state=active]:border-yellow-500 data-[state=active]:text-yellow-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
                   >
                     <Clock className="w-4 h-4 mr-2" />
-                    Under Review
-                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.under_review})</span>
+                    Pending
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.pending_approval})</span>
                   </TabsTrigger>
                   <TabsTrigger
-                    value="approved"
+                    value="accepted"
                     className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
                   >
                     <CheckCircle className="w-4 h-4 mr-2" />
-                    Approved
-                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.approved})</span>
+                    Accepted
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.accepted})</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="completed"
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-purple-400 data-[state=active]:text-purple-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                  >
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Completed
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.completed_extra})</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="rejected"
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                  >
+                    <XCircle className="w-4 h-4 mr-2" />
+                    Rejected
+                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.rejected})</span>
                   </TabsTrigger>
                 </>
               ) : (
@@ -461,6 +520,8 @@ const ChangeRequestsPage: React.FC = () => {
               )}
             </TabsList>
 
+            {!isExtraMaterial && (
+            <>
             <TabsContent value="pending" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
                 <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending Review</h2>
@@ -754,11 +815,80 @@ const ChangeRequestsPage: React.FC = () => {
               </div>
             </TabsContent>
 
+            <TabsContent value="rejected" className="mt-0 p-0">
+              <div className="space-y-4 sm:space-y-6">
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Rejected Requests</h2>
+                {filteredRequests.length === 0 ? (
+                  <div className="text-center py-12">
+                    <XCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500 text-lg">No rejected requests found</p>
+                  </div>
+                ) : viewMode === 'table' ? (
+                  <RequestsTable requests={filteredRequests} />
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                    {filteredRequests.map((request, index) => (
+                      <motion.div
+                        key={request.cr_id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.05 * index }}
+                        className="bg-white rounded-lg border border-red-200 shadow-sm hover:shadow-lg transition-all duration-200 opacity-75"
+                      >
+                        <div className="p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
+                            <Badge className={getStatusColor(request.status)}>REJECTED</Badge>
+                          </div>
+                          <div className="space-y-1 text-sm text-gray-600">
+                            <div className="flex items-center gap-1.5">
+                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate">By: {request.requested_by_name}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="px-4 pb-3 text-center text-sm">
+                          <span className="font-bold text-red-600 text-lg">{(request.materials_data?.length || 0)}</span>
+                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                        </div>
+                        <div className="px-4 pb-3 space-y-1.5 text-xs">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Additional Cost:</span>
+                            <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Cost Increase:</span>
+                            <span className="font-semibold text-red-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
+                          </div>
+                        </div>
+                        <div className="border-t border-gray-200 p-2 sm:p-3">
+                          <button
+                            onClick={() => handleReview(request.cr_id)}
+                            className="w-full text-white text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 font-semibold"
+                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                          >
+                            <Eye className="h-4 w-4" />
+                            <span>View Details</span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+            </>
+            )}
+
             {/* Extra Material Tab Contents */}
             {isExtraMaterial && (
               <TabsContent value="requested" className="mt-0 p-0">
                 <div className="space-y-4 sm:space-y-6">
-                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending Review</h2>
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Requested</h2>
                   {filteredRequests.length === 0 ? (
                     <div className="text-center py-12">
                       <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
@@ -799,7 +929,7 @@ const ChangeRequestsPage: React.FC = () => {
 
                           <div className="px-4 pb-3 text-center text-sm">
                             <span className="font-bold text-blue-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
-                            <span className="text-gray-600 ml-1">Sub-Item{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                            <span className="text-gray-600 ml-1">Extra Purchase{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
 
                           <div className="px-4 pb-3 space-y-1.5 text-xs">
@@ -823,7 +953,7 @@ const ChangeRequestsPage: React.FC = () => {
                                 style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                               >
                                 <Eye className="h-4 w-4" />
-                                <span>Review</span>
+                                <span>Review Details</span>
                               </button>
                               <button
                                 onClick={() => handleEdit(request.cr_id)}
@@ -833,20 +963,20 @@ const ChangeRequestsPage: React.FC = () => {
                                 <span>Edit</span>
                               </button>
                             </div>
+                            {/* SE requests: Show Approve/Reject buttons */}
                             <div className="grid grid-cols-2 gap-2">
                               <button
                                 onClick={() => handleApprove(request.cr_id)}
-                                className="text-white text-[10px] sm:text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 font-semibold px-1"
-                                style={{ backgroundColor: 'rgb(22, 163, 74)' }}
+                                className="bg-green-600 hover:bg-green-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
                               >
-                                <Check className="h-3.5 w-3.5" />
+                                <Check className="h-4 w-4" />
                                 <span>Approve</span>
                               </button>
                               <button
                                 onClick={() => handleReject(request.cr_id)}
-                                className="bg-red-600 hover:bg-red-700 text-white text-[10px] sm:text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold px-1"
+                                className="bg-red-600 hover:bg-red-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
                               >
-                                <X className="h-3.5 w-3.5" />
+                                <X className="h-4 w-4" />
                                 <span>Reject</span>
                               </button>
                             </div>
@@ -860,9 +990,9 @@ const ChangeRequestsPage: React.FC = () => {
             )}
 
             {isExtraMaterial && (
-              <TabsContent value="under_review" className="mt-0 p-0">
+              <TabsContent value="pending" className="mt-0 p-0">
                 <div className="space-y-4 sm:space-y-6">
-                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Under Review</h2>
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending</h2>
                   {filteredRequests.length === 0 ? (
                     <div className="text-center py-12">
                       <Clock className="w-16 h-16 text-gray-300 mx-auto mb-4" />
@@ -902,7 +1032,7 @@ const ChangeRequestsPage: React.FC = () => {
 
                           <div className="px-4 pb-3 text-center text-sm">
                             <span className="font-bold text-yellow-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
-                            <span className="text-gray-600 ml-1">Sub-Item{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                            <span className="text-gray-600 ml-1">Extra Purchase{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
 
                           <div className="px-4 pb-3 space-y-1.5 text-xs">
@@ -918,6 +1048,96 @@ const ChangeRequestsPage: React.FC = () => {
                             </div>
                           </div>
 
+                          <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => handleReview(request.cr_id)}
+                                className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                              >
+                                <Eye className="h-4 w-4" />
+                                <span>Review</span>
+                              </button>
+                              <button
+                                onClick={() => handleEdit(request.cr_id)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              >
+                                <Pencil className="h-4 w-4" />
+                                <span>Edit</span>
+                              </button>
+                            </div>
+                            {/* Smart Send for Review button based on overhead percentage */}
+                            <button
+                              onClick={() => {
+                                const overheadPercent = request.percentage_of_item_overhead || 0;
+                                const routeTo = overheadPercent > 40 ? 'technical_director' : 'estimator';
+                                handleSendForReview(request.cr_id, routeTo);
+                              }}
+                              className={`w-full text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold ${
+                                (request.percentage_of_item_overhead || 0) > 40
+                                  ? 'bg-orange-600 hover:bg-orange-700'
+                                  : 'bg-purple-600 hover:bg-purple-700'
+                              }`}
+                            >
+                              <Check className="h-4 w-4" />
+                              <span>Send for Review {(request.percentage_of_item_overhead || 0) > 40 ? '(TD)' : '(Est.)'}</span>
+                            </button>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            )}
+
+            {isExtraMaterial && (
+              <TabsContent value="accepted" className="mt-0 p-0">
+                <div className="space-y-4 sm:space-y-6">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Accepted</h2>
+                  {filteredRequests.length === 0 ? (
+                    <div className="text-center py-12">
+                      <CheckCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                      <p className="text-gray-500 text-lg">No accepted requests found</p>
+                    </div>
+                  ) : viewMode === 'table' ? (
+                    <RequestsTable requests={filteredRequests} />
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                      {filteredRequests.map((request, index) => (
+                        <motion.div
+                          key={request.cr_id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.05 * index }}
+                          className="bg-white rounded-lg border border-green-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                        >
+                          <div className="p-4">
+                            <div className="flex items-start justify-between mb-2">
+                              <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
+                              <Badge className="bg-green-100 text-green-800">ACCEPTED</Badge>
+                            </div>
+                            <div className="space-y-1 text-sm text-gray-600">
+                              <div className="flex items-center gap-1.5">
+                                <Package className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate">By: {request.requested_by_name}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="px-4 pb-3 text-center text-sm">
+                            <span className="font-bold text-green-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
+                            <span className="text-gray-600 ml-1">Extra Purchase{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                          </div>
+                          <div className="px-4 pb-3 space-y-1.5 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Additional Cost:</span>
+                              <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
+                            </div>
+                          </div>
                           <div className="border-t border-gray-200 p-2 sm:p-3">
                             <button
                               onClick={() => handleReview(request.cr_id)}
@@ -936,76 +1156,146 @@ const ChangeRequestsPage: React.FC = () => {
               </TabsContent>
             )}
 
-            <TabsContent value="rejected" className="mt-0 p-0">
-              <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Rejected Requests</h2>
-                {filteredRequests.length === 0 ? (
-                  <div className="text-center py-12">
-                    <XCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No rejected requests found</p>
-                  </div>
-                ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
-                      <motion.div
-                        key={request.cr_id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.05 * index }}
-                        className="bg-white rounded-lg border border-red-200 shadow-sm hover:shadow-lg transition-all duration-200 opacity-75"
-                      >
-                        <div className="p-4">
-                          <div className="flex items-start justify-between mb-2">
-                            <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
-                            <Badge className={getStatusColor(request.status)}>REJECTED</Badge>
-                          </div>
-
-                          <div className="space-y-1 text-sm text-gray-600">
-                            <div className="flex items-center gap-1.5">
-                              <Package className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate">By: {request.requested_by_name}</span>
+            {isExtraMaterial && (
+              <TabsContent value="completed" className="mt-0 p-0">
+                <div className="space-y-4 sm:space-y-6">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Completed</h2>
+                  {filteredRequests.length === 0 ? (
+                    <div className="text-center py-12">
+                      <CheckCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                      <p className="text-gray-500 text-lg">No completed requests found</p>
+                    </div>
+                  ) : viewMode === 'table' ? (
+                    <RequestsTable requests={filteredRequests} />
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                      {filteredRequests.map((request, index) => (
+                        <motion.div
+                          key={request.cr_id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.05 * index }}
+                          className="bg-white rounded-lg border border-purple-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                        >
+                          <div className="p-4">
+                            <div className="flex items-start justify-between mb-2">
+                              <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
+                              <Badge className="bg-purple-100 text-purple-800">COMPLETED</Badge>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="h-3.5 w-3.5 text-gray-400" />
-                              <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                            <div className="space-y-1 text-sm text-gray-600">
+                              <div className="flex items-center gap-1.5">
+                                <Package className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate">By: {request.requested_by_name}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-
-                        <div className="px-4 pb-3 text-center text-sm">
-                          <span className="font-bold text-red-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
-                        </div>
-
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Additional Cost:</span>
-                            <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
+                          <div className="px-4 pb-3 text-center text-sm">
+                            <span className="font-bold text-purple-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
+                            <span className="text-gray-600 ml-1">Extra Purchase{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Cost Increase:</span>
-                            <span className="font-semibold text-red-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
+                          <div className="px-4 pb-3 space-y-1.5 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Additional Cost:</span>
+                              <span className="font-bold text-purple-600">{formatCurrency(request.materials_total_cost)}</span>
+                            </div>
                           </div>
-                        </div>
+                          <div className="border-t border-gray-200 p-2 sm:p-3">
+                            <button
+                              onClick={() => handleReview(request.cr_id)}
+                              className="w-full text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                            >
+                              <Eye className="h-4 w-4" />
+                              <span>View Details</span>
+                            </button>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            )}
 
-                        <div className="border-t border-gray-200 p-2 sm:p-3">
-                          <button
-                            onClick={() => handleReview(request.cr_id)}
-                            className="w-full text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold"
-                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                          >
-                            <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                            <span>View Details</span>
-                          </button>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </TabsContent>
+            {isExtraMaterial && (
+              <TabsContent value="rejected" className="mt-0 p-0">
+                <div className="space-y-4 sm:space-y-6">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900">Rejected Requests</h2>
+                  {filteredRequests.length === 0 ? (
+                    <div className="text-center py-12">
+                      <XCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                      <p className="text-gray-500 text-lg">No rejected requests found</p>
+                    </div>
+                  ) : viewMode === 'table' ? (
+                    <RequestsTable requests={filteredRequests} />
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                      {filteredRequests.map((request, index) => (
+                        <motion.div
+                          key={request.cr_id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.05 * index }}
+                          className="bg-white rounded-lg border border-red-200 shadow-sm hover:shadow-lg transition-all duration-200 opacity-75"
+                        >
+                          <div className="p-4">
+                            <div className="flex items-start justify-between mb-2">
+                              <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
+                              <Badge className="bg-red-100 text-red-800">REJECTED</Badge>
+                            </div>
+                            <div className="space-y-1 text-sm text-gray-600">
+                              <div className="flex items-center gap-1.5">
+                                <Package className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate">By: {request.requested_by_name}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="px-4 pb-3 text-center text-sm">
+                            <span className="font-bold text-red-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
+                            <span className="text-gray-600 ml-1">Extra Purchase{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                          </div>
+                          <div className="px-4 pb-3 space-y-1.5 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Additional Cost:</span>
+                              <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
+                            </div>
+                            {request.rejection_reason && (
+                              <div className="pt-2 border-t border-red-200">
+                                <p className="text-xs font-medium text-red-900">Rejection Reason:</p>
+                                <p className="text-xs text-red-700 mt-1 line-clamp-2">{request.rejection_reason}</p>
+                              </div>
+                            )}
+                            {request.rejected_by_name && (
+                              <div className="text-xs text-gray-500">
+                                <p>Rejected by: <span className="font-medium text-red-700">{request.rejected_by_name}</span></p>
+                              </div>
+                            )}
+                          </div>
+                          <div className="border-t border-gray-200 p-2 sm:p-3">
+                            <button
+                              onClick={() => handleReview(request.cr_id)}
+                              className="w-full text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                            >
+                              <Eye className="h-4 w-4" />
+                              <span>View Details</span>
+                            </button>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            )}
           </Tabs>
         </div>
       </div>

@@ -16,6 +16,7 @@ import { useAuthStore } from '@/store/authStore';
 import { siteEngineerService } from '../services/siteEngineerService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
+import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
 import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
@@ -486,8 +487,16 @@ const MyProjects: React.FC = () => {
         </div>
       </div>
 
-      {/* Details Modal */}
-      {showDetailsModal && selectedProject && (
+      {/* BOQ Details Modal - Using shared component */}
+      <BOQDetailsModal
+        isOpen={showDetailsModal}
+        onClose={handleCloseModal}
+        boq={selectedProject ? { boq_id: selectedProject.boq_id, boq_name: selectedProject.boq_name } : null}
+        showNewPurchaseItems={true}
+      />
+
+      {/* OLD Details Modal - REMOVED - Replaced with BOQDetailsModal */}
+      {false && showDetailsModal && selectedProject && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -505,6 +514,7 @@ const MyProjects: React.FC = () => {
                 <button
                   onClick={handleCloseModal}
                   className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
+                  title="Close"
                 >
                   <XMarkIcon className="w-6 h-6 text-blue-900" />
                 </button>

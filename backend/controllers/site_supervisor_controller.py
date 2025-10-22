@@ -405,15 +405,23 @@ def assign_projects_sitesupervisor():
         data = request.get_json(silent=True)
 
         site_supervisor_id = data.get("site_supervisor_id")
+        buyer_id = data.get("buyer_id")  # Optional: Buyer assignment
         project_ids = data.get("project_ids")  # list of project IDs
 
         if not site_supervisor_id or not project_ids:
             return jsonify({"error": "site_supervisor_id and project_ids are required"}), 400
 
-        # Validate user
+        # Validate Site Engineer
         user = User.query.filter_by(user_id=site_supervisor_id).first()
         if not user:
             return jsonify({"error": "siteEngineer not found"}), 404
+
+        # Validate Buyer if provided
+        buyer_user = None
+        if buyer_id:
+            buyer_user = User.query.filter_by(user_id=buyer_id).first()
+            if not buyer_user:
+                return jsonify({"error": "Buyer not found"}), 404
 
         # Get current user (Project Manager)
         current_user = getattr(g, 'user', None)
@@ -422,12 +430,16 @@ def assign_projects_sitesupervisor():
 
         assigned_projects = []
         projects_data_for_email = []
+        projects_data_for_buyer_email = []
         boq_histories_updated = 0
 
         for pid in project_ids:
             project = Project.query.filter_by(project_id=pid).first()
             if project:
                 project.site_supervisor_id = site_supervisor_id
+                # Assign buyer if provided
+                if buyer_id:
+                    project.buyer_id = buyer_id
                 project.last_modified_at = datetime.utcnow()
                 project.last_modified_by = pm_name
 
@@ -436,13 +448,22 @@ def assign_projects_sitesupervisor():
                     "project_name": getattr(project, "project_name", None)
                 })
 
-                # Collect project data for email
+                # Collect project data for SE email
                 projects_data_for_email.append({
                     "project_name": getattr(project, "project_name", "N/A"),
                     "client": getattr(project, "client", "N/A"),
                     "location": getattr(project, "location", "N/A"),
                     "status": getattr(project, "status", "Active")
                 })
+
+                # Collect project data for buyer email (if buyer assigned)
+                if buyer_id:
+                    projects_data_for_buyer_email.append({
+                        "project_name": getattr(project, "project_name", "N/A"),
+                        "client": getattr(project, "client", "N/A"),
+                        "location": getattr(project, "location", "N/A"),
+                        "status": getattr(project, "status", "Active")
+                    })
 
                 # Find BOQs associated with this project
                 boqs = BOQ.query.filter_by(project_id=pid, is_deleted=False).all()
@@ -465,6 +486,10 @@ def assign_projects_sitesupervisor():
                         current_actions = []
 
                     # Prepare new action for Site Engineer assignment
+                    comments = f"Site Engineer {user.full_name} assigned to project"
+                    if buyer_user:
+                        comments = f"Site Engineer {user.full_name} and Buyer {buyer_user.full_name} assigned to project"
+
                     new_action = {
                         "role": "project_manager",
                         "type": "assigned_site_engineer",
@@ -472,7 +497,7 @@ def assign_projects_sitesupervisor():
                         "receiver": "site_engineer",
                         "status": "SE_Assigned",
                         "boq_name": boq.boq_name,
-                        "comments": f"Site Engineer {user.full_name} assigned to project",
+                        "comments": comments,
                         "timestamp": datetime.utcnow().isoformat(),
                         "sender_name": pm_name,
                         "sender_user_id": pm_id,
@@ -480,7 +505,10 @@ def assign_projects_sitesupervisor():
                         "project_id": project.project_id,
                         "assigned_se_name": user.full_name,
                         "assigned_se_user_id": user.user_id,
-                        "assigned_se_email": user.email
+                        "assigned_se_email": user.email,
+                        "assigned_buyer_name": buyer_user.full_name if buyer_user else None,
+                        "assigned_buyer_user_id": buyer_user.user_id if buyer_user else None,
+                        "assigned_buyer_email": buyer_user.email if buyer_user else None
                     }
 
                     # Append new action
@@ -497,7 +525,7 @@ def assign_projects_sitesupervisor():
                         existing_history.action_by = pm_name
                         existing_history.sender = pm_name
                         existing_history.receiver = user.full_name
-                        existing_history.comments = f"Site Engineer {user.full_name} assigned to project"
+                        existing_history.comments = comments
                         existing_history.sender_role = 'project_manager'
                         existing_history.receiver_role = 'site_engineer'
                         existing_history.action_date = datetime.utcnow()
@@ -515,7 +543,7 @@ def assign_projects_sitesupervisor():
                             # boq.status,
                             sender=pm_name,
                             receiver=user.full_name,
-                            comments=f"Site Engineer {user.full_name} assigned to project",
+                            comments=comments,
                             sender_role='project_manager',
                             receiver_role='site_engineer',
                             action_date=datetime.utcnow(),
@@ -530,18 +558,18 @@ def assign_projects_sitesupervisor():
         log.info(f"Successfully assigned Site Engineer to {len(assigned_projects)} projects and updated {boq_histories_updated} BOQ histories")
 
         # Send email notification to Site Engineer
-        email_sent = False
+        se_email_sent = False
         if user.email and projects_data_for_email:
             try:
                 email_service = BOQEmailService()
-                email_sent = email_service.send_se_assignment_notification(
+                se_email_sent = email_service.send_se_assignment_notification(
                     se_email=user.email,
                     se_name=user.full_name,
                     pm_name=pm_name,
                     projects_data=projects_data_for_email
                 )
 
-                if email_sent:
+                if se_email_sent:
                     log.info(f"Assignment notification email sent successfully to {user.email}")
                 else:
                     log.warning(f"Failed to send assignment notification email to {user.email}")
@@ -551,9 +579,31 @@ def assign_projects_sitesupervisor():
                 import traceback
                 log.error(f"Email error traceback: {traceback.format_exc()}")
 
-        return jsonify({
+        # Send email notification to Buyer (if assigned)
+        buyer_email_sent = False
+        if buyer_user and buyer_user.email and projects_data_for_buyer_email:
+            try:
+                email_service = BOQEmailService()
+                buyer_email_sent = email_service.send_buyer_assignment_notification(
+                    buyer_email=buyer_user.email,
+                    buyer_name=buyer_user.full_name,
+                    pm_name=pm_name,
+                    projects_data=projects_data_for_buyer_email
+                )
+
+                if buyer_email_sent:
+                    log.info(f"Buyer assignment notification email sent successfully to {buyer_user.email}")
+                else:
+                    log.warning(f"Failed to send buyer assignment notification email to {buyer_user.email}")
+            except Exception as email_error:
+                log.error(f"Error sending buyer assignment notification email: {email_error}")
+                # Don't fail the entire request if email fails
+                import traceback
+                log.error(f"Email error traceback: {traceback.format_exc()}")
+
+        response_data = {
             "success": True,
-            "message": "Projects assigned to Site Engineer successfully",
+            "message": "Projects assigned successfully",
             "assigned_sitesupervisor": {
                 "site_supervisor_id": user.user_id,
                 "user_name": user.full_name,
@@ -563,8 +613,20 @@ def assign_projects_sitesupervisor():
             "assigned_projects": assigned_projects,
             "assigned_count": len(assigned_projects),
             "boq_histories_updated": boq_histories_updated,
-            "email_sent": email_sent
-        }), 200
+            "se_email_sent": se_email_sent
+        }
+
+        # Add buyer info to response if buyer was assigned
+        if buyer_user:
+            response_data["assigned_buyer"] = {
+                "buyer_id": buyer_user.user_id,
+                "buyer_name": buyer_user.full_name,
+                "email": buyer_user.email,
+                "phone": buyer_user.phone
+            }
+            response_data["buyer_email_sent"] = buyer_email_sent
+
+        return jsonify(response_data), 200
 
     except Exception as e:
         db.session.rollback()

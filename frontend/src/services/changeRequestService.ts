@@ -212,14 +212,45 @@ class ChangeRequestService {
 
 
   /**
+   * Get all buyers (for Estimator/TD to select when approving)
+   * GET /api/buyers
+   */
+  async getAllBuyers(): Promise<{ success: boolean; buyers: Array<{user_id: number, full_name: string, email: string, username: string}>; message?: string }> {
+    try {
+      const response = await axios.get(
+        `${API_BASE_URL}/buyers`,
+        this.getAuthHeaders()
+      );
+
+      return {
+        success: response.data.success,
+        buyers: response.data.buyers || []
+      };
+    } catch (error: any) {
+      console.error('Error fetching buyers:', error);
+      return {
+        success: false,
+        buyers: [],
+        message: error.response?.data?.error || 'Failed to fetch buyers'
+      };
+    }
+  }
+
+  /**
    * Approve change request
    * POST /api/change-request/{cr_id}/approve
+   * @param buyerId - Optional: Estimator/TD can specify which buyer to assign
    */
-  async approve(crId: number, comments?: string): Promise<{ success: boolean; message: string }> {
+  async approve(crId: number, comments?: string, buyerId?: number): Promise<{ success: boolean; message: string }> {
     try {
+      const payload: any = { comments: comments || 'Approved' };
+      if (buyerId) {
+        payload.buyer_id = buyerId;
+      }
+
       const response = await axios.post(
         `${API_BASE_URL}/change-request/${crId}/approve`,
-        { comments: comments || 'Approved' },
+        payload,
         this.getAuthHeaders()
       );
 

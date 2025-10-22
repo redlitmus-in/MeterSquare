@@ -1565,6 +1565,166 @@ class BOQEmailService:
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
 
+    def generate_buyer_assignment_email(self, buyer_name, pm_name, projects_data):
+        """
+        Generate email for Buyer assignment notification
+
+        Args:
+            buyer_name: Buyer name
+            pm_name: Project Manager name
+            projects_data: List of dictionaries containing project information
+
+        Returns:
+            str: HTML formatted email content
+        """
+        # Build projects table
+        projects_table_rows = ""
+        for idx, project in enumerate(projects_data, 1):
+            project_name = project.get('project_name', 'N/A')
+            client = project.get('client', 'N/A')
+            location = project.get('location', 'N/A')
+            status = project.get('status', 'Active')
+
+            projects_table_rows += f"""
+                <tr>
+                    <td>{idx}</td>
+                    <td><strong>{project_name}</strong></td>
+                    <td>{client}</td>
+                    <td>{location}</td>
+                    <td><span class="status-badge status-approved">{status}</span></td>
+                </tr>
+            """
+
+        email_body = f"""
+        <div class="email-container">
+            <!-- Header -->
+            <div class="header" style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);">
+                <h1>PROCUREMENT ASSIGNMENT</h1>
+                <h2>You Have Been Assigned as Buyer</h2>
+            </div>
+
+            <!-- Content -->
+            <div class="content">
+                <p>Dear <strong>{buyer_name}</strong>,</p>
+
+                <p>
+                    You have been assigned as the <strong>Buyer</strong> for the following project(s) by
+                    <strong>{pm_name}</strong>. You are responsible for procuring all materials for these projects.
+                </p>
+
+                <div class="divider"></div>
+
+                <!-- Assignment Details -->
+                <h2>Assignment Details</h2>
+                <div class="info-box">
+                    <p><span class="label">Assigned By:</span> <span class="value">{pm_name}</span></p>
+                    <p><span class="label">Role:</span> <span class="value">Project Manager</span></p>
+                    <p><span class="label">Total Projects:</span> <span class="value">{len(projects_data)}</span></p>
+                    <p><span class="label">Assignment Status:</span> <span class="status-badge" style="background-color: #fed7aa; color: #9a3412;">ACTIVE</span></p>
+                </div>
+
+                <!-- Projects Table -->
+                <h2>Assigned Projects</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>S.No</th>
+                                <th>Project Name</th>
+                                <th>Client</th>
+                                <th>Location</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {projects_table_rows}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Next Steps -->
+                <div class="alert" style="background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%); border-left: 4px solid #f97316;">
+                    <strong>Your Responsibilities:</strong>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>Review project BOQ and material specifications</li>
+                        <li>Procure all materials from approved vendors</li>
+                        <li>Track material deliveries and quality</li>
+                        <li>Manage purchase orders and vendor relations</li>
+                        <li>Ensure timely availability of materials on site</li>
+                        <li>Coordinate with Project Manager for material needs</li>
+                        <li>Process approved change requests for additional materials</li>
+                    </ul>
+                </div>
+
+                <!-- Action Required -->
+                <div class="alert alert-info">
+                    <strong>Action Required:</strong> Please log in to the MeterSquare ERP system to access
+                    project BOQ materials, approved vendors list, and begin material procurement activities.
+                </div>
+
+                <!-- Signature -->
+                <div class="signature">
+                    <p><strong>Best Regards,</strong></p>
+                    <p>{pm_name}</p>
+                    <p>Project Manager</p>
+                    <p>MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
+                <p>This is an automated email notification. Please do not reply to this email.</p>
+                <p>© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def send_buyer_assignment_notification(self, buyer_email, buyer_name, pm_name, projects_data):
+        """
+        Send Buyer assignment notification email
+
+        Args:
+            buyer_email: Buyer's email address
+            buyer_name: Buyer's name
+            pm_name: Project Manager's name
+            projects_data: List of project dictionaries with details
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            # Generate email content
+            email_html = self.generate_buyer_assignment_email(buyer_name, pm_name, projects_data)
+
+            # Create subject
+            project_count = len(projects_data)
+            project_names = ", ".join([p.get('project_name', 'Project') for p in projects_data[:2]])
+            if project_count > 2:
+                project_names += f" and {project_count - 2} more"
+
+            subject = f"🛒 Procurement Assignment - You are now Buyer for {project_names}"
+
+            # Send email
+            success = self.send_email(buyer_email, subject, email_html)
+
+            if success:
+                log.info(f"Buyer assignment email sent successfully to {buyer_email}")
+            else:
+                log.error(f"Failed to send Buyer assignment email to {buyer_email}")
+
+            return success
+
+        except Exception as e:
+            log.error(f"Error sending Buyer assignment email: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
     def send_estimator_assignment_notification(self, to_email, to_name, from_name, projects_data):
         subject = f"New BOQ Assigned for Estimation"
         body = f"""

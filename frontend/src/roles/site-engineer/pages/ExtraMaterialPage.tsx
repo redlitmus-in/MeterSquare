@@ -8,13 +8,18 @@ import {
   XCircleIcon,
   ExclamationTriangleIcon,
   EyeIcon,
-  FunnelIcon
+  FunnelIcon,
+  TableCellsIcon,
+  Squares2X2Icon,
+  PencilIcon,
+  PaperAirplaneIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 import { useExtraMaterialsAutoSync } from '@/hooks/useAutoSync';
+import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 
 interface ExtraMaterialRequest {
   id: number;
@@ -35,12 +40,18 @@ interface ExtraMaterialRequest {
   status: string;
   created_at: string;
   remarks?: string;
+  rejection_reason?: string;
+  rejected_by?: string;
+  rejected_at?: string;
 }
 
 const ExtraMaterialPage: React.FC = () => {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<'request' | 'approved'>('request');
+  const [activeTab, setActiveTab] = useState<'pending' | 'request' | 'approved' | 'rejected'>('pending');
+  const [viewMode, setViewMode] = useState<'table' | 'card'>('card');
   const [showForm, setShowForm] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<any>(null);
+  const [showViewModal, setShowViewModal] = useState(false);
   const [filterProject, setFilterProject] = useState('');
   const [filterArea, setFilterArea] = useState('');
   const [filterItem, setFilterItem] = useState('');
@@ -55,38 +66,72 @@ const ExtraMaterialPage: React.FC = () => {
     async () => {
       const response = await axios.get(`${API_URL}/change-requests`, { headers });
 
-      // Transform requested materials
-      const filteredRequested = (response.data.data || [])
-        .filter((cr: any) => ['pending', 'under_review'].includes(cr.status))
+      // Filter to show only SE's own requests
+      const seRequests = (response.data.data || [])
+        .filter((cr: any) => cr.requested_by_user_id === user?.user_id);
+
+      // Transform pending materials (status: 'pending' - not yet sent to PM)
+      const filteredPending = seRequests
+        .filter((cr: any) => cr.status === 'pending')
         .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
         .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
 
-      const transformedRequested = filteredRequested.flatMap((cr: any) => {
+      const transformedPending = filteredPending.flatMap((cr: any) => {
         const materials = cr.materials_data || [];
         return materials.map((mat: any) => ({
           id: cr.cr_id,
           project_id: cr.project_id,
-          project_name: cr.project_name || 'Unknown',
-          area_id: cr.area_id || 1,
-          area_name: cr.area_name || 'Main Area',
-          boq_item_id: cr.item_id || '',
-          boq_item_name: cr.item_name || '',
-          sub_item_id: mat.master_material_id || '',
+          project_name: cr.project_name,
+          area_id: cr.area_id,
+          area_name: cr.area_name,
+          boq_item_id: cr.item_id,
+          boq_item_name: cr.item_name,
+          sub_item_id: mat.master_material_id,
           sub_item_name: mat.material_name,
           quantity: mat.quantity,
           unit_rate: mat.unit_price,
           total_cost: mat.total_price,
           reason_for_new_sub_item: mat.reason,
           requested_by: cr.requested_by_name,
-          overhead_percent: cr.percentage_of_item_overhead || 0,
+          overhead_percent: cr.percentage_of_item_overhead,
           status: cr.status,
           created_at: cr.created_at,
           remarks: cr.justification
         }));
       });
 
-      // Transform approved materials
-      const filteredApproved = (response.data.data || [])
+      // Transform under review materials (status: 'under_review' - sent to PM, waiting for approval)
+      const filteredUnderReview = seRequests
+        .filter((cr: any) => cr.status === 'under_review')
+        .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
+        .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
+
+      const transformedUnderReview = filteredUnderReview.flatMap((cr: any) => {
+        const materials = cr.materials_data || [];
+        return materials.map((mat: any) => ({
+          id: cr.cr_id,
+          project_id: cr.project_id,
+          project_name: cr.project_name,
+          area_id: cr.area_id,
+          area_name: cr.area_name,
+          boq_item_id: cr.item_id,
+          boq_item_name: cr.item_name,
+          sub_item_id: mat.master_material_id,
+          sub_item_name: mat.material_name,
+          quantity: mat.quantity,
+          unit_rate: mat.unit_price,
+          total_cost: mat.total_price,
+          reason_for_new_sub_item: mat.reason,
+          requested_by: cr.requested_by_name,
+          overhead_percent: cr.percentage_of_item_overhead,
+          status: cr.status,
+          created_at: cr.created_at,
+          remarks: cr.justification
+        }));
+      });
+
+      // Transform approved materials (only SE's own approved requests)
+      const filteredApproved = seRequests
         .filter((cr: any) => cr.status === 'approved')
         .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
         .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea))
@@ -97,34 +142,71 @@ const ExtraMaterialPage: React.FC = () => {
         return materials.map((mat: any) => ({
           id: cr.cr_id,
           project_id: cr.project_id,
-          project_name: cr.project_name || 'Unknown',
-          area_id: cr.area_id || 1,
-          area_name: cr.area_name || 'Main Area',
-          boq_item_id: cr.item_id || '',
-          boq_item_name: cr.item_name || '',
-          sub_item_id: mat.master_material_id || '',
+          project_name: cr.project_name,
+          area_id: cr.area_id,
+          area_name: cr.area_name,
+          boq_item_id: cr.item_id,
+          boq_item_name: cr.item_name,
+          sub_item_id: mat.master_material_id,
           sub_item_name: mat.material_name,
           quantity: mat.quantity,
           unit_rate: mat.unit_price,
           total_cost: mat.total_price,
           reason_for_new_sub_item: mat.reason,
           requested_by: cr.requested_by_name,
-          overhead_percent: cr.percentage_of_item_overhead || 0,
+          overhead_percent: cr.percentage_of_item_overhead,
           status: cr.status,
           created_at: cr.created_at,
           remarks: cr.justification
         }));
       });
 
+      // Transform rejected materials (only SE's own rejected requests)
+      const filteredRejected = seRequests
+        .filter((cr: any) => cr.status === 'rejected')
+        .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
+        .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
+
+      const transformedRejected = filteredRejected.flatMap((cr: any) => {
+        const materials = cr.materials_data || [];
+        return materials.map((mat: any) => ({
+          id: cr.cr_id,
+          project_id: cr.project_id,
+          project_name: cr.project_name,
+          area_id: cr.area_id,
+          area_name: cr.area_name,
+          boq_item_id: cr.item_id,
+          boq_item_name: cr.item_name,
+          sub_item_id: mat.master_material_id,
+          sub_item_name: mat.material_name,
+          quantity: mat.quantity,
+          unit_rate: mat.unit_price,
+          total_cost: mat.total_price,
+          reason_for_new_sub_item: mat.reason,
+          requested_by: cr.requested_by_name,
+          overhead_percent: cr.percentage_of_item_overhead,
+          status: cr.status,
+          created_at: cr.created_at,
+          remarks: cr.justification,
+          rejection_reason: cr.rejection_reason,
+          rejected_by: cr.rejected_by_name,
+          rejected_at: cr.rejected_at_stage
+        }));
+      });
+
       return {
-        requested: transformedRequested,
-        approved: transformedApproved
+        pending: transformedPending,
+        underReview: transformedUnderReview,
+        approved: transformedApproved,
+        rejected: transformedRejected
       };
     }
   );
 
-  const extraMaterials = useMemo(() => materialsData?.requested || [], [materialsData]);
+  const pendingMaterials = useMemo(() => materialsData?.pending || [], [materialsData]);
+  const underReviewMaterials = useMemo(() => materialsData?.underReview || [], [materialsData]);
   const approvedMaterials = useMemo(() => materialsData?.approved || [], [materialsData]);
+  const rejectedMaterials = useMemo(() => materialsData?.rejected || [], [materialsData]);
 
   useEffect(() => {
     refetch();
@@ -155,29 +237,9 @@ const ExtraMaterialPage: React.FC = () => {
       );
 
       if (response.data.success || response.data.cr_id) {
-        // Get the created CR ID from response
-        const crId = response.data.cr_id;
-
-        if (crId) {
-          // Automatically send for review to PM
-          try {
-            await axios.post(
-              `${API_URL}/change-request/${crId}/send-for-review`,
-              {},
-              { headers }
-            );
-            toast.success('Extra material request submitted and sent to PM for approval');
-          } catch (sendError: any) {
-            console.error('Error sending for review:', sendError);
-            // If sending for review fails, still show success for creation
-            toast.warning('Request created but needs to be sent for review manually');
-          }
-        } else {
-          toast.success('Extra material request submitted successfully');
-        }
-
+        toast.success('Extra material request created successfully. Review and send to PM when ready.');
         setShowForm(false);
-        fetchRequestedMaterials();
+        refetch();
       }
     } catch (error: any) {
       console.error('Error submitting extra material request:', error);
@@ -229,6 +291,43 @@ const ExtraMaterialPage: React.FC = () => {
     );
   };
 
+  const handleViewDetails = async (requestId: number) => {
+    try {
+      const response = await axios.get(`${API_URL}/change-request/${requestId}`, { headers });
+      // Backend returns {success: true, data: {...}} - we need response.data.data
+      if (response.data && response.data.data) {
+        setSelectedRequest(response.data.data);
+        setShowViewModal(true);
+      } else {
+        toast.error('Failed to load request details');
+      }
+    } catch (error) {
+      console.error('Error fetching request details:', error);
+      toast.error('Failed to load request details');
+    }
+  };
+
+  const handleEdit = (requestId: number) => {
+    // For now, show a toast - full edit functionality would require edit modal
+    toast.info('Edit functionality coming soon');
+    // TODO: Implement edit modal with pre-filled form
+  };
+
+  const handleSendToPM = async (requestId: number) => {
+    try {
+      await axios.post(
+        `${API_URL}/change-request/${requestId}/send-for-review`,
+        {},
+        { headers }
+      );
+      toast.success('Request sent to PM for approval');
+      refetch();
+    } catch (error: any) {
+      console.error('Error sending request to PM:', error);
+      toast.error(error.response?.data?.error || 'Failed to send request to PM');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -248,43 +347,97 @@ const ExtraMaterialPage: React.FC = () => {
           </div>
         </motion.div>
 
-        {/* Tabs */}
-        <div className="mb-6 border-b border-gray-200 bg-white rounded-t-xl">
-          <nav className="-mb-px flex space-x-8 px-6">
-            <button
-              onClick={() => setActiveTab('request')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'request'
-                  ? 'border-orange-500 text-orange-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <PlusIcon className="w-5 h-5" />
-                Request
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('approved')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'approved'
-                  ? 'border-orange-500 text-orange-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <CheckCircleIcon className="w-5 h-5" />
-                Approved
-              </div>
-            </button>
-          </nav>
+        {/* Tabs and View Toggle */}
+        <div className="mb-6 bg-white rounded-xl border border-gray-200">
+          <div className="flex justify-between items-center px-6 pt-4">
+            <nav className="-mb-px flex space-x-8">
+              <button
+                onClick={() => setActiveTab('pending')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'pending'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <PlusIcon className="w-5 h-5" />
+                  Pending ({pendingMaterials.length})
+                </div>
+              </button>
+              <button
+                onClick={() => setActiveTab('request')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'request'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <ClockIcon className="w-5 h-5" />
+                  Request ({underReviewMaterials.length})
+                </div>
+              </button>
+              <button
+                onClick={() => setActiveTab('approved')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'approved'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <CheckCircleIcon className="w-5 h-5" />
+                  Approved ({approvedMaterials.length})
+                </div>
+              </button>
+              <button
+                onClick={() => setActiveTab('rejected')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'rejected'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <XCircleIcon className="w-5 h-5" />
+                  Rejected ({rejectedMaterials.length})
+                </div>
+              </button>
+            </nav>
+
+            {/* View Mode Toggle */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setViewMode('card')}
+                className={`p-2 rounded-lg transition-colors ${
+                  viewMode === 'card'
+                    ? 'bg-orange-100 text-orange-600'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+                title="Card View"
+              >
+                <Squares2X2Icon className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                className={`p-2 rounded-lg transition-colors ${
+                  viewMode === 'table'
+                    ? 'bg-orange-100 text-orange-600'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+                title="Table View"
+              >
+                <TableCellsIcon className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Tab Content */}
-        {activeTab === 'request' ? (
+        {activeTab === 'pending' ? (
           <motion.div
-            key="request"
-            initial={{ opacity: 0, x: -20 }}
+            key="pending"
+            initial={{ opacity: 0, x: 0 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.3 }}
           >
@@ -299,16 +452,244 @@ const ExtraMaterialPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Request List */}
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Pending Requests</h2>
+            {/* Pending List */}
             {loading ? (
               <div className="flex justify-center items-center py-12">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
               </div>
-            ) : extraMaterials.length === 0 ? (
+            ) : pendingMaterials.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
                 <CubeIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No Pending Requests</h3>
                 <p className="text-gray-500">Click "Add Extra Sub Item" to create your first request</p>
+              </div>
+            ) : viewMode === 'card' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {pendingMaterials.map((request) => (
+                  <motion.div
+                    key={request.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                  >
+                    <div className="p-4">
+                      <div className="flex items-start justify-between mb-2">
+                        <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                        {getStatusBadge(request.status)}
+                      </div>
+
+                      <div className="space-y-2 text-sm text-gray-600 mb-4">
+                        <div>
+                          <p className="font-medium text-gray-900">{request.project_name}</p>
+                          <p className="text-xs text-gray-500">{request.area_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">BOQ Item</p>
+                          <p className="font-medium">{request.boq_item_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Sub-Item</p>
+                          <p className="font-medium">{request.sub_item_name}</p>
+                        </div>
+                        <div className="flex justify-between pt-2 border-t">
+                          <div>
+                            <p className="text-xs text-gray-500">Quantity</p>
+                            <p className="font-semibold">{request.quantity}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-500">Total Cost</p>
+                            <p className="font-semibold text-blue-600">AED {request.total_cost.toLocaleString()}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => handleViewDetails(request.id)}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                        >
+                          <EyeIcon className="w-4 h-4" />
+                          View Details
+                        </button>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => handleEdit(request.id)}
+                            className="bg-green-600 hover:bg-green-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
+                          >
+                            <PencilIcon className="w-4 h-4" />
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleSendToPM(request.id)}
+                            className="bg-orange-600 hover:bg-orange-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
+                          >
+                            <PaperAirplaneIcon className="w-4 h-4" />
+                            Send
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Request ID
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Project / Area
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          BOQ Item
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Sub-Item
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Quantity
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Total Cost
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {pendingMaterials.map((request) => (
+                        <tr key={request.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            EM-{request.id}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            <div>
+                              <p className="font-medium">{request.project_name}</p>
+                              <p className="text-xs text-gray-500">{request.area_name}</p>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {request.boq_item_name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {request.sub_item_name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {request.quantity}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            AED{request.total_cost.toLocaleString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleViewDetails(request.id)}
+                                className="text-blue-600 hover:text-blue-800 font-medium"
+                              >
+                                <EyeIcon className="w-4 h-4 inline mr-1" />
+                                View
+                              </button>
+                              <button
+                                onClick={() => handleEdit(request.id)}
+                                className="text-green-600 hover:text-green-800 font-medium"
+                              >
+                                <PencilIcon className="w-4 h-4 inline mr-1" />
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleSendToPM(request.id)}
+                                className="text-orange-600 hover:text-orange-800 font-medium"
+                              >
+                                <PaperAirplaneIcon className="w-4 h-4 inline mr-1" />
+                                Send to PM
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        ) : activeTab === 'request' ? (
+          <motion.div
+            key="request"
+            initial={{ opacity: 0, x: 0 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Sent for PM Approval</h2>
+            {loading ? (
+              <div className="flex justify-center items-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
+              </div>
+            ) : underReviewMaterials.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+                <ClockIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No Requests Under Review</h3>
+                <p className="text-gray-500">Requests sent to PM will appear here</p>
+              </div>
+            ) : viewMode === 'card' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {underReviewMaterials.map((request) => (
+                  <motion.div
+                    key={request.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                  >
+                    <div className="p-4">
+                      <div className="flex items-start justify-between mb-2">
+                        <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                        {getStatusBadge(request.status)}
+                      </div>
+
+                      <div className="space-y-2 text-sm text-gray-600 mb-4">
+                        <div>
+                          <p className="font-medium text-gray-900">{request.project_name}</p>
+                          <p className="text-xs text-gray-500">{request.area_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">BOQ Item</p>
+                          <p className="font-medium">{request.boq_item_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Sub-Item</p>
+                          <p className="font-medium">{request.sub_item_name}</p>
+                        </div>
+                        <div className="flex justify-between pt-2 border-t">
+                          <div>
+                            <p className="text-xs text-gray-500">Quantity</p>
+                            <p className="font-semibold">{request.quantity}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-500">Total Cost</p>
+                            <p className="font-semibold text-yellow-600">AED {request.total_cost.toLocaleString()}</p>
+                          </div>
+                        </div>
+                        <div className="text-xs text-gray-500 pt-2">
+                          Created: {new Date(request.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleViewDetails(request.id)}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                      >
+                        <EyeIcon className="w-4 h-4" />
+                        View Details
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
               </div>
             ) : (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -340,10 +721,13 @@ const ExtraMaterialPage: React.FC = () => {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Created
                         </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {extraMaterials.map((request) => (
+                      {underReviewMaterials.map((request) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             EM-{request.id}
@@ -364,13 +748,22 @@ const ExtraMaterialPage: React.FC = () => {
                             {request.quantity}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            AED{request.total_cost.toLocaleString()}
+                            AED {request.total_cost.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {getStatusBadge(request.status)}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {new Date(request.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <button
+                              onClick={() => handleViewDetails(request.id)}
+                              className="text-blue-600 hover:text-blue-800 font-medium"
+                            >
+                              <EyeIcon className="w-4 h-4 inline mr-1" />
+                              View
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -380,7 +773,7 @@ const ExtraMaterialPage: React.FC = () => {
               </div>
             )}
           </motion.div>
-        ) : (
+        ) : activeTab === 'approved' ? (
           <motion.div
             key="approved"
             initial={{ opacity: 0, x: 20 }}
@@ -453,6 +846,52 @@ const ExtraMaterialPage: React.FC = () => {
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No Approved Materials</h3>
                 <p className="text-gray-500">Approved extra material requests will appear here</p>
               </div>
+            ) : viewMode === 'card' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {approvedMaterials.map((request) => (
+                  <motion.div
+                    key={request.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white rounded-lg border border-green-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                  >
+                    <div className="p-4">
+                      <div className="flex items-start justify-between mb-2">
+                        <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                        {getStatusBadge(request.status)}
+                      </div>
+
+                      <div className="space-y-2 text-sm text-gray-600">
+                        <div>
+                          <p className="font-medium text-gray-900">{request.project_name}</p>
+                          <p className="text-xs text-gray-500">{request.area_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">BOQ Item</p>
+                          <p className="font-medium">{request.boq_item_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Sub-Item</p>
+                          <p className="font-medium">{request.sub_item_name}</p>
+                        </div>
+                        <div className="flex justify-between pt-2 border-t">
+                          <div>
+                            <p className="text-xs text-gray-500">Quantity</p>
+                            <p className="font-semibold">{request.quantity}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-500">Total Cost</p>
+                            <p className="font-semibold text-green-600">AED {request.total_cost.toLocaleString()}</p>
+                          </div>
+                        </div>
+                        <div className="text-xs text-gray-500 pt-2">
+                          Approved: {new Date(request.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
             ) : (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
@@ -517,7 +956,173 @@ const ExtraMaterialPage: React.FC = () => {
               </div>
             )}
           </motion.div>
-        )}
+        ) : activeTab === 'rejected' ? (
+          <motion.div
+            key="rejected"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Rejected Requests</h2>
+            {loading ? (
+              <div className="flex justify-center items-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
+              </div>
+            ) : rejectedMaterials.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+                <XCircleIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No Rejected Requests</h3>
+                <p className="text-gray-500">Rejected extra material requests will appear here</p>
+              </div>
+            ) : viewMode === 'card' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {rejectedMaterials.map((request) => (
+                  <motion.div
+                    key={request.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white rounded-lg border border-red-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                  >
+                    <div className="p-4">
+                      <div className="flex items-start justify-between mb-2">
+                        <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                        {getStatusBadge(request.status)}
+                      </div>
+
+                      <div className="space-y-2 text-sm text-gray-600 mb-4">
+                        <div>
+                          <p className="font-medium text-gray-900">{request.project_name}</p>
+                          <p className="text-xs text-gray-500">{request.area_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">BOQ Item</p>
+                          <p className="font-medium">{request.boq_item_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Sub-Item</p>
+                          <p className="font-medium">{request.sub_item_name}</p>
+                        </div>
+                        <div className="flex justify-between pt-2 border-t">
+                          <div>
+                            <p className="text-xs text-gray-500">Quantity</p>
+                            <p className="font-semibold">{request.quantity}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-500">Total Cost</p>
+                            <p className="font-semibold text-red-600">AED {request.total_cost.toLocaleString()}</p>
+                          </div>
+                        </div>
+
+                        {/* Rejection Details */}
+                        {request.rejection_reason && (
+                          <div className="pt-2 border-t bg-red-50 -mx-4 px-4 py-2 mt-3">
+                            <p className="text-xs font-medium text-red-900">Rejection Reason:</p>
+                            <p className="text-xs text-red-700 mt-1">{request.rejection_reason}</p>
+                          </div>
+                        )}
+                        {request.rejected_by && (
+                          <div className="text-xs text-gray-500">
+                            <p>Rejected by: <span className="font-medium text-red-700">{request.rejected_by}</span></p>
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={() => handleViewDetails(request.id)}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                      >
+                        <EyeIcon className="w-4 h-4" />
+                        View Details
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Request ID
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Project / Area
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          BOQ Item
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Sub-Item
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Quantity
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Total Cost
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Rejection Reason
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Rejected By
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {rejectedMaterials.map((request) => (
+                        <tr key={request.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            EM-{request.id}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            <div>
+                              <p className="font-medium">{request.project_name}</p>
+                              <p className="text-xs text-gray-500">{request.area_name}</p>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {request.boq_item_name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {request.sub_item_name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {request.quantity}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-red-600">
+                            AED {request.total_cost.toLocaleString()}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-red-700 max-w-xs">
+                            <div className="truncate" title={request.rejection_reason}>
+                              {request.rejection_reason || 'N/A'}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {request.rejected_by || 'N/A'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <button
+                              onClick={() => handleViewDetails(request.id)}
+                              className="text-blue-600 hover:text-blue-800 font-medium"
+                            >
+                              <EyeIcon className="w-4 h-4 inline mr-1" />
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </motion.div>
+         ) : null}
 
         {/* Form Modal */}
         {showForm && (
@@ -539,6 +1144,18 @@ const ExtraMaterialPage: React.FC = () => {
             </motion.div>
           </div>
         )}
+
+        {/* View Details Modal */}
+        <ChangeRequestDetailsModal
+          isOpen={showViewModal}
+          onClose={() => {
+            setShowViewModal(false);
+            setSelectedRequest(null);
+          }}
+          changeRequest={selectedRequest}
+          canApprove={false}
+          canReject={false}
+        />
       </div>
     </div>
   );

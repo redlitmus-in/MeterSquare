@@ -414,6 +414,24 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       }
     ];
 
+    // Buyer specific navigation items
+    const buyerItems: NavigationItem[] = [
+      // {
+      //   name: 'Materials to Purchase',
+      //   href: buildPath('/materials'),
+      //   icon: CubeIcon,
+      //   iconSolid: CubeSolid,
+      //   color: 'text-orange-600'
+      // },
+      {
+        name: 'Purchase Orders',
+        href: buildPath('/purchase-orders'),
+        icon: ShoppingCartIcon,
+        iconSolid: ShoppingSolid,
+        color: 'text-green-600'
+      }
+    ];
+
     // Admin specific navigation items - Full access to all role functionalities
     const adminItems: NavigationItem[] = [
       {
@@ -557,6 +575,12 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         currentRole === UserRole.SITE_ENGINEER ||
         getRoleDisplayName(roleId || '') === 'Site Engineer';
 
+    // Check for Buyer with multiple format variations
+    const isBuyer = roleId === 'buyer' ||
+        roleIdLower === 'buyer' ||
+        currentRole === 'buyer' ||
+        getRoleDisplayName(roleId || '') === 'Buyer';
+
     // Check for Admin with multiple format variations
     const isAdmin = roleId === 'admin' ||
         roleIdLower === 'admin' ||
@@ -579,6 +603,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     } else if (isSiteEngineer) {
       // Site Engineer gets Projects menu with submenu (Assigned, Ongoing, Completed)
       navigation.push(...siteEngineerItems);
+    } else if (isBuyer) {
+      // Buyer gets Materials to Purchase, Projects, and Purchase Orders
+      navigation.push(...buyerItems);
     } else {
       // Other roles get procurement
       navigation.push(procurementItem);

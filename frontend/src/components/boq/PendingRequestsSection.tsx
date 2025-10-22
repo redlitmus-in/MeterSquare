@@ -220,7 +220,7 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
                   </>
                 ) : (
                   <>
-                    {/* User's own requests - Show Send for Review button */}
+                    {/* PM's own requests - Only show Send for Review button */}
                     {shouldShowSendButton && (
                       <button
                         onClick={() => handleSendForReview(request.cr_id)}

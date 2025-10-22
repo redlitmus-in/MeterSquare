@@ -8,14 +8,16 @@ import { UserRole } from '@/types';
 /**
  * Map numeric role IDs to role names (based on database)
  * Database structure:
- * 2: siteSupervisor
- * 3: mepSupervisor
- * 4: procurement
+ * 1: admin
+ * 2: siteEngineer
+ * 3: siteEngineer
+ * 4: estimator
  * 5: projectManager
- * 6: design
- * 7: estimation
- * 8: accounts
- * 9: technicalDirector
+ * 6: projectManager
+ * 7: technicalDirector
+ * 8: buyer
+ * 9: accounts
+ * 10: estimator
  */
 export const ROLE_ID_TO_NAME: Record<number, string> = {
   1: 'admin',
@@ -25,8 +27,8 @@ export const ROLE_ID_TO_NAME: Record<number, string> = {
   5: UserRole.PROJECT_MANAGER,
   6: 'projectManager',
   7: 'technicalDirector',
-  8: UserRole.ACCOUNTS,
-  9: UserRole.TECHNICAL_DIRECTOR,
+  8: 'buyer', // Buyer role
+  9: UserRole.ACCOUNTS, // Accounts moved to 9
   10: 'estimator' // Map ESTIMATOR role ID to estimator
 };
 
@@ -36,6 +38,7 @@ export const ROLE_ID_TO_NAME: Record<number, string> = {
 export const ROLE_URL_SLUGS: Record<string, string> = {
   'admin': 'admin',
   'siteEngineer': 'site-engineer',
+  'buyer': 'buyer',
   [UserRole.SITE_SUPERVISOR]: 'site-supervisor',
   [UserRole.MEP_SUPERVISOR]: 'mep-supervisor',
   [UserRole.PROCUREMENT]: 'procurement',
@@ -61,6 +64,7 @@ export const URL_SLUG_TO_ROLE: Record<string, UserRole> = Object.entries(ROLE_UR
 export const ROLE_DASHBOARD_PATHS: Record<string, string> = {
   'admin': '/admin/dashboard',
   'siteEngineer': '/site-engineer/dashboard',
+  'buyer': '/buyer/dashboard',
   [UserRole.SITE_SUPERVISOR]: '/site-supervisor/dashboard',
   [UserRole.MEP_SUPERVISOR]: '/mep-supervisor/dashboard',
   [UserRole.PROCUREMENT]: '/procurement/dashboard',
@@ -136,6 +140,7 @@ export const getRoleDisplayName = (role: string | number | UserRole): string => 
   const roleNames: Record<string, string> = {
     'admin': 'Admin',
     'siteEngineer': 'Site Engineer',
+    'buyer': 'Buyer',
     [UserRole.SITE_SUPERVISOR]: 'Site Supervisor',
     [UserRole.MEP_SUPERVISOR]: 'MEP Supervisor',
     [UserRole.PROCUREMENT]: 'Procurement',
@@ -162,6 +167,7 @@ export const getRoleThemeColor = (role: string | UserRole): string => {
   const roleColors: Record<string, string> = {
     'admin': 'purple',
     'siteEngineer': 'orange',
+    'buyer': 'orange',
     [UserRole.SITE_SUPERVISOR]: 'orange',
     [UserRole.MEP_SUPERVISOR]: 'cyan',
     [UserRole.PROCUREMENT]: 'red',
@@ -232,6 +238,7 @@ export const hasRouteAccess = (userRole: string | UserRole, routePath: string): 
   const roleAccess: Record<string, string[]> = {
     'admin': ['/'], // Admin has access to all routes
     'siteEngineer': ['/projects', '/materials', '/tasks', '/reports'],
+    'buyer': ['/materials', '/projects', '/purchase-orders'], // Buyer access
     [UserRole.SITE_SUPERVISOR]: ['/workflows/material-dispatch-site'],
     [UserRole.MEP_SUPERVISOR]: ['/workflows/material-dispatch-site'],
     [UserRole.PROCUREMENT]: ['/procurement', '/vendor'],

@@ -113,6 +113,16 @@ interface SiteEngineer {
   user_status?: string;
 }
 
+interface Buyer {
+  user_id: number;
+  buyer_name: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  project_id?: number | null;
+  project_name?: string | null;
+}
+
 const MyProjects: React.FC = () => {
   const { user } = useAuthStore();
 
@@ -180,6 +190,11 @@ const MyProjects: React.FC = () => {
   const [selectedSE, setSelectedSE] = useState<SiteEngineer | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [seSearchQuery, setSeSearchQuery] = useState('');
+
+  // Buyer-related states
+  const [availableBuyers, setAvailableBuyers] = useState<Buyer[]>([]);
+  const [selectedBuyer, setSelectedBuyer] = useState<Buyer | null>(null);
+  const [buyerSearchQuery, setBuyerSearchQuery] = useState('');
   const [loadingBOQDetails, setLoadingBOQDetails] = useState(false);
   const [assignMode, setAssignMode] = useState<'existing' | 'create'>('existing');
   const [newSEData, setNewSEData] = useState({ full_name: '', email: '', phone: '' });
@@ -207,10 +222,13 @@ const MyProjects: React.FC = () => {
   const [processingBOQ, setProcessingBOQ] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [seToDelete, setSeToDelete] = useState<{ id: number; name: string } | null>(null);
 
   useEffect(() => {
     if (showAssignModal) {
       loadAvailableSEs();
+      // loadAvailableBuyers(); // Removed - Buyer assignment not needed
     }
   }, [showAssignModal]);
 
@@ -230,6 +248,30 @@ const MyProjects: React.FC = () => {
       toast.error('Failed to load site engineers');
     } finally {
       setLoadingSEs(false);
+    }
+  };
+
+  const loadAvailableBuyers = async () => {
+    try {
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+      // Updated to use PM route - PM manages buyers
+      const response = await fetch(`${API_URL}/all_buyers`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        const allBuyers = [
+          ...(data.assigned_buyers || []),
+          ...(data.unassigned_buyers || [])
+        ];
+        setAvailableBuyers(allBuyers);
+      }
+    } catch (error) {
+      console.error('Error loading buyers:', error);
+      toast.error('Failed to load buyers');
     }
   };
 
@@ -419,6 +461,21 @@ const MyProjects: React.FC = () => {
     }
   };
 
+  const handleDeleteSE = async () => {
+    if (!seToDelete) return;
+
+    try {
+      await projectManagerService.deleteSE(seToDelete.id);
+      toast.success('Site Engineer deleted successfully');
+      setShowDeleteConfirm(false);
+      setSeToDelete(null);
+      loadAvailableSEs();
+      refetch();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || 'Failed to delete Site Engineer');
+    }
+  };
+
   const handleAssignSE = async () => {
     if (!selectedSE || !selectedProject) {
       toast.error('Please select a Site Engineer');
@@ -427,13 +484,26 @@ const MyProjects: React.FC = () => {
 
     try {
       setAssigning(true);
-      await projectManagerService.assignProjectsToSiteSupervisor({
+      const assignmentData: any = {
         site_supervisor_id: selectedSE.user_id,
         project_ids: [selectedProject.project_id]
-      });
+      };
 
-      toast.success(`Assigned ${selectedSE.sitesupervisor_name} to ${selectedProject.project_name}`);
+      // Add buyer if selected
+      if (selectedBuyer) {
+        assignmentData.buyer_id = selectedBuyer.user_id;
+      }
+
+      await projectManagerService.assignProjectsToSiteSupervisor(assignmentData);
+
+      const assignmentMessage = selectedBuyer
+        ? `Assigned ${selectedSE.sitesupervisor_name} (SE) and ${selectedBuyer.full_name} (Buyer) to ${selectedProject.project_name}`
+        : `Assigned ${selectedSE.sitesupervisor_name} to ${selectedProject.project_name}`;
+
+      toast.success(assignmentMessage);
       setSelectedSE(null);
+      setSelectedBuyer(null);
+      setBuyerSearchQuery('');
       setShowAssignModal(false);
       await refetch();
       setFilterStatus('assigned');
@@ -745,9 +815,54 @@ const MyProjects: React.FC = () => {
                           <span>{formatDate(project.created_at)}</span>
                         </div>
                         {project.site_supervisor_id && project.site_supervisor_name && (
-                          <div className="flex items-center gap-1 px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md">
-                            <UserIcon className="w-3.5 h-3.5 text-purple-600" />
-                            <span className="text-xs font-medium text-purple-900">{project.site_supervisor_name}</span>
+                          <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md">
+                            <UserIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-600 flex-shrink-0" />
+                            <span className="text-[10px] sm:text-xs font-medium text-purple-900 truncate">{project.site_supervisor_name}</span>
+                            <div className="flex items-center gap-0.5 sm:gap-1 ml-auto">
+                              <button
+                                onClick={async () => {
+                                  const se = availableSEs.find(s => s.user_id === project.site_supervisor_id);
+                                  if (se) {
+                                    setEditingSE(se);
+                                    setEditSEData({
+                                      full_name: se.sitesupervisor_name,
+                                      email: se.email || '',
+                                      phone: se.phone || ''
+                                    });
+                                    setShowEditModal(true);
+                                  } else {
+                                    await loadAvailableSEs();
+                                    const refreshedSE = availableSEs.find(s => s.user_id === project.site_supervisor_id);
+                                    if (refreshedSE) {
+                                      setEditingSE(refreshedSE);
+                                      setEditSEData({
+                                        full_name: refreshedSE.sitesupervisor_name,
+                                        email: refreshedSE.email || '',
+                                        phone: refreshedSE.phone || ''
+                                      });
+                                      setShowEditModal(true);
+                                    }
+                                  }
+                                }}
+                                className="p-0.5 sm:p-1 text-purple-600 hover:text-blue-600 hover:bg-blue-100 rounded transition-all flex-shrink-0"
+                                title="Edit Site Engineer Details"
+                              >
+                                <PencilIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setSeToDelete({
+                                    id: project.site_supervisor_id,
+                                    name: project.site_supervisor_name
+                                  });
+                                  setShowDeleteConfirm(true);
+                                }}
+                                className="p-0.5 sm:p-1 text-purple-600 hover:text-red-600 hover:bg-red-100 rounded transition-all flex-shrink-0"
+                                title="Delete Site Engineer"
+                              >
+                                <XMarkIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -897,14 +1012,59 @@ const MyProjects: React.FC = () => {
                           {project.priority}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                         {project.site_supervisor_name ? (
-                          <div className="flex items-center gap-1 px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md w-fit">
-                            <UserIcon className="w-3.5 h-3.5 text-purple-600" />
-                            <span className="text-xs font-medium text-purple-900">{project.site_supervisor_name}</span>
+                          <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md w-fit max-w-full">
+                            <UserIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-600 flex-shrink-0" />
+                            <span className="text-[10px] sm:text-xs font-medium text-purple-900 truncate">{project.site_supervisor_name}</span>
+                            <div className="flex items-center gap-0.5 sm:gap-1 ml-auto flex-shrink-0">
+                              <button
+                                onClick={async () => {
+                                  const se = availableSEs.find(s => s.user_id === project.site_supervisor_id);
+                                  if (se) {
+                                    setEditingSE(se);
+                                    setEditSEData({
+                                      full_name: se.sitesupervisor_name,
+                                      email: se.email || '',
+                                      phone: se.phone || ''
+                                    });
+                                    setShowEditModal(true);
+                                  } else {
+                                    await loadAvailableSEs();
+                                    const refreshedSE = availableSEs.find(s => s.user_id === project.site_supervisor_id);
+                                    if (refreshedSE) {
+                                      setEditingSE(refreshedSE);
+                                      setEditSEData({
+                                        full_name: refreshedSE.sitesupervisor_name,
+                                        email: refreshedSE.email || '',
+                                        phone: refreshedSE.phone || ''
+                                      });
+                                      setShowEditModal(true);
+                                    }
+                                  }
+                                }}
+                                className="p-0.5 sm:p-1 text-purple-600 hover:text-blue-600 hover:bg-blue-100 rounded transition-all"
+                                title="Edit Site Engineer Details"
+                              >
+                                <PencilIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setSeToDelete({
+                                    id: project.site_supervisor_id,
+                                    name: project.site_supervisor_name
+                                  });
+                                  setShowDeleteConfirm(true);
+                                }}
+                                className="p-0.5 sm:p-1 text-purple-600 hover:text-red-600 hover:bg-red-100 rounded transition-all"
+                                title="Delete Site Engineer"
+                              >
+                                <XMarkIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                              </button>
+                            </div>
                           </div>
                         ) : (
-                          <span className="text-sm text-gray-400">Not assigned</span>
+                          <span className="text-xs sm:text-sm text-gray-400">Not assigned</span>
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -978,10 +1138,18 @@ const MyProjects: React.FC = () => {
         isOpen={showBOQModal}
         onClose={() => setShowBOQModal(false)}
         boq={selectedProject ? { boq_id: selectedProject.boq_id, boq_name: selectedProject.projectName } : null}
-        onEdit={() => {
+        onEdit={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? () => {
           setShowEditBOQModal(true);
           setShowBOQModal(false);
-        }}
+        } : undefined}
+        onApprove={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? () => {
+          setShowApproveModal(true);
+          setShowBOQModal(false);
+        } : undefined}
+        onReject={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? () => {
+          setShowRejectModal(true);
+          setShowBOQModal(false);
+        } : undefined}
         showNewPurchaseItems={true}
       />
 
@@ -1468,13 +1636,6 @@ const MyProjects: React.FC = () => {
                             Edit BOQ
                           </button>
                           <button
-                            onClick={() => setShowRejectModal(true)}
-                            className="px-4 py-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
-                          >
-                            <XMarkIcon className="w-4 h-4" />
-                            Reject BOQ
-                          </button>
-                          <button
                             onClick={() => setShowApproveModal(true)}
                             className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
                           >
@@ -1658,9 +1819,43 @@ const MyProjects: React.FC = () => {
                                         </div>
                                       </div>
                                     </div>
-                                    {isSelected && !isMaxCapacity && (
-                                      <CheckCircleIcon className="w-5 h-5 text-blue-600 flex-shrink-0" />
-                                    )}
+                                    <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
+                                      {/* Edit Icon */}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingSE(se);
+                                          setEditSEData({
+                                            full_name: se.sitesupervisor_name,
+                                            email: se.email || '',
+                                            phone: se.phone || ''
+                                          });
+                                          setShowEditModal(true);
+                                        }}
+                                        className="p-1 sm:p-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-100 rounded transition-all"
+                                        title="Edit Site Engineer"
+                                      >
+                                        <PencilIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                                      </button>
+                                      {/* Delete Icon */}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSeToDelete({
+                                            id: se.user_id,
+                                            name: se.sitesupervisor_name
+                                          });
+                                          setShowDeleteConfirm(true);
+                                        }}
+                                        className="p-1 sm:p-1.5 text-red-600 hover:text-red-700 hover:bg-red-100 rounded transition-all"
+                                        title="Delete Site Engineer"
+                                      >
+                                        <XMarkIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                                      </button>
+                                      {isSelected && !isMaxCapacity && (
+                                        <CheckCircleIcon className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 flex-shrink-0" />
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               );
@@ -1736,6 +1931,40 @@ const MyProjects: React.FC = () => {
                                         </div>
                                       </div>
                                     </div>
+                                    <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
+                                      {/* Edit Icon */}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingSE(se);
+                                          setEditSEData({
+                                            full_name: se.sitesupervisor_name,
+                                            email: se.email || '',
+                                            phone: se.phone || ''
+                                          });
+                                          setShowEditModal(true);
+                                        }}
+                                        className="p-1 sm:p-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-100 rounded transition-all"
+                                        title="Edit Site Engineer"
+                                      >
+                                        <PencilIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                                      </button>
+                                      {/* Delete Icon */}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSeToDelete({
+                                            id: se.user_id,
+                                            name: se.sitesupervisor_name
+                                          });
+                                          setShowDeleteConfirm(true);
+                                        }}
+                                        className="p-1 sm:p-1.5 text-red-600 hover:text-red-700 hover:bg-red-100 rounded transition-all"
+                                        title="Delete Site Engineer"
+                                      >
+                                        <XMarkIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
                               );
@@ -1760,13 +1989,80 @@ const MyProjects: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Buyer Selection (Optional) - COMMENTED OUT FOR NOW */}
+                {/* <div className="px-3 py-3 border-t border-gray-200 bg-orange-50">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                      <svg className="w-4 h-4 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                      </svg>
+                      Assign Buyer (Optional)
+                    </h3>
+                    {selectedBuyer && (
+                      <button
+                        onClick={() => setSelectedBuyer(null)}
+                        className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  <input
+                    type="text"
+                    placeholder="Search buyer..."
+                    value={buyerSearchQuery}
+                    onChange={(e) => setBuyerSearchQuery(e.target.value)}
+                    className="w-full px-3 py-1.5 text-sm border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 mb-2"
+                  />
+
+                  <div className="max-h-32 overflow-y-auto space-y-1.5">
+                    {availableBuyers
+                      .filter(buyer =>
+                        buyer.full_name.toLowerCase().includes(buyerSearchQuery.toLowerCase()) ||
+                        buyer.email.toLowerCase().includes(buyerSearchQuery.toLowerCase())
+                      )
+                      .map((buyer) => (
+                        <div
+                          key={buyer.user_id}
+                          onClick={() => setSelectedBuyer(buyer)}
+                          className={`border-2 rounded-lg p-2 transition-all cursor-pointer ${
+                            selectedBuyer?.user_id === buyer.user_id
+                              ? 'border-orange-500 bg-orange-100'
+                              : 'border-orange-200 hover:border-orange-300 bg-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center flex-shrink-0">
+                              <span className="text-white font-bold text-xs">
+                                {buyer.full_name.charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold text-sm text-gray-900 truncate">{buyer.full_name}</p>
+                              <p className="text-xs text-gray-600 truncate">{buyer.email}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    {availableBuyers.filter(buyer =>
+                      buyer.full_name.toLowerCase().includes(buyerSearchQuery.toLowerCase()) ||
+                      buyer.email.toLowerCase().includes(buyerSearchQuery.toLowerCase())
+                    ).length === 0 && (
+                      <p className="text-xs text-gray-500 text-center py-3">No buyers found</p>
+                    )}
+                  </div>
+                </div> */}
+
                 {/* Footer - Fixed */}
                 <div className="px-3 py-2.5 bg-white border-t border-gray-200 flex items-center justify-between gap-2 sticky bottom-0">
                   <button
                     onClick={() => {
                       setShowAssignModal(false);
                       setSelectedSE(null);
+                      setSelectedBuyer(null);
                       setSeSearchQuery('');
+                      setBuyerSearchQuery('');
                     }}
                     className="px-4 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
                   >
@@ -1789,7 +2085,7 @@ const MyProjects: React.FC = () => {
                     ) : (
                       <>
                         <CheckIcon className="w-4 h-4" />
-                        Confirm Assignment
+                        {selectedBuyer ? 'Assign SE & Buyer' : 'Confirm Assignment'}
                       </>
                     )}
                   </button>
@@ -2366,9 +2662,20 @@ const MyProjects: React.FC = () => {
                     setShowApproveModal(false);
                     setApprovalComments('');
                   }}
-                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                  className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
                 >
                   Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setShowApproveModal(false);
+                    setShowRejectModal(true);
+                  }}
+                  disabled={processingBOQ}
+                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <XMarkIcon className="w-5 h-5" />
+                  Reject
                 </button>
                 <button
                   onClick={async () => {
@@ -2395,7 +2702,7 @@ const MyProjects: React.FC = () => {
                   className="flex-1 px-4 py-2.5 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <CheckCircleIcon className="w-5 h-5" />
-                  {processingBOQ ? 'Approving...' : 'Approve BOQ'}
+                  {processingBOQ ? 'Approving...' : 'Approve'}
                 </button>
               </div>
             </div>
@@ -2677,12 +2984,144 @@ const MyProjects: React.FC = () => {
           created_at: selectedProject.created_at || '',
           updated_at: selectedProject.updated_at || '',
         } : null}
-        onSave={() => {
+        onSave={async () => {
           setShowEditBOQModal(false);
-          refetch();
           toast.success('BOQ updated successfully');
+
+          // Reload BOQ details to show updated data
+          if (selectedProject?.boq_id) {
+            await loadBOQDetails(selectedProject.boq_id);
+          }
+
+          // Refresh projects list in background
+          refetch();
+
+          // Reopen view modal with fresh data
+          setShowBOQModal(true);
         }}
       />
+
+      {/* Edit Site Engineer Modal */}
+      {showEditModal && editingSE && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-2xl w-full max-w-md"
+          >
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 rounded-t-xl">
+              <h2 className="text-xl font-bold text-white">Edit Site Engineer</h2>
+              <p className="text-sm text-blue-100 mt-1">Update details for {editingSE.sitesupervisor_name}</p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
+                <input
+                  type="text"
+                  value={editSEData.full_name}
+                  onChange={(e) => setEditSEData({ ...editSEData, full_name: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Enter full name"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+                <input
+                  type="email"
+                  value={editSEData.email}
+                  onChange={(e) => setEditSEData({ ...editSEData, email: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Enter email"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Phone *</label>
+                <input
+                  type="tel"
+                  value={editSEData.phone}
+                  onChange={(e) => setEditSEData({ ...editSEData, phone: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Enter phone number"
+                />
+              </div>
+            </div>
+
+            <div className="bg-gray-50 px-6 py-4 rounded-b-xl flex items-center justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingSE(null);
+                }}
+                className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSE}
+                className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-lg font-medium transition-all shadow-md flex items-center gap-2"
+              >
+                <CheckIcon className="w-5 h-5" />
+                Save Changes
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && seToDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-2xl w-full max-w-md"
+          >
+            <div className="bg-gradient-to-r from-red-600 to-red-700 px-6 py-4 rounded-t-xl">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-white bg-opacity-20 flex items-center justify-center">
+                  <XMarkIcon className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">Delete Site Engineer</h2>
+                  <p className="text-sm text-red-100 mt-0.5">This action cannot be undone</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <p className="text-gray-700 text-base">
+                Are you sure you want to delete Site Engineer{' '}
+                <span className="font-bold text-gray-900">"{seToDelete.name}"</span>?
+              </p>
+              <p className="text-sm text-gray-600 mt-3">
+                This will permanently remove the user from the system.
+              </p>
+            </div>
+
+            <div className="bg-gray-50 px-6 py-4 rounded-b-xl flex items-center justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setSeToDelete(null);
+                }}
+                className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteSE}
+                className="px-5 py-2.5 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-lg font-medium transition-all shadow-md flex items-center gap-2"
+              >
+                <XMarkIcon className="w-5 h-5" />
+                Delete
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

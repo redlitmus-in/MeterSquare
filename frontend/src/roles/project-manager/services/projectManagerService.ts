@@ -375,5 +375,19 @@ export const projectManagerService = {
       console.error('Error sending BOQ to estimator:', error);
       throw error;
     }
+  },
+
+  // Alias for deleteSiteSupervisor for backward compatibility
+  async deleteSE(siteSupervisorId: number): Promise<any> {
+    return this.deleteSiteSupervisor(siteSupervisorId);
+  },
+
+  // Alias for updateSiteSupervisor for backward compatibility
+  async updateSE(siteSupervisorId: number, data: {
+    full_name?: string;
+    email?: string;
+    phone?: string;
+  }): Promise<any> {
+    return this.updateSiteSupervisor(siteSupervisorId, data);
   }
 };

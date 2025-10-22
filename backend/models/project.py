@@ -12,6 +12,7 @@ class Project(db.Model):
     # user_id is a project manager id in a user table
     user_id = db.Column(db.Integer, nullable=True)
     site_supervisor_id = db.Column(db.Integer, nullable=True)
+    buyer_id = db.Column(db.Integer, nullable=True)  # Buyer assigned to project
     location = db.Column(db.String(255), nullable=True) 
     area = db.Column(db.String(100), nullable=True)
     floor_name = db.Column(db.String(255), nullable=True)  # Optional
@@ -48,6 +49,7 @@ class Project(db.Model):
             'project_name': self.project_name,
             'user_id': self.user_id,
             'site_supervisor_id': self.site_supervisor_id,
+            'buyer_id': self.buyer_id,
             'area': self.area,
             'location': self.location,
             'floor_name': self.floor_name,

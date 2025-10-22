@@ -649,17 +649,24 @@ def send_boq_to_estimator():
         # Get BOQ
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq:
-            return jsonify({"error": "BOQ not found"}), 404
+            log.error(f"BOQ {boq_id} not found or deleted")
+            return jsonify({"error": f"BOQ {boq_id} not found"}), 404
+
+        log.info(f"Found BOQ {boq_id} with project_id: {boq.project_id}")
 
         # Get BOQ details
-        boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        boq_details = BOQDetails.query.filter_by(boq_id=boq_id).first()
         if not boq_details:
-            return jsonify({"error": "BOQ details not found"}), 404
+            log.error(f"BOQ details not found for BOQ {boq_id}")
+            return jsonify({"error": f"BOQ details not found for BOQ {boq_id}"}), 404
 
-        # Get project
-        project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+        # Get project (allow soft-deleted projects for BOQ approval flow)
+        project = Project.query.filter_by(project_id=boq.project_id).first()
         if not project:
-            return jsonify({"error": "Project not found"}), 404
+            log.error(f"Project {boq.project_id} not found for BOQ {boq_id}")
+            return jsonify({"error": f"Project not found (ID: {boq.project_id}) for BOQ {boq_id}"}), 404
+
+        log.info(f"Found project {project.project_id}: {project.project_name}")
 
         # Get Estimator user
         estimator_role = Role.query.filter_by(role='estimator').first()

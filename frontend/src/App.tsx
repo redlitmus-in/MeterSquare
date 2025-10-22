@@ -57,6 +57,11 @@ const RoleBasedChangeRequests = lazy(() => import('@/components/routing/RoleBase
 // Site Engineer Pages
 const SiteEngineerProjects = lazy(() => import('@/roles/site-engineer/pages/MyProjects'));
 
+// Buyer Pages
+const BuyerDashboard = lazy(() => import('@/roles/buyer/pages/Dashboard'));
+const MaterialsToPurchase = lazy(() => import('@/roles/buyer/pages/MaterialsToPurchase'));
+const PurchaseOrders = lazy(() => import('@/roles/buyer/pages/PurchaseOrders'));
+
 // Admin Pages - Mix of custom admin pages and role pages
 const AdminUserManagement = lazy(() => import('@/pages/admin/UserManagement'));
 const AdminRoleManagement = lazy(() => import('@/pages/admin/RoleManagement'));
@@ -513,6 +518,10 @@ function App() {
             {/* Role-based Change Requests and Extra Material - Single route for all roles */}
             <Route path="change-requests" element={<RoleBasedChangeRequests />} />
             <Route path="extra-material" element={<RoleBasedChangeRequests />} />
+
+            {/* Buyer Routes */}
+            <Route path="materials" element={<MaterialsToPurchase />} />
+            <Route path="purchase-orders" element={<PurchaseOrders />} />
 
             {/* Admin Routes - Use original role pages directly */}
             <Route path="user-management" element={

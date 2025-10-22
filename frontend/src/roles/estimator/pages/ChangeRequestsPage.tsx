@@ -245,12 +245,6 @@ const ChangeRequestsPage: React.FC = () => {
                     <Eye className="h-3.5 w-3.5 mr-1" />
                     View
                   </Button>
-                  {request.status === 'pending' && (
-                    <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => handleEdit(request.cr_id)}>
-                      <Pencil className="h-3.5 w-3.5 mr-1" />
-                      Edit
-                    </Button>
-                  )}
                   {request.approval_required_from === 'estimator' && request.status !== 'approved' && request.status !== 'rejected' && (
                     <>
                       <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(request.cr_id)}>
@@ -350,14 +344,10 @@ const ChangeRequestsPage: React.FC = () => {
               </TabsTrigger>
               <TabsTrigger
                 value="escalated"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
-                style={{
-                  borderBottomColor: activeTab === 'escalated' ? 'rgb(36, 61, 138)' : 'transparent',
-                  color: activeTab === 'escalated' ? 'rgb(36, 61, 138)' : ''
-                }}
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-purple-400 data-[state=active]:text-purple-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
-                <TrendingUp className="w-4 h-4 mr-2" />
-                Escalated
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Completed
                 <span className="ml-1 sm:ml-2 text-gray-400">({stats.escalated})</span>
               </TabsTrigger>
               <TabsTrigger
@@ -453,25 +443,14 @@ const ChangeRequestsPage: React.FC = () => {
 
                         {/* Actions */}
                         <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              onClick={() => handleReview(request.cr_id)}
-                              className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
-                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                            >
-                              <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                              <span>Review</span>
-                            </button>
-                            {request.status === 'pending' && (
-                              <button
-                                onClick={() => handleEdit(request.cr_id)}
-                                className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] sm:text-xs h-8 rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
-                              >
-                                <Pencil className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                                <span>Edit</span>
-                              </button>
-                            )}
-                          </div>
+                          <button
+                            onClick={() => handleReview(request.cr_id)}
+                            className="w-full text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                            style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                          >
+                            <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                            <span>Review</span>
+                          </button>
                           {request.approval_required_from === 'estimator' && request.status !== 'approved' && request.status !== 'rejected' && (
                             <div className="grid grid-cols-2 gap-2">
                               <button
@@ -576,11 +555,11 @@ const ChangeRequestsPage: React.FC = () => {
 
             <TabsContent value="escalated" className="mt-0 p-0">
               <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Escalated to TD</h2>
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Completed Requests</h2>
                 {filteredRequests.length === 0 ? (
                   <div className="text-center py-12">
-                    <TrendingUp className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No escalated requests found</p>
+                    <CheckCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500 text-lg">No completed requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
                   <RequestsTable requests={filteredRequests} />
