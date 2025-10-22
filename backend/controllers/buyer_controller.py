@@ -439,7 +439,8 @@ def get_buyer_pending_purchases():
                             sub_total = float(sub_item.get('total_price', 0) or 0)
                             cr_total += sub_total
                             materials_list.append({
-                                "material_name": sub_item.get('sub_item_name', '') or sub_item.get('material_name', ''),
+                                "material_name": sub_item.get('material_name', ''),
+                                "sub_item_name": sub_item.get('sub_item_name', ''),
                                 "quantity": sub_item.get('quantity', 0),
                                 "unit": sub_item.get('unit', ''),
                                 "unit_price": sub_item.get('unit_price', 0),
@@ -452,6 +453,7 @@ def get_buyer_pending_purchases():
                     cr_total += material_total
                     materials_list.append({
                         "material_name": material.get('material_name', ''),
+                        "sub_item_name": material.get('sub_item_name', ''),
                         "quantity": material.get('quantity', 0),
                         "unit": material.get('unit', ''),
                         "unit_price": material.get('unit_price', 0),
@@ -459,6 +461,9 @@ def get_buyer_pending_purchases():
                     })
 
             total_cost += cr_total
+
+            # Get the first sub-item's sub_item_name for display (since all materials in a CR should be from same sub-item)
+            first_sub_item_name = materials_list[0].get('sub_item_name', 'N/A') if materials_list else 'N/A'
 
             pending_purchases.append({
                 "cr_id": cr.cr_id,
@@ -469,7 +474,7 @@ def get_buyer_pending_purchases():
                 "boq_id": cr.boq_id,
                 "boq_name": boq.boq_name if boq else "Unknown",
                 "item_name": cr.item_name or "N/A",
-                "sub_item_name": "Extra Materials",
+                "sub_item_name": first_sub_item_name,
                 "request_type": cr.request_type or "EXTRA_MATERIALS",
                 "reason": cr.justification or "",
                 "materials": materials_list,
@@ -544,7 +549,8 @@ def get_buyer_completed_purchases():
                             sub_total = float(sub_item.get('total_price', 0) or 0)
                             cr_total += sub_total
                             materials_list.append({
-                                "material_name": sub_item.get('sub_item_name', '') or sub_item.get('material_name', ''),
+                                "material_name": sub_item.get('material_name', ''),
+                                "sub_item_name": sub_item.get('sub_item_name', ''),
                                 "quantity": sub_item.get('quantity', 0),
                                 "unit": sub_item.get('unit', ''),
                                 "unit_price": sub_item.get('unit_price', 0),
@@ -556,6 +562,7 @@ def get_buyer_completed_purchases():
                     cr_total += material_total
                     materials_list.append({
                         "material_name": material.get('material_name', ''),
+                        "sub_item_name": material.get('sub_item_name', ''),
                         "quantity": material.get('quantity', 0),
                         "unit": material.get('unit', ''),
                         "unit_price": material.get('unit_price', 0),
@@ -563,6 +570,9 @@ def get_buyer_completed_purchases():
                     })
 
             total_cost += cr_total
+
+            # Get the first sub-item's sub_item_name for display (since all materials in a CR should be from same sub-item)
+            first_sub_item_name = materials_list[0].get('sub_item_name', 'N/A') if materials_list else 'N/A'
 
             completed_purchases.append({
                 "cr_id": cr.cr_id,
@@ -573,7 +583,7 @@ def get_buyer_completed_purchases():
                 "boq_id": cr.boq_id,
                 "boq_name": boq.boq_name if boq else "Unknown",
                 "item_name": cr.item_name or "N/A",
-                "sub_item_name": "Extra Materials",
+                "sub_item_name": first_sub_item_name,
                 "request_type": cr.request_type or "EXTRA_MATERIALS",
                 "reason": cr.justification or "",
                 "materials": materials_list,
@@ -720,7 +730,8 @@ def get_purchase_by_id(cr_id):
                         sub_total = float(sub_item.get('total_price', 0) or 0)
                         cr_total += sub_total
                         materials_list.append({
-                            "material_name": sub_item.get('sub_item_name', '') or sub_item.get('material_name', ''),
+                            "material_name": sub_item.get('material_name', ''),
+                            "sub_item_name": sub_item.get('sub_item_name', ''),
                             "quantity": sub_item.get('quantity', 0),
                             "unit": sub_item.get('unit', ''),
                             "unit_price": sub_item.get('unit_price', 0),
@@ -732,6 +743,7 @@ def get_purchase_by_id(cr_id):
                 cr_total += material_total
                 materials_list.append({
                     "material_name": material.get('material_name', ''),
+                    "sub_item_name": material.get('sub_item_name', ''),
                     "quantity": material.get('quantity', 0),
                     "unit": material.get('unit', ''),
                     "unit_price": material.get('unit_price', 0),

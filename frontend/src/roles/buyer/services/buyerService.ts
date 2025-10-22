@@ -4,6 +4,7 @@ const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
 
 export interface PurchaseMaterial {
   material_name: string;
+  sub_item_name?: string;  // Sub-item/scope name like "Protection"
   quantity: number;
   unit: string;
   unit_price: number;

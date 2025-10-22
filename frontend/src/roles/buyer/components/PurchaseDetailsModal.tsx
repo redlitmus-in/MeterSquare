@@ -238,6 +238,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       <TableHeader>
                         <TableRow className="bg-gray-50">
                           <TableHead className="font-semibold">Material Name</TableHead>
+                          <TableHead className="font-semibold">Sub-Item</TableHead>
                           <TableHead className="font-semibold">Quantity</TableHead>
                           <TableHead className="font-semibold">Unit Price</TableHead>
                           <TableHead className="font-semibold text-right">Total Price</TableHead>
@@ -248,6 +249,13 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                           <TableRow key={idx} className="hover:bg-gray-50">
                             <TableCell className="font-medium">{material.material_name}</TableCell>
                             <TableCell>
+                              {material.sub_item_name && (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                  {material.sub_item_name}
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
                               {material.quantity} {material.unit}
                             </TableCell>
                             <TableCell>{formatCurrency(material.unit_price)}</TableCell>
@@ -257,7 +265,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                           </TableRow>
                         ))}
                         <TableRow className="bg-purple-50 font-bold">
-                          <TableCell colSpan={3} className="text-right">Total Cost:</TableCell>
+                          <TableCell colSpan={4} className="text-right">Total Cost:</TableCell>
                           <TableCell className="text-right text-purple-700 text-lg">
                             {formatCurrency(purchase.total_cost)}
                           </TableCell>

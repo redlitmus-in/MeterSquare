@@ -12,7 +12,8 @@ import {
   TableCellsIcon,
   Squares2X2Icon,
   PencilIcon,
-  PaperAirplaneIcon
+  PaperAirplaneIcon,
+  CheckBadgeIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import axios from 'axios';
@@ -47,7 +48,7 @@ interface ExtraMaterialRequest {
 
 const ExtraMaterialPage: React.FC = () => {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<'pending' | 'request' | 'approved' | 'rejected'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'request' | 'approved' | 'rejected' | 'complete'>('pending');
   const [viewMode, setViewMode] = useState<'table' | 'card'>('card');
   const [showForm, setShowForm] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
@@ -130,9 +131,9 @@ const ExtraMaterialPage: React.FC = () => {
         }));
       });
 
-      // Transform approved materials (only SE's own approved requests)
+      // Transform approved materials (only SE's own approved requests WITHOUT purchase completion)
       const filteredApproved = seRequests
-        .filter((cr: any) => cr.status === 'approved')
+        .filter((cr: any) => cr.status === 'approved' && !cr.purchase_completion_date)
         .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
         .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea))
         .filter((cr: any) => !filterItem || cr.item_id === filterItem);
@@ -194,11 +195,44 @@ const ExtraMaterialPage: React.FC = () => {
         }));
       });
 
+      // Transform completed materials (purchase completed by buyer - status is 'purchase_completed')
+      const filteredCompleted = seRequests
+        .filter((cr: any) => cr.status === 'purchase_completed')
+        .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
+        .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
+
+      const transformedCompleted = filteredCompleted.flatMap((cr: any) => {
+        const materials = cr.materials_data || [];
+        return materials.map((mat: any) => ({
+          id: cr.cr_id,
+          project_id: cr.project_id,
+          project_name: cr.project_name,
+          area_id: cr.area_id,
+          area_name: cr.area_name,
+          boq_item_id: cr.item_id,
+          boq_item_name: cr.item_name,
+          sub_item_id: mat.master_material_id,
+          sub_item_name: mat.material_name,
+          quantity: mat.quantity,
+          unit_rate: mat.unit_price,
+          total_cost: mat.total_price,
+          reason_for_new_sub_item: mat.reason,
+          requested_by: cr.requested_by_name,
+          overhead_percent: cr.percentage_of_item_overhead,
+          status: cr.status,
+          created_at: cr.created_at,
+          remarks: cr.justification,
+          purchase_completed_by: cr.purchase_completed_by_name,
+          purchase_completion_date: cr.purchase_completion_date
+        }));
+      });
+
       return {
         pending: transformedPending,
         underReview: transformedUnderReview,
         approved: transformedApproved,
-        rejected: transformedRejected
+        rejected: transformedRejected,
+        completed: transformedCompleted
       };
     }
   );
@@ -207,6 +241,7 @@ const ExtraMaterialPage: React.FC = () => {
   const underReviewMaterials = useMemo(() => materialsData?.underReview || [], [materialsData]);
   const approvedMaterials = useMemo(() => materialsData?.approved || [], [materialsData]);
   const rejectedMaterials = useMemo(() => materialsData?.rejected || [], [materialsData]);
+  const completedMaterials = useMemo(() => materialsData?.completed || [], [materialsData]);
 
   useEffect(() => {
     refetch();
@@ -403,6 +438,19 @@ const ExtraMaterialPage: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <XCircleIcon className="w-5 h-5" />
                   Rejected ({rejectedMaterials.length})
+                </div>
+              </button>
+              <button
+                onClick={() => setActiveTab('complete')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'complete'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <CheckBadgeIcon className="w-5 h-5" />
+                  Complete ({completedMaterials.length})
                 </div>
               </button>
             </nav>
@@ -1106,6 +1154,183 @@ const ExtraMaterialPage: React.FC = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                             {request.rejected_by || 'N/A'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <button
+                              onClick={() => handleViewDetails(request.id)}
+                              className="text-blue-600 hover:text-blue-800 font-medium"
+                            >
+                              <EyeIcon className="w-4 h-4 inline mr-1" />
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        ) : activeTab === 'complete' ? (
+          <motion.div
+            key="complete"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Completed Purchases</h2>
+            {loading ? (
+              <div className="flex justify-center items-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
+              </div>
+            ) : completedMaterials.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+                <CheckBadgeIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No Completed Purchases</h3>
+                <p className="text-gray-500">Purchases completed by buyer will appear here</p>
+              </div>
+            ) : viewMode === 'card' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {completedMaterials.map((request) => (
+                  <motion.div
+                    key={request.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white rounded-lg border border-blue-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                  >
+                    <div className="p-4">
+                      <div className="flex items-start justify-between mb-2">
+                        <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-blue-100 text-blue-700 border-blue-300">
+                          <CheckBadgeIcon className="w-4 h-4" />
+                          Complete
+                        </span>
+                      </div>
+
+                      <div className="space-y-2 text-sm text-gray-600 mb-4">
+                        <div>
+                          <p className="font-medium text-gray-900">{request.project_name}</p>
+                          <p className="text-xs text-gray-500">{request.area_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">BOQ Item</p>
+                          <p className="font-medium">{request.boq_item_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Sub-Item</p>
+                          <p className="font-medium">{request.sub_item_name}</p>
+                        </div>
+                        <div className="flex justify-between pt-2 border-t">
+                          <div>
+                            <p className="text-xs text-gray-500">Quantity</p>
+                            <p className="font-semibold">{request.quantity}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-500">Total Cost</p>
+                            <p className="font-semibold text-blue-600">AED {request.total_cost.toLocaleString()}</p>
+                          </div>
+                        </div>
+
+                        {/* Purchase Completion Details */}
+                        <div className="pt-2 border-t bg-blue-50 -mx-4 px-4 py-2 mt-3">
+                          <p className="text-xs font-medium text-blue-900">Purchase Completed</p>
+                          {request.purchase_completed_by && (
+                            <p className="text-xs text-blue-700 mt-1">
+                              By: <span className="font-medium">{request.purchase_completed_by}</span>
+                            </p>
+                          )}
+                          {request.purchase_completion_date && (
+                            <p className="text-xs text-blue-600 mt-0.5">
+                              {new Date(request.purchase_completion_date).toLocaleString('en-US', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleViewDetails(request.id)}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                      >
+                        <EyeIcon className="w-4 h-4" />
+                        View Details
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Request ID
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Project / Area
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          BOQ Item
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Sub-Item
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Quantity
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Total Cost
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Completed By
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Completed Date
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {completedMaterials.map((request) => (
+                        <tr key={request.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            EM-{request.id}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            <div>
+                              <p className="font-medium">{request.project_name}</p>
+                              <p className="text-xs text-gray-500">{request.area_name}</p>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {request.boq_item_name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {request.sub_item_name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {request.quantity}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">
+                            AED {request.total_cost.toLocaleString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {request.purchase_completed_by || 'N/A'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {request.purchase_completion_date
+                              ? new Date(request.purchase_completion_date).toLocaleDateString()
+                              : 'N/A'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
                             <button
