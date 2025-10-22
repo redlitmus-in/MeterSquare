@@ -61,6 +61,8 @@ const SiteEngineerProjects = lazy(() => import('@/roles/site-engineer/pages/MyPr
 const BuyerDashboard = lazy(() => import('@/roles/buyer/pages/Dashboard'));
 const MaterialsToPurchase = lazy(() => import('@/roles/buyer/pages/MaterialsToPurchase'));
 const PurchaseOrders = lazy(() => import('@/roles/buyer/pages/PurchaseOrders'));
+const VendorManagement = lazy(() => import('@/roles/buyer/pages/VendorManagement'));
+const VendorDetails = lazy(() => import('@/roles/buyer/pages/VendorDetails'));
 
 // Admin Pages - Mix of custom admin pages and role pages
 const AdminUserManagement = lazy(() => import('@/pages/admin/UserManagement'));
@@ -522,6 +524,8 @@ function App() {
             {/* Buyer Routes */}
             <Route path="materials" element={<MaterialsToPurchase />} />
             <Route path="purchase-orders" element={<PurchaseOrders />} />
+            <Route path="vendors" element={<VendorManagement />} />
+            <Route path="vendors/:vendorId" element={<VendorDetails />} />
 
             {/* Admin Routes - Use original role pages directly */}
             <Route path="user-management" element={

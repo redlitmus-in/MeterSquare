@@ -251,6 +251,8 @@ def get_all_pm_boqs():
 
 def get_all_pm():
     try:
+        from datetime import timedelta
+
         role = Role.query.filter_by(role='projectManager').first()
         if not role:
             return jsonify({"error": "Role 'projectManager' not found"}), 404
@@ -259,7 +261,16 @@ def get_all_pm():
         assigned_list = []
         unassigned_list = []
 
+        # Calculate online status dynamically: user is online if last_login was within last 5 minutes
+        current_time = datetime.utcnow()
+        online_threshold = timedelta(minutes=5)
+
         for pm in get_pms:
+            # Check online status based on user_status field
+            # Only "online" is considered online, everything else (offline/NULL) is offline
+            is_online = pm.user_status == 'online'
+            log.info(f"PM {pm.full_name}: user_status={pm.user_status}, is_online={is_online}")
+
             # Fetch all projects assigned to this PM
             projects = Project.query.filter_by(user_id=pm.user_id).all()
 
@@ -271,6 +282,7 @@ def get_all_pm():
                         "pm_name": pm.full_name,
                         "email": pm.email,
                         "phone": pm.phone,
+                        "is_active": is_online,  # Dynamic online status
                         "project_id": project.project_id,
                         "project_name": project.project_name if hasattr(project, "project_name") else None
                     })
@@ -282,6 +294,7 @@ def get_all_pm():
                     "full_name": pm.full_name,
                     "email": pm.email,
                     "phone": pm.phone,
+                    "is_active": is_online,  # Dynamic online status
                     "project_id": None
                 })
 

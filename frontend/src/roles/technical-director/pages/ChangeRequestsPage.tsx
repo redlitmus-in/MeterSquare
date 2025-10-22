@@ -34,6 +34,7 @@ import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
+import ApprovalWithBuyerModal from '@/components/modals/ApprovalWithBuyerModal';
 
 const ChangeRequestsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('pending');
@@ -44,6 +45,8 @@ const ChangeRequestsPage: React.FC = () => {
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
 
   // Fetch change requests from backend
   useEffect(() => {
@@ -67,18 +70,16 @@ const ChangeRequestsPage: React.FC = () => {
     }
   };
 
-  const handleApprove = async (crId: number) => {
-    try {
-      const response = await changeRequestService.approve(crId, 'Approved by Technical Director');
-      if (response.success) {
-        toast.success('Change request approved successfully');
-        loadChangeRequests();
-      } else {
-        toast.error(response.message);
-      }
-    } catch (error) {
-      toast.error('Failed to approve change request');
-    }
+  const handleApprove = (crId: number) => {
+    // Show buyer selection modal before approving
+    setApprovingCrId(crId);
+    setShowApprovalModal(true);
+  };
+
+  const handleApprovalSuccess = () => {
+    loadChangeRequests();
+    setShowApprovalModal(false);
+    setApprovingCrId(null);
   };
 
   const handleReject = async (crId: number) => {
@@ -134,11 +135,10 @@ const ChangeRequestsPage: React.FC = () => {
     setSelectedChangeRequest(null);
   };
 
-  const handleApproveFromModal = async () => {
+  const handleApproveFromModal = () => {
     if (!selectedChangeRequest) return;
-    await handleApprove(selectedChangeRequest.cr_id);
     setShowDetailsModal(false);
-    setSelectedChangeRequest(null);
+    handleApprove(selectedChangeRequest.cr_id);
   };
 
   const handleRejectFromModal = async () => {
@@ -755,6 +755,20 @@ const ChangeRequestsPage: React.FC = () => {
           }}
           changeRequest={selectedChangeRequest}
           onSuccess={handleEditSuccess}
+        />
+      )}
+
+      {/* Approval with Buyer Selection Modal */}
+      {approvingCrId && (
+        <ApprovalWithBuyerModal
+          isOpen={showApprovalModal}
+          onClose={() => {
+            setShowApprovalModal(false);
+            setApprovingCrId(null);
+          }}
+          crId={approvingCrId}
+          crName={`CR-${approvingCrId}`}
+          onSuccess={handleApprovalSuccess}
         />
       )}
     </div>

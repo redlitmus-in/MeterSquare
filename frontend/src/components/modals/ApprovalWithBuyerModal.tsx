@@ -3,13 +3,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, CheckCircle, User } from 'lucide-react';
 import { changeRequestService } from '@/services/changeRequestService';
 import { toast } from 'sonner';
-import Mod ernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface Buyer {
   user_id: number;
   full_name: string;
   email: string;
   username: string;
+  is_active: boolean;
 }
 
 interface ApprovalWithBuyerModalProps {
@@ -151,19 +152,106 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
                         </p>
                       </div>
                     ) : (
-                      <select
-                        value={selectedBuyerId || ''}
-                        onChange={(e) => setSelectedBuyerId(Number(e.target.value))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                        required
-                      >
-                        <option value="">Select a buyer</option>
-                        {buyers.map(buyer => (
-                          <option key={buyer.user_id} value={buyer.user_id}>
-                            {buyer.full_name} ({buyer.email})
-                          </option>
+                      <div className="border border-gray-300 rounded-lg max-h-60 overflow-y-auto p-3 space-y-4">
+                        {/* Online Buyers Section */}
+                        {buyers.filter(b => b.is_active === true).length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <User className="w-4 h-4 text-green-600" />
+                              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                              <h3 className="text-xs font-bold text-green-700 uppercase tracking-wide">Online</h3>
+                              <div className="flex-1 h-px bg-green-200"></div>
+                            </div>
+                            <div className="space-y-2">
+                              {buyers.filter(b => b.is_active === true).map((buyer) => (
+                          <div
+                            key={buyer.user_id}
+                            onClick={() => setSelectedBuyerId(buyer.user_id)}
+                            className={`
+                              flex items-center gap-3 p-3 cursor-pointer transition-colors rounded-lg border-2
+                              ${selectedBuyerId === buyer.user_id ? 'bg-green-50 border-green-500' : 'border-gray-200 hover:border-gray-300 bg-white'}
+                            `}
+                          >
+                            {/* Online Status Indicator */}
+                            <div className="relative">
+                              <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white font-semibold">
+                                {buyer.full_name.charAt(0).toUpperCase()}
+                              </div>
+                              <div
+                                className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white bg-green-500"
+                                title="Online"
+                              />
+                            </div>
+
+                            {/* Buyer Info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-semibold text-gray-900 truncate">
+                                  {buyer.full_name}
+                                </p>
+                                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-green-100 text-green-700">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                                  Online
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-500 truncate">{buyer.email}</p>
+                            </div>
+
+                            {/* Selected Checkmark */}
+                            {selectedBuyerId === buyer.user_id && (
+                              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                            )}
+                          </div>
                         ))}
-                      </select>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Offline Buyers Section */}
+                        {buyers.filter(b => b.is_active !== true).length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <User className="w-4 h-4 text-gray-500" />
+                              <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                              <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wide">Offline</h3>
+                              <div className="flex-1 h-px bg-gray-200"></div>
+                            </div>
+                            <div className="space-y-2">
+                              {buyers.filter(b => b.is_active !== true).map((buyer) => (
+                          <div
+                            key={buyer.user_id}
+                            className="flex items-center gap-3 p-3 cursor-not-allowed transition-colors rounded-lg border-2 border-gray-200 bg-gray-50 opacity-60"
+                          >
+                            {/* Offline Status Indicator */}
+                            <div className="relative">
+                              <div className="w-10 h-10 bg-gradient-to-br from-gray-400 to-gray-500 rounded-full flex items-center justify-center text-white font-semibold">
+                                {buyer.full_name.charAt(0).toUpperCase()}
+                              </div>
+                              <div
+                                className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white bg-gray-400"
+                                title="Offline"
+                              />
+                            </div>
+
+                            {/* Buyer Info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-semibold text-gray-700 truncate">
+                                  {buyer.full_name}
+                                </p>
+                                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-gray-200 text-gray-700">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+                                  Offline
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-500 truncate">{buyer.email}</p>
+                            </div>
+                          </div>
+                        ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
                     <p className="text-xs text-gray-500 mt-2">
                       The selected buyer will be notified to complete the purchase

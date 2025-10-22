@@ -389,9 +389,10 @@ def get_all_change_requests():
                 query = query.filter_by(requested_by_user_id=user_id)
         elif user_role in ['projectmanager', 'project_manager']:
             # PM sees:
-            # 1. Their own requests
+            # 1. Their own requests (all statuses)
             # 2. Requests from SEs that need PM approval (approval_required_from = 'project_manager')
-            # 3. ALL requests from their projects (for extra materials page)
+            # 3. Requests approved by PM (where pm_approved_by_user_id is set) - stays visible in approved tab
+            # 4. ALL requests from their projects (for extra materials page)
             from sqlalchemy import or_, and_
 
             # Get projects assigned to this PM
@@ -402,29 +403,32 @@ def get_all_change_requests():
                 or_(
                     ChangeRequest.requested_by_user_id == user_id,  # PM's own requests
                     ChangeRequest.approval_required_from == 'project_manager',  # Requests needing PM approval
+                    ChangeRequest.pm_approved_by_user_id == user_id,  # Requests approved by this PM (shows in approved tab even after TD/Est/Buyer approval)
                     ChangeRequest.project_id.in_(pm_project_ids) if pm_project_ids else False  # All requests from PM's projects
                 )
             )
         elif user_role == 'estimator':
             # Estimator sees:
             # 1. Requests where approval_required_from = 'estimator' (pending estimator approval)
-            # 2. Requests already approved by estimator (status='assigned_to_buyer' or 'purchase_complete')
+            # 2. Requests approved by estimator (where approved_by_user_id is set)
+            # This includes requests that moved to buyer or completed - they stay visible in "approved" tab
             from sqlalchemy import or_
             query = query.filter(
                 or_(
-                    ChangeRequest.approval_required_from == 'estimator',
-                    ChangeRequest.status.in_(['assigned_to_buyer', 'purchase_complete'])  # Show requests Estimator has approved
+                    ChangeRequest.approval_required_from == 'estimator',  # Pending requests
+                    ChangeRequest.approved_by_user_id.isnot(None)  # Approved by estimator (shows in approved tab even after buyer completes)
                 )
             )
         elif user_role in ['technical_director', 'technicaldirector']:
             # TD sees:
             # 1. Requests where approval_required_from = 'technical_director' (pending TD approval)
-            # 2. Requests already approved by TD (all statuses after TD approval)
+            # 2. Requests approved by TD (where td_approved_by_user_id is set)
+            # This includes requests that moved to buyer or completed - they stay visible in "approved" tab
             from sqlalchemy import or_
             query = query.filter(
                 or_(
-                    ChangeRequest.approval_required_from == 'technical_director',
-                    ChangeRequest.status.in_(['assigned_to_buyer', 'purchase_complete'])  # Show requests TD has approved
+                    ChangeRequest.approval_required_from == 'technical_director',  # Pending requests
+                    ChangeRequest.td_approved_by_user_id.isnot(None)  # Approved by TD (shows in approved tab even after buyer completes)
                 )
             )
         elif user_role == 'buyer':
@@ -622,15 +626,21 @@ def approve_change_request(cr_id):
             change_request.approval_required_from = CR_CONFIG.ROLE_BUYER
             change_request.current_approver_role = CR_CONFIG.ROLE_BUYER
 
+            # Get buyer role_id
+            from models.role import Role
+            buyer_role = Role.query.filter_by(role='buyer', is_deleted=False).first()
+
             # Get buyer in priority order: 1) selected by user, 2) project buyer, 3) first available buyer
             buyer = None
 
             # Priority 1: User selected a specific buyer
             if selected_buyer_id:
-                buyer = User.query.filter_by(user_id=selected_buyer_id, role_name='buyer', is_deleted=False).first()
-                if buyer:
+                buyer = User.query.filter_by(user_id=selected_buyer_id, is_deleted=False).first()
+                # Verify the user is actually a buyer
+                if buyer and buyer_role and buyer.role_id == buyer_role.role_id:
                     log.info(f"TD selected buyer {buyer.full_name} (ID: {buyer.user_id}) for CR {cr_id}")
                 else:
+                    buyer = None
                     log.warning(f"Selected buyer_id {selected_buyer_id} not found or not a buyer")
 
             # Priority 2: Try project buyer if no buyer selected or selected buyer not found
@@ -642,8 +652,8 @@ def approve_change_request(cr_id):
                         log.info(f"Using project buyer {buyer.full_name} (ID: {buyer.user_id})")
 
             # Priority 3: Use first available buyer in system
-            if not buyer:
-                buyer = User.query.filter_by(role_name='buyer', is_deleted=False).first()
+            if not buyer and buyer_role:
+                buyer = User.query.filter_by(role_id=buyer_role.role_id, is_deleted=False).first()
                 if buyer:
                     log.info(f"No buyer assigned to project {change_request.project_id}, using system buyer: {buyer.full_name}")
 
@@ -677,15 +687,21 @@ def approve_change_request(cr_id):
             change_request.current_approver_role = CR_CONFIG.ROLE_BUYER
             change_request.updated_at = datetime.utcnow()
 
+            # Get buyer role_id
+            from models.role import Role
+            buyer_role = Role.query.filter_by(role='buyer', is_deleted=False).first()
+
             # Get buyer in priority order: 1) selected by user, 2) project buyer, 3) first available buyer
             buyer = None
 
             # Priority 1: User selected a specific buyer
             if selected_buyer_id:
-                buyer = User.query.filter_by(user_id=selected_buyer_id, role_name='buyer', is_deleted=False).first()
-                if buyer:
+                buyer = User.query.filter_by(user_id=selected_buyer_id, is_deleted=False).first()
+                # Verify the user is actually a buyer
+                if buyer and buyer_role and buyer.role_id == buyer_role.role_id:
                     log.info(f"Estimator selected buyer {buyer.full_name} (ID: {buyer.user_id}) for CR {cr_id}")
                 else:
+                    buyer = None
                     log.warning(f"Selected buyer_id {selected_buyer_id} not found or not a buyer")
 
             # Priority 2: Try project buyer if no buyer selected or selected buyer not found
@@ -697,8 +713,8 @@ def approve_change_request(cr_id):
                         log.info(f"Using project buyer {buyer.full_name} (ID: {buyer.user_id})")
 
             # Priority 3: Use first available buyer in system
-            if not buyer:
-                buyer = User.query.filter_by(role_name='buyer', is_deleted=False).first()
+            if not buyer and buyer_role:
+                buyer = User.query.filter_by(role_id=buyer_role.role_id, is_deleted=False).first()
                 if buyer:
                     log.info(f"No buyer assigned to project {change_request.project_id}, using system buyer: {buyer.full_name}")
 
@@ -1394,19 +1410,43 @@ def get_all_buyers():
     Used by Estimator/TD to select buyer when approving change requests
     """
     try:
-        # Get all active buyers
+        from models.role import Role
+        from datetime import timedelta
+
+        # Get buyer role_id first
+        buyer_role = Role.query.filter_by(role='buyer', is_deleted=False).first()
+        if not buyer_role:
+            log.warning("Buyer role not found in roles table")
+            return jsonify({
+                "success": True,
+                "buyers": [],
+                "count": 0,
+                "message": "No buyer role configured"
+            }), 200
+
+        # Get all active buyers using role_id
         buyers = User.query.filter_by(
-            role_name='buyer',
+            role_id=buyer_role.role_id,
             is_deleted=False
         ).all()
 
+        # Calculate online status dynamically: user is online if last_login was within last 5 minutes
+        current_time = datetime.utcnow()
+        online_threshold = timedelta(minutes=5)
+
         buyers_list = []
         for buyer in buyers:
+            # Check online status based on user_status field
+            # Only "online" is considered online, everything else (offline/NULL) is offline
+            is_online = buyer.user_status == 'online'
+            log.info(f"Buyer {buyer.full_name}: user_status={buyer.user_status}, is_online={is_online}")
+
             buyers_list.append({
                 'user_id': buyer.user_id,
                 'full_name': buyer.full_name,
                 'email': buyer.email,
-                'username': buyer.username
+                'username': buyer.email,  # Use email as username since User model doesn't have username
+                'is_active': is_online  # Dynamic online status based on last_login
             })
 
         return jsonify({
