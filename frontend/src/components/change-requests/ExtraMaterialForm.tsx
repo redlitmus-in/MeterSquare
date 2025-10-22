@@ -407,26 +407,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         return;
       }
 
-      if (material.isNew && (!material.reasonForNew || material.reasonForNew.length < 10)) {
-        toast.error(`New material "${material.materialName}" requires a reason (min 10 characters)`);
-        return;
-      }
-
-      // Validate per-material justification (required for ALL materials)
-      if (!material.justification || material.justification.trim().length < 20) {
-        toast.error(`Material "${material.materialName}" requires a justification (minimum 20 characters)`);
-        return;
-      }
-
       if (material.quantity <= 0 || material.unitRate <= 0) {
         toast.error(`Material "${material.materialName}" must have positive quantity and unit rate`);
         return;
       }
     }
 
-    // Overall justification is now optional (since we have per-material justifications)
+    // Overall justification is required
     if (!justification || justification.trim().length < 20) {
-      toast.error('Please provide an overall justification (minimum 20 characters)');
+      toast.error('Please provide a justification (minimum 20 characters)');
       return;
     }
 
@@ -931,18 +920,6 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           placeholder="Enter material name"
                         />
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Reason for New Material <span className="text-red-500">*</span>
-                        </label>
-                        <textarea
-                          value={material.reasonForNew}
-                          onChange={(e) => updateMaterial(material.id, { reasonForNew: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                          rows={2}
-                          placeholder="Why is this new material needed? (min 10 chars)"
-                        />
-                      </div>
                     </div>
                   ) : (
                     <div className="mb-3 space-y-2">
@@ -1011,29 +988,6 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                     </div>
                   </div>
 
-                  {/* Per-Material Justification - REQUIRED FOR ALL MATERIALS */}
-                  <div className="mt-3">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Justification / Reason <span className="text-red-500">*</span>
-                    </label>
-                    <textarea
-                      value={material.justification}
-                      onChange={(e) => updateMaterial(material.id, { justification: e.target.value })}
-                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 ${
-                        material.justification.trim().length > 0 && material.justification.trim().length < 20
-                          ? 'border-red-500'
-                          : 'border-gray-300'
-                      }`}
-                      rows={2}
-                      placeholder="Why is this material needed? (minimum 20 characters)"
-                      required
-                    />
-                    {material.justification.trim().length > 0 && material.justification.trim().length < 20 && (
-                      <p className="text-sm text-red-600 mt-1">
-                        Justification must be at least 20 characters ({20 - material.justification.trim().length} more needed)
-                      </p>
-                    )}
-                  </div>
 
                   <div className="mt-2 text-right">
                     <span className="text-sm text-gray-600">
