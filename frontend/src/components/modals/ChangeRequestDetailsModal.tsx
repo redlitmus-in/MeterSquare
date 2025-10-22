@@ -73,16 +73,30 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const userIsEstimator = isEstimator(user);
   const userIsTechnicalDirector = isTechnicalDirector(user);
 
+  // Final statuses where no actions should be allowed
+  const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'approved', 'rejected'].includes(changeRequest.status);
+
+  // Check if the request has been approved by PM and is being sent to Estimator/TD
+  const isApprovedAndSentForward = changeRequest.status === 'under_review' &&
+                                    ['estimator', 'technical_director'].includes(changeRequest.approval_required_from || '');
+
   const canApproveReject = canApproveFromParent !== undefined
     ? canApproveFromParent
-    : (userIsEstimator || userIsTechnicalDirector) && changeRequest.status !== 'approved' && changeRequest.status !== 'rejected';
+    : (userIsEstimator || userIsTechnicalDirector) &&
+      changeRequest.status !== 'approved' &&
+      changeRequest.status !== 'rejected' &&
+      !isFinalStatus &&
+      !isApprovedAndSentForward;
 
   // Can edit if:
-  // 1. Status is pending/approved_by_pm AND user is requester, PM, or Estimator
+  // 1. Status is pending AND user is requester or PM
   // 2. OR user can approve/reject (which means they need to review it)
-  const canEdit = ((changeRequest.status === 'pending' || changeRequest.status === 'approved_by_pm') &&
-                  (changeRequest.requested_by_user_id === user?.user_id || userIsProjectManager || userIsEstimator)) ||
-                  canApproveReject;
+  // BUT NOT if it's already been approved by PM and sent forward
+  const canEdit = ((changeRequest.status === 'pending' &&
+                   (changeRequest.requested_by_user_id === user?.user_id || userIsProjectManager)) ||
+                   canApproveReject) &&
+                  !isFinalStatus &&
+                  !isApprovedAndSentForward;
 
   // Can send for review if the request is pending and user is the requester
   const canSendForReview = changeRequest.status === 'pending' &&
@@ -492,68 +506,71 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
             </div>
 
             {/* Footer - Responsive Actions */}
-            <div className="border-t border-gray-200 px-4 sm:px-6 py-3 sm:py-4 bg-gray-50 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3">
-              {canSendForReview && (
-                <button
-                  onClick={handleSendForReview}
-                  disabled={sendingForReview}
-                  className="w-full sm:w-auto px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base disabled:bg-gray-400"
-                >
-                  {sendingForReview ? (
-                    <>
-                      <ModernLoadingSpinners variant="dots" size="small" color="white" />
-                      Sending...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-4 h-4" />
-                      Send for Review
-                    </>
-                  )}
-                </button>
-              )}
-              {canEdit && (
-                <button
-                  onClick={() => {
-                    if (onEdit) {
-                      onEdit();
-                    } else {
-                      setShowEditModal(true);
-                    }
-                  }}
-                  className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base"
-                >
-                  <Edit className="w-4 h-4" />
-                  Edit Request
-                </button>
-              )}
-              {canApproveReject ? (
-                <>
+            {/* Hide footer completely if in accepted/final state */}
+            {!(isFinalStatus || isApprovedAndSentForward) && (
+              <div className="border-t border-gray-200 px-4 sm:px-6 py-3 sm:py-4 bg-gray-50 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3">
+                {canSendForReview && (
                   <button
-                    onClick={onReject}
-                    className="w-full sm:w-auto px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium text-sm sm:text-base"
+                    onClick={handleSendForReview}
+                    disabled={sendingForReview}
+                    className="w-full sm:w-auto px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base disabled:bg-gray-400"
                   >
-                    Reject
+                    {sendingForReview ? (
+                      <>
+                        <ModernLoadingSpinners variant="dots" size="small" color="white" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        Send for Review
+                      </>
+                    )}
                   </button>
+                )}
+                {canEdit && (
                   <button
-                    onClick={onApprove}
-                    className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base"
+                    onClick={() => {
+                      if (onEdit) {
+                        onEdit();
+                      } else {
+                        setShowEditModal(true);
+                      }
+                    }}
+                    className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base"
                   >
-                    <CheckCircle className="w-4 h-4" />
-                    Approve Request
+                    <Edit className="w-4 h-4" />
+                    Edit Request
                   </button>
-                </>
-              ) : (
-                !canEdit && (
-                  <button
-                    onClick={onClose}
-                    className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium text-sm sm:text-base"
-                  >
-                    Close
-                  </button>
-                )
-              )}
-            </div>
+                )}
+                {canApproveReject ? (
+                  <>
+                    <button
+                      onClick={onReject}
+                      className="w-full sm:w-auto px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium text-sm sm:text-base"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      onClick={onApprove}
+                      className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      Approve Request
+                    </button>
+                  </>
+                ) : (
+                  !canEdit && (
+                    <button
+                      onClick={onClose}
+                      className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium text-sm sm:text-base"
+                    >
+                      Close
+                    </button>
+                  )
+                )}
+              </div>
+            )}
           </motion.div>
         </div>
 
