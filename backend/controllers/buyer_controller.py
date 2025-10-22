@@ -386,10 +386,6 @@ def get_buyer_pending_purchases():
         current_user = g.user
         buyer_id = current_user['user_id']
 
-        print(f"\n{'='*80}")
-        print(f"[BUYER PURCHASES] Fetching for buyer_id: {buyer_id}")
-        print(f"{'='*80}\n")
-
         # Get change requests DIRECTLY assigned to this buyer (via assigned_to_buyer_user_id)
         change_requests = ChangeRequest.query.filter(
             ChangeRequest.status == 'assigned_to_buyer',
@@ -397,24 +393,18 @@ def get_buyer_pending_purchases():
             ChangeRequest.is_deleted == False
         ).all()
 
-        print(f">>> Found {len(change_requests)} CRs directly assigned to buyer {buyer_id}\n")
-
         pending_purchases = []
         total_cost = 0
 
         for cr in change_requests:
-            print(f"Processing CR-{cr.cr_id}: project_id={cr.project_id}, boq_id={cr.boq_id}")
-
             # Get project details
             project = Project.query.get(cr.project_id)
             if not project:
-                print(f"  WARNING: Project {cr.project_id} not found, skipping")
                 continue
 
             # Get BOQ details
             boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
             if not boq:
-                print(f"  WARNING: BOQ {cr.boq_id} not found, skipping")
                 continue
 
             # Use sub_items_data (new structure) or fallback to materials_data (legacy)
@@ -470,8 +460,6 @@ def get_buyer_pending_purchases():
 
             total_cost += cr_total
 
-            print(f"  CR-{cr.cr_id} total: AED {cr_total}, materials count: {len(materials_list)}")
-
             pending_purchases.append({
                 "cr_id": cr.cr_id,
                 "project_id": project.project_id,
@@ -491,13 +479,6 @@ def get_buyer_pending_purchases():
                 "approved_at": cr.approval_date.isoformat() if cr.approval_date else None,
                 "created_at": cr.created_at.isoformat() if cr.created_at else None
             })
-
-        print(f"\n{'='*80}")
-        print(f"[BUYER PURCHASES] Summary:")
-        print(f"  Total CRs processed: {len(pending_purchases)}")
-        print(f"  Total cost: AED {round(total_cost, 2)}")
-        print(f"{'='*80}\n")
-
         return jsonify({
             "success": True,
             "pending_purchases_count": len(pending_purchases),
