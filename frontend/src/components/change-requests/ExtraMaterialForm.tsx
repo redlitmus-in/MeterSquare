@@ -437,11 +437,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       boq_item_id: selectedItem.item_id,  // Also send item_id for reference
       boq_item_name: selectedItem.item_name,  // Send item name
       materials: materials.map(mat => ({
-        sub_item_id: mat.isNew ? null : mat.subItemId,
-        sub_item_name: mat.subItemName,
+        material_name: mat.materialName,  // Actual material name like "Bubble Wrap"
+        sub_item_id: mat.isNew ? null : mat.subItemId,  // Sub-item ID
+        sub_item_name: mat.subItemName,  // Sub-item name like "Protection"
         quantity: mat.quantity,
         unit: mat.unit,
         unit_rate: mat.unitRate,
+        master_material_id: mat.isNew ? null : mat.materialId,  // Material ID
         reason: mat.isNew ? mat.reasonForNew : null,
         justification: mat.justification  // Per-material justification
       })),

@@ -121,9 +121,9 @@ def create_change_request():
             # Direct API call - convert materials to sub_items format
             for mat in materials:
                 sub_items_data.append({
-                    'sub_item_id': mat.get('sub_item_id') or mat.get('master_material_id'),
-                    'sub_item_name': mat.get('sub_item_name') or mat.get('material_name'),
-                    'material_name': mat.get('material_name'),
+                    'sub_item_id': mat.get('sub_item_id'),  # Sub-item ID (e.g., "subitem_331_1_3")
+                    'sub_item_name': mat.get('sub_item_name'),  # Sub-item name (e.g., "Protection")
+                    'material_name': mat.get('material_name'),  # Material name (e.g., "Bubble Wrap")
                     'quantity': mat.get('quantity'),
                     'unit': mat.get('unit', 'nos'),
                     'unit_price': mat.get('unit_price'),
@@ -859,10 +859,14 @@ def complete_purchase_and_merge_to_boq(cr_id):
         # Add each material as a sub-item with special marking
         existing_materials = target_item.get('materials', [])
 
-        for material in materials:
+        # Get sub_items_data if available (preferred), otherwise use materials_data
+        materials_to_merge = change_request.sub_items_data or change_request.materials_data or []
+
+        for material in materials_to_merge:
             # Mark this material as from change request with planned_quantity = 0
             new_material = {
-                'material_name': material.get('material_name'),
+                'material_name': material.get('material_name'),  # Actual material name like "Bubble Wrap"
+                'sub_item_name': material.get('sub_item_name'),  # Sub-item name like "Protection"
                 'master_material_id': material.get('master_material_id'),
                 'quantity': material.get('quantity', 0),
                 'unit': material.get('unit', 'nos'),
@@ -1177,7 +1181,9 @@ def update_change_request(cr_id):
             })
 
             sub_items_data.append({
-                'sub_item_name': mat.get('material_name'),
+                'sub_item_id': mat.get('sub_item_id'),  # Sub-item ID
+                'sub_item_name': mat.get('sub_item_name'),  # Sub-item name (e.g., "Protection")
+                'material_name': mat.get('material_name'),  # Material name (e.g., "Bubble Wrap")
                 'quantity': quantity,
                 'unit': mat.get('unit', 'nos'),
                 'unit_price': unit_price,
