@@ -7,6 +7,9 @@ from controllers.buyer_controller import (
     delete_buyer,
     get_buyer_boq_materials,
     get_buyer_pending_purchases,
+    get_buyer_completed_purchases,
+    complete_purchase,
+    get_purchase_by_id,
     get_buyer_dashboard
 )
 from controllers.auth_controller import jwt_required
@@ -71,3 +74,24 @@ def get_buyer_boq_materials_route():
 def get_buyer_pending_purchases_route():
     """Get approved change requests (extra materials) for buyer to purchase"""
     return get_buyer_pending_purchases()
+
+
+@buyer_routes.route('/completed-purchases', methods=['GET'])
+@jwt_required
+def get_buyer_completed_purchases_route():
+    """Get completed purchases by buyer"""
+    return get_buyer_completed_purchases()
+
+
+@buyer_routes.route('/complete-purchase', methods=['POST'])
+@jwt_required
+def complete_purchase_route():
+    """Mark a purchase as complete"""
+    return complete_purchase()
+
+
+@buyer_routes.route('/purchase/<int:cr_id>', methods=['GET'])
+@jwt_required
+def get_purchase_by_id_route(cr_id):
+    """Get purchase details by change request ID"""
+    return get_purchase_by_id(cr_id)

@@ -389,9 +389,10 @@ def get_all_change_requests():
                 query = query.filter_by(requested_by_user_id=user_id)
         elif user_role in ['projectmanager', 'project_manager']:
             # PM sees:
-            # 1. Their own requests
+            # 1. Their own requests (all statuses)
             # 2. Requests from SEs that need PM approval (approval_required_from = 'project_manager')
-            # 3. ALL requests from their projects (for extra materials page)
+            # 3. Requests approved by PM (where pm_approved_by_user_id is set) - stays visible in approved tab
+            # 4. ALL requests from their projects (for extra materials page)
             from sqlalchemy import or_, and_
 
             # Get projects assigned to this PM
@@ -402,29 +403,32 @@ def get_all_change_requests():
                 or_(
                     ChangeRequest.requested_by_user_id == user_id,  # PM's own requests
                     ChangeRequest.approval_required_from == 'project_manager',  # Requests needing PM approval
+                    ChangeRequest.pm_approved_by_user_id == user_id,  # Requests approved by this PM (shows in approved tab even after TD/Est/Buyer approval)
                     ChangeRequest.project_id.in_(pm_project_ids) if pm_project_ids else False  # All requests from PM's projects
                 )
             )
         elif user_role == 'estimator':
             # Estimator sees:
             # 1. Requests where approval_required_from = 'estimator' (pending estimator approval)
-            # 2. Requests already approved by estimator (status='assigned_to_buyer' or 'purchase_complete')
+            # 2. Requests approved by estimator (where approved_by_user_id is set)
+            # This includes requests that moved to buyer or completed - they stay visible in "approved" tab
             from sqlalchemy import or_
             query = query.filter(
                 or_(
-                    ChangeRequest.approval_required_from == 'estimator',
-                    ChangeRequest.status.in_(['assigned_to_buyer', 'purchase_complete'])  # Show requests Estimator has approved
+                    ChangeRequest.approval_required_from == 'estimator',  # Pending requests
+                    ChangeRequest.approved_by_user_id.isnot(None)  # Approved by estimator (shows in approved tab even after buyer completes)
                 )
             )
         elif user_role in ['technical_director', 'technicaldirector']:
             # TD sees:
             # 1. Requests where approval_required_from = 'technical_director' (pending TD approval)
-            # 2. Requests already approved by TD (all statuses after TD approval)
+            # 2. Requests approved by TD (where td_approved_by_user_id is set)
+            # This includes requests that moved to buyer or completed - they stay visible in "approved" tab
             from sqlalchemy import or_
             query = query.filter(
                 or_(
-                    ChangeRequest.approval_required_from == 'technical_director',
-                    ChangeRequest.status.in_(['assigned_to_buyer', 'purchase_complete'])  # Show requests TD has approved
+                    ChangeRequest.approval_required_from == 'technical_director',  # Pending requests
+                    ChangeRequest.td_approved_by_user_id.isnot(None)  # Approved by TD (shows in approved tab even after buyer completes)
                 )
             )
         elif user_role == 'buyer':
@@ -1432,14 +1436,10 @@ def get_all_buyers():
 
         buyers_list = []
         for buyer in buyers:
-            # Calculate if buyer is online based on last_login time
-            is_online = False
-            if buyer.last_login is not None:
-                time_since_login = current_time - buyer.last_login
-                is_online = time_since_login <= online_threshold
-                log.info(f"Buyer {buyer.full_name}: last_login={buyer.last_login}, time_since_login={time_since_login.total_seconds():.0f}s, is_online={is_online}")
-            else:
-                log.info(f"Buyer {buyer.full_name}: last_login is None, is_online=False")
+            # Check online status based on user_status field
+            # Only "online" is considered online, everything else (offline/NULL) is offline
+            is_online = buyer.user_status == 'online'
+            log.info(f"Buyer {buyer.full_name}: user_status={buyer.user_status}, is_online={is_online}")
 
             buyers_list.append({
                 'user_id': buyer.user_id,

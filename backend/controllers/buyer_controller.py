@@ -510,3 +510,287 @@ def get_buyer_pending_purchases():
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to fetch pending purchases: {str(e)}"}), 500
+
+
+def get_buyer_completed_purchases():
+    """Get completed purchases by buyer"""
+    try:
+        current_user = g.user
+        buyer_id = current_user['user_id']
+
+        # Get change requests completed by this buyer
+        change_requests = ChangeRequest.query.filter(
+            ChangeRequest.status == 'purchase_completed',
+            ChangeRequest.purchase_completed_by_user_id == buyer_id,
+            ChangeRequest.is_deleted == False
+        ).all()
+
+        completed_purchases = []
+        total_cost = 0
+
+        for cr in change_requests:
+            # Get project details
+            project = Project.query.get(cr.project_id)
+            if not project:
+                continue
+
+            # Get BOQ details
+            boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
+            if not boq:
+                continue
+
+            # Process materials
+            sub_items_data = cr.sub_items_data or cr.materials_data or []
+            cr_total = 0
+            materials_list = []
+
+            if cr.sub_items_data:
+                for sub_item in sub_items_data:
+                    if isinstance(sub_item, dict):
+                        sub_materials = sub_item.get('materials', [])
+                        if sub_materials:
+                            for material in sub_materials:
+                                material_total = float(material.get('total_price', 0) or 0)
+                                cr_total += material_total
+                                materials_list.append({
+                                    "material_name": material.get('material_name', ''),
+                                    "quantity": material.get('quantity', 0),
+                                    "unit": material.get('unit', ''),
+                                    "unit_price": material.get('unit_price', 0),
+                                    "total_price": material_total
+                                })
+                        else:
+                            sub_total = float(sub_item.get('total_price', 0) or 0)
+                            cr_total += sub_total
+                            materials_list.append({
+                                "material_name": sub_item.get('sub_item_name', '') or sub_item.get('material_name', ''),
+                                "quantity": sub_item.get('quantity', 0),
+                                "unit": sub_item.get('unit', ''),
+                                "unit_price": sub_item.get('unit_price', 0),
+                                "total_price": sub_total
+                            })
+            else:
+                for material in sub_items_data:
+                    material_total = float(material.get('total_price', 0) or 0)
+                    cr_total += material_total
+                    materials_list.append({
+                        "material_name": material.get('material_name', ''),
+                        "quantity": material.get('quantity', 0),
+                        "unit": material.get('unit', ''),
+                        "unit_price": material.get('unit_price', 0),
+                        "total_price": material_total
+                    })
+
+            total_cost += cr_total
+
+            completed_purchases.append({
+                "cr_id": cr.cr_id,
+                "project_id": project.project_id,
+                "project_name": project.project_name,
+                "client": project.client or "Unknown Client",
+                "location": project.location or "Unknown Location",
+                "boq_id": cr.boq_id,
+                "boq_name": boq.boq_name if boq else "Unknown",
+                "item_name": cr.item_name or "N/A",
+                "sub_item_name": "Extra Materials",
+                "request_type": cr.request_type or "EXTRA_MATERIALS",
+                "reason": cr.justification or "",
+                "materials": materials_list,
+                "materials_count": len(materials_list),
+                "total_cost": round(cr_total, 2),
+                "approved_by": cr.approved_by_user_id,
+                "approved_at": cr.approval_date.isoformat() if cr.approval_date else None,
+                "created_at": cr.created_at.isoformat() if cr.created_at else None,
+                "status": "completed",
+                "purchase_completed_by_user_id": cr.purchase_completed_by_user_id,
+                "purchase_completed_by_name": cr.purchase_completed_by_name,
+                "purchase_completion_date": cr.purchase_completion_date.isoformat() if cr.purchase_completion_date else None,
+                "purchase_notes": cr.purchase_notes
+            })
+
+        return jsonify({
+            "success": True,
+            "completed_purchases_count": len(completed_purchases),
+            "total_cost": round(total_cost, 2),
+            "completed_purchases": completed_purchases
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching completed purchases: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to fetch completed purchases: {str(e)}"}), 500
+
+
+def complete_purchase():
+    """Mark a purchase as complete"""
+    try:
+        current_user = g.user
+        buyer_id = current_user['user_id']
+        buyer_name = current_user.get('full_name', 'Unknown Buyer')
+
+        data = request.get_json()
+        cr_id = data.get('cr_id')
+        notes = data.get('notes', '')
+
+        if not cr_id:
+            return jsonify({"error": "Change request ID is required"}), 400
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Verify it's assigned to this buyer
+        if cr.assigned_to_buyer_user_id != buyer_id:
+            return jsonify({"error": "This purchase is not assigned to you"}), 403
+
+        # Verify it's in the correct status
+        if cr.status != 'assigned_to_buyer':
+            return jsonify({"error": f"Purchase cannot be completed. Current status: {cr.status}"}), 400
+
+        # Update the change request
+        cr.status = 'purchase_completed'
+        cr.purchase_completed_by_user_id = buyer_id
+        cr.purchase_completed_by_name = buyer_name
+        cr.purchase_completion_date = datetime.utcnow()
+        cr.purchase_notes = notes
+        cr.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        log.info(f"Purchase CR-{cr_id} marked as complete by buyer {buyer_id}")
+
+        return jsonify({
+            "success": True,
+            "message": "Purchase marked as complete successfully",
+            "purchase": {
+                "cr_id": cr.cr_id,
+                "status": cr.status,
+                "purchase_completed_by_user_id": cr.purchase_completed_by_user_id,
+                "purchase_completed_by_name": cr.purchase_completed_by_name,
+                "purchase_completion_date": cr.purchase_completion_date.isoformat(),
+                "purchase_notes": cr.purchase_notes
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error completing purchase: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to complete purchase: {str(e)}"}), 500
+
+
+def get_purchase_by_id(cr_id):
+    """Get purchase details by change request ID"""
+    try:
+        current_user = g.user
+        buyer_id = current_user['user_id']
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Verify it's assigned to this buyer or completed by this buyer
+        if cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
+            return jsonify({"error": "You don't have access to this purchase"}), 403
+
+        # Get project details
+        project = Project.query.get(cr.project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Get BOQ details
+        boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Process materials
+        sub_items_data = cr.sub_items_data or cr.materials_data or []
+        cr_total = 0
+        materials_list = []
+
+        if cr.sub_items_data:
+            for sub_item in sub_items_data:
+                if isinstance(sub_item, dict):
+                    sub_materials = sub_item.get('materials', [])
+                    if sub_materials:
+                        for material in sub_materials:
+                            material_total = float(material.get('total_price', 0) or 0)
+                            cr_total += material_total
+                            materials_list.append({
+                                "material_name": material.get('material_name', ''),
+                                "quantity": material.get('quantity', 0),
+                                "unit": material.get('unit', ''),
+                                "unit_price": material.get('unit_price', 0),
+                                "total_price": material_total
+                            })
+                    else:
+                        sub_total = float(sub_item.get('total_price', 0) or 0)
+                        cr_total += sub_total
+                        materials_list.append({
+                            "material_name": sub_item.get('sub_item_name', '') or sub_item.get('material_name', ''),
+                            "quantity": sub_item.get('quantity', 0),
+                            "unit": sub_item.get('unit', ''),
+                            "unit_price": sub_item.get('unit_price', 0),
+                            "total_price": sub_total
+                        })
+        else:
+            for material in sub_items_data:
+                material_total = float(material.get('total_price', 0) or 0)
+                cr_total += material_total
+                materials_list.append({
+                    "material_name": material.get('material_name', ''),
+                    "quantity": material.get('quantity', 0),
+                    "unit": material.get('unit', ''),
+                    "unit_price": material.get('unit_price', 0),
+                    "total_price": material_total
+                })
+
+        purchase_status = 'completed' if cr.status == 'purchase_completed' else 'pending'
+
+        purchase = {
+            "cr_id": cr.cr_id,
+            "project_id": project.project_id,
+            "project_name": project.project_name,
+            "client": project.client or "Unknown Client",
+            "location": project.location or "Unknown Location",
+            "boq_id": cr.boq_id,
+            "boq_name": boq.boq_name,
+            "item_name": cr.item_name or "N/A",
+            "sub_item_name": "Extra Materials",
+            "request_type": cr.request_type or "EXTRA_MATERIALS",
+            "reason": cr.justification or "",
+            "materials": materials_list,
+            "materials_count": len(materials_list),
+            "total_cost": round(cr_total, 2),
+            "approved_by": cr.approved_by_user_id,
+            "approved_at": cr.approval_date.isoformat() if cr.approval_date else None,
+            "created_at": cr.created_at.isoformat() if cr.created_at else None,
+            "status": purchase_status,
+            "purchase_completed_by_user_id": cr.purchase_completed_by_user_id,
+            "purchase_completed_by_name": cr.purchase_completed_by_name,
+            "purchase_completion_date": cr.purchase_completion_date.isoformat() if cr.purchase_completion_date else None,
+            "purchase_notes": cr.purchase_notes
+        }
+
+        return jsonify({
+            "success": True,
+            "purchase": purchase
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching purchase {cr_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to fetch purchase: {str(e)}"}), 500

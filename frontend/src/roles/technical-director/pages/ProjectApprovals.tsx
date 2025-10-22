@@ -2666,14 +2666,31 @@ const ProjectApprovals: React.FC = () => {
                       />
                     </div>
 
-                    <div className="max-h-96 overflow-y-auto space-y-3">
-                      {allPMs
-                        .filter(pm =>
+                    <div className="max-h-96 overflow-y-auto space-y-4">
+                      {/* Filter PMs by search */}
+                      {(() => {
+                        const filteredPMs = allPMs.filter(pm =>
                           pmSearchQuery === '' ||
                           (pm.pm_name || pm.full_name)?.toLowerCase().includes(pmSearchQuery.toLowerCase()) ||
                           pm.email?.toLowerCase().includes(pmSearchQuery.toLowerCase())
-                        )
-                        .map((pm: any) => {
+                        );
+
+                        const onlinePMs = filteredPMs.filter(pm => pm.is_active === true);
+                        const offlinePMs = filteredPMs.filter(pm => pm.is_active !== true);
+
+                        return (
+                          <>
+                            {/* Online PMs Section */}
+                            {onlinePMs.length > 0 && (
+                              <div>
+                                <div className="flex items-center gap-2 mb-2 px-1">
+                                  <UserIcon className="w-4 h-4 text-green-600" />
+                                  <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                                  <h3 className="text-xs font-bold text-green-700 uppercase tracking-wide">Online</h3>
+                                  <div className="flex-1 h-px bg-green-200"></div>
+                                </div>
+                                <div className="space-y-2">
+                                  {onlinePMs.map((pm: any) => {
                           const isSelected = selectedPMId === pm.user_id;
                           const projectCount = pm.projectCount || 0;
                           const isAvailable = projectCount === 0;
@@ -2715,22 +2732,18 @@ const ProjectApprovals: React.FC = () => {
                                       {(pm.pm_name || pm.full_name).charAt(0).toUpperCase()}
                                     </div>
                                     <div
-                                      className={`
-                                        absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white
-                                        ${pm.is_active ? 'bg-green-500' : 'bg-gray-400'}
-                                      `}
-                                      title={pm.is_active ? 'Online' : 'Offline'}
+                                      className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white bg-green-500"
+                                      title="Online"
                                     />
                                   </div>
 
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
                                       <h4 className="font-semibold text-gray-900 text-sm">{pm.pm_name || pm.full_name}</h4>
-                                      {pm.is_active === true && (
-                                        <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">
-                                          Online
-                                        </span>
-                                      )}
+                                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-green-100 text-green-700">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                                        Online
+                                      </span>
                                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColor} ${statusBg} border whitespace-nowrap`}>
                                         {statusText}
                                       </span>
@@ -2793,6 +2806,100 @@ const ProjectApprovals: React.FC = () => {
                             </div>
                           );
                         })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Offline PMs Section */}
+                            {offlinePMs.length > 0 && (
+                              <div>
+                                <div className="flex items-center gap-2 mb-2 px-1">
+                                  <UserIcon className="w-4 h-4 text-gray-500" />
+                                  <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                                  <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wide">Offline</h3>
+                                  <div className="flex-1 h-px bg-gray-200"></div>
+                                </div>
+                                <div className="space-y-2">
+                                  {offlinePMs.map((pm: any) => {
+                          const projectCount = pm.projectCount || 0;
+                          const isAvailable = projectCount === 0;
+                          const isBusy = projectCount >= 1 && projectCount <= 3;
+                          const isOverloaded = projectCount > 3;
+
+                          let statusColor = '';
+                          let statusText = '';
+                          let statusBg = '';
+
+                          if (isAvailable) {
+                            statusColor = 'text-green-700';
+                            statusText = 'Available';
+                            statusBg = 'bg-green-50 border-green-200';
+                          } else if (isBusy) {
+                            statusColor = 'text-yellow-700';
+                            statusText = 'Busy';
+                            statusBg = 'bg-yellow-50 border-yellow-200';
+                          } else {
+                            statusColor = 'text-red-700';
+                            statusText = 'Overloaded';
+                            statusBg = 'bg-red-50 border-red-200';
+                          }
+
+                          return (
+                            <div key={pm.user_id}>
+                              <div className="border-2 border-gray-200 bg-gray-50 rounded-md px-3 py-2 cursor-not-allowed opacity-60">
+                                <div className="flex items-center gap-3">
+                                  {/* Avatar with Offline Status */}
+                                  <div className="relative flex-shrink-0">
+                                    <div className="w-9 h-9 bg-gradient-to-br from-gray-400 to-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                                      {(pm.pm_name || pm.full_name).charAt(0).toUpperCase()}
+                                    </div>
+                                    <div
+                                      className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white bg-gray-400"
+                                      title="Offline"
+                                    />
+                                  </div>
+
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <h4 className="font-semibold text-gray-700 text-sm">{pm.pm_name || pm.full_name}</h4>
+                                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-gray-200 text-gray-700">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+                                        Offline
+                                      </span>
+                                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColor} ${statusBg} border whitespace-nowrap`}>
+                                        {statusText}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-3 text-xs text-gray-500 flex-shrink-0">
+                                    <span className="max-w-[200px] truncate">{pm.email}</span>
+                                    <span className="whitespace-nowrap">{pm.phone}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-shrink-0">
+                                    <div className="flex items-center gap-1">
+                                      <BuildingOfficeIcon className="w-4 h-4 text-gray-400" />
+                                      <span className="font-medium text-gray-600 text-sm">{projectCount}</span>
+                                      <span className="text-gray-400 text-xs">{projectCount === 1 ? 'project' : 'projects'}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                                </div>
+                              </div>
+                            )}
+
+                            {filteredPMs.length === 0 && (
+                              <div className="text-center py-8">
+                                <UserIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                                <p className="text-gray-500">No Project Managers found</p>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
 
                     {allPMs.length === 0 && (

@@ -266,14 +266,10 @@ def get_all_pm():
         online_threshold = timedelta(minutes=5)
 
         for pm in get_pms:
-            # Calculate if PM is online based on last_login time
-            is_online = False
-            if pm.last_login is not None:
-                time_since_login = current_time - pm.last_login
-                is_online = time_since_login <= online_threshold
-                log.info(f"PM {pm.full_name}: last_login={pm.last_login}, time_since_login={time_since_login.total_seconds():.0f}s, is_online={is_online}")
-            else:
-                log.info(f"PM {pm.full_name}: last_login is None, is_online=False")
+            # Check online status based on user_status field
+            # Only "online" is considered online, everything else (offline/NULL) is offline
+            is_online = pm.user_status == 'online'
+            log.info(f"PM {pm.full_name}: user_status={pm.user_status}, is_online={is_online}")
 
             # Fetch all projects assigned to this PM
             projects = Project.query.filter_by(user_id=pm.user_id).all()

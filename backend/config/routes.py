@@ -11,6 +11,7 @@ from routes.change_request_routes import change_request_routes
 from routes.boq_tracking_routes import boq_tracking_routes
 from routes.buyer_routes import buyer_routes
 from routes.preliminary_routes import preliminary_routes
+from routes.vendor_routes import vendor_routes
 
 # Import and register the routes from the route blueprints
 
@@ -28,3 +29,4 @@ def initialize_routes(app):
     app.register_blueprint(boq_tracking_routes)
     app.register_blueprint(buyer_routes)
     app.register_blueprint(preliminary_routes)
+    app.register_blueprint(vendor_routes)

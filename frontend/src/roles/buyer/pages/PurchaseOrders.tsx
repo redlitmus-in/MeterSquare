@@ -1,16 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
 import {
   Search,
   ShoppingCart,
@@ -21,113 +13,91 @@ import {
   FileText,
   Package,
   Calendar,
-  LayoutGrid,
-  List
+  Eye,
+  Check,
+  DollarSign
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { useAutoSync } from '@/hooks/useAutoSync';
-
-interface PurchaseMaterial {
-  material_name: string;
-  quantity: number;
-  unit: string;
-  unit_price: number;
-  total_price: number;
-}
-
-interface PurchaseOrder {
-  cr_id: number;
-  project_id: number;
-  project_name: string;
-  client: string;
-  location: string;
-  boq_id: number;
-  boq_name: string;
-  item_name: string;
-  sub_item_name: string;
-  request_type: string;
-  reason: string;
-  materials: PurchaseMaterial[];
-  materials_count: number;
-  total_cost: number;
-  approved_by: number;
-  approved_at: string | null;
-  created_at: string;
-  purchase_status?: 'ongoing' | 'complete';
-}
-
-interface PurchaseOrdersResponse {
-  success: boolean;
-  pending_purchases_count: number;
-  total_cost: number;
-  projects_count: number;
-  pending_purchases: PurchaseOrder[];
-}
+import { buyerService, Purchase, PurchaseListResponse } from '../services/buyerService';
+import PurchaseDetailsModal from '../components/PurchaseDetailsModal';
 
 const PurchaseOrders: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'ongoing' | 'complete'>('ongoing');
+  const [activeTab, setActiveTab] = useState<'pending' | 'completed'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [completingPurchaseId, setCompletingPurchaseId] = useState<number | null>(null);
 
-  // Fetch approved change requests (extra materials) with auto-sync
-  const { data: purchaseData, isLoading} = useAutoSync<PurchaseOrdersResponse>({
+  // Fetch pending purchases
+  const { data: pendingData, isLoading: isPendingLoading, refetch: refetchPending } = useAutoSync<PurchaseListResponse>({
     queryKey: ['buyer-pending-purchases'],
-    fetchFn: async () => {
-      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-      const token = localStorage.getItem('access_token');
-
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-
-      const response = await fetch(`${API_URL}/buyer/new-purchases`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch purchase orders');
-      }
-
-      return response.json();
-    },
+    fetchFn: () => buyerService.getPendingPurchases(),
     staleTime: 30000,
-    refetchInterval: 30000, // Auto-refresh every 30 seconds
+    refetchInterval: 30000,
   });
 
-  const purchaseOrders = useMemo(() => {
-    if (!purchaseData?.pending_purchases) return [];
+  // Fetch completed purchases
+  const { data: completedData, isLoading: isCompletedLoading, refetch: refetchCompleted } = useAutoSync<PurchaseListResponse>({
+    queryKey: ['buyer-completed-purchases'],
+    fetchFn: () => buyerService.getCompletedPurchases(),
+    staleTime: 30000,
+    refetchInterval: 30000,
+  });
 
-    // For now, treat all as ongoing since backend doesn't have purchase_status
-    // In future, you can add purchase_status field in backend
-    return purchaseData.pending_purchases.map(po => ({
-      ...po,
-      purchase_status: 'ongoing' as const
-    }));
-  }, [purchaseData]);
+  const pendingPurchases: Purchase[] = useMemo(() => {
+    return (pendingData?.pending_purchases || []).map(p => ({ ...p, status: 'pending' as const }));
+  }, [pendingData]);
 
-  const filteredOrders = useMemo(() => {
-    return purchaseOrders.filter(order => {
+  const completedPurchases: Purchase[] = useMemo(() => {
+    return (completedData?.completed_purchases || []).map(p => ({ ...p, status: 'completed' as const }));
+  }, [completedData]);
+
+  const currentPurchases = activeTab === 'pending' ? pendingPurchases : completedPurchases;
+
+  const filteredPurchases = useMemo(() => {
+    return currentPurchases.filter(purchase => {
       const matchesSearch =
-        order.project_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.client.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.item_name.toLowerCase().includes(searchTerm.toLowerCase());
+        purchase.project_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        purchase.client.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        purchase.item_name.toLowerCase().includes(searchTerm.toLowerCase());
 
-      const matchesTab = order.purchase_status === activeTab;
-
-      return matchesSearch && matchesTab;
+      return matchesSearch;
     });
-  }, [purchaseOrders, searchTerm, activeTab]);
+  }, [currentPurchases, searchTerm]);
 
   const stats = useMemo(() => ({
-    ongoing: purchaseOrders.filter(po => po.purchase_status === 'ongoing').length,
-    complete: purchaseOrders.filter(po => po.purchase_status === 'complete').length,
-  }), [purchaseOrders]);
+    pending: pendingPurchases.length,
+    completed: completedPurchases.length,
+  }), [pendingPurchases, completedPurchases]);
 
-  if (isLoading) {
+  const handleViewDetails = (purchase: Purchase) => {
+    setSelectedPurchase(purchase);
+    setIsDetailsModalOpen(true);
+  };
+
+  const handleMarkAsComplete = async (crId: number) => {
+    try {
+      setCompletingPurchaseId(crId);
+      await buyerService.completePurchase({ cr_id: crId });
+
+      toast.success('Purchase marked as complete successfully!');
+
+      // Refetch both lists
+      refetchPending();
+      refetchCompleted();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to complete purchase');
+    } finally {
+      setCompletingPurchaseId(null);
+    }
+  };
+
+  const isLoading = isPendingLoading || isCompletedLoading;
+
+  if (isLoading && currentPurchases.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <ModernLoadingSpinners variant="pulse" color="purple" />
@@ -153,8 +123,8 @@ const PurchaseOrders: React.FC = () => {
               </div>
             </div>
             <div className="text-right">
-              <div className="text-sm text-gray-600">Total Projects</div>
-              <div className="text-2xl font-bold text-purple-600">{purchaseData?.projects_count || 0}</div>
+              <div className="text-sm text-gray-600">Total Purchases</div>
+              <div className="text-2xl font-bold text-purple-600">{stats.pending + stats.completed}</div>
             </div>
           </div>
         </div>
@@ -178,269 +148,157 @@ const PurchaseOrders: React.FC = () => {
             {/* Tab Toggle Buttons */}
             <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
               <button
-                onClick={() => setActiveTab('ongoing')}
+                onClick={() => setActiveTab('pending')}
                 className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
-                  activeTab === 'ongoing'
+                  activeTab === 'pending'
                     ? 'bg-purple-600 text-white'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
                 <Clock className="w-3 h-3 inline mr-1" />
-                Ongoing ({stats.ongoing})
+                Pending ({stats.pending})
               </button>
               <button
-                onClick={() => setActiveTab('complete')}
+                onClick={() => setActiveTab('completed')}
                 className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
-                  activeTab === 'complete'
+                  activeTab === 'completed'
                     ? 'bg-green-600 text-white'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
                 <CheckCircle className="w-3 h-3 inline mr-1" />
-                Complete ({stats.complete})
-              </button>
-            </div>
-
-            {/* View Mode Toggle */}
-            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-              <button
-                onClick={() => setViewMode('cards')}
-                className={`h-8 px-3 rounded text-xs font-medium transition-all ${
-                  viewMode === 'cards'
-                    ? 'bg-purple-600 text-white'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <LayoutGrid className="h-4 w-4 sm:mr-1.5 inline" />
-                <span className="hidden sm:inline">Cards</span>
-              </button>
-              <button
-                onClick={() => setViewMode('table')}
-                className={`h-8 px-3 rounded text-xs font-medium transition-all ${
-                  viewMode === 'table'
-                    ? 'bg-purple-600 text-white'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <List className="h-4 w-4 sm:mr-1.5 inline" />
-                <span className="hidden sm:inline">Table</span>
+                Completed ({stats.completed})
               </button>
             </div>
           </div>
         </div>
 
         {/* Content */}
-        <div className="bg-white rounded-2xl shadow-lg border border-purple-100 p-6">
-          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'ongoing' | 'complete')}>
-            <TabsContent value="ongoing" className="mt-0">
-              <div className="space-y-4">
-                {filteredOrders.length === 0 ? (
-                  <div className="text-center py-12">
-                    <ShoppingCart className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No ongoing purchase orders found</p>
+        <div className="space-y-4">
+          {filteredPurchases.length === 0 ? (
+            <div className="bg-white rounded-2xl shadow-lg border border-purple-100 p-12 text-center">
+              <ShoppingCart className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-500 text-lg">
+                No {activeTab === 'pending' ? 'pending' : 'completed'} purchases found
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredPurchases.map((purchase) => (
+                <motion.div
+                  key={purchase.cr_id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`bg-white rounded-xl border shadow-sm hover:shadow-md transition-all flex flex-col ${
+                    purchase.status === 'completed' ? 'border-green-200' : 'border-purple-200'
+                  }`}
+                >
+                  {/* Card Header */}
+                  <div className={`px-4 py-3 border-b ${
+                    purchase.status === 'completed'
+                      ? 'bg-gradient-to-r from-green-50 to-green-100 border-green-200'
+                      : 'bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200'
+                  }`}>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h3 className="text-base font-bold text-gray-900 line-clamp-1">{purchase.project_name}</h3>
+                      <Badge className={`${purchase.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-purple-100 text-purple-800'} text-xs whitespace-nowrap`}>
+                        CR #{purchase.cr_id}
+                      </Badge>
+                    </div>
+                    <div className="space-y-1 text-xs text-gray-600">
+                      <div className="flex items-center gap-1.5">
+                        <Building2 className="w-3 h-3 flex-shrink-0" />
+                        <span className="truncate">{purchase.client}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <MapPin className="w-3 h-3 flex-shrink-0" />
+                        <span className="truncate">{purchase.location}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <FileText className="w-3 h-3 flex-shrink-0" />
+                        <span className="truncate">{purchase.boq_name}</span>
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <div className="space-y-4">
-                    {filteredOrders.map((order) => (
-                      <motion.div
-                        key={order.cr_id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-all"
-                      >
-                        {/* Order Header */}
-                        <div className="bg-gradient-to-r from-purple-50 to-purple-100 px-6 py-4 border-b border-purple-200">
-                          <div className="flex items-start justify-between">
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-3">
-                                <h3 className="text-lg font-bold text-gray-900">{order.project_name}</h3>
-                                <Badge className="bg-purple-100 text-purple-800">CR #{order.cr_id}</Badge>
-                              </div>
-                              <div className="flex items-center gap-4 text-sm text-gray-600">
-                                <div className="flex items-center gap-1">
-                                  <Building2 className="w-4 h-4" />
-                                  {order.client}
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <MapPin className="w-4 h-4" />
-                                  {order.location}
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <FileText className="w-4 h-4" />
-                                  {order.boq_name}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-2xl font-bold text-purple-600">{formatCurrency(order.total_cost)}</div>
-                              <div className="text-xs text-gray-500 mt-1">{order.materials_count} materials</div>
-                            </div>
+
+                  {/* Card Body */}
+                  <div className="p-4 flex-1 flex flex-col">
+                    <div className="space-y-3 mb-4">
+                      <div>
+                        <div className="text-xs text-gray-500 mb-0.5">Item</div>
+                        <div className="font-medium text-gray-900 text-sm line-clamp-1">{purchase.item_name}</div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-xs text-gray-500 mb-0.5">Created</div>
+                          <div className="text-xs flex items-center gap-1">
+                            <Calendar className="w-3 h-3" />
+                            {new Date(purchase.created_at).toLocaleDateString()}
                           </div>
                         </div>
-
-                        {/* Order Details */}
-                        <div className="p-6">
-                          <div className="grid grid-cols-2 gap-4 mb-4">
-                            <div>
-                              <div className="text-xs text-gray-500 mb-1">Item</div>
-                              <div className="font-medium text-gray-900">{order.item_name}</div>
-                            </div>
-                            <div>
-                              <div className="text-xs text-gray-500 mb-1">Sub-Item</div>
-                              <div className="font-medium text-gray-900">{order.sub_item_name}</div>
-                            </div>
-                            <div>
-                              <div className="text-xs text-gray-500 mb-1">Request Type</div>
-                              <Badge className="bg-blue-100 text-blue-800">{order.request_type}</Badge>
-                            </div>
-                            <div>
-                              <div className="text-xs text-gray-500 mb-1">Created</div>
-                              <div className="text-sm flex items-center gap-1">
-                                <Calendar className="w-3 h-3" />
-                                {new Date(order.created_at).toLocaleDateString()}
-                              </div>
-                            </div>
+                        <div>
+                          <div className="text-xs text-gray-500 mb-0.5">Materials</div>
+                          <div className="text-sm font-medium flex items-center gap-1">
+                            <Package className="w-3 h-3" />
+                            {purchase.materials_count} items
                           </div>
+                        </div>
+                      </div>
+                    </div>
 
-                          {/* Justification/Reason */}
-                          {order.reason && (
-                            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                              <div className="text-xs font-medium text-blue-800 mb-1">Justification</div>
-                              <div className="text-sm text-blue-900">{order.reason}</div>
-                            </div>
+                    {/* Action Buttons */}
+                    <div className="flex flex-col gap-2 mt-auto">
+                      <Button
+                        onClick={() => handleViewDetails(purchase)}
+                        variant="outline"
+                        size="sm"
+                        className="w-full border-gray-300 hover:bg-gray-50"
+                      >
+                        <Eye className="w-4 h-4 mr-2" />
+                        View Details
+                      </Button>
+
+                      {purchase.status === 'pending' && (
+                        <Button
+                          onClick={() => handleMarkAsComplete(purchase.cr_id)}
+                          disabled={completingPurchaseId === purchase.cr_id}
+                          size="sm"
+                          className="w-full bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          {completingPurchaseId === purchase.cr_id ? (
+                            <>
+                              <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              Completing...
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-4 h-4 mr-2" />
+                              Mark as Complete
+                            </>
                           )}
-
-                          {/* Materials Table */}
-                          <div className="border rounded-lg overflow-hidden">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Material Name</TableHead>
-                                  <TableHead>Quantity</TableHead>
-                                  <TableHead>Unit Price</TableHead>
-                                  <TableHead>Total</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {order.materials.map((material, idx) => (
-                                  <TableRow key={idx}>
-                                    <TableCell className="font-medium">{material.material_name}</TableCell>
-                                    <TableCell>{material.quantity} {material.unit}</TableCell>
-                                    <TableCell>{formatCurrency(material.unit_price)}</TableCell>
-                                    <TableCell className="font-bold text-purple-600">
-                                      {formatCurrency(material.total_price)}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))}
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="complete" className="mt-0">
-              <div className="space-y-4">
-                {filteredOrders.length === 0 ? (
-                  <div className="text-center py-12">
-                    <CheckCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No completed purchase orders found</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {filteredOrders.map((order) => (
-                      <motion.div
-                        key={order.cr_id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-white rounded-lg border border-green-200 shadow-sm hover:shadow-md transition-all"
-                      >
-                        {/* Order Header */}
-                        <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-green-200">
-                          <div className="flex items-start justify-between">
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-3">
-                                <h3 className="text-lg font-bold text-gray-900">{order.project_name}</h3>
-                                <Badge className="bg-green-100 text-green-800">CR #{order.cr_id}</Badge>
-                                <Badge className="bg-green-600 text-white">
-                                  <CheckCircle className="w-3 h-3 mr-1" />
-                                  Completed
-                                </Badge>
-                              </div>
-                              <div className="flex items-center gap-4 text-sm text-gray-600">
-                                <div className="flex items-center gap-1">
-                                  <Building2 className="w-4 h-4" />
-                                  {order.client}
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <MapPin className="w-4 h-4" />
-                                  {order.location}
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <FileText className="w-4 h-4" />
-                                  {order.boq_name}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-2xl font-bold text-green-600">{formatCurrency(order.total_cost)}</div>
-                              <div className="text-xs text-gray-500 mt-1">{order.materials_count} materials</div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Order Details */}
-                        <div className="p-6">
-                          <div className="grid grid-cols-2 gap-4 mb-4">
-                            <div>
-                              <div className="text-xs text-gray-500 mb-1">Item</div>
-                              <div className="font-medium text-gray-900">{order.item_name}</div>
-                            </div>
-                            <div>
-                              <div className="text-xs text-gray-500 mb-1">Sub-Item</div>
-                              <div className="font-medium text-gray-900">{order.sub_item_name}</div>
-                            </div>
-                          </div>
-
-                          {/* Materials Table */}
-                          <div className="border rounded-lg overflow-hidden">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Material Name</TableHead>
-                                  <TableHead>Quantity</TableHead>
-                                  <TableHead>Unit Price</TableHead>
-                                  <TableHead>Total</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {order.materials.map((material, idx) => (
-                                  <TableRow key={idx}>
-                                    <TableCell className="font-medium">{material.material_name}</TableCell>
-                                    <TableCell>{material.quantity} {material.unit}</TableCell>
-                                    <TableCell>{formatCurrency(material.unit_price)}</TableCell>
-                                    <TableCell className="font-bold text-green-600">
-                                      {formatCurrency(material.total_price)}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-          </Tabs>
+                </motion.div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Purchase Details Modal */}
+      {selectedPurchase && (
+        <PurchaseDetailsModal
+          purchase={selectedPurchase}
+          isOpen={isDetailsModalOpen}
+          onClose={() => {
+            setIsDetailsModalOpen(false);
+            setSelectedPurchase(null);
+          }}
+        />
+      )}
     </div>
   );
 };
