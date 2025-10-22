@@ -19,6 +19,36 @@ interface BOQItem {
   quantity: number;
   rate: number;
   amount: number;
+  has_sub_items?: boolean;
+  sub_items?: {
+    sub_item_name: string;
+    scope?: string;
+    size?: string;
+    description?: string;
+    location?: string;
+    brand?: string;
+    quantity: number;
+    unit: string;
+    rate: number;
+    base_total: number;
+    materials_cost: number;
+    labour_cost: number;
+    materials: {
+      name: string;
+      quantity: number;
+      unit: string;
+      rate: number;
+      amount: number;
+      vat_percentage?: number;
+    }[];
+    labour: {
+      type: string;
+      quantity: number;
+      unit: string;
+      rate: number;
+      amount: number;
+    }[];
+  }[];
   materials: {
     name: string;
     quantity: number;
@@ -36,8 +66,14 @@ interface BOQItem {
   }[];
   laborCost: number;
   estimatedSellingPrice: number;
+  miscellaneous_percentage?: number;
+  miscellaneous_amount?: number;
   overheadPercentage?: number;
+  overhead_percentage?: number;
+  overhead_amount?: number;
   profitMarginPercentage?: number;
+  profit_margin_percentage?: number;
+  profit_margin_amount?: number;
   discountPercentage?: number;
   vat_percentage?: number;
   vat_amount?: number;
@@ -141,15 +177,8 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
     [],
   ];
 
-  // Add each BOQ item with full breakdown
+  // Add each BOQ item with full breakdown - INTERNAL VERSION
   (estimation.boqItems || []).forEach((item, itemIndex) => {
-    const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
-    const itemBaseCost = materialTotal + item.laborCost;
-    const overhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
-    const profit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
-    const itemSubtotal = itemBaseCost + overhead + profit;
-    const discount = itemSubtotal * (item.discountPercentage || 0) / 100;
-
     // Item Header
     allData.push([`${itemIndex + 1}. ${item.description}`, '', '', '']);
     if (item.briefDescription) {
@@ -158,61 +187,155 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
     allData.push([`Qty: ${item.quantity} ${item.unit}`, `Rate: AED ${formatCurrency(item.rate)}/${item.unit}`, '', '']);
     allData.push([]);
 
-    // Raw Materials Section
-    if (item.materials.length > 0) {
-      allData.push(['+ RAW MATERIALS', '', '', '']);
-      allData.push(['Material Name', 'Quantity', 'Unit', 'Rate (AED)', 'Amount (AED)']);
+    // Check if item has sub-items
+    const hasSubItems = item.has_sub_items && item.sub_items && item.sub_items.length > 0;
 
-      item.materials.forEach(material => {
-        allData.push([
-          material.name,
-          material.quantity,
-          material.unit,
-          formatCurrency(material.rate),
-          formatCurrency(material.amount)
-        ]);
+    if (hasSubItems) {
+      // NEW FORMAT: Item with sub-items - show each sub-item with its materials/labour
+      item.sub_items!.forEach((subItem, subIdx) => {
+        // Sub-item header
+        allData.push([`  ${subIdx + 1}. ${subItem.sub_item_name}`, '', '', '']);
+        if (subItem.scope || subItem.size) {
+          allData.push([`     Scope: ${subItem.scope || ''} | Size: ${subItem.size || ''}`, '', '', '']);
+        }
+        allData.push([`     Qty: ${subItem.quantity} ${subItem.unit}`, '', '', '']);
+        allData.push([]);
+
+        // Sub-item Materials
+        const subMaterialTotal = subItem.materials.reduce((sum, m) => sum + m.amount, 0);
+        if (subItem.materials.length > 0) {
+          allData.push(['     + RAW MATERIALS', '', '', '']);
+          allData.push(['     Material Name', 'Quantity', 'Unit', 'Rate (AED)', 'Amount (AED)']);
+
+          subItem.materials.forEach(material => {
+            allData.push([
+              '       ' + material.name,
+              material.quantity,
+              material.unit,
+              formatCurrency(material.rate),
+              formatCurrency(material.amount)
+            ]);
+          });
+
+          allData.push(['     Total Materials:', '', '', '', formatCurrency(subMaterialTotal)]);
+          allData.push([]);
+        }
+
+        // Sub-item Labour
+        const subLabourTotal = subItem.labour.reduce((sum, l) => sum + l.amount, 0);
+        if (subItem.labour && subItem.labour.length > 0) {
+          allData.push(['     + LABOUR', '', '', '']);
+          allData.push(['     Labour Type', 'Hours/Qty', 'Unit', 'Rate (AED)', 'Amount (AED)']);
+
+          subItem.labour.forEach(labor => {
+            allData.push([
+              '       ' + labor.type,
+              labor.quantity,
+              labor.unit,
+              formatCurrency(labor.rate),
+              formatCurrency(labor.amount)
+            ]);
+          });
+
+          allData.push(['     Total Labour:', '', '', '', formatCurrency(subLabourTotal)]);
+          allData.push([]);
+        }
+
+        allData.push(['     Sub-item Total:', '', '', '', formatCurrency(subMaterialTotal + subLabourTotal)]);
+        allData.push([]);
       });
 
-      allData.push(['Total Materials:', '', '', '', formatCurrency(materialTotal)]);
+      // Item-level misc, overhead, profit, discount, VAT (applied to whole item)
+      const itemBaseCost = item.sub_items!.reduce((sum, si) => sum + si.materials_cost + si.labour_cost, 0);
+      const misc = (item as any).miscellaneous_amount || (itemBaseCost * ((item as any).miscellaneous_percentage || 0) / 100);
+      const overhead = (item as any).overhead_amount || (itemBaseCost * (item.overheadPercentage || (item as any).overhead_percentage || 0) / 100);
+      const profit = (item as any).profit_margin_amount || (itemBaseCost * (item.profitMarginPercentage || (item as any).profit_margin_percentage || 0) / 100);
+      const itemSubtotal = itemBaseCost + misc + overhead + profit;
+      const discount = itemSubtotal * (item.discountPercentage || 0) / 100;
+      const itemAfterDiscount = itemSubtotal - discount;
+      const itemVat = itemAfterDiscount * (item.vat_percentage || 0) / 100;
+      const itemFinalPrice = itemAfterDiscount + itemVat;
+
+      allData.push(['+ ITEM-LEVEL MISC, OVERHEADS, PROFIT, DISCOUNT & VAT', '', '', '']);
+      if (misc > 0) {
+        const miscPct = (item as any).miscellaneous_percentage || 0;
+        allData.push([`Miscellaneous (${miscPct}%)`, '', '', '', formatCurrency(misc)]);
+      }
+      allData.push([`Overhead (${item.overheadPercentage || (item as any).overhead_percentage || 0}%)`, '', '', '', formatCurrency(overhead)]);
+      allData.push([`Profit Margin (${item.profitMarginPercentage || (item as any).profit_margin_percentage || 0}%)`, '', '', '', formatCurrency(profit)]);
+      allData.push([`Discount (${item.discountPercentage || 0}%)`, '', '', '', discount > 0 ? `-${formatCurrency(discount)}` : formatCurrency(0)]);
+      allData.push(['Subtotal (After Discount):', '', '', '', formatCurrency(itemAfterDiscount)]);
+      allData.push([`VAT (${item.vat_percentage || 0}%)`, '', '', '', formatCurrency(itemVat)]);
+      allData.push([]);
+
+      allData.push(['ESTIMATED SELLING PRICE:', '', '', '', formatCurrency(itemFinalPrice)]);
+      allData.push([]);
+      allData.push([]);
+    } else {
+      // OLD FORMAT: Item without sub-items - show materials/labour directly on item
+      const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
+      const itemBaseCost = materialTotal + item.laborCost;
+      const overhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
+      const profit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
+      const itemSubtotal = itemBaseCost + overhead + profit;
+      const discount = itemSubtotal * (item.discountPercentage || 0) / 100;
+
+      // Raw Materials Section
+      if (item.materials.length > 0) {
+        allData.push(['+ RAW MATERIALS', '', '', '']);
+        allData.push(['Material Name', 'Quantity', 'Unit', 'Rate (AED)', 'Amount (AED)']);
+
+        item.materials.forEach(material => {
+          allData.push([
+            material.name,
+            material.quantity,
+            material.unit,
+            formatCurrency(material.rate),
+            formatCurrency(material.amount)
+          ]);
+        });
+
+        allData.push(['Total Materials:', '', '', '', formatCurrency(materialTotal)]);
+        allData.push([]);
+      }
+
+      // Labour Section
+      if (item.labour && item.labour.length > 0) {
+        allData.push(['+ LABOUR', '', '', '']);
+        allData.push(['Labour Type', 'Hours/Qty', 'Unit', 'Rate (AED)', 'Amount (AED)']);
+
+        item.labour.forEach(labor => {
+          allData.push([
+            labor.type,
+            labor.quantity,
+            labor.unit,
+            formatCurrency(labor.rate),
+            formatCurrency(labor.amount)
+          ]);
+        });
+
+        allData.push(['Total Labour:', '', '', '', formatCurrency(item.laborCost)]);
+        allData.push([]);
+      }
+
+      // Overhead, Profit, Discount & VAT
+      const itemAfterDiscount = itemSubtotal - discount;
+      const itemVat = itemAfterDiscount * (item.vat_percentage || 0) / 100;
+      const itemFinalPrice = itemAfterDiscount + itemVat;
+
+      allData.push(['+ OVERHEADS, PROFIT, DISCOUNT & VAT', '', '', '']);
+      allData.push([`Overhead (${item.overheadPercentage || 0}%)`, '', '', '', formatCurrency(overhead)]);
+      allData.push([`Profit Margin (${item.profitMarginPercentage || 0}%)`, '', '', '', formatCurrency(profit)]);
+      allData.push([`Discount (${item.discountPercentage || 0}%)`, '', '', '', discount > 0 ? `-${formatCurrency(discount)}` : formatCurrency(0)]);
+      allData.push(['Subtotal (After Discount):', '', '', '', formatCurrency(itemAfterDiscount)]);
+      allData.push([`VAT (${item.vat_percentage || 0}%)`, '', '', '', formatCurrency(itemVat)]);
+      allData.push([]);
+
+      // Item Total
+      allData.push(['ESTIMATED SELLING PRICE:', '', '', '', formatCurrency(itemFinalPrice)]);
+      allData.push([]);
       allData.push([]);
     }
-
-    // Labour Section
-    if (item.labour && item.labour.length > 0) {
-      allData.push(['+ LABOUR', '', '', '']);
-      allData.push(['Labour Type', 'Hours/Qty', 'Unit', 'Rate (AED)', 'Amount (AED)']);
-
-      item.labour.forEach(labor => {
-        allData.push([
-          labor.type,
-          labor.quantity,
-          labor.unit,
-          formatCurrency(labor.rate),
-          formatCurrency(labor.amount)
-        ]);
-      });
-
-      allData.push(['Total Labour:', '', '', '', formatCurrency(item.laborCost)]);
-      allData.push([]);
-    }
-
-    // Overhead, Profit, Discount & VAT
-    const itemAfterDiscount = itemSubtotal - discount;
-    const itemVat = itemAfterDiscount * (item.vat_percentage || 0) / 100;
-    const itemFinalPrice = itemAfterDiscount + itemVat;
-
-    allData.push(['+ OVERHEADS, PROFIT, DISCOUNT & VAT', '', '', '']);
-    allData.push([`Overhead (${item.overheadPercentage || 0}%)`, '', '', '', formatCurrency(overhead)]);
-    allData.push([`Profit Margin (${item.profitMarginPercentage || 0}%)`, '', '', '', formatCurrency(profit)]);
-    allData.push([`Discount (${item.discountPercentage || 0}%)`, '', '', '', discount > 0 ? `-${formatCurrency(discount)}` : formatCurrency(0)]);
-    allData.push(['Subtotal (After Discount):', '', '', '', formatCurrency(itemAfterDiscount)]);
-    allData.push([`VAT (${item.vat_percentage || 0}%)`, '', '', '', formatCurrency(itemVat)]);
-    allData.push([]);
-
-    // Item Total
-    allData.push(['ESTIMATED SELLING PRICE:', '', '', '', formatCurrency(itemFinalPrice)]);
-    allData.push([]);
-    allData.push([]);
   });
 
   // Cost Summary at END
@@ -315,18 +438,11 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
   const afterVat = afterDiscount + totalVat;
   const grandTotal = afterVat;
 
-  // Calculate average discount percentage for display
-  const avgDiscountPct = subtotal > 0 ? (totalDiscount / subtotal) * 100 : 0;
-
-  // Calculate adjusted totals for summary
-  let adjustedTotalMaterialCost = 0;
-  let adjustedTotalLaborCost = 0;
-
   // ============================================
-  // SINGLE SHEET WITH EVERYTHING
+  // CLIENT VERSION: Show only items and sub-items
   // ============================================
   const allData: any[][] = [
-    ['BILL OF QUANTITIES - CLIENT VERSION'],
+    ['BILL OF QUANTITIES'],
     [],
     ['Project Information'],
     ['Project Name:', estimation.projectName],
@@ -337,109 +453,88 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
     ['Date:', formatDate(estimation.submittedDate)],
     [],
     [],
-    ['DETAILED BOQ ITEMS'],
+    ['SCOPE OF WORK'],
     [],
   ];
 
-  // Add each BOQ item with distributed markup
+  // Add each BOQ item - CLIENT VERSION (no materials/labour details)
   (estimation.boqItems || []).forEach((item, itemIndex) => {
-    const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
-    const itemBaseCost = materialTotal + item.laborCost;
-
-    // Calculate item's overhead and profit from item-level percentages
-    const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
-    const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
-    const itemTotalMarkup = itemOverhead + itemProfit;
-
-    // Calculate distribution ratios
-    const materialRatio = itemBaseCost > 0 ? materialTotal / itemBaseCost : 0;
-    const laborRatio = itemBaseCost > 0 ? item.laborCost / itemBaseCost : 0;
-    const materialMarkupShare = itemTotalMarkup * materialRatio;
-    const laborMarkupShare = itemTotalMarkup * laborRatio;
-
     // Item Header
-    allData.push([`${itemIndex + 1}. ${item.description}`, '', '', '']);
+    allData.push([`${itemIndex + 1}. ${item.description}`, '', '', '', '', '']);
     if (item.briefDescription) {
-      allData.push([item.briefDescription, '', '', '']);
+      allData.push([item.briefDescription, '', '', '', '', '']);
     }
-    allData.push([`Qty: ${item.quantity} ${item.unit}`, `Rate: AED ${formatCurrency(item.rate)}/${item.unit}`, '', '']);
     allData.push([]);
 
-    // Raw Materials Section with distributed markup
-    let itemAdjustedMaterialTotal = 0;
-    if (item.materials.length > 0) {
-      allData.push(['+ RAW MATERIALS', '', '', '']);
-      allData.push(['Material Name', 'Quantity', 'Unit', 'Rate (AED)', 'Amount (AED)']);
+    // Check if item has sub-items
+    const hasSubItems = item.has_sub_items && item.sub_items && item.sub_items.length > 0;
 
-      item.materials.forEach(material => {
-        const matShare = materialTotal > 0 ? (material.amount / materialTotal) * materialMarkupShare : 0;
-        const adjustedAmount = material.amount + matShare;
-        const adjustedRate = material.quantity > 0 ? adjustedAmount / material.quantity : material.rate;
+    if (hasSubItems) {
+      // CLIENT VERSION: Show sub-items (NO materials/labour)
+      allData.push(['Sub-Item', 'Scope/Size', 'Quantity', 'Unit', 'Rate (AED)', 'Amount (AED)']);
 
-        allData.push([
-          material.name,
-          material.quantity,
-          material.unit,
-          formatCurrency(adjustedRate),
-          formatCurrency(adjustedAmount)
-        ]);
-        itemAdjustedMaterialTotal += adjustedAmount;
-      });
+      // Get item-level amounts (misc, overhead, profit)
+      const itemMisc = (item as any).miscellaneous_amount || 0;
+      const itemOverhead = (item as any).overhead_amount || 0;
+      const itemProfit = (item as any).profit_margin_amount || 0;
+      const itemBaseCost = item.sub_items!.reduce((sum, si) => sum + si.materials_cost + si.labour_cost, 0);
 
-      allData.push(['Total Materials:', '', '', '', formatCurrency(itemAdjustedMaterialTotal)]);
-      allData.push([]);
-      adjustedTotalMaterialCost += itemAdjustedMaterialTotal;
-    }
+      item.sub_items!.forEach(subItem => {
+        const subItemBase = subItem.materials_cost + subItem.labour_cost;
+        // Distribute misc + overhead + profit proportionally to sub-items
+        const subItemMarkup = itemBaseCost > 0 ? (subItemBase / itemBaseCost) * (itemMisc + itemOverhead + itemProfit) : 0;
+        const subItemTotal = subItemBase + subItemMarkup;
+        const adjustedRate = subItem.quantity > 0 ? subItemTotal / subItem.quantity : 0;
 
-    // Labour Section with distributed markup
-    let itemAdjustedLaborTotal = 0;
-    if (item.labour && item.labour.length > 0) {
-      allData.push(['+ LABOUR', '', '', '']);
-      allData.push(['Labour Type', 'Hours/Qty', 'Unit', 'Rate (AED)', 'Amount (AED)']);
-
-      item.labour.forEach(labor => {
-        const labShare = item.laborCost > 0 ? (labor.amount / item.laborCost) * laborMarkupShare : 0;
-        const adjustedAmount = labor.amount + labShare;
-        const adjustedRate = labor.quantity > 0 ? adjustedAmount / labor.quantity : labor.rate;
+        // Build comprehensive scope/size display
+        const scopeParts = [];
+        if (subItem.scope) scopeParts.push(subItem.scope);
+        if (subItem.size) scopeParts.push(subItem.size);
+        if (subItem.location) scopeParts.push(`Loc: ${subItem.location}`);
+        if (subItem.brand) scopeParts.push(`Brand: ${subItem.brand}`);
+        const scopeSize = scopeParts.join(' | ') || '-';
 
         allData.push([
-          labor.type,
-          labor.quantity,
-          labor.unit,
+          subItem.sub_item_name,
+          scopeSize,
+          subItem.quantity,
+          subItem.unit,
           formatCurrency(adjustedRate),
-          formatCurrency(adjustedAmount)
+          formatCurrency(subItemTotal)
         ]);
-        itemAdjustedLaborTotal += adjustedAmount;
       });
 
-      allData.push(['Total Labour:', '', '', '', formatCurrency(itemAdjustedLaborTotal)]);
       allData.push([]);
-      adjustedTotalLaborCost += itemAdjustedLaborTotal;
+    } else {
+      // Old format: No sub-items
+      allData.push([`Qty: ${item.quantity} ${item.unit}`, `Rate: AED ${formatCurrency(item.rate)}/${item.unit}`, '', '', '', '']);
+      allData.push([]);
     }
 
-    // Item Total with markup distributed
-    const itemTotalWithMarkup = itemAdjustedMaterialTotal + itemAdjustedLaborTotal;
-    allData.push(['TOTAL PRICE:', '', '', '', formatCurrency(itemTotalWithMarkup)]);
+    // Item Total
+    allData.push(['TOTAL:', '', '', '', '', formatCurrency(item.estimatedSellingPrice)]);
     allData.push([]);
     allData.push([]);
   });
 
-  // Cost Overview at END with adjusted costs
-  allData.push([]);
-  allData.push(['COST OVERVIEW']);
-  allData.push([]);
-  allData.push(['Total Material Cost:', formatCurrency(adjustedTotalMaterialCost)]);
-  allData.push(['Total Labor Cost:', formatCurrency(adjustedTotalLaborCost)]);
-  allData.push(['Total Project Cost:', formatCurrency(adjustedTotalMaterialCost + adjustedTotalLaborCost)]);
-  allData.push([`Discount (${avgDiscountPct.toFixed(0)}%):`, totalDiscount > 0 ? `-${formatCurrency(totalDiscount)}` : formatCurrency(0)]);
+  // Cost Summary at END - CLIENT VERSION
+  const subtotalBeforeDiscount = (estimation.boqItems || []).reduce((sum, item) => sum + item.estimatedSellingPrice, 0);
+  const avgDiscountPct = subtotalBeforeDiscount > 0 ? (totalDiscount / subtotalBeforeDiscount) * 100 : 0;
 
-  // Calculate discount-adjusted base before VAT
-  const clientAfterDiscount = (adjustedTotalMaterialCost + adjustedTotalLaborCost) - totalDiscount;
-  allData.push(['Subtotal (After Discount):', formatCurrency(clientAfterDiscount)]);
+  allData.push([]);
+  allData.push(['COST SUMMARY']);
+  allData.push([]);
+  allData.push(['Subtotal:', formatCurrency(subtotalBeforeDiscount)]);
 
-  // Add VAT
-  const avgVatPct = clientAfterDiscount > 0 ? (totalVat / clientAfterDiscount) * 100 : 0;
-  allData.push([`VAT (${avgVatPct.toFixed(1)}%):`, formatCurrency(totalVat)]);
+  if (totalDiscount > 0) {
+    allData.push([`Discount (${avgDiscountPct.toFixed(0)}%):`, `-${formatCurrency(totalDiscount)}`]);
+    allData.push(['After Discount:', formatCurrency(afterDiscount)]);
+  }
+
+  if (totalVat > 0) {
+    const avgVatPct = afterDiscount > 0 ? (totalVat / afterDiscount) * 100 : 0;
+    allData.push([`VAT (${avgVatPct.toFixed(1)}%):`, formatCurrency(totalVat)]);
+  }
 
   allData.push([]);
   allData.push(['TOTAL PROJECT VALUE:', formatCurrency(grandTotal)]);
@@ -467,14 +562,15 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
 
   const ws = XLSX.utils.aoa_to_sheet(allData);
   ws['!cols'] = [
-    { wch: 40 }, // Column A
-    { wch: 15 }, // Column B
-    { wch: 12 }, // Column C
-    { wch: 15 }, // Column D
-    { wch: 18 }, // Column E
+    { wch: 30 }, // Column A - Sub-Item/Item Name
+    { wch: 25 }, // Column B - Scope/Size
+    { wch: 12 }, // Column C - Quantity
+    { wch: 10 }, // Column D - Unit
+    { wch: 15 }, // Column E - Rate (AED)
+    { wch: 18 }, // Column F - Amount (AED)
   ];
 
-  XLSX.utils.book_append_sheet(wb, ws, 'Complete BOQ Client');
+  XLSX.utils.book_append_sheet(wb, ws, 'BOQ Client');
 
   // Generate and download
   const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
@@ -587,16 +683,6 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
       yPos = 20;
     }
 
-    const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
-    const itemBaseCost = materialTotal + item.laborCost;
-    const overhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
-    const profit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
-    const itemSubtotal = itemBaseCost + overhead + profit;
-    const discount = itemSubtotal * (item.discountPercentage || 0) / 100;
-    const itemAfterDiscount = itemSubtotal - discount;
-    const itemVat = itemAfterDiscount * (item.vat_percentage || 0) / 100;
-    const itemFinalPrice = itemAfterDiscount + itemVat;
-
     // Item Header
     doc.setFillColor(230, 240, 255);
     doc.rect(14, yPos - 2, 182, 8, 'F');
@@ -618,114 +704,375 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
     doc.text(`Qty: ${item.quantity} ${item.unit} | Rate: AED ${formatCurrency(item.rate)}/${item.unit}`, 16, yPos);
     yPos += 7;
 
-    // Materials Section
-    if (item.materials.length > 0) {
-      doc.setFillColor(240, 250, 255);
-      doc.rect(16, yPos - 2, 178, 6, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.text('+ Raw Materials', 18, yPos + 2);
-      yPos += 8;
+    // Check if item has sub-items
+    const hasSubItems = item.has_sub_items && item.sub_items && item.sub_items.length > 0;
 
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      item.materials.forEach(material => {
-        if (yPos > 270) {
+    // Declare variables for calculations (will be set in if/else blocks)
+    let itemBaseCost = 0;
+    let misc = 0;
+    let overhead = 0;
+    let profit = 0;
+    let itemSubtotal = 0;
+    let discount = 0;
+    let itemAfterDiscount = 0;
+    let itemVat = 0;
+    let itemFinalPrice = 0;
+
+    if (hasSubItems) {
+      // NEW FORMAT: Item with sub-items - show each sub-item with its materials/labour
+      item.sub_items!.forEach((subItem, subIdx) => {
+        if (yPos > 260) {
           doc.addPage();
           yPos = 20;
         }
-        doc.text(`${material.name} (${material.quantity} ${material.unit})`, 20, yPos);
-        doc.text(`AED ${formatCurrency(material.amount)}`, 170, yPos, { align: 'right' });
-        yPos += 5;
+
+        // Sub-item header
+        doc.setFillColor(245, 248, 255);
+        doc.rect(18, yPos - 2, 176, 7, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(`${subIdx + 1}. ${subItem.sub_item_name}`, 20, yPos + 2);
+        yPos += 8;
+
+        if (subItem.scope || subItem.size) {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7);
+          doc.setTextColor(80);
+          doc.text(`Scope: ${subItem.scope || ''} | Size: ${subItem.size || ''}`, 22, yPos);
+          doc.setTextColor(0);
+          yPos += 5;
+        }
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.text(`Qty: ${subItem.quantity} ${subItem.unit}`, 22, yPos);
+        yPos += 6;
+
+        // Sub-item Materials - Professional Table
+        const subMaterialTotal = subItem.materials.reduce((sum, m) => sum + (m.total_price || m.amount || 0), 0);
+        if (subItem.materials.length > 0) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(8);
+          doc.setTextColor(37, 99, 235);
+          doc.text('+ RAW MATERIALS', 22, yPos);
+          doc.setTextColor(0);
+          yPos += 3;
+
+          // Create materials table
+          const materialsTableData = subItem.materials.map((mat: any) => [
+            mat.material_name || mat.name || '',
+            mat.quantity || 0,
+            mat.unit || '',
+            formatCurrency(mat.rate || 0),
+            formatCurrency(mat.total_price || mat.amount || 0)
+          ]);
+
+          // Add total row
+          materialsTableData.push([
+            { content: 'Total Materials:', colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } },
+            { content: formatCurrency(subMaterialTotal), styles: { fontStyle: 'bold', fillColor: [219, 234, 254] } }
+          ]);
+
+          (autoTable as any)(doc, {
+            startY: yPos,
+            head: [['Material Name', 'Qty', 'Unit', 'Rate (AED)', 'Amount (AED)']],
+            body: materialsTableData,
+            margin: { left: 22 },
+            theme: 'grid',
+            headStyles: {
+              fillColor: [191, 219, 254],
+              textColor: [30, 64, 175],
+              fontStyle: 'bold',
+              fontSize: 7
+            },
+            bodyStyles: {
+              fontSize: 7,
+              textColor: [55, 65, 81]
+            },
+            columnStyles: {
+              0: { cellWidth: 60 },
+              1: { cellWidth: 20, halign: 'center' },
+              2: { cellWidth: 20, halign: 'center' },
+              3: { cellWidth: 30, halign: 'right' },
+              4: { cellWidth: 30, halign: 'right' }
+            },
+            didDrawPage: (data: any) => {
+              yPos = data.cursor.y + 3;
+            }
+          });
+
+          yPos = (doc as any).lastAutoTable.finalY + 3;
+        }
+
+        // Sub-item Labour - Professional Table
+        const subLabourTotal = subItem.labour.reduce((sum, l) => sum + (l.total_cost || l.amount || 0), 0);
+        if (subItem.labour && subItem.labour.length > 0) {
+          if (yPos > 240) {
+            doc.addPage();
+            yPos = 20;
+          }
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(8);
+          doc.setTextColor(126, 34, 206);
+          doc.text('+ LABOUR', 22, yPos);
+          doc.setTextColor(0);
+          yPos += 3;
+
+          // Create labour table
+          const labourTableData = subItem.labour.map((lab: any) => [
+            lab.labour_role || lab.type || '',
+            lab.hours || lab.quantity || 0,
+            lab.unit || 'hrs',
+            formatCurrency(lab.rate || 0),
+            formatCurrency(lab.total_cost || lab.amount || 0)
+          ]);
+
+          // Add total row
+          labourTableData.push([
+            { content: 'Total Labour:', colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } },
+            { content: formatCurrency(subLabourTotal), styles: { fontStyle: 'bold', fillColor: [233, 213, 255] } }
+          ]);
+
+          (autoTable as any)(doc, {
+            startY: yPos,
+            head: [['Labour Role', 'Hours', 'Unit', 'Rate (AED)', 'Amount (AED)']],
+            body: labourTableData,
+            margin: { left: 22 },
+            theme: 'grid',
+            headStyles: {
+              fillColor: [216, 180, 254],
+              textColor: [107, 33, 168],
+              fontStyle: 'bold',
+              fontSize: 7
+            },
+            bodyStyles: {
+              fontSize: 7,
+              textColor: [55, 65, 81]
+            },
+            columnStyles: {
+              0: { cellWidth: 60 },
+              1: { cellWidth: 20, halign: 'center' },
+              2: { cellWidth: 20, halign: 'center' },
+              3: { cellWidth: 30, halign: 'right' },
+              4: { cellWidth: 30, halign: 'right' }
+            },
+            didDrawPage: (data: any) => {
+              yPos = data.cursor.y + 3;
+            }
+          });
+
+          yPos = (doc as any).lastAutoTable.finalY + 3;
+        }
+
+        // Sub-item total
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(59, 130, 246);
+        doc.text('Sub-item Total:', 24, yPos);
+        doc.text(`AED ${formatCurrency(subMaterialTotal + subLabourTotal)}`, 168, yPos, { align: 'right' });
+        doc.setTextColor(0);
+        yPos += 8;
       });
 
-      doc.setFont('helvetica', 'bold');
-      doc.text('Total Materials:', 20, yPos);
-      doc.text(`AED ${formatCurrency(materialTotal)}`, 170, yPos, { align: 'right' });
-      yPos += 7;
-    }
+      // Item-level calculations for misc, overhead, profit, etc.
+      itemBaseCost = item.sub_items!.reduce((sum, si) => sum + si.materials_cost + si.labour_cost, 0);
+      misc = (item as any).miscellaneous_amount || (itemBaseCost * ((item as any).miscellaneous_percentage || 0) / 100);
+      overhead = (item as any).overhead_amount || (itemBaseCost * (item.overheadPercentage || (item as any).overhead_percentage || 0) / 100);
+      profit = (item as any).profit_margin_amount || (itemBaseCost * (item.profitMarginPercentage || (item as any).profit_margin_percentage || 0) / 100);
+      itemSubtotal = itemBaseCost + misc + overhead + profit;
+      discount = itemSubtotal * (item.discountPercentage || 0) / 100;
+      itemAfterDiscount = itemSubtotal - discount;
+      itemVat = itemAfterDiscount * (item.vat_percentage || 0) / 100;
+      itemFinalPrice = itemAfterDiscount + itemVat;
+    } else {
+      // OLD FORMAT: Item without sub-items - show materials/labour directly
+      const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
+      itemBaseCost = materialTotal + item.laborCost;
+      misc = (item as any).miscellaneous_amount || (itemBaseCost * ((item as any).miscellaneous_percentage || 0) / 100);
+      overhead = (item as any).overhead_amount || (itemBaseCost * (item.overheadPercentage || (item as any).overhead_percentage || 0) / 100);
+      profit = (item as any).profit_margin_amount || (itemBaseCost * (item.profitMarginPercentage || (item as any).profit_margin_percentage || 0) / 100);
+      itemSubtotal = itemBaseCost + misc + overhead + profit;
+      discount = itemSubtotal * (item.discountPercentage || 0) / 100;
+      itemAfterDiscount = itemSubtotal - discount;
+      itemVat = itemAfterDiscount * (item.vat_percentage || 0) / 100;
+      itemFinalPrice = itemAfterDiscount + itemVat;
 
-    // Labor Section
-    if (item.labour && item.labour.length > 0) {
-      if (yPos > 270) {
-        doc.addPage();
-        yPos = 20;
+      // Materials Section - Professional Table
+      if (item.materials.length > 0) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(37, 99, 235);
+        doc.text('+ RAW MATERIALS', 18, yPos);
+        doc.setTextColor(0);
+        yPos += 3;
+
+        const materialsTableData = item.materials.map(mat => [
+          mat.name,
+          mat.quantity,
+          mat.unit,
+          formatCurrency(mat.rate),
+          formatCurrency(mat.amount)
+        ]);
+
+        materialsTableData.push([
+          { content: 'Total Materials:', colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } },
+          { content: formatCurrency(materialTotal), styles: { fontStyle: 'bold', fillColor: [219, 234, 254] } }
+        ]);
+
+        (autoTable as any)(doc, {
+          startY: yPos,
+          head: [['Material Name', 'Qty', 'Unit', 'Rate (AED)', 'Amount (AED)']],
+          body: materialsTableData,
+          margin: { left: 18 },
+          theme: 'grid',
+          headStyles: {
+            fillColor: [191, 219, 254],
+            textColor: [30, 64, 175],
+            fontStyle: 'bold',
+            fontSize: 8
+          },
+          bodyStyles: {
+            fontSize: 8,
+            textColor: [55, 65, 81]
+          },
+          columnStyles: {
+            0: { cellWidth: 70 },
+            1: { cellWidth: 20, halign: 'center' },
+            2: { cellWidth: 20, halign: 'center' },
+            3: { cellWidth: 30, halign: 'right' },
+            4: { cellWidth: 35, halign: 'right' }
+          }
+        });
+
+        yPos = (doc as any).lastAutoTable.finalY + 5;
       }
 
-      doc.setFillColor(240, 255, 245);
-      doc.rect(16, yPos - 2, 178, 6, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.text('+ Labour', 18, yPos + 2);
-      yPos += 8;
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      item.labour.forEach(labor => {
-        if (yPos > 270) {
+      // Labor Section - Professional Table
+      if (item.labour && item.labour.length > 0) {
+        if (yPos > 240) {
           doc.addPage();
           yPos = 20;
         }
-        doc.text(`${labor.type} (${labor.quantity} ${labor.unit})`, 20, yPos);
-        doc.text(`AED ${formatCurrency(labor.amount)}`, 170, yPos, { align: 'right' });
-        yPos += 5;
-      });
 
-      doc.setFont('helvetica', 'bold');
-      doc.text('Total Labour:', 20, yPos);
-      doc.text(`AED ${formatCurrency(item.laborCost)}`, 170, yPos, { align: 'right' });
-      yPos += 7;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(126, 34, 206);
+        doc.text('+ LABOUR', 18, yPos);
+        doc.setTextColor(0);
+        yPos += 3;
+
+        const labourTableData = item.labour.map(lab => [
+          lab.type,
+          lab.quantity,
+          lab.unit,
+          formatCurrency(lab.rate),
+          formatCurrency(lab.amount)
+        ]);
+
+        labourTableData.push([
+          { content: 'Total Labour:', colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } },
+          { content: formatCurrency(item.laborCost), styles: { fontStyle: 'bold', fillColor: [233, 213, 255] } }
+        ]);
+
+        (autoTable as any)(doc, {
+          startY: yPos,
+          head: [['Labour Type', 'Hours/Qty', 'Unit', 'Rate (AED)', 'Amount (AED)']],
+          body: labourTableData,
+          margin: { left: 18 },
+          theme: 'grid',
+          headStyles: {
+            fillColor: [216, 180, 254],
+            textColor: [107, 33, 168],
+            fontStyle: 'bold',
+            fontSize: 8
+          },
+          bodyStyles: {
+            fontSize: 8,
+            textColor: [55, 65, 81]
+          },
+          columnStyles: {
+            0: { cellWidth: 70 },
+            1: { cellWidth: 20, halign: 'center' },
+            2: { cellWidth: 20, halign: 'center' },
+            3: { cellWidth: 30, halign: 'right' },
+            4: { cellWidth: 35, halign: 'right' }
+          }
+        });
+
+        yPos = (doc as any).lastAutoTable.finalY + 5;
+      }
     }
 
-    // Overhead & Profit
-    if (yPos > 265) {
+    // Cost Breakdown Table - Professional Format
+    if (yPos > 220) {
       doc.addPage();
       yPos = 20;
     }
 
-    doc.setFillColor(255, 245, 230);
-    doc.rect(16, yPos - 2, 178, 6, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.text('+ Overheads, Profit, Discount & VAT', 18, yPos + 2);
-    yPos += 8;
+    doc.setTextColor(234, 88, 12);
+    doc.text('+ MISC, OVERHEADS, PROFIT, DISCOUNT & VAT', 18, yPos);
+    doc.setTextColor(0);
+    yPos += 3;
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.text(`Overhead (${item.overheadPercentage || 0}%)`, 20, yPos);
-    doc.text(`AED ${formatCurrency(overhead)}`, 170, yPos, { align: 'right' });
-    yPos += 5;
+    const costBreakdownData: any[] = [];
 
-    doc.text(`Profit Margin (${item.profitMarginPercentage || 0}%)`, 20, yPos);
-    doc.text(`AED ${formatCurrency(profit)}`, 170, yPos, { align: 'right' });
-    yPos += 5;
+    const miscPct = (item as any).miscellaneous_percentage || 0;
+    const overheadPct = item.overheadPercentage || (item as any).overhead_percentage || 0;
+    const profitPct = item.profitMarginPercentage || (item as any).profit_margin_percentage || 0;
+
+    if (misc > 0) {
+      costBreakdownData.push(['Miscellaneous', `${miscPct.toFixed(1)}%`, formatCurrency(misc)]);
+    }
+    costBreakdownData.push(['Overhead', `${overheadPct.toFixed(1)}%`, formatCurrency(overhead)]);
+    costBreakdownData.push(['Profit Margin', `${profitPct.toFixed(1)}%`, formatCurrency(profit)]);
 
     if (discount > 0) {
-      doc.setTextColor(220, 38, 38);
+      costBreakdownData.push([
+        { content: 'Discount', styles: { textColor: [220, 38, 38] } },
+        { content: `${(item.discountPercentage || 0).toFixed(1)}%`, styles: { textColor: [220, 38, 38] } },
+        { content: `- ${formatCurrency(discount)}`, styles: { textColor: [220, 38, 38] } }
+      ]);
     }
-    doc.text(`Discount (${item.discountPercentage || 0}%)`, 20, yPos);
-    doc.text(`${discount > 0 ? '-' : ''}AED ${formatCurrency(discount)}`, 170, yPos, { align: 'right' });
-    doc.setTextColor(0);
-    yPos += 5;
 
-    doc.text('Subtotal (After Discount):', 20, yPos);
-    doc.text(`AED ${formatCurrency(itemAfterDiscount)}`, 170, yPos, { align: 'right' });
-    yPos += 5;
+    costBreakdownData.push([
+      { content: 'Subtotal (After Discount):', colSpan: 2, styles: { fontStyle: 'bold' } },
+      { content: formatCurrency(itemAfterDiscount), styles: { fontStyle: 'bold' } }
+    ]);
 
-    doc.text(`VAT (${item.vat_percentage || 0}%)`, 20, yPos);
-    doc.text(`AED ${formatCurrency(itemVat)}`, 170, yPos, { align: 'right' });
-    yPos += 7;
+    costBreakdownData.push(['VAT', `${(item.vat_percentage || 0).toFixed(1)}%`, formatCurrency(itemVat)]);
 
-    // Item Total
-    doc.setFillColor(240, 255, 240);
-    doc.rect(16, yPos - 2, 178, 7, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(22, 163, 74);
-    doc.text('Estimated Selling Price:', 18, yPos + 3);
-    doc.text(`AED ${formatCurrency(itemFinalPrice)}`, 170, yPos + 3, { align: 'right' });
-    doc.setTextColor(0);
-    yPos += 12;
+    costBreakdownData.push([
+      { content: 'Estimated Selling Price:', colSpan: 2, styles: { fontStyle: 'bold', fillColor: [209, 250, 229], textColor: [22, 163, 74] } },
+      { content: formatCurrency(itemFinalPrice), styles: { fontStyle: 'bold', fillColor: [209, 250, 229], textColor: [22, 163, 74] } }
+    ]);
+
+    (autoTable as any)(doc, {
+      startY: yPos,
+      head: [['Description', 'Percentage', 'Amount (AED)']],
+      body: costBreakdownData,
+      margin: { left: 18 },
+      theme: 'grid',
+      headStyles: {
+        fillColor: [254, 243, 199],
+        textColor: [146, 64, 14],
+        fontStyle: 'bold',
+        fontSize: 8
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: [55, 65, 81]
+      },
+      columnStyles: {
+        0: { cellWidth: 90 },
+        1: { cellWidth: 35, halign: 'center' },
+        2: { cellWidth: 50, halign: 'right' }
+      }
+    });
+
+    yPos = (doc as any).lastAutoTable.finalY + 8;
   });
 
   // Add Cost Summary at the END - Beautiful Box
@@ -999,11 +1346,11 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   doc.text(`Date: ${formatDate(estimation.submittedDate)}`, 160, yPos);
   yPos += 10;
 
-  // BOQ Items - Detailed breakdown (NO OVERHEAD/PROFIT SHOWN)
+  // BOQ Items - CLIENT VERSION: Show only items and sub-items (NO materials/labour)
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
   doc.setTextColor(36, 61, 138);
-  doc.text('DETAILED BOQ ITEMS', 14, yPos);
+  doc.text('SCOPE OF WORK', 14, yPos);
   yPos += 8;
 
   (estimation.boqItems || []).forEach((item, itemIndex) => {
@@ -1012,20 +1359,6 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
       doc.addPage();
       yPos = 20;
     }
-
-    const materialTotal = item.materials.reduce((sum, m) => sum + m.amount, 0);
-    const itemBaseCost = materialTotal + item.laborCost;
-
-    // Calculate item's overhead and profit from item-level percentages
-    const itemOverhead = itemBaseCost * (item.overheadPercentage || 0) / 100;
-    const itemProfit = itemBaseCost * (item.profitMarginPercentage || 0) / 100;
-    const itemTotalMarkup = itemOverhead + itemProfit;
-
-    // Calculate distribution ratios
-    const materialRatio = itemBaseCost > 0 ? materialTotal / itemBaseCost : 0;
-    const laborRatio = itemBaseCost > 0 ? item.laborCost / itemBaseCost : 0;
-    const materialMarkupShare = itemTotalMarkup * materialRatio;
-    const laborMarkupShare = itemTotalMarkup * laborRatio;
 
     // Item Header
     doc.setFillColor(230, 240, 255);
@@ -1044,101 +1377,100 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
       yPos += 5;
     }
 
-    doc.setFontSize(8);
-    doc.text(`Qty: ${item.quantity} ${item.unit} | Rate: AED ${formatCurrency(item.rate)}/${item.unit}`, 16, yPos);
-    yPos += 7;
+    // Check if item has sub-items
+    const hasSubItems = item.has_sub_items && item.sub_items && item.sub_items.length > 0;
 
-    // Materials Section with distributed markup
-    let itemAdjustedMaterialTotal = 0;
-    if (item.materials.length > 0) {
-      doc.setFillColor(240, 250, 255);
-      doc.rect(16, yPos - 2, 178, 6, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.text('+ Raw Materials', 18, yPos + 2);
-      yPos += 8;
+    if (hasSubItems) {
+      // CLIENT VERSION: Professional sub-items table (NO materials/labour)
+      yPos += 2;
 
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      item.materials.forEach(material => {
-        if (yPos > 270) {
-          doc.addPage();
-          yPos = 20;
-        }
-        const matShare = materialTotal > 0 ? (material.amount / materialTotal) * materialMarkupShare : 0;
-        const adjustedAmount = material.amount + matShare;
-        itemAdjustedMaterialTotal += adjustedAmount;
+      // Get item-level amounts (misc, overhead, profit)
+      const itemMisc = (item as any).miscellaneous_amount || 0;
+      const itemOverhead = (item as any).overhead_amount || 0;
+      const itemProfit = (item as any).profit_margin_amount || 0;
+      const itemBaseCost = item.sub_items!.reduce((sum, si) => sum + si.materials_cost + si.labour_cost, 0);
 
-        doc.text(`${material.name} (${material.quantity} ${material.unit})`, 20, yPos);
-        doc.text(`AED ${formatCurrency(adjustedAmount)}`, 170, yPos, { align: 'right' });
-        yPos += 5;
+      // Build sub-items table data
+      const subItemsTableData = item.sub_items!.map((subItem, sIdx) => {
+        const subItemBase = subItem.materials_cost + subItem.labour_cost;
+        // Distribute misc + overhead + profit proportionally to sub-items
+        const subItemMarkup = itemBaseCost > 0 ? (subItemBase / itemBaseCost) * (itemMisc + itemOverhead + itemProfit) : 0;
+        const subItemTotal = subItemBase + subItemMarkup;
+        const adjustedRate = subItem.quantity > 0 ? subItemTotal / subItem.quantity : 0;
+
+        // Build comprehensive scope/size display
+        const scopeParts = [];
+        if (subItem.scope) scopeParts.push(`Scope: ${subItem.scope}`);
+        if (subItem.size) scopeParts.push(`Size: ${subItem.size}`);
+        if (subItem.location) scopeParts.push(`Loc: ${subItem.location}`);
+        if (subItem.brand) scopeParts.push(`Brand: ${subItem.brand}`);
+        const details = scopeParts.join(' | ') || '-';
+
+        return [
+          `Sub Item ${sIdx + 1}: ${subItem.sub_item_name}\n${details}`,
+          `${subItem.quantity}`,
+          subItem.unit,
+          formatCurrency(adjustedRate),
+          formatCurrency(subItemTotal)
+        ];
       });
 
-      doc.setFont('helvetica', 'bold');
-      doc.text('Total Materials:', 20, yPos);
-      doc.text(`AED ${formatCurrency(itemAdjustedMaterialTotal)}`, 170, yPos, { align: 'right' });
-      yPos += 7;
-      adjustedTotalMaterialCost += itemAdjustedMaterialTotal;
-    }
-
-    // Labor Section with distributed markup
-    let itemAdjustedLaborTotal = 0;
-    if (item.labour && item.labour.length > 0) {
-      if (yPos > 270) {
-        doc.addPage();
-        yPos = 20;
-      }
-
-      doc.setFillColor(240, 255, 245);
-      doc.rect(16, yPos - 2, 178, 6, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.text('+ Labour', 18, yPos + 2);
-      yPos += 8;
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      item.labour.forEach(labor => {
-        if (yPos > 270) {
-          doc.addPage();
-          yPos = 20;
+      (autoTable as any)(doc, {
+        startY: yPos,
+        head: [['Description', 'Qty', 'Unit', 'Rate (AED)', 'Amount (AED)']],
+        body: subItemsTableData,
+        margin: { left: 18 },
+        theme: 'grid',
+        headStyles: {
+          fillColor: [191, 219, 254],
+          textColor: [30, 64, 175],
+          fontStyle: 'bold',
+          fontSize: 8
+        },
+        bodyStyles: {
+          fontSize: 7,
+          textColor: [55, 65, 81]
+        },
+        columnStyles: {
+          0: { cellWidth: 85 },
+          1: { cellWidth: 18, halign: 'center' },
+          2: { cellWidth: 18, halign: 'center' },
+          3: { cellWidth: 28, halign: 'right' },
+          4: { cellWidth: 28, halign: 'right' }
+        },
+        styles: {
+          lineColor: [191, 219, 254],
+          lineWidth: 0.1
         }
-        const labShare = item.laborCost > 0 ? (labor.amount / item.laborCost) * laborMarkupShare : 0;
-        const adjustedAmount = labor.amount + labShare;
-        itemAdjustedLaborTotal += adjustedAmount;
-
-        doc.text(`${labor.type} (${labor.quantity} ${labor.unit})`, 20, yPos);
-        doc.text(`AED ${formatCurrency(adjustedAmount)}`, 170, yPos, { align: 'right' });
-        yPos += 5;
       });
 
-      doc.setFont('helvetica', 'bold');
-      doc.text('Total Labour:', 20, yPos);
-      doc.text(`AED ${formatCurrency(itemAdjustedLaborTotal)}`, 170, yPos, { align: 'right' });
+      yPos = (doc as any).lastAutoTable.finalY + 3;
+    } else {
+      // Old format: No sub-items
+      doc.setFontSize(8);
+      doc.text(`Qty: ${item.quantity} ${item.unit} | Rate: AED ${formatCurrency(item.rate)}/${item.unit}`, 16, yPos);
       yPos += 7;
-      adjustedTotalLaborCost += itemAdjustedLaborTotal;
     }
 
-    // Item Total with markup distributed
+    // Item Total
     if (yPos > 265) {
       doc.addPage();
       yPos = 20;
     }
 
-    const itemTotalWithMarkup = itemAdjustedMaterialTotal + itemAdjustedLaborTotal;
+    const itemTotalWithMarkup = item.estimatedSellingPrice;
     doc.setFillColor(240, 255, 240);
     doc.rect(16, yPos - 2, 178, 7, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
     doc.setTextColor(22, 163, 74);
-    doc.text('Total Price:', 18, yPos + 3);
+    doc.text('Total:', 18, yPos + 3);
     doc.text(`AED ${formatCurrency(itemTotalWithMarkup)}`, 170, yPos + 3, { align: 'right' });
     doc.setTextColor(0);
     yPos += 12;
   });
 
-  // Add Cost Overview at the END (NO Overhead/Profit shown) - Compact like UI
-  // Only add new page if there's really not enough space
+  // Add Cost Summary at the END - CLIENT VERSION
   if (yPos > 220) {
     doc.addPage();
     yPos = 20;
@@ -1148,61 +1480,55 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   doc.setDrawColor(200, 220, 240);
   doc.setLineWidth(0.5);
   doc.setFillColor(240, 247, 255);
-  // Box height for VAT (without preliminaries)
-  doc.roundedRect(14, yPos, 182, 45, 2, 2, 'FD');
+  doc.roundedRect(14, yPos, 182, 40, 2, 2, 'FD');
 
   yPos += 7;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(36, 61, 138);
-  doc.text('Cost Summary', 16, yPos);
+  doc.text('COST SUMMARY', 16, yPos);
   yPos += 8;
 
   doc.setFontSize(9);
   doc.setTextColor(0);
   doc.setFont('helvetica', 'normal');
 
-  // Left column
-  doc.text('Total Material Cost:', 18, yPos);
-  doc.text(`AED${formatCurrency(adjustedTotalMaterialCost)}`, 75, yPos, { align: 'right' });
+  // Calculate totals from items
+  const subtotalBeforeDiscount = (estimation.boqItems || []).reduce((sum, item) => sum + item.estimatedSellingPrice, 0);
 
-  // Right column
-  doc.text('Total Labor Cost:', 100, yPos);
-  doc.text(`AED${formatCurrency(adjustedTotalLaborCost)}`, 160, yPos, { align: 'right' });
+  doc.text('Subtotal:', 18, yPos);
+  doc.text(`AED ${formatCurrency(subtotalBeforeDiscount)}`, 75, yPos, { align: 'right' });
   yPos += 5;
 
-  doc.setFont('helvetica', 'bold');
-  doc.text('Total Project Cost:', 18, yPos);
-  doc.text(`AED${formatCurrency(adjustedTotalMaterialCost + adjustedTotalLaborCost)}`, 75, yPos, { align: 'right' });
-
-  yPos += 5;
-  doc.setFont('helvetica', 'normal');
+  // Discount (if any)
   if (totalDiscount > 0) {
-    doc.setTextColor(239, 68, 68); // Red color for discount
-  }
-  doc.text(`Discount (${avgDiscountPct.toFixed(0)}%):`, 18, yPos);
-  doc.text(`${totalDiscount > 0 ? '-' : ''} AED${formatCurrency(totalDiscount)}`, 75, yPos, { align: 'right' });
-  doc.setTextColor(0); // Reset to black
-  yPos += 5;
+    doc.setTextColor(239, 68, 68);
+    doc.text(`Discount (${avgDiscountPct.toFixed(0)}%):`, 18, yPos);
+    doc.text(`-AED ${formatCurrency(totalDiscount)}`, 75, yPos, { align: 'right' });
+    doc.setTextColor(0);
+    yPos += 5;
 
-  // Subtotal after discount
-  const clientAfterDiscount = (adjustedTotalMaterialCost + adjustedTotalLaborCost) - totalDiscount;
-  doc.text('Subtotal (After Discount):', 18, yPos);
-  doc.text(`AED${formatCurrency(clientAfterDiscount)}`, 75, yPos, { align: 'right' });
-  yPos += 5;
+    doc.setFont('helvetica', 'bold');
+    doc.text('After Discount:', 18, yPos);
+    doc.text(`AED ${formatCurrency(afterDiscount)}`, 75, yPos, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    yPos += 5;
+  }
 
   // VAT
-  const avgVatPct = clientAfterDiscount > 0 ? (totalVat / clientAfterDiscount) * 100 : 0;
-  doc.text(`VAT (${avgVatPct.toFixed(1)}%):`, 18, yPos);
-  doc.text(`AED${formatCurrency(totalVat)}`, 75, yPos, { align: 'right' });
-  yPos += 8;
+  if (totalVat > 0) {
+    const avgVatPct = afterDiscount > 0 ? (totalVat / afterDiscount) * 100 : 0;
+    doc.text(`VAT (${avgVatPct.toFixed(1)}%):`, 18, yPos);
+    doc.text(`AED ${formatCurrency(totalVat)}`, 75, yPos, { align: 'right' });
+    yPos += 8;
+  }
 
-  // Grand Total - Compact Green Bar
+  // Grand Total
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(22, 163, 74);
-  doc.text('Grand Total:', 18, yPos);
-  doc.text(`AED${formatCurrency(grandTotal)}`, 160, yPos, { align: 'right' });
+  doc.text('TOTAL PROJECT VALUE:', 18, yPos);
+  doc.text(`AED ${formatCurrency(grandTotal)}`, 160, yPos, { align: 'right' });
 
   // Preliminaries & Approval Works Section
   if (estimation.preliminaries && (estimation.preliminaries.items?.length > 0 || estimation.preliminaries.notes)) {

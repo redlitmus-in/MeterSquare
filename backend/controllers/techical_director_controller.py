@@ -344,6 +344,49 @@ def td_mail_send():
                 "recipient_name": recipient_name
             }
 
+            # ==================== CREATE INTERNAL REVISION FOR TD REJECTION ====================
+            # Increment internal revision number and create snapshot
+            current_internal_rev = boq.internal_revision_number or 0
+            new_internal_rev = current_internal_rev + 1
+            boq.internal_revision_number = new_internal_rev
+            boq.has_internal_revisions = True
+
+            # Create complete BOQ snapshot for internal revision tracking
+            complete_boq_snapshot = {
+                "boq_id": boq.boq_id,
+                "boq_name": boq.boq_name,
+                "status": boq.status,
+                "revision_number": boq.revision_number or 0,
+                "internal_revision_number": new_internal_rev,
+                "total_cost": float(boq_details.total_cost) if boq_details.total_cost else 0,
+                "total_items": boq_details.total_items or 0,
+                "total_materials": boq_details.total_materials or 0,
+                "total_labour": boq_details.total_labour or 0,
+                "preliminaries": boq_details.boq_details.get("preliminaries", {}) if boq_details.boq_details else {},
+                "items": items_summary.get('items', []),
+                "summary": items_summary if items_summary else {},
+                "created_by": boq.created_by,
+                "created_at": boq.created_at.isoformat() if boq.created_at else None,
+                "last_modified_by": td_name,
+                "last_modified_at": datetime.utcnow().isoformat()
+            }
+
+            # Create internal revision record for TD rejection
+            internal_revision = BOQInternalRevision(
+                boq_id=boq_id,
+                internal_revision_number=new_internal_rev,
+                action_type='TD_REJECTED',
+                actor_role='technicalDirector',
+                actor_name=td_name,
+                actor_user_id=td_user_id,
+                status_before=boq.status,
+                status_after=new_status,
+                rejection_reason=rejection_reason or comments,
+                changes_summary=complete_boq_snapshot
+            )
+            db.session.add(internal_revision)
+            log.info(f"✅ Internal revision {new_internal_rev} created for TD rejection of BOQ {boq_id}")
+
         # ==================== UPDATE BOQ & HISTORY ====================
         # Update BOQ status
         boq.status = new_status

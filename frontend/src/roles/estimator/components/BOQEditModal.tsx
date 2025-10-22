@@ -799,10 +799,21 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
         is_revision: isRevision
       };
 
-      // Use revisionBOQ endpoint if this is a revision, otherwise updateBOQ
-      const result = isRevision
-        ? await estimatorService.revisionBOQ(editedBoq.boq_id, payload)
-        : await estimatorService.updateBOQ(editedBoq.boq_id, payload);
+      // Determine which API to call based on BOQ status
+      // - If status is "Rejected" (TD rejection): Use internal revision API
+      // - If status is "Client_Rejected" or "Sent_for_Confirmation": Use client revision API
+      // - Otherwise: Use regular update API
+      let result;
+      if (boq?.status === 'Rejected') {
+        // TD rejected - use internal revision API (for internal approval cycles)
+        result = await estimatorService.updateInternalRevisionBOQ(editedBoq.boq_id, payload);
+      } else if (isRevision) {
+        // Client revision - use revision_boq API (for client-facing revisions)
+        result = await estimatorService.revisionBOQ(editedBoq.boq_id, payload);
+      } else {
+        // Regular update
+        result = await estimatorService.updateBOQ(editedBoq.boq_id, payload);
+      }
 
       if (result.success) {
         toast.success(isRevision ? 'BOQ revision saved successfully' : 'BOQ updated successfully');

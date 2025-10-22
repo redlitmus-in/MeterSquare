@@ -52,6 +52,41 @@ interface BOQItem {
   quantity: number;
   rate: number;
   amount: number;
+  has_sub_items?: boolean;
+  sub_items?: {
+    sub_item_name: string;
+    scope?: string;
+    size?: string;
+    description?: string;
+    location?: string;
+    brand?: string;
+    quantity: number;
+    unit: string;
+    rate: number;
+    base_total: number;
+    materials_cost: number;
+    labour_cost: number;
+    materials: {
+      name: string;
+      material_name?: string;
+      quantity: number;
+      unit: string;
+      rate: number;
+      amount: number;
+      total_price?: number;
+      vat_percentage?: number;
+    }[];
+    labour: {
+      type: string;
+      labour_role?: string;
+      quantity: number;
+      hours?: number;
+      unit: string;
+      rate: number;
+      amount: number;
+      total_cost?: number;
+    }[];
+  }[];
   materials: {
     name: string;
     quantity: number;
@@ -68,6 +103,17 @@ interface BOQItem {
   }[];
   laborCost: number;
   estimatedSellingPrice: number;
+  miscellaneous_percentage?: number;
+  miscellaneous_amount?: number;
+  overheadPercentage?: number;
+  overhead_percentage?: number;
+  overhead_amount?: number;
+  profitMarginPercentage?: number;
+  profit_margin_percentage?: number;
+  profit_margin_amount?: number;
+  discountPercentage?: number;
+  vat_percentage?: number;
+  vat_amount?: number;
 }
 
 interface EstimationItem {
@@ -807,9 +853,9 @@ const ProjectApprovals: React.FC = () => {
       // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
       return est.status === 'pending' && !est.pmAssigned;
     } else if (filterStatus === 'revisions') {
-      // Revisions: Show ALL revision projects (both pending_revision and revision_approved)
-      // Filter only by selectedRevisionNumber (revision cycle)
-      const isRevisionStatus = (est.status === 'pending_revision' || est.status === 'revision_approved') && !est.pmAssigned;
+      // Revisions: Show ONLY pending_revision (waiting for TD approval)
+      // revision_approved moves to the approved tab
+      const isRevisionStatus = (est.status === 'pending_revision') && !est.pmAssigned;
 
       if (!isRevisionStatus) return false;
 
@@ -821,8 +867,8 @@ const ProjectApprovals: React.FC = () => {
 
       return true;
     } else if (filterStatus === 'approved') {
-      // Approved: TD approved internally, includes both "approved" and "sent_for_confirmation" (waiting for client)
-      return (est.status === 'approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned;
+      // Approved: TD approved internally, includes "approved", "revision_approved", and "sent_for_confirmation" (waiting for client)
+      return (est.status === 'approved' || est.status === 'revision_approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned;
     } else if (filterStatus === 'sent') {
       // Client Response: Shows both approved (client_confirmed) and rejected (client_rejected) by client
       return (est.status === 'client_confirmed' || est.status === 'client_rejected') && !est.pmAssigned;

@@ -308,6 +308,78 @@ class EstimatorService {
     }
   }
 
+  async updateInternalRevisionBOQ(boqId: number, updateData: any): Promise<{ success: boolean; message: string }> {
+    try {
+      console.log('=== INTERNAL REVISION BOQ PAYLOAD ===', JSON.stringify(updateData, null, 2));
+
+      // Validate required fields
+      if (!updateData.boq_name || !updateData.boq_name.trim()) {
+        return {
+          success: false,
+          message: 'BOQ name is required'
+        };
+      }
+
+      if (!updateData.items || updateData.items.length === 0) {
+        return {
+          success: false,
+          message: 'At least one BOQ item is required'
+        };
+      }
+
+      // Process data similar to revisionBOQ
+      const processedData = {
+        ...updateData,
+        items: updateData.items.map((item: any) => ({
+          ...item,
+          materials: item.materials.map((mat: any) => ({
+            ...mat,
+            total_price: mat.total_price || (mat.quantity * mat.unit_price)
+          })),
+          labour: item.labour.map((lab: any) => ({
+            ...lab,
+            total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour)
+          }))
+        }))
+      };
+
+      console.log('=== PROCESSED INTERNAL REVISION PAYLOAD ===', JSON.stringify(processedData, null, 2));
+
+      // Call internal revision API endpoint
+      const response = await apiClient.put(`/boq/${boqId}/internal_revision`, processedData);
+      console.log('BOQ internal revision response:', response.data);
+
+      return {
+        success: true,
+        message: response.data.message || 'BOQ internal revision created successfully'
+      };
+    } catch (error: any) {
+      console.error('BOQ internal revision error:', error.response?.data || error.message);
+
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'BOQ not found'
+        };
+      } else if (error.response?.status === 400) {
+        return {
+          success: false,
+          message: error.response?.data?.error || 'Invalid BOQ data provided'
+        };
+      } else if (error.response?.status === 500) {
+        return {
+          success: false,
+          message: 'Server error while creating internal revision'
+        };
+      }
+
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to create BOQ internal revision'
+      };
+    }
+  }
+
   async deleteBOQ(boqId: number): Promise<{ success: boolean; message: string }> {
     try {
       const response = await apiClient.delete(`/delete_boq/${boqId}`);
