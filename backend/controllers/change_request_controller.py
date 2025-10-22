@@ -413,24 +413,26 @@ def get_all_change_requests():
             # Estimator sees:
             # 1. Requests where approval_required_from = 'estimator' (pending estimator approval)
             # 2. Requests approved by estimator that are assigned_to_buyer (approved tab)
-            # 3. Requests approved by estimator that are purchase_completed (completed tab)
+            # 3. ALL requests that are purchase_completed (completed tab) - regardless of who approved
             from sqlalchemy import or_
             query = query.filter(
                 or_(
                     ChangeRequest.approval_required_from == 'estimator',  # Pending requests
-                    ChangeRequest.approved_by_user_id.isnot(None)  # Approved by estimator
+                    ChangeRequest.approved_by_user_id.isnot(None),  # Approved by estimator
+                    ChangeRequest.status == 'purchase_completed'  # All completed purchases (actual DB value)
                 )
             )
         elif user_role in ['technical_director', 'technicaldirector']:
             # TD sees:
             # 1. Requests where approval_required_from = 'technical_director' (pending TD approval)
             # 2. Requests approved by TD that are assigned_to_buyer (approved tab)
-            # 3. Requests approved by TD that are purchase_completed (completed tab)
+            # 3. ALL requests that are purchase_completed (completed tab) - regardless of who approved
             from sqlalchemy import or_
             query = query.filter(
                 or_(
                     ChangeRequest.approval_required_from == 'technical_director',  # Pending requests
-                    ChangeRequest.td_approved_by_user_id.isnot(None)  # Approved by TD
+                    ChangeRequest.td_approved_by_user_id.isnot(None),  # Approved by TD
+                    ChangeRequest.status == 'purchase_completed'  # All completed purchases (actual DB value)
                 )
             )
         elif user_role == 'buyer':
