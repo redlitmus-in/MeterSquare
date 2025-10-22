@@ -37,6 +37,7 @@ import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
+import ApprovalWithBuyerModal from '@/components/modals/ApprovalWithBuyerModal';
 
 const ChangeRequestsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('pending');
@@ -49,6 +50,8 @@ const ChangeRequestsPage: React.FC = () => {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
 
   // Fetch change requests from backend
   useEffect(() => {
@@ -81,18 +84,16 @@ const ChangeRequestsPage: React.FC = () => {
     }
   };
 
-  const handleApprove = async (crId: number) => {
-    try {
-      const response = await changeRequestService.approve(crId, 'Approved by Estimator');
-      if (response.success) {
-        toast.success('Change request approved successfully');
-        loadChangeRequests();
-      } else {
-        toast.error(response.message);
-      }
-    } catch (error) {
-      toast.error('Failed to approve change request');
-    }
+  const handleApprove = (crId: number) => {
+    // Show buyer selection modal before approving
+    setApprovingCrId(crId);
+    setShowApprovalModal(true);
+  };
+
+  const handleApprovalSuccess = () => {
+    loadChangeRequests();
+    setShowApprovalModal(false);
+    setApprovingCrId(null);
   };
 
   const handleReject = (crId: number) => {
@@ -133,11 +134,10 @@ const ChangeRequestsPage: React.FC = () => {
     }
   };
 
-  const handleApproveFromModal = async () => {
+  const handleApproveFromModal = () => {
     if (!selectedChangeRequest) return;
-    await handleApprove(selectedChangeRequest.cr_id);
     setShowDetailsModal(false);
-    setSelectedChangeRequest(null);
+    handleApprove(selectedChangeRequest.cr_id);
   };
 
   const handleRejectFromModal = () => {
@@ -200,7 +200,7 @@ const ChangeRequestsPage: React.FC = () => {
   if (initialLoad) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <ModernLoadingSpinners variant="pulse" color="purple" />
+        <ModernLoadingSpinners variant="pulse-wave" />
       </div>
     );
   }
@@ -721,6 +721,20 @@ const ChangeRequestsPage: React.FC = () => {
         onSubmit={handleRejectSubmit}
         title="Reject Change Request"
       />
+
+      {/* Approval with Buyer Selection Modal */}
+      {approvingCrId && (
+        <ApprovalWithBuyerModal
+          isOpen={showApprovalModal}
+          onClose={() => {
+            setShowApprovalModal(false);
+            setApprovingCrId(null);
+          }}
+          crId={approvingCrId}
+          crName={`CR-${approvingCrId}`}
+          onSuccess={handleApprovalSuccess}
+        />
+      )}
     </div>
   );
 };

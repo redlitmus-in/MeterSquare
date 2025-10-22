@@ -2702,16 +2702,35 @@ const ProjectApprovals: React.FC = () => {
                             <div key={pm.user_id}>
                               <div
                                 onClick={() => setSelectedPMId(pm.user_id)}
-                                className={`border rounded-md px-3 py-1.5 cursor-pointer transition-all ${
+                                className={`border rounded-md px-3 py-2 cursor-pointer transition-all ${
                                   isSelected
                                     ? 'border-[#243d8a] bg-blue-50 shadow-sm'
                                     : `border-gray-200 hover:border-gray-300 hover:shadow-sm ${statusBg}`
                                 }`}
                               >
                                 <div className="flex items-center gap-3">
+                                  {/* Avatar with Online Status */}
+                                  <div className="relative flex-shrink-0">
+                                    <div className="w-9 h-9 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                                      {(pm.pm_name || pm.full_name).charAt(0).toUpperCase()}
+                                    </div>
+                                    <div
+                                      className={`
+                                        absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white
+                                        ${pm.is_active ? 'bg-green-500' : 'bg-gray-400'}
+                                      `}
+                                      title={pm.is_active ? 'Online' : 'Offline'}
+                                    />
+                                  </div>
+
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
                                       <h4 className="font-semibold text-gray-900 text-sm">{pm.pm_name || pm.full_name}</h4>
+                                      {pm.is_active === true && (
+                                        <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                                          Online
+                                        </span>
+                                      )}
                                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColor} ${statusBg} border whitespace-nowrap`}>
                                         {statusText}
                                       </span>

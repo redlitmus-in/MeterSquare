@@ -167,6 +167,7 @@ class TDService {
             full_name: pm.pm_name,
             email: pm.email,
             phone: pm.phone,
+            is_active: pm.is_active || false,
             projects: [],
             projectCount: 0
           });
@@ -187,6 +188,7 @@ class TDService {
           full_name: pm.full_name,
           email: pm.email,
           phone: pm.phone,
+          is_active: pm.is_active || false,
           projects: [],
           projectCount: 0
         });

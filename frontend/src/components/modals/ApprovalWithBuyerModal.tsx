@@ -3,13 +3,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, CheckCircle, User } from 'lucide-react';
 import { changeRequestService } from '@/services/changeRequestService';
 import { toast } from 'sonner';
-import Mod ernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface Buyer {
   user_id: number;
   full_name: string;
   email: string;
   username: string;
+  is_active: boolean;
 }
 
 interface ApprovalWithBuyerModalProps {
@@ -151,19 +152,53 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
                         </p>
                       </div>
                     ) : (
-                      <select
-                        value={selectedBuyerId || ''}
-                        onChange={(e) => setSelectedBuyerId(Number(e.target.value))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                        required
-                      >
-                        <option value="">Select a buyer</option>
-                        {buyers.map(buyer => (
-                          <option key={buyer.user_id} value={buyer.user_id}>
-                            {buyer.full_name} ({buyer.email})
-                          </option>
+                      <div className="border border-gray-300 rounded-lg max-h-60 overflow-y-auto">
+                        {buyers.map((buyer, index) => (
+                          <div
+                            key={buyer.user_id}
+                            onClick={() => setSelectedBuyerId(buyer.user_id)}
+                            className={`
+                              flex items-center gap-3 p-3 cursor-pointer transition-colors
+                              ${selectedBuyerId === buyer.user_id ? 'bg-green-50 border-l-4 border-green-500' : 'hover:bg-gray-50'}
+                              ${index !== 0 ? 'border-t border-gray-200' : ''}
+                            `}
+                          >
+                            {/* Online/Offline Status Indicator */}
+                            <div className="relative">
+                              <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white font-semibold">
+                                {buyer.full_name.charAt(0).toUpperCase()}
+                              </div>
+                              <div
+                                className={`
+                                  absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white
+                                  ${buyer.is_active ? 'bg-green-500' : 'bg-gray-400'}
+                                `}
+                                title={buyer.is_active ? 'Online' : 'Offline'}
+                              />
+                            </div>
+
+                            {/* Buyer Info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-semibold text-gray-900 truncate">
+                                  {buyer.full_name}
+                                </p>
+                                {buyer.is_active === true && (
+                                  <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                                    Online
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-500 truncate">{buyer.email}</p>
+                            </div>
+
+                            {/* Selected Checkmark */}
+                            {selectedBuyerId === buyer.user_id && (
+                              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                            )}
+                          </div>
                         ))}
-                      </select>
+                      </div>
                     )}
                     <p className="text-xs text-gray-500 mt-2">
                       The selected buyer will be notified to complete the purchase
