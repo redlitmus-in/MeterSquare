@@ -281,10 +281,11 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
               <div className="mb-4 sm:mb-6">
                 <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3">Materials Requested</h3>
                 <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
-                  <table className="w-full min-w-[640px]">
+                  <table className="w-full min-w-[800px]">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">Material</th>
+                        <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">Sub-Item</th>
                         <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">For Item</th>
                         <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Quantity</th>
                         <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Unit Price</th>
@@ -292,9 +293,18 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {changeRequest.materials_data?.map((material, idx) => (
+                      {(changeRequest.sub_items_data || changeRequest.materials_data)?.map((material: any, idx: number) => (
                         <tr key={idx} className="hover:bg-gray-50">
-                          <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-gray-900">{material.material_name}</td>
+                          <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-gray-900">
+                            {material.material_name}
+                          </td>
+                          <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600">
+                            {material.sub_item_name && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                {material.sub_item_name}
+                              </span>
+                            )}
+                          </td>
                           <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600">
                             {changeRequest.item_name && (
                               <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
@@ -314,7 +324,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         </tr>
                       ))}
                       <tr className="bg-purple-50 font-bold">
-                        <td colSpan={4} className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-purple-900 text-right">
+                        <td colSpan={5} className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-purple-900 text-right">
                           Total Materials Cost:
                         </td>
                         <td className="px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-purple-900 text-right whitespace-nowrap">

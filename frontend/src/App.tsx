@@ -160,6 +160,18 @@ const RoleSpecificVendorHub: React.FC = () => {
   // Get user role (backend sends camelCase: technicalDirector)
   const userRole = (user as any)?.role || '';
   const userRoleLower = userRole.toLowerCase();
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  // Check if user is Buyer
+  const isBuyer = roleId === 'buyer' ||
+                  roleIdLower === 'buyer' ||
+                  userRoleLower === 'buyer';
+
+  // Buyer has vendor management access
+  if (isBuyer) {
+    return <VendorManagement />;
+  }
 
   // Site and MEP Supervisors don't have vendor access - they only handle material purchases
   if (userRole === 'siteSupervisor' || userRoleLower === 'site supervisor' || userRoleLower === 'site_supervisor' || userRoleLower === 'sitesupervisor' ||

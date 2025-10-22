@@ -121,7 +121,9 @@ def create_change_request():
             # Direct API call - convert materials to sub_items format
             for mat in materials:
                 sub_items_data.append({
-                    'sub_item_name': mat.get('material_name'),
+                    'sub_item_id': mat.get('sub_item_id') or mat.get('master_material_id'),
+                    'sub_item_name': mat.get('sub_item_name') or mat.get('material_name'),
+                    'material_name': mat.get('material_name'),
                     'quantity': mat.get('quantity'),
                     'unit': mat.get('unit', 'nos'),
                     'unit_price': mat.get('unit_price'),
@@ -410,25 +412,25 @@ def get_all_change_requests():
         elif user_role == 'estimator':
             # Estimator sees:
             # 1. Requests where approval_required_from = 'estimator' (pending estimator approval)
-            # 2. Requests approved by estimator (where approved_by_user_id is set)
-            # This includes requests that moved to buyer or completed - they stay visible in "approved" tab
+            # 2. Requests approved by estimator that are assigned_to_buyer (approved tab)
+            # 3. Requests approved by estimator that are purchase_completed (completed tab)
             from sqlalchemy import or_
             query = query.filter(
                 or_(
                     ChangeRequest.approval_required_from == 'estimator',  # Pending requests
-                    ChangeRequest.approved_by_user_id.isnot(None)  # Approved by estimator (shows in approved tab even after buyer completes)
+                    ChangeRequest.approved_by_user_id.isnot(None)  # Approved by estimator
                 )
             )
         elif user_role in ['technical_director', 'technicaldirector']:
             # TD sees:
             # 1. Requests where approval_required_from = 'technical_director' (pending TD approval)
-            # 2. Requests approved by TD (where td_approved_by_user_id is set)
-            # This includes requests that moved to buyer or completed - they stay visible in "approved" tab
+            # 2. Requests approved by TD that are assigned_to_buyer (approved tab)
+            # 3. Requests approved by TD that are purchase_completed (completed tab)
             from sqlalchemy import or_
             query = query.filter(
                 or_(
                     ChangeRequest.approval_required_from == 'technical_director',  # Pending requests
-                    ChangeRequest.td_approved_by_user_id.isnot(None)  # Approved by TD (shows in approved tab even after buyer completes)
+                    ChangeRequest.td_approved_by_user_id.isnot(None)  # Approved by TD
                 )
             )
         elif user_role == 'buyer':

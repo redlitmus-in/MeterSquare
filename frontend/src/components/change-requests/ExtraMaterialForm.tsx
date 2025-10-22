@@ -55,8 +55,10 @@ interface Material {
 interface MaterialItem {
   id: string;
   isNew: boolean;
-  subItemId?: string;
-  subItemName: string;
+  subItemId?: string;  // The sub-item (scope) ID like "Protection"
+  subItemName: string;  // The sub-item (scope) name like "Protection"
+  materialId?: string;  // The actual material ID like "Bubble Wrap"
+  materialName: string;  // The actual material name like "Bubble Wrap"
   quantity: number;
   unit: string;
   unitRate: number;
@@ -207,11 +209,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
   // Add material functions
   const addExistingMaterial = (material: Material) => {
+    if (!selectedSubItem) return;
+
     const newMaterialItem: MaterialItem = {
       id: `material-${Date.now()}-${Math.random()}`,
       isNew: false,
-      subItemId: material.material_id,
-      subItemName: material.material_name,
+      subItemId: selectedSubItem.sub_item_id,  // The sub-item (scope) ID like "Protection"
+      subItemName: selectedSubItem.sub_item_name,  // The sub-item (scope) name like "Protection"
+      materialId: material.material_id,  // The material ID like "Bubble Wrap's ID"
+      materialName: material.material_name,  // The material name like "Bubble Wrap"
       quantity: 0,  // Empty for user to fill
       unit: material.unit,  // Fixed from material
       unitRate: material.unit_price || 0,  // Fixed from material
@@ -228,10 +234,14 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   };
 
   const addNewMaterial = () => {
+    if (!selectedSubItem) return;
+
     const newMaterial: MaterialItem = {
       id: `material-${Date.now()}-${Math.random()}`,
       isNew: true,
-      subItemName: '',
+      subItemId: selectedSubItem.sub_item_id,  // The sub-item (scope) ID
+      subItemName: selectedSubItem.sub_item_name,  // The sub-item (scope) name
+      materialName: '',  // New material name (to be filled by user)
       quantity: 0,  // Empty for user to fill
       unit: '',
       unitRate: 0,
@@ -392,24 +402,24 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
     // Validate each material
     for (const material of materials) {
-      if (!material.subItemName) {
+      if (!material.materialName) {
         toast.error('All materials must have a name');
         return;
       }
 
       if (material.isNew && (!material.reasonForNew || material.reasonForNew.length < 10)) {
-        toast.error(`New material "${material.subItemName}" requires a reason (min 10 characters)`);
+        toast.error(`New material "${material.materialName}" requires a reason (min 10 characters)`);
         return;
       }
 
       // Validate per-material justification (required for ALL materials)
       if (!material.justification || material.justification.trim().length < 20) {
-        toast.error(`Material "${material.subItemName}" requires a justification (minimum 20 characters)`);
+        toast.error(`Material "${material.materialName}" requires a justification (minimum 20 characters)`);
         return;
       }
 
       if (material.quantity <= 0 || material.unitRate <= 0) {
-        toast.error(`Material "${material.subItemName}" must have positive quantity and unit rate`);
+        toast.error(`Material "${material.materialName}" must have positive quantity and unit rate`);
         return;
       }
     }
@@ -458,11 +468,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           item_name: selectedItem?.item_name || null,
           justification: justification || remarks,
           materials: materials.map(mat => ({
-            material_name: mat.subItemName,
+            material_name: mat.materialName,  // The actual material name like "Bubble Wrap"
+            sub_item_id: mat.subItemId,  // The sub-item (scope) ID like "subitem_331_1_3"
+            sub_item_name: mat.subItemName,  // The sub-item (scope) name like "Protection"
             quantity: mat.quantity,
             unit: mat.unit,
             unit_price: mat.unitRate,
-            master_material_id: mat.isNew ? null : mat.subItemId,
+            master_material_id: mat.isNew ? null : mat.materialId,  // The material ID like "mat_331_1_3_1"
             reason: mat.isNew ? mat.reasonForNew : null,
             justification: mat.justification  // Per-material justification
           }))
@@ -888,11 +900,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <h4 className="font-medium text-gray-900">Purchase Request #{index + 1}</h4>
-                      {!material.isNew && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          Scope: {material.subItemName} | Unit Rate: AED{material.unitRate}/{material.unit}
-                        </p>
-                      )}
+                      <p className="text-xs text-gray-500 mt-1">
+                        Scope: {material.subItemName}
+                        {!material.isNew && ` | Material: ${material.materialName}`}
+                        {!material.isNew && ` | Unit Rate: AED${material.unitRate}/${material.unit}`}
+                      </p>
                     </div>
                     <button
                       type="button"
@@ -911,8 +923,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         </label>
                         <input
                           type="text"
-                          value={material.subItemName}
-                          onChange={(e) => updateMaterial(material.id, { subItemName: e.target.value })}
+                          value={material.materialName}
+                          onChange={(e) => updateMaterial(material.id, { materialName: e.target.value })}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
                           placeholder="Enter material name"
                         />
@@ -931,12 +943,18 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                       </div>
                     </div>
                   ) : (
-                    <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                      <p className="text-xs font-medium text-blue-900 mb-1">Selected Sub-Item (Scope)</p>
-                      <p className="text-sm font-semibold text-blue-900">{material.subItemName}</p>
-                      <div className="mt-2 flex gap-4 text-xs text-blue-700">
-                        <span>Unit: {material.unit}</span>
-                        <span>Rate: AED{material.unitRate.toLocaleString()}/{material.unit}</span>
+                    <div className="mb-3 space-y-2">
+                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                        <p className="text-xs font-medium text-purple-900 mb-1">Scope (Sub-Item)</p>
+                        <p className="text-sm font-semibold text-purple-900">{material.subItemName}</p>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <p className="text-xs font-medium text-blue-900 mb-1">Selected Material</p>
+                        <p className="text-sm font-semibold text-blue-900">{material.materialName}</p>
+                        <div className="mt-2 flex gap-4 text-xs text-blue-700">
+                          <span>Unit: {material.unit}</span>
+                          <span>Rate: AED{material.unitRate.toLocaleString()}/{material.unit}</span>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1086,9 +1104,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                 {materials.map((mat, idx) => (
                   <div key={mat.id} className="flex justify-between text-sm">
                     <span className="text-gray-600">
-                      {idx + 1}. {mat.subItemName} ({mat.quantity} {mat.unit})
+                      {idx + 1}. {mat.materialName} ({mat.quantity} {mat.unit})
                     </span>
-                    <span className="text-gray-900">₹{(mat.quantity * mat.unitRate).toLocaleString()}</span>
+                    <span className="text-gray-900">AED{(mat.quantity * mat.unitRate).toLocaleString()}</span>
                   </div>
                 ))}
               </div>

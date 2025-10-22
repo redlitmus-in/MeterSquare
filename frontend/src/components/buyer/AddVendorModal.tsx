@@ -11,6 +11,20 @@ interface AddVendorModalProps {
   editVendor?: Vendor | null;
 }
 
+// Country and phone code mapping
+const COUNTRY_PHONE_CODES = [
+  { country: 'UAE', code: '+971', flag: '🇦🇪' },
+  { country: 'Saudi Arabia', code: '+966', flag: '🇸🇦' },
+  { country: 'Qatar', code: '+974', flag: '🇶🇦' },
+  { country: 'Kuwait', code: '+965', flag: '🇰🇼' },
+  { country: 'Bahrain', code: '+973', flag: '🇧🇭' },
+  { country: 'Oman', code: '+968', flag: '🇴🇲' },
+  { country: 'India', code: '+91', flag: '🇮🇳' },
+  { country: 'Pakistan', code: '+92', flag: '🇵🇰' },
+  { country: 'USA', code: '+1', flag: '🇺🇸' },
+  { country: 'UK', code: '+44', flag: '🇬🇧' },
+];
+
 const AddVendorModal: React.FC<AddVendorModalProps> = ({
   isOpen,
   onClose,
@@ -86,6 +100,21 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
     }
   };
 
+  const handleCountryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedCountry = e.target.value;
+    const countryData = COUNTRY_PHONE_CODES.find(c => c.country === selectedCountry);
+
+    setFormData(prev => ({
+      ...prev,
+      country: selectedCountry,
+      phone_code: countryData?.code || '+971'
+    }));
+
+    if (errors.length > 0) {
+      setErrors([]);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -138,30 +167,32 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
             onClick={onClose}
           />
 
-          {/* Modal */}
+          {/* Modal - Made more compact */}
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden z-50"
+            className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden z-50"
           >
-            {/* Header */}
-            <div className="bg-gradient-to-r from-purple-50 to-purple-100 px-6 py-4 border-b border-purple-200">
+            {/* Header - More compact */}
+            <div className="bg-gradient-to-r from-purple-50 to-purple-100 px-4 py-3 border-b border-purple-200">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-800">
+                <h2 className="text-lg font-bold text-gray-800">
                   {editVendor ? 'Edit Vendor' : 'Add New Vendor'}
                 </h2>
                 <button
+                  type="button"
                   onClick={onClose}
-                  className="p-2 hover:bg-purple-200 rounded-lg transition-colors"
+                  className="p-1.5 hover:bg-purple-200 rounded-lg transition-colors"
+                  title="Close"
                 >
                   <XMarkIcon className="w-5 h-5 text-gray-600" />
                 </button>
               </div>
             </div>
 
-            {/* Form */}
-            <form onSubmit={handleSubmit} className="p-6 overflow-y-auto max-h-[calc(90vh-8rem)]">
+            {/* Form - More compact padding */}
+            <form onSubmit={handleSubmit} className="p-4 overflow-y-auto max-h-[calc(90vh-8rem)]">
               {/* Error Messages */}
               {errors.length > 0 && (
                 <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -173,33 +204,35 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
                 </div>
               )}
 
-              {/* Company Information */}
-              <div className="mb-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-4">Company Information</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Company Information - More compact */}
+              <div className="mb-4">
+                <h3 className="text-base font-semibold text-gray-800 mb-3">Company Information</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label htmlFor="company_name" className="block text-sm font-medium text-gray-700 mb-1">
                       Company Name <span className="text-red-500">*</span>
                     </label>
                     <input
+                      id="company_name"
                       type="text"
                       name="company_name"
                       value={formData.company_name}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                       required
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-1">
                       Category
                     </label>
                     <select
+                      id="category"
                       name="category"
                       value={formData.category}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     >
                       <option value="">Select Category</option>
                       {categories.map((cat) => (
@@ -209,14 +242,15 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
                       Status
                     </label>
                     <select
+                      id="status"
                       name="status"
                       value={formData.status}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     >
                       <option value="active">Active</option>
                       <option value="inactive">Inactive</option>
@@ -225,157 +259,173 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
                 </div>
               </div>
 
-              {/* Contact Information */}
-              <div className="mb-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-4">Contact Information</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Contact Information - More compact with country-phone code relationship */}
+              <div className="mb-4">
+                <h3 className="text-base font-semibold text-gray-800 mb-3">Contact Information</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Contact Person Name
+                    <label htmlFor="contact_person_name" className="block text-sm font-medium text-gray-700 mb-1">
+                      Contact Person
                     </label>
                     <input
+                      id="contact_person_name"
                       type="text"
                       name="contact_person_name"
                       value={formData.contact_person_name}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      placeholder="Enter name"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
                       Email <span className="text-red-500">*</span>
                     </label>
                     <input
+                      id="email"
                       type="email"
                       name="email"
                       value={formData.email}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                       required
+                      placeholder="email@example.com"
                     />
                   </div>
 
-                  <div className="flex gap-2">
-                    <div className="w-24">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Code
-                      </label>
+                  <div className="col-span-2">
+                    <label htmlFor="country" className="block text-sm font-medium text-gray-700 mb-1">
+                      Country
+                    </label>
+                    <select
+                      id="country"
+                      name="country"
+                      value={formData.country}
+                      onChange={handleCountryChange}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    >
+                      {COUNTRY_PHONE_CODES.map((item) => (
+                        <option key={item.country} value={item.country}>
+                          {item.flag} {item.country} ({item.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="col-span-2">
+                    <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">
+                      Phone
+                    </label>
+                    <div className="flex gap-2">
                       <input
                         type="text"
-                        name="phone_code"
                         value={formData.phone_code}
-                        onChange={handleInputChange}
-                        className="w-full px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        readOnly
+                        className="w-20 px-3 py-2 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-700 font-medium"
+                        title="Phone code (auto-filled based on country)"
                       />
-                    </div>
-                    <div className="flex-1">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Phone
-                      </label>
                       <input
+                        id="phone"
                         type="tel"
                         name="phone"
                         value={formData.phone}
                         onChange={handleInputChange}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        placeholder="Enter phone number"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      GST Number
+                    <label htmlFor="gst_number" className="block text-sm font-medium text-gray-700 mb-1">
+                      GST/Tax Number
                     </label>
                     <input
+                      id="gst_number"
                       type="text"
                       name="gst_number"
                       value={formData.gst_number}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                       placeholder="22XXXXX5678X1Z5"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Address Information */}
-              <div className="mb-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-4">Address</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Address Information - More compact */}
+              <div className="mb-4">
+                <h3 className="text-base font-semibold text-gray-800 mb-3">Address (Optional)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label htmlFor="street_address" className="block text-sm font-medium text-gray-700 mb-1">
                       Street Address
                     </label>
                     <textarea
+                      id="street_address"
                       name="street_address"
                       value={formData.street_address}
                       onChange={handleInputChange}
                       rows={2}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                      placeholder="Enter street address"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label htmlFor="city" className="block text-sm font-medium text-gray-700 mb-1">
                       City
                     </label>
                     <input
+                      id="city"
                       type="text"
                       name="city"
                       value={formData.city}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      placeholder="Enter city"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label htmlFor="state" className="block text-sm font-medium text-gray-700 mb-1">
                       State/Emirate
                     </label>
                     <input
+                      id="state"
                       type="text"
                       name="state"
                       value={formData.state}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      placeholder="Enter state/emirate"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Country
-                    </label>
-                    <input
-                      type="text"
-                      name="country"
-                      value={formData.country}
-                      onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label htmlFor="pin_code" className="block text-sm font-medium text-gray-700 mb-1">
                       PIN/Postal Code
                     </label>
                     <input
+                      id="pin_code"
                       type="text"
                       name="pin_code"
                       value={formData.pin_code}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      placeholder="Enter postal code"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex justify-end gap-4 pt-4 border-t border-gray-200">
+              {/* Actions - More compact */}
+              <div className="flex justify-end gap-3 pt-3 border-t border-gray-200 mt-4">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="px-5 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                   disabled={loading}
                 >
                   Cancel
@@ -383,7 +433,7 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
                 <button
                   type="submit"
                   disabled={loading}
-                  className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-5 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loading ? 'Saving...' : editVendor ? 'Update Vendor' : 'Add Vendor'}
                 </button>

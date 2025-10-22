@@ -224,8 +224,8 @@ const ChangeRequestsPage: React.FC = () => {
                          req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesTab = (
       (activeTab === 'pending' && ['under_review', 'approved_by_pm', 'pending'].includes(req.status)) ||
-      (activeTab === 'approved' && req.status === 'approved_by_td') ||
-      (activeTab === 'completed' && req.status === 'approved') ||
+      (activeTab === 'approved' && req.status === 'assigned_to_buyer') ||
+      (activeTab === 'completed' && req.status === 'purchase_completed') ||
       (activeTab === 'rejected' && req.status === 'rejected')
     );
     return matchesSearch && matchesTab;
@@ -233,8 +233,8 @@ const ChangeRequestsPage: React.FC = () => {
 
   const stats = {
     pending: changeRequests.filter(r => ['under_review', 'approved_by_pm', 'pending'].includes(r.status)).length,
-    approved: changeRequests.filter(r => r.status === 'approved_by_td').length,
-    completed: changeRequests.filter(r => r.status === 'approved').length,
+    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer').length,
+    completed: changeRequests.filter(r => r.status === 'purchase_completed').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length
   };
 

@@ -182,18 +182,18 @@ const ChangeRequestsPage: React.FC = () => {
     const matchesSearch = projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesTab = (
-      (activeTab === 'pending' && req.approval_required_from === 'estimator' && req.status !== 'approved' && req.status !== 'rejected') ||
-      (activeTab === 'approved' && req.status === 'approved') ||
-      (activeTab === 'escalated' && req.approval_required_from === 'technical_director' && req.status !== 'approved' && req.status !== 'rejected') ||
+      (activeTab === 'pending' && req.approval_required_from === 'estimator' && req.status !== 'assigned_to_buyer' && req.status !== 'rejected' && req.status !== 'purchase_completed') ||
+      (activeTab === 'approved' && req.status === 'assigned_to_buyer') ||
+      (activeTab === 'escalated' && req.status === 'purchase_completed') ||
       (activeTab === 'rejected' && req.status === 'rejected')
     );
     return matchesSearch && matchesTab;
   });
 
   const stats = {
-    pending: changeRequests.filter(r => r.approval_required_from === 'estimator' && r.status !== 'approved' && r.status !== 'rejected').length,
-    approved: changeRequests.filter(r => r.status === 'approved').length,
-    escalated: changeRequests.filter(r => r.approval_required_from === 'technical_director' && r.status !== 'approved' && r.status !== 'rejected').length,
+    pending: changeRequests.filter(r => r.approval_required_from === 'estimator' && r.status !== 'assigned_to_buyer' && r.status !== 'rejected' && r.status !== 'purchase_completed').length,
+    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer').length,
+    escalated: changeRequests.filter(r => r.status === 'purchase_completed').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length
   };
 

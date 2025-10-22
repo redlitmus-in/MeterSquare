@@ -96,9 +96,13 @@ export interface ChangeRequestItem {
 
 export interface CreateChangeRequestData {
   boq_id: number;
+  item_id?: string;
+  item_name?: string;
   justification: string;
   materials: Array<{
     material_name: string;
+    sub_item_id?: string;
+    sub_item_name?: string;
     quantity: number;
     unit: string;
     unit_price: number;

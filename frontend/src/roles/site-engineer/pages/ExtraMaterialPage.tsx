@@ -221,12 +221,14 @@ const ExtraMaterialPage: React.FC = () => {
         item_name: data.boq_item_name,  // Include item_name
         justification: data.justification || data.remarks || 'Extra materials required',
         materials: data.materials.map((mat: any) => ({
-          material_name: mat.sub_item_name,
+          material_name: mat.materialName || mat.material_name,  // Actual material name like "Bubble Wrap"
+          sub_item_id: mat.subItemId || mat.sub_item_id,  // Sub-item ID like "subitem_331_1_3"
+          sub_item_name: mat.subItemName || mat.sub_item_name,  // Sub-item name like "Protection"
           quantity: mat.quantity,
           unit: mat.unit,
-          unit_price: mat.unit_rate,
-          master_material_id: mat.sub_item_id || null,
-          reason: mat.reason || null
+          unit_price: mat.unit_rate || mat.unitRate,
+          master_material_id: mat.materialId || mat.master_material_id || null,  // Material ID
+          reason: mat.reason || mat.reasonForNew || null
         }))
       };
 

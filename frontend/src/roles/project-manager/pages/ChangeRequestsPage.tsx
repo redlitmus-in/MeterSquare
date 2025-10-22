@@ -185,9 +185,10 @@ const ChangeRequestsPage: React.FC = () => {
     const colors = {
       pending: 'bg-yellow-100 text-yellow-800',
       under_review: 'bg-yellow-100 text-yellow-800',
-      approved_by_pm: 'bg-yellow-100 text-yellow-800',
+      approved_by_pm: 'bg-blue-100 text-blue-800',
       approved_by_td: 'bg-blue-100 text-blue-800',
-      approved: 'bg-green-100 text-green-800',
+      assigned_to_buyer: 'bg-purple-100 text-purple-800',
+      purchase_completed: 'bg-green-100 text-green-800',
       rejected: 'bg-red-100 text-red-800'
     };
     return colors[status as keyof typeof colors] || colors.pending;
@@ -204,8 +205,11 @@ const ChangeRequestsPage: React.FC = () => {
     if (status === 'approved_by_td') {
       return 'APPROVED BY TD';
     }
-    if (status === 'approved') {
-      return 'COMPLETED';  // Final approval by Estimator = Completed
+    if (status === 'assigned_to_buyer') {
+      return 'ASSIGNED TO BUYER';
+    }
+    if (status === 'purchase_completed') {
+      return 'PURCHASE COMPLETED';
     }
     if (status === 'rejected') {
       return 'REJECTED';
@@ -234,16 +238,16 @@ const ChangeRequestsPage: React.FC = () => {
       matchesTab = (
         (activeTab === 'requested' && req.status === 'under_review' && req.approval_required_from === 'project_manager' && !isPMRequest) ||  // SE requests waiting for PM approval
         (activeTab === 'pending' && req.status === 'pending' && isPMRequest) ||  // PM's own requests only
-        (activeTab === 'accepted' && (req.status === 'approved_by_pm' || isPMApprovedAndSent)) ||  // PM approved and sent to Est/TD
-        (activeTab === 'completed' && req.status === 'approved') ||  // Only Estimator/TD final approval
+        (activeTab === 'accepted' && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||  // PM approved and sent to Est/TD or assigned to buyer
+        (activeTab === 'completed' && req.status === 'purchase_completed') ||  // Buyer completed purchase
         (activeTab === 'rejected' && req.status === 'rejected')  // Rejected requests
       );
     } else {
       // Change Requests tab filtering - show requests that need PM action or PM created
       matchesTab = (
         (activeTab === 'pending' && ['pending', 'under_review'].includes(req.status)) ||
-        (activeTab === 'approved' && ['approved_by_pm', 'approved_by_td'].includes(req.status)) ||
-        (activeTab === 'completed' && req.status === 'approved') ||
+        (activeTab === 'approved' && ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer'].includes(req.status)) ||
+        (activeTab === 'completed' && req.status === 'purchase_completed') ||
         (activeTab === 'rejected' && req.status === 'rejected')
       );
     }
@@ -252,14 +256,14 @@ const ChangeRequestsPage: React.FC = () => {
 
   const stats = {
     pending: changeRequests.filter(r => ['pending', 'under_review'].includes(r.status)).length,
-    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'approved'].includes(r.status)).length,
-    completed: changeRequests.filter(r => r.status === 'approved').length,
+    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer'].includes(r.status)).length,
+    completed: changeRequests.filter(r => r.status === 'purchase_completed').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length,
     // For Extra Material - separate SE requests from PM requests
     my_requests: changeRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'project_manager' && r.requested_by_user_id !== user?.user_id).length,  // SE requests waiting for PM (Requested tab)
     pending_approval: changeRequests.filter(r => r.status === 'pending' && r.requested_by_user_id === user?.user_id).length,  // PM's own requests (Pending tab)
-    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || (r.status === 'under_review' && ['estimator', 'technical_director'].includes(r.approval_required_from || ''))).length,  // PM approved and sent
-    completed_extra: changeRequests.filter(r => r.status === 'approved').length  // Final approval only (Completed tab)
+    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || (r.status === 'under_review' && ['estimator', 'technical_director'].includes(r.approval_required_from || '')) || r.status === 'assigned_to_buyer').length,  // PM approved and sent or assigned to buyer
+    completed_extra: changeRequests.filter(r => r.status === 'purchase_completed').length  // Buyer completed (Completed tab)
   };
 
   if (initialLoad) {
