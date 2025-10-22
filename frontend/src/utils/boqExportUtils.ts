@@ -1470,65 +1470,85 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
     yPos += 12;
   });
 
-  // Add Cost Summary at the END - CLIENT VERSION
-  if (yPos > 220) {
+  // Add Cost Summary at the END - CLIENT VERSION (Match comparison modal exactly)
+  if (yPos > 200) {
     doc.addPage();
     yPos = 20;
   }
 
-  yPos += 8;
-  doc.setDrawColor(200, 220, 240);
-  doc.setLineWidth(0.5);
-  doc.setFillColor(240, 247, 255);
-  doc.roundedRect(14, yPos, 182, 40, 2, 2, 'FD');
-
-  yPos += 7;
+  yPos += 10;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
+  doc.setFontSize(12);
   doc.setTextColor(36, 61, 138);
-  doc.text('COST SUMMARY', 16, yPos);
-  yPos += 8;
-
-  doc.setFontSize(9);
-  doc.setTextColor(0);
-  doc.setFont('helvetica', 'normal');
-
-  // Calculate totals from items
-  const subtotalBeforeDiscount = (estimation.boqItems || []).reduce((sum, item) => sum + item.estimatedSellingPrice, 0);
-
-  doc.text('Subtotal:', 18, yPos);
-  doc.text(`AED ${formatCurrency(subtotalBeforeDiscount)}`, 75, yPos, { align: 'right' });
+  doc.text('COST BREAKDOWN', 14, yPos);
   yPos += 5;
 
-  // Discount (if any)
-  if (totalDiscount > 0) {
-    doc.setTextColor(239, 68, 68);
-    doc.text(`Discount (${avgDiscountPct.toFixed(0)}%):`, 18, yPos);
-    doc.text(`-AED ${formatCurrency(totalDiscount)}`, 75, yPos, { align: 'right' });
-    doc.setTextColor(0);
-    yPos += 5;
+  // Calculate totals matching comparison modal logic (lines 3344-3360)
+  let clientTotalItemTotal = 0;
+  let clientTotalDiscount = 0;
+  let clientTotalVAT = 0;
 
-    doc.setFont('helvetica', 'bold');
-    doc.text('After Discount:', 18, yPos);
-    doc.text(`AED ${formatCurrency(afterDiscount)}`, 75, yPos, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    yPos += 5;
+  (estimation.boqItems || []).forEach((item: any) => {
+    const itemTotal = (item as any).item_total || (item.quantity * item.rate) || 0;
+    const itemMisc = (item as any).miscellaneous_amount || 0;
+    const itemOHProfit = (item as any).overhead_profit_amount || 0;
+    const discountAmount = (item as any).discount_amount || 0;
+    const vatAmount = (item as any).vat_amount || 0;
+
+    clientTotalItemTotal += itemTotal + itemMisc + itemOHProfit; // Base cost includes markup
+    clientTotalDiscount += discountAmount;
+    clientTotalVAT += vatAmount;
+  });
+
+  const clientSubtotalBeforeDiscount = clientTotalItemTotal;
+  const clientAfterDiscount = clientSubtotalBeforeDiscount - clientTotalDiscount;
+  const clientFinalTotal = clientAfterDiscount + clientTotalVAT;
+  const clientAvgDiscountPct = clientSubtotalBeforeDiscount > 0 ? (clientTotalDiscount / clientSubtotalBeforeDiscount) * 100 : 0;
+
+  // Create cost summary table
+  const costSummaryData: any[] = [
+    ['Base Cost:', formatCurrency(clientSubtotalBeforeDiscount)]
+  ];
+
+  if (clientTotalDiscount > 0) {
+    costSummaryData.push([
+      { content: `Discount (${clientAvgDiscountPct.toFixed(0)}%):`, styles: { textColor: [239, 68, 68] } },
+      { content: `- ${formatCurrency(clientTotalDiscount)}`, styles: { textColor: [239, 68, 68] } }
+    ]);
   }
 
-  // VAT
-  if (totalVat > 0) {
-    const avgVatPct = afterDiscount > 0 ? (totalVat / afterDiscount) * 100 : 0;
-    doc.text(`VAT (${avgVatPct.toFixed(1)}%):`, 18, yPos);
-    doc.text(`AED ${formatCurrency(totalVat)}`, 75, yPos, { align: 'right' });
-    yPos += 8;
+  if (clientTotalVAT > 0) {
+    costSummaryData.push([
+      { content: 'VAT:', styles: { textColor: [59, 130, 246] } },
+      { content: `+ ${formatCurrency(clientTotalVAT)}`, styles: { textColor: [59, 130, 246] } }
+    ]);
   }
 
-  // Grand Total
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(22, 163, 74);
-  doc.text('TOTAL PROJECT VALUE:', 18, yPos);
-  doc.text(`AED ${formatCurrency(grandTotal)}`, 160, yPos, { align: 'right' });
+  costSummaryData.push([
+    { content: 'Total:', styles: { fontStyle: 'bold', fontSize: 11, fillColor: [209, 250, 229], textColor: [22, 163, 74] } },
+    { content: formatCurrency(clientFinalTotal), styles: { fontStyle: 'bold', fontSize: 11, fillColor: [209, 250, 229], textColor: [22, 163, 74] } }
+  ]);
+
+  (autoTable as any)(doc, {
+    startY: yPos,
+    body: costSummaryData,
+    margin: { left: 14 },
+    theme: 'grid',
+    styles: {
+      lineColor: [191, 219, 254],
+      lineWidth: 0.5
+    },
+    bodyStyles: {
+      fontSize: 10,
+      textColor: [55, 65, 81]
+    },
+    columnStyles: {
+      0: { cellWidth: 120, fontStyle: 'bold' },
+      1: { cellWidth: 62, halign: 'right', fontStyle: 'bold' }
+    }
+  });
+
+  yPos = (doc as any).lastAutoTable.finalY + 10;
 
   // Preliminaries & Approval Works Section
   if (estimation.preliminaries && (estimation.preliminaries.items?.length > 0 || estimation.preliminaries.notes)) {

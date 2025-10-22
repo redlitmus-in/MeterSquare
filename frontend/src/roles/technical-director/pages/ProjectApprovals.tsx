@@ -432,6 +432,7 @@ const ProjectApprovals: React.FC = () => {
           overhead_profit_percentage: ohProfitPercentage,
           overhead_profit_amount: ohProfitAmount,
           before_discount: beforeDiscount,
+          has_sub_items: item.sub_items && item.sub_items.length > 0,
           sub_items: item.sub_items || [],
           materials: item.sub_items?.length > 0
             ? item.sub_items.flatMap((si: any) => si.materials?.map((mat: any) => ({
@@ -529,6 +530,7 @@ const ProjectApprovals: React.FC = () => {
           overhead_profit_percentage: ohProfitPercentage,
           overhead_profit_amount: ohProfitAmount,
           before_discount: beforeDiscount,
+          has_sub_items: item.sub_items && item.sub_items.length > 0,
           sub_items: item.sub_items || [],
           materials: item.sub_items?.length > 0
             ? item.sub_items.flatMap((si: any) => si.materials?.map((mat: any) => ({
@@ -628,6 +630,7 @@ const ProjectApprovals: React.FC = () => {
             miscellaneous_amount: cleanValue(item.miscellaneous_amount) || (itemTotal * miscPct / 100),
             overhead_profit_percentage: ohProfitPct,
             overhead_profit_amount: cleanValue(item.overhead_profit_amount) || (itemTotal * ohProfitPct / 100),
+            has_sub_items: item.sub_items && item.sub_items.length > 0,
             sub_items: item.sub_items || [],
             materials: item.sub_items?.length > 0
               ? item.sub_items.flatMap((si: any) => si.materials?.map((mat: any) => ({
@@ -725,6 +728,7 @@ const ProjectApprovals: React.FC = () => {
             miscellaneous_amount: cleanValue(item.miscellaneous_amount) || (itemTotal * miscPct / 100),
             overhead_profit_percentage: ohProfitPct,
             overhead_profit_amount: cleanValue(item.overhead_profit_amount) || (itemTotal * ohProfitPct / 100),
+            has_sub_items: item.sub_items && item.sub_items.length > 0,
             sub_items: item.sub_items || [],
             materials: item.sub_items?.length > 0
               ? item.sub_items.flatMap((si: any) => si.materials?.map((mat: any) => ({

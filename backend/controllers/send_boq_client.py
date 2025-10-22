@@ -58,6 +58,13 @@ def send_boq_to_client():
         boq_json = boq_details.boq_details
         items = boq_json.get('items', [])
 
+        # FIX: Ensure has_sub_items flag is set based on sub_items array
+        for item in items:
+            if 'sub_items' in item and item['sub_items'] and len(item['sub_items']) > 0:
+                item['has_sub_items'] = True
+            else:
+                item['has_sub_items'] = False
+
         # Calculate totals - handle both old format (direct materials/labour) and new format (sub-items)
         total_material_cost = 0
         total_labour_cost = 0
