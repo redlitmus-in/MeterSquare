@@ -5,6 +5,7 @@ from config.logging import get_logger
 from datetime import datetime
 from decimal import Decimal
 import json
+from models.change_request import ChangeRequest
 
 log = get_logger()
 
@@ -31,6 +32,68 @@ def get_boq_planned_vs_actual(boq_id):
         # Parse BOQ details (planned data)
         boq_data = json.loads(boq_detail.boq_details) if isinstance(boq_detail.boq_details, str) else boq_detail.boq_details
 
+
+        # Fetch ALL change requests (regardless of status) to show in comparison
+        change_requests = ChangeRequest.query.filter_by(
+            boq_id=boq_id,
+            is_deleted=False
+        ).all()
+
+        # Merge CR materials into BOQ data as sub-items
+        for cr in change_requests:
+            materials_data = cr.materials_data or []
+            if not materials_data:
+                continue
+            cr_item_id = cr.item_id
+            cr_item_name = cr.item_name
+
+            # Find target item in BOQ
+            target_item = None
+            for item in boq_data.get('items', []):
+                item_master_id = item.get('master_item_id')
+                item_name = item.get('item_name')
+
+                # Match by ID or name
+                if (item_master_id and cr_item_id and str(item_master_id) == str(cr_item_id)) or \
+                   (cr_item_name and item_name and cr_item_name.lower().strip() == item_name.lower().strip()):
+                    target_item = item
+                    break
+
+            # Fallback: use first item
+            if not target_item and boq_data.get('items'):
+                target_item = boq_data['items'][0]
+
+            if target_item:
+                # Ensure sub_items array exists
+                if 'sub_items' not in target_item:
+                    target_item['sub_items'] = []
+
+                # Create CR sub-item
+                cr_sub_item = {
+                    'sub_item_name': f"Extra Materials - CR #{cr.cr_id}",
+                    'description': f"{cr.justification} [Status: {cr.status}]",
+                    'materials': []
+                }
+
+                # Add materials from CR
+                for mat in materials_data:
+                    cr_sub_item['materials'].append({
+                        'master_material_id': mat.get('master_material_id'),
+                        'material_name': mat.get('material_name'),
+                        'quantity': mat.get('quantity', 0),
+                        'unit': mat.get('unit', 'nos'),
+                        'unit_price': mat.get('unit_price', 0),
+                        'total_price': mat.get('total_price', 0),
+                        'is_from_change_request': True,
+                        'change_request_id': cr.cr_id,
+                        'justification': mat.get('justification', cr.justification),
+                        # Mark planned as 0 = unplanned spending
+                        'planned_quantity': 0,
+                        'planned_unit_price': 0,
+                        'planned_total_price': 0
+                    })
+
+                target_item['sub_items'].append(cr_sub_item)
         # Get actual material purchases from MaterialPurchaseTracking
         # Group by (master_item_id, master_material_id) and take only the latest entry for each group
         from sqlalchemy import func
@@ -77,397 +140,403 @@ def get_boq_planned_vs_actual(boq_id):
             planned_materials_total = Decimal('0')
             actual_materials_total = Decimal('0')
 
-            for planned_mat in planned_item.get('materials', []):
-                master_material_id = planned_mat.get('master_material_id')
-                material_name = planned_mat.get('material_name')
+            # Process materials from SUB-ITEMS (new structure that includes CR materials)
+            for sub_item in planned_item.get('sub_items', []):
+                sub_item_name = sub_item.get('sub_item_name', '')
+                master_sub_item_id = sub_item.get('master_sub_item_id')
 
-                actual_mat = None
-                matched_material_id = master_material_id
+                for planned_mat in sub_item.get('materials', []):
+                    master_material_id = planned_mat.get('master_material_id')
+                    material_name = planned_mat.get('material_name')
 
-                # Strategy 1: Find by exact match (master_material_id + master_item_id)
-                if master_material_id:
-                    actual_mat = next(
-                        (am for am in actual_materials
-                         if am.master_material_id == master_material_id
-                         and am.master_item_id == master_item_id),
-                        None
-                    )
+                    actual_mat = None
+                    matched_material_id = master_material_id
 
-                # Strategy 2: Find by material_id only
-                if not actual_mat and master_material_id:
-                    actual_mat = next(
-                        (am for am in actual_materials
-                         if am.master_material_id == master_material_id),
-                        None
-                    )
+                    # Strategy 1: Find by exact match (master_material_id + master_item_id)
+                    if master_material_id:
+                        actual_mat = next(
+                            (am for am in actual_materials
+                             if am.master_material_id == master_material_id
+                             and am.master_item_id == master_item_id),
+                            None
+                        )
 
-                # Strategy 3: Search inside purchase_history.materials array for matching master_material_id
-                if not actual_mat and master_material_id:
-                    for am in actual_materials:
-                        if am.purchase_history:
-                            if isinstance(am.purchase_history, dict) and 'materials' in am.purchase_history:
-                                for mat_entry in am.purchase_history.get('materials', []):
-                                    if mat_entry.get('master_material_id') == master_material_id:
-                                        actual_mat = am
-                                        matched_material_id = master_material_id
-                                        break
+                    # Strategy 2: Find by material_id only
+                    if not actual_mat and master_material_id:
+                        actual_mat = next(
+                            (am for am in actual_materials
+                             if am.master_material_id == master_material_id),
+                            None
+                        )
+
+                    # Strategy 3: Search inside purchase_history.materials array for matching master_material_id
+                    if not actual_mat and master_material_id:
+                        for am in actual_materials:
+                            if am.purchase_history:
+                                if isinstance(am.purchase_history, dict) and 'materials' in am.purchase_history:
+                                    for mat_entry in am.purchase_history.get('materials', []):
+                                        if mat_entry.get('master_material_id') == master_material_id:
+                                            actual_mat = am
+                                            matched_material_id = master_material_id
+                                            break
+                            if actual_mat:
+                                break
+
+                    # Strategy 4: Match by material name (case-insensitive) if no master_material_id in BOQ
+                    if not actual_mat and material_name:
+                        actual_mat = next(
+                            (am for am in actual_materials
+                             if am.material_name and am.material_name.lower().strip() == material_name.lower().strip()),
+                            None
+                        )
                         if actual_mat:
-                            break
+                            matched_material_id = actual_mat.master_material_id
 
-                # Strategy 4: Match by material name (case-insensitive) if no master_material_id in BOQ
-                if not actual_mat and material_name:
-                    actual_mat = next(
-                        (am for am in actual_materials
-                         if am.material_name and am.material_name.lower().strip() == material_name.lower().strip()),
-                        None
-                    )
-                    if actual_mat:
-                        matched_material_id = actual_mat.master_material_id
+                    # Strategy 5: Search by material name inside purchase_history
+                    if not actual_mat and material_name:
+                        for am in actual_materials:
+                            if am.purchase_history:
+                                if isinstance(am.purchase_history, dict) and 'materials' in am.purchase_history:
+                                    for mat_entry in am.purchase_history.get('materials', []):
+                                        mat_entry_name = mat_entry.get('material_name', '')
+                                        if mat_entry_name.lower().strip() == material_name.lower().strip():
+                                            actual_mat = am
+                                            matched_material_id = mat_entry.get('master_material_id')
+                                            break
+                            if actual_mat:
+                                break
 
-                # Strategy 5: Search by material name inside purchase_history
-                if not actual_mat and material_name:
-                    for am in actual_materials:
-                        if am.purchase_history:
-                            if isinstance(am.purchase_history, dict) and 'materials' in am.purchase_history:
-                                for mat_entry in am.purchase_history.get('materials', []):
-                                    mat_entry_name = mat_entry.get('material_name', '')
-                                    if mat_entry_name.lower().strip() == material_name.lower().strip():
-                                        actual_mat = am
-                                        matched_material_id = mat_entry.get('master_material_id')
-                                        break
-                        if actual_mat:
-                            break
+                    # Calculate planned total
+                    # Check if this material is from a change request (planned_quantity: 0)
+                    is_from_change_request = planned_mat.get('is_from_change_request', False)
 
-                # Calculate planned total
-                # Check if this material is from a change request (planned_quantity: 0)
-                is_from_change_request = planned_mat.get('is_from_change_request', False)
+                    if is_from_change_request:
+                        # Material from change request - use planned_quantity (should be 0)
+                        planned_quantity = Decimal(str(planned_mat.get('planned_quantity', 0)))
+                        planned_unit_price = Decimal(str(planned_mat.get('planned_unit_price', 0)))
+                    else:
+                        # Regular planned material
+                        planned_quantity = Decimal(str(planned_mat.get('quantity', 0)))
+                        planned_unit_price = Decimal(str(planned_mat.get('unit_price', 0)))
 
-                if is_from_change_request:
-                    # Material from change request - use planned_quantity (should be 0)
-                    planned_quantity = Decimal(str(planned_mat.get('planned_quantity', 0)))
-                    planned_unit_price = Decimal(str(planned_mat.get('planned_unit_price', 0)))
-                else:
-                    # Regular planned material
-                    planned_quantity = Decimal(str(planned_mat.get('quantity', 0)))
-                    planned_unit_price = Decimal(str(planned_mat.get('unit_price', 0)))
+                    planned_total = planned_quantity * planned_unit_price
 
-                planned_total = planned_quantity * planned_unit_price
+                    # Calculate actual total from purchase history
+                    actual_total = Decimal('0')
+                    actual_quantity = Decimal('0')
+                    actual_avg_unit_price = Decimal('0')
+                    purchase_history = []
 
-                # Calculate actual total from purchase history
-                actual_total = Decimal('0')
-                actual_quantity = Decimal('0')
-                actual_avg_unit_price = Decimal('0')
-                purchase_history = []
+                    if actual_mat and actual_mat.purchase_history:
+                        purchase_data = actual_mat.purchase_history
 
-                if actual_mat and actual_mat.purchase_history:
-                    purchase_data = actual_mat.purchase_history
+                        # Handle dictionary structure: {"materials": [...], "new_material": {...}, ...}
+                        if isinstance(purchase_data, dict):
+                            # Collect all material entries from the dictionary
+                            all_material_entries = []
 
-                    # Handle dictionary structure: {"materials": [...], "new_material": {...}, ...}
-                    if isinstance(purchase_data, dict):
-                        # Collect all material entries from the dictionary
-                        all_material_entries = []
+                            # Check for 'materials' array
+                            if 'materials' in purchase_data and isinstance(purchase_data['materials'], list):
+                                all_material_entries.extend(purchase_data['materials'])
 
-                        # Check for 'materials' array
-                        if 'materials' in purchase_data and isinstance(purchase_data['materials'], list):
-                            all_material_entries.extend(purchase_data['materials'])
+                            # Check for other fields that contain material objects (like 'new_material')
+                            for key, value in purchase_data.items():
+                                if key != 'materials' and isinstance(value, dict):
+                                    # Check if this dict has material fields
+                                    if 'material_name' in value or 'master_material_id' in value:
+                                        all_material_entries.append(value)
 
-                        # Check for other fields that contain material objects (like 'new_material')
-                        for key, value in purchase_data.items():
-                            if key != 'materials' and isinstance(value, dict):
-                                # Check if this dict has material fields
-                                if 'material_name' in value or 'master_material_id' in value:
-                                    all_material_entries.append(value)
+                            # Process all material entries
+                            for mat_entry in all_material_entries:
+                                # Check if this material matches by ID or by name
+                                entry_mat_id = mat_entry.get('master_material_id')
+                                entry_mat_name = mat_entry.get('material_name', '')
 
-                        # Process all material entries
-                        for mat_entry in all_material_entries:
-                            # Check if this material matches by ID or by name
-                            entry_mat_id = mat_entry.get('master_material_id')
-                            entry_mat_name = mat_entry.get('material_name', '')
+                                is_match = False
+                                if matched_material_id and entry_mat_id == matched_material_id:
+                                    is_match = True
+                                elif not matched_material_id and material_name and entry_mat_name.lower().strip() == material_name.lower().strip():
+                                    is_match = True
 
-                            is_match = False
-                            if matched_material_id and entry_mat_id == matched_material_id:
-                                is_match = True
-                            elif not matched_material_id and material_name and entry_mat_name.lower().strip() == material_name.lower().strip():
-                                is_match = True
+                                if is_match:
+                                    purchase_qty = Decimal(str(mat_entry.get('quantity', 0)))
+                                    purchase_price = Decimal(str(mat_entry.get('unit_price', 0)))
+                                    purchase_total = Decimal(str(mat_entry.get('total_price', 0)))
 
-                            if is_match:
-                                purchase_qty = Decimal(str(mat_entry.get('quantity', 0)))
-                                purchase_price = Decimal(str(mat_entry.get('unit_price', 0)))
-                                purchase_total = Decimal(str(mat_entry.get('total_price', 0)))
+                                    actual_quantity += purchase_qty
+                                    actual_total += purchase_total
+
+                                    purchase_history.append({
+                                        "purchase_date": actual_mat.created_at.isoformat() if actual_mat.created_at else None,
+                                        "quantity": float(purchase_qty),
+                                        "unit": mat_entry.get('unit', planned_mat.get('unit')),
+                                        "unit_price": float(purchase_price),
+                                        "total_price": float(purchase_total),
+                                        "purchased_by": actual_mat.created_by or "Unknown"
+                                    })
+
+                        # Handle new structure: [{...}, {...}]
+                        elif isinstance(purchase_data, list):
+                            for purchase in purchase_data:
+                                purchase_qty = Decimal(str(purchase.get('quantity', 0)))
+                                purchase_price = Decimal(str(purchase.get('unit_price', 0)))
+                                purchase_total = Decimal(str(purchase.get('total_price', 0)))
 
                                 actual_quantity += purchase_qty
                                 actual_total += purchase_total
 
                                 purchase_history.append({
-                                    "purchase_date": actual_mat.created_at.isoformat() if actual_mat.created_at else None,
+                                    "purchase_date": purchase.get('purchase_date'),
                                     "quantity": float(purchase_qty),
-                                    "unit": mat_entry.get('unit', planned_mat.get('unit')),
                                     "unit_price": float(purchase_price),
                                     "total_price": float(purchase_total),
-                                    "purchased_by": actual_mat.created_by or "Unknown"
+                                    "purchased_by": purchase.get('purchased_by')
                                 })
 
-                    # Handle new structure: [{...}, {...}]
-                    elif isinstance(purchase_data, list):
-                        for purchase in purchase_data:
-                            purchase_qty = Decimal(str(purchase.get('quantity', 0)))
-                            purchase_price = Decimal(str(purchase.get('unit_price', 0)))
-                            purchase_total = Decimal(str(purchase.get('total_price', 0)))
+                        if actual_quantity > 0:
+                            actual_avg_unit_price = actual_total / actual_quantity
 
-                            actual_quantity += purchase_qty
-                            actual_total += purchase_total
+                    # For change request materials without purchase_history yet,
+                    # use the quantity/price from the CR data itself
+                    if is_from_change_request and actual_quantity == 0:
+                        # Get actual values from the CR material data
+                        actual_quantity = Decimal(str(planned_mat.get('quantity', 0)))
+                        actual_avg_unit_price = Decimal(str(planned_mat.get('unit_price', 0)))
+                        actual_total = Decimal(str(planned_mat.get('total_price', 0)))
 
-                            purchase_history.append({
-                                "purchase_date": purchase.get('purchase_date'),
-                                "quantity": float(purchase_qty),
-                                "unit_price": float(purchase_price),
-                                "total_price": float(purchase_total),
-                                "purchased_by": purchase.get('purchased_by')
-                            })
+                        # Add purchase history from CR
+                        purchase_history.append({
+                            "purchase_date": datetime.utcnow().isoformat(),
+                            "quantity": float(actual_quantity),
+                            "unit": planned_mat.get('unit'),
+                            "unit_price": float(actual_avg_unit_price),
+                            "total_price": float(actual_total),
+                            "purchased_by": f"Change Request #{planned_mat.get('change_request_id')}"
+                        })
+
+                    planned_materials_total += planned_total
+
+                    # For actual total: use actual if purchased, otherwise use planned (for pending items)
+                    if actual_total > 0:
+                        actual_materials_total += actual_total
+                    elif not is_from_change_request:
+                        # Regular material is pending - assume planned cost
+                        # But don't add CR materials if no actual data
+                        actual_materials_total += planned_total
+
+                    # Calculate variances
+                    quantity_variance = actual_quantity - planned_quantity
+                    price_variance = actual_avg_unit_price - planned_unit_price
+                    total_variance = actual_total - planned_total
+
+                    # Determine status
+                    material_status = "pending"
+                    if actual_quantity > 0:
+                        material_status = "completed"
+
+                    # For change request materials, mark as "from_change_request"
+                    if is_from_change_request:
+                        material_status = "from_change_request"
+
+                    # Generate reason based on variance
+                    variance_reason = None
+                    variance_response = None
 
                     if actual_quantity > 0:
-                        actual_avg_unit_price = actual_total / actual_quantity
+                        if is_from_change_request:
+                            # Special handling for CR materials
+                            variance_reason = f" - {planned_mat.get('justification')}"
+                            if planned_mat.get('justification'):
+                                variance_reason += f" - {planned_mat.get('justification')}"
+                        elif total_variance > 0:
+                            variance_reason = f"Cost overrun: AED{float(total_variance):.2f} over budget"
+                            if price_variance > 0:
+                                variance_reason += f" (Price increased by AED{float(price_variance):.2f})"
+                            if quantity_variance > 0:
+                                variance_reason += f" (Quantity increased by {float(quantity_variance):.2f} {planned_mat.get('unit', '')})"
+                        elif total_variance < 0:
+                            variance_reason = f"Cost saved: AED{abs(float(total_variance)):.2f} under budget"
+                        else:
+                            variance_reason = "On budget"
 
-                # For change request materials without purchase_history yet,
-                # use the quantity/price from the CR data itself
-                if is_from_change_request and actual_quantity == 0:
-                    # Get actual values from the CR material data
-                    actual_quantity = Decimal(str(planned_mat.get('quantity', 0)))
-                    actual_avg_unit_price = Decimal(str(planned_mat.get('unit_price', 0)))
-                    actual_total = Decimal(str(planned_mat.get('total_price', 0)))
+                        # Response placeholder - can be updated later from tracking data
+                        if actual_mat:
+                            variance_response = actual_mat.variance_response if hasattr(actual_mat, 'variance_response') else None
 
-                    # Add purchase history from CR
-                    purchase_history.append({
-                        "purchase_date": datetime.utcnow().isoformat(),
-                        "quantity": float(actual_quantity),
-                        "unit": planned_mat.get('unit'),
-                        "unit_price": float(actual_avg_unit_price),
-                        "total_price": float(actual_total),
-                        "purchased_by": f"Change Request #{planned_mat.get('change_request_id')}"
+                    # Check if this material is from a change request
+                    cr_id = planned_mat.get('change_request_id') if is_from_change_request else None
+                    if actual_mat and not cr_id:
+                        cr_id = getattr(actual_mat, 'change_request_id', None)
+
+                    materials_comparison.append({
+                        "material_name": material_name,
+                        "sub_item_name": sub_item_name,  # Sub item name from parent sub_item
+                        "master_sub_item_id": master_sub_item_id,  # Track sub-item ID
+                        "master_material_id": matched_material_id,  # Use the matched ID (could be from purchase_history)
+                        "planned": {
+                            "quantity": float(planned_quantity),
+                            "unit": planned_mat.get('unit'),
+                            "unit_price": float(planned_unit_price),
+                            "total": float(planned_total)
+                        },
+                        "actual": {
+                            "quantity": float(actual_quantity),
+                            "unit": purchase_history[0].get('unit') if purchase_history else planned_mat.get('unit'),
+                            "unit_price": float(actual_avg_unit_price),
+                            "total": float(actual_total),
+                            "purchase_history": purchase_history
+                        } if actual_quantity > 0 else None,
+                        "variance": {
+                            "quantity": float(quantity_variance),
+                            "unit": planned_mat.get('unit'),
+                            "price": float(price_variance),
+                            "total": float(total_variance),
+                            "percentage": (float(total_variance) / float(planned_total) * 100) if planned_total > 0 else (100.0 if is_from_change_request else 0),
+                            "status": "unplanned" if is_from_change_request else ("overrun" if total_variance > 0 else "saved" if total_variance < 0 else "on_budget")
+                        } if actual_quantity > 0 else None,
+                        "status": material_status,
+                        "variance_reason": variance_reason,
+                        "variance_response": variance_response,
+                        "is_from_change_request": is_from_change_request,
+                        "change_request_id": cr_id,
+                        "source": "change_request" if is_from_change_request else "original_boq"
                     })
 
-                planned_materials_total += planned_total
+                # Deduplicate change request materials with same master_material_id - keep only the latest
+                # Group materials by master_material_id for change request materials only
+                cr_materials_by_id = {}
+                non_cr_materials = []
 
-                # For actual total: use actual if purchased, otherwise use planned (for pending items)
-                if actual_total > 0:
-                    actual_materials_total += actual_total
-                elif not is_from_change_request:
-                    # Regular material is pending - assume planned cost
-                    # But don't add CR materials if no actual data
-                    actual_materials_total += planned_total
+                for mat_comp in materials_comparison:
+                    if mat_comp.get('is_from_change_request') and mat_comp.get('master_material_id'):
+                        mat_id = mat_comp.get('master_material_id')
+                        cr_id = mat_comp.get('change_request_id')
 
-                # Calculate variances
-                quantity_variance = actual_quantity - planned_quantity
-                price_variance = actual_avg_unit_price - planned_unit_price
-                total_variance = actual_total - planned_total
-
-                # Determine status
-                material_status = "pending"
-                if actual_quantity > 0:
-                    material_status = "completed"
-
-                # For change request materials, mark as "from_change_request"
-                if is_from_change_request:
-                    material_status = "from_change_request"
-
-                # Generate reason based on variance
-                variance_reason = None
-                variance_response = None
-
-                if actual_quantity > 0:
-                    if is_from_change_request:
-                        # Special handling for CR materials
-                        variance_reason = f"Unplanned material from Change Request #{planned_mat.get('change_request_id')}: AED{float(total_variance):.2f}"
-                        if planned_mat.get('justification'):
-                            variance_reason += f" - {planned_mat.get('justification')}"
-                    elif total_variance > 0:
-                        variance_reason = f"Cost overrun: AED{float(total_variance):.2f} over budget"
-                        if price_variance > 0:
-                            variance_reason += f" (Price increased by AED{float(price_variance):.2f})"
-                        if quantity_variance > 0:
-                            variance_reason += f" (Quantity increased by {float(quantity_variance):.2f} {planned_mat.get('unit', '')})"
-                    elif total_variance < 0:
-                        variance_reason = f"Cost saved: AED{abs(float(total_variance)):.2f} under budget"
-                    else:
-                        variance_reason = "On budget"
-
-                    # Response placeholder - can be updated later from tracking data
-                    if actual_mat:
-                        variance_response = actual_mat.variance_response if hasattr(actual_mat, 'variance_response') else None
-
-                # Check if this material is from a change request
-                cr_id = planned_mat.get('change_request_id') if is_from_change_request else None
-                if actual_mat and not cr_id:
-                    cr_id = getattr(actual_mat, 'change_request_id', None)
-
-                materials_comparison.append({
-                    "material_name": material_name,
-                    "sub_item_name": planned_mat.get('sub_item_name', material_name),  # Sub item name from BOQ
-                    "master_material_id": matched_material_id,  # Use the matched ID (could be from purchase_history)
-                    "planned": {
-                        "quantity": float(planned_quantity),
-                        "unit": planned_mat.get('unit'),
-                        "unit_price": float(planned_unit_price),
-                        "total": float(planned_total)
-                    },
-                    "actual": {
-                        "quantity": float(actual_quantity),
-                        "unit": purchase_history[0].get('unit') if purchase_history else planned_mat.get('unit'),
-                        "unit_price": float(actual_avg_unit_price),
-                        "total": float(actual_total),
-                        "purchase_history": purchase_history
-                    } if actual_quantity > 0 else None,
-                    "variance": {
-                        "quantity": float(quantity_variance),
-                        "unit": planned_mat.get('unit'),
-                        "price": float(price_variance),
-                        "total": float(total_variance),
-                        "percentage": (float(total_variance) / float(planned_total) * 100) if planned_total > 0 else (100.0 if is_from_change_request else 0),
-                        "status": "unplanned" if is_from_change_request else ("overrun" if total_variance > 0 else "saved" if total_variance < 0 else "on_budget")
-                    } if actual_quantity > 0 else None,
-                    "status": material_status,
-                    "variance_reason": variance_reason,
-                    "variance_response": variance_response,
-                    "is_from_change_request": is_from_change_request,
-                    "change_request_id": cr_id,
-                    "source": "change_request" if is_from_change_request else "original_boq"
-                })
-
-            # Deduplicate change request materials with same master_material_id - keep only the latest
-            # Group materials by master_material_id for change request materials only
-            cr_materials_by_id = {}
-            non_cr_materials = []
-
-            for mat_comp in materials_comparison:
-                if mat_comp.get('is_from_change_request') and mat_comp.get('master_material_id'):
-                    mat_id = mat_comp.get('master_material_id')
-                    cr_id = mat_comp.get('change_request_id')
-
-                    # Keep the one with higher CR ID (latest change request)
-                    if mat_id not in cr_materials_by_id:
-                        cr_materials_by_id[mat_id] = mat_comp
-                    else:
-                        existing_cr_id = cr_materials_by_id[mat_id].get('change_request_id', 0)
-                        if cr_id and cr_id > existing_cr_id:
-                            # Replace with newer change request
+                        # Keep the one with higher CR ID (latest change request)
+                        if mat_id not in cr_materials_by_id:
                             cr_materials_by_id[mat_id] = mat_comp
-                else:
-                    # Keep all non-CR materials as-is
-                    non_cr_materials.append(mat_comp)
+                        else:
+                            existing_cr_id = cr_materials_by_id[mat_id].get('change_request_id', 0)
+                            if cr_id and cr_id > existing_cr_id:
+                                # Replace with newer change request
+                                cr_materials_by_id[mat_id] = mat_comp
+                    else:
+                        # Keep all non-CR materials as-is
+                        non_cr_materials.append(mat_comp)
 
-            # Rebuild materials_comparison with deduplicated CR materials
-            materials_comparison = non_cr_materials + list(cr_materials_by_id.values())
+                # Rebuild materials_comparison with deduplicated CR materials
+                materials_comparison = non_cr_materials + list(cr_materials_by_id.values())
 
-            # Check for unplanned materials (purchased but not in BOQ)
-            # Build a set of all material IDs we've already processed
-            processed_material_ids = set()
-            processed_material_names = set()
-            # Track processed change request materials separately (cr_id + material_name)
-            processed_cr_materials = set()
+                # Check for unplanned materials (purchased but not in BOQ)
+                # Build a set of all material IDs we've already processed
+                processed_material_ids = set()
+                processed_material_names = set()
+                # Track processed change request materials separately (cr_id + material_name)
+                processed_cr_materials = set()
 
-            for planned_mat in planned_item.get('materials', []):
-                mat_id = planned_mat.get('master_material_id')
-                mat_name = planned_mat.get('material_name', '').lower().strip()
-                if mat_id:
-                    processed_material_ids.add(mat_id)
-                if mat_name:
-                    processed_material_names.add(mat_name)
+                for planned_mat in planned_item.get('materials', []):
+                    mat_id = planned_mat.get('master_material_id')
+                    mat_name = planned_mat.get('material_name', '').lower().strip()
+                    if mat_id:
+                        processed_material_ids.add(mat_id)
+                    if mat_name:
+                        processed_material_names.add(mat_name)
 
-            # Find materials in actual purchases that weren't in the plan
-            for am in actual_materials:
-                if am.master_item_id == master_item_id or not master_item_id:
-                    if am.purchase_history:
-                        purchase_data = am.purchase_history
+                # Find materials in actual purchases that weren't in the plan
+                for am in actual_materials:
+                    if am.master_item_id == master_item_id or not master_item_id:
+                        if am.purchase_history:
+                            purchase_data = am.purchase_history
 
-                        if isinstance(purchase_data, dict):
-                            # Collect all material entries
-                            all_material_entries = []
+                            if isinstance(purchase_data, dict):
+                                # Collect all material entries
+                                all_material_entries = []
 
-                            if 'materials' in purchase_data and isinstance(purchase_data['materials'], list):
-                                all_material_entries.extend(purchase_data['materials'])
+                                if 'materials' in purchase_data and isinstance(purchase_data['materials'], list):
+                                    all_material_entries.extend(purchase_data['materials'])
 
-                            for key, value in purchase_data.items():
-                                if key != 'materials' and isinstance(value, dict):
-                                    if 'material_name' in value or 'master_material_id' in value:
-                                        all_material_entries.append(value)
+                                for key, value in purchase_data.items():
+                                    if key != 'materials' and isinstance(value, dict):
+                                        if 'material_name' in value or 'master_material_id' in value:
+                                            all_material_entries.append(value)
 
-                            # Check each material entry
-                            for mat_entry in all_material_entries:
-                                entry_mat_id = mat_entry.get('master_material_id')
-                                entry_mat_name = mat_entry.get('material_name', '').lower().strip()
+                                # Check each material entry
+                                for mat_entry in all_material_entries:
+                                    entry_mat_id = mat_entry.get('master_material_id')
+                                    entry_mat_name = mat_entry.get('material_name', '').lower().strip()
 
-                                # Check if this unplanned material is from a change request
-                                is_from_cr = getattr(am, 'is_from_change_request', False)
-                                cr_id = getattr(am, 'change_request_id', None)
+                                    # Check if this unplanned material is from a change request
+                                    is_from_cr = getattr(am, 'is_from_change_request', False)
+                                    cr_id = getattr(am, 'change_request_id', None)
 
-                                # Check if this material is unplanned
-                                is_unplanned = True
+                                    # Check if this material is unplanned
+                                    is_unplanned = True
 
-                                # For change request materials, check by CR ID + name combination
-                                if is_from_cr and cr_id:
-                                    cr_material_key = f"{cr_id}_{entry_mat_name}"
-                                    if cr_material_key in processed_cr_materials:
-                                        is_unplanned = False
-                                else:
-                                    # For non-CR materials, check by ID or name as before
-                                    if entry_mat_id and entry_mat_id in processed_material_ids:
-                                        is_unplanned = False
-                                    if entry_mat_name and entry_mat_name in processed_material_names:
-                                        is_unplanned = False
-
-                                if is_unplanned:
-                                    # Add this as an unplanned material
-                                    purchase_qty = Decimal(str(mat_entry.get('quantity', 0)))
-                                    purchase_price = Decimal(str(mat_entry.get('unit_price', 0)))
-                                    purchase_total = Decimal(str(mat_entry.get('total_price', 0)))
-
-                                    actual_materials_total += purchase_total
-
-                                    # Mark as processed to avoid duplicates
+                                    # For change request materials, check by CR ID + name combination
                                     if is_from_cr and cr_id:
-                                        # Track CR materials by CR ID + name
                                         cr_material_key = f"{cr_id}_{entry_mat_name}"
-                                        processed_cr_materials.add(cr_material_key)
+                                        if cr_material_key in processed_cr_materials:
+                                            is_unplanned = False
                                     else:
-                                        # Track non-CR materials by ID or name
-                                        if entry_mat_id:
-                                            processed_material_ids.add(entry_mat_id)
-                                        if entry_mat_name:
-                                            processed_material_names.add(entry_mat_name)
+                                        # For non-CR materials, check by ID or name as before
+                                        if entry_mat_id and entry_mat_id in processed_material_ids:
+                                            is_unplanned = False
+                                        if entry_mat_name and entry_mat_name in processed_material_names:
+                                            is_unplanned = False
 
-                                    materials_comparison.append({
-                                        "material_name": mat_entry.get('material_name'),
-                                        "master_material_id": entry_mat_id,
-                                        "planned": None,  # Not in original BOQ
-                                        "actual": {
-                                            "quantity": float(purchase_qty),
-                                            "unit": mat_entry.get('unit'),
-                                            "unit_price": float(purchase_price),
-                                            "total": float(purchase_total),
-                                            "purchase_history": [{
-                                                "purchase_date": am.created_at.isoformat() if am.created_at else None,
+                                    if is_unplanned:
+                                        # Add this as an unplanned material
+                                        purchase_qty = Decimal(str(mat_entry.get('quantity', 0)))
+                                        purchase_price = Decimal(str(mat_entry.get('unit_price', 0)))
+                                        purchase_total = Decimal(str(mat_entry.get('total_price', 0)))
+
+                                        actual_materials_total += purchase_total
+
+                                        # Mark as processed to avoid duplicates
+                                        if is_from_cr and cr_id:
+                                            # Track CR materials by CR ID + name
+                                            cr_material_key = f"{cr_id}_{entry_mat_name}"
+                                            processed_cr_materials.add(cr_material_key)
+                                        else:
+                                            # Track non-CR materials by ID or name
+                                            if entry_mat_id:
+                                                processed_material_ids.add(entry_mat_id)
+                                            if entry_mat_name:
+                                                processed_material_names.add(entry_mat_name)
+
+                                        materials_comparison.append({
+                                            "material_name": mat_entry.get('material_name'),
+                                            "master_material_id": entry_mat_id,
+                                            "planned": None,  # Not in original BOQ
+                                            "actual": {
                                                 "quantity": float(purchase_qty),
                                                 "unit": mat_entry.get('unit'),
                                                 "unit_price": float(purchase_price),
-                                                "total_price": float(purchase_total),
-                                                "purchased_by": am.created_by or "Unknown"
-                                            }]
-                                        },
-                                        "variance": {
-                                            "quantity": float(purchase_qty),
-                                            "unit": mat_entry.get('unit'),
-                                            "price": float(purchase_price),
-                                            "total": float(purchase_total),
-                                            "percentage": 0,  # No baseline to compare
+                                                "total": float(purchase_total),
+                                                "purchase_history": [{
+                                                    "purchase_date": am.created_at.isoformat() if am.created_at else None,
+                                                    "quantity": float(purchase_qty),
+                                                    "unit": mat_entry.get('unit'),
+                                                    "unit_price": float(purchase_price),
+                                                    "total_price": float(purchase_total),
+                                                    "purchased_by": am.created_by or "Unknown"
+                                                }]
+                                            },
+                                            "variance": {
+                                                "quantity": float(purchase_qty),
+                                                "unit": mat_entry.get('unit'),
+                                                "price": float(purchase_price),
+                                                "total": float(purchase_total),
+                                                "percentage": 0,  # No baseline to compare
+                                                "status": "unplanned",
+                                                "reason": mat_entry.get('reason'),
+                                            },
                                             "status": "unplanned",
-                                            "reason": mat_entry.get('reason'),
-                                        },
-                                        "status": "unplanned",
-                                        "note": "This material was purchased but was not in the original BOQ plan",
-                                        "is_from_change_request": is_from_cr,
-                                        "change_request_id": cr_id,
-                                        "source": "change_request" if is_from_cr else "unplanned"
-                                    })
+                                            "note": "This material was purchased but was not in the original BOQ plan",
+                                            "is_from_change_request": is_from_cr,
+                                            "change_request_id": cr_id,
+                                            "source": "change_request" if is_from_cr else "unplanned"
+                                        })
 
             # Labour comparison
             labour_comparison = []
@@ -790,6 +859,4 @@ def get_boq_planned_vs_actual(boq_id):
 
     except Exception as e:
         log.error(f"Error getting planned vs actual: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to get comparison: {str(e)}"}), 500
