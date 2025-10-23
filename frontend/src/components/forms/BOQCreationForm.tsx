@@ -654,32 +654,55 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       labour: []
     };
 
-    setItems(items.map(item =>
-      item.id === itemId
-        ? { ...item, sub_items: [...item.sub_items, newSubItem] }
-        : item
-    ));
+    setItems(items.map(item => {
+      if (item.id === itemId) {
+        const updatedSubItems = [...item.sub_items, newSubItem];
+        const subItemsTotal = updatedSubItems.reduce((sum, si) => sum + (si.quantity * si.rate), 0);
+
+        return {
+          ...item,
+          sub_items: updatedSubItems,
+          rate: subItemsTotal
+        };
+      }
+      return item;
+    }));
   };
 
   const removeSubItem = (itemId: string, subItemId: string) => {
-    setItems(items.map(item =>
-      item.id === itemId
-        ? { ...item, sub_items: item.sub_items.filter(si => si.id !== subItemId) }
-        : item
-    ));
+    setItems(items.map(item => {
+      if (item.id === itemId) {
+        const updatedSubItems = item.sub_items.filter(si => si.id !== subItemId);
+        const subItemsTotal = updatedSubItems.reduce((sum, si) => sum + (si.quantity * si.rate), 0);
+
+        return {
+          ...item,
+          sub_items: updatedSubItems,
+          rate: subItemsTotal
+        };
+      }
+      return item;
+    }));
   };
 
   const updateSubItem = (itemId: string, subItemId: string, field: keyof SubItemForm, value: any) => {
-    setItems(items.map(item =>
-      item.id === itemId
-        ? {
-            ...item,
-            sub_items: item.sub_items.map(si =>
-              si.id === subItemId ? { ...si, [field]: value } : si
-            )
-          }
-        : item
-    ));
+    setItems(items.map(item => {
+      if (item.id === itemId) {
+        const updatedSubItems = item.sub_items.map(si =>
+          si.id === subItemId ? { ...si, [field]: value } : si
+        );
+
+        // Auto-calculate item rate from sub-items total
+        const subItemsTotal = updatedSubItems.reduce((sum, si) => sum + (si.quantity * si.rate), 0);
+
+        return {
+          ...item,
+          sub_items: updatedSubItems,
+          rate: subItemsTotal // Auto-update item rate
+        };
+      }
+      return item;
+    }));
   };
 
   // Sub-item material management
@@ -879,7 +902,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
   const calculateItemCost = (item: BOQItemForm) => {
     // IMPORTANT: Always use item-level quantity × rate for cost calculations
-    // Sub-items are just for material/labour breakdown, NOT for pricing
+    // Sub-items are summed to calculate the item rate automatically
     const itemTotal = (item.quantity || 0) * (item.rate || 0);
 
     // Calculate percentages based on itemTotal (all applied on base)
@@ -2100,15 +2123,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               <input
                                 type="number"
                                 value={item.rate === 0 ? '' : item.rate}
-                                onChange={(e) => {
-                                  const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                  updateItem(item.id, 'rate', value);
-                                }}
-                                className="w-28 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                placeholder="0.00"
-                                min="0"
-                                step="0.01"
-                                disabled={isSubmitting}
+                                className="w-28 px-3 py-2 text-sm border border-gray-300 rounded-lg bg-gray-100 text-gray-700 font-semibold cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                placeholder="Auto"
+                                disabled
+                                title="Auto-calculated from sub-items"
                               />
                             </div>
                           </div>
