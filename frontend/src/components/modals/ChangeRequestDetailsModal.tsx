@@ -350,123 +350,102 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                 </div>
               </div>
 
-              {/* Miscellaneous Budget Tracking - Responsive */}
-              {changeRequest.overhead_analysis && (
-                <div className="mb-4 sm:mb-6">
-                  <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3 flex items-center gap-2">
-                    <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
-                    Miscellaneous Budget Analysis
-                  </h3>
-                  <div className={`rounded-lg p-3 sm:p-5 border-2 ${isOverBudget ? 'bg-red-50 border-red-300' : 'bg-green-50 border-green-300'}`}>
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-3 sm:mb-4">
-                      <div>
-                        <p className="text-[10px] sm:text-xs text-gray-600 mb-1">Total Miscellaneous Allocated</p>
-                        <p className="text-sm sm:text-lg font-bold text-gray-900 break-words">
-                          {formatCurrency(changeRequest.overhead_analysis.original_allocated)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] sm:text-xs text-gray-600 mb-1">Already Consumed</p>
-                        <p className="text-sm sm:text-lg font-bold text-gray-700 break-words">
-                          {formatCurrency(changeRequest.overhead_analysis.consumed_before_request)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] sm:text-xs text-gray-600 mb-1">This Request Consumes</p>
-                        <p className="text-sm sm:text-lg font-bold text-orange-600 break-words">
-                          {formatCurrency(changeRequest.overhead_analysis.consumed_by_this_request)}
-                        </p>
-                      </div>
-                      <div className="col-span-2 lg:col-span-1">
-                        <p className="text-[10px] sm:text-xs text-gray-600 mb-1">Remaining After Approval</p>
-                        <p className={`text-sm sm:text-lg font-bold break-words ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
-                          {formatCurrency(changeRequest.overhead_analysis.remaining_after_approval)}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Overhead Status */}
-                    <div className={`flex items-start gap-2 sm:gap-3 p-3 sm:p-4 rounded-lg ${isOverBudget ? 'bg-red-100 border-2 border-red-400' : 'bg-green-100 border-2 border-green-400'}`}>
-                      {isOverBudget ? (
-                        <>
-                          <AlertCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 flex-shrink-0 mt-0.5" />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-bold text-red-900 text-xs sm:text-sm">⚠️ MISCELLANEOUS BUDGET EXCEEDED</p>
-                            <p className="text-[10px] sm:text-xs text-red-700 mt-1 break-words">
-                              This request exceeds the allocated miscellaneous budget by {formatCurrency(Math.abs(changeRequest.overhead_analysis.remaining_after_approval))}
-                            </p>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 flex-shrink-0 mt-0.5" />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-bold text-green-900 text-xs sm:text-sm">✓ WITHIN MISCELLANEOUS BUDGET</p>
-                            <p className="text-[10px] sm:text-xs text-green-700 mt-1 break-words">
-                              Sufficient miscellaneous budget available. Remaining: {formatCurrency(changeRequest.overhead_analysis.remaining_after_approval)}
-                            </p>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Request Cost Breakdown - Responsive */}
+              {/* Compact Budget Analysis & Cost Breakdown */}
               <div className="mb-4 sm:mb-6">
-                <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3 flex items-center gap-2">
-                  <DollarSign className="w-3 h-3 sm:w-4 sm:h-4" />
-                  Request Cost Breakdown
+                <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                  <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
+                  Budget & Cost Summary
                 </h3>
-                <div className="bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-300 rounded-lg p-3 sm:p-5">
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
-                    <div>
-                      <p className="text-xs text-purple-700 mb-1">Total Materials Cost</p>
-                      <p className="text-lg sm:text-xl font-bold text-purple-900 break-words">
-                        {formatCurrency(changeRequest.materials_total_cost)}
+                <div className={`rounded-lg p-3 border ${isOverBudget ? 'bg-red-50 border-red-300' : 'bg-green-50 border-green-300'}`}>
+                  {/* Compact Budget Status */}
+                  <div className={`flex items-center gap-2 mb-3 p-2 rounded ${isOverBudget ? 'bg-red-100' : 'bg-green-100'}`}>
+                    {isOverBudget ? (
+                      <>
+                        <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                        <p className="font-bold text-red-900 text-xs">⚠️ BUDGET EXCEEDED - Remaining: {formatCurrency(changeRequest.overhead_analysis?.remaining_after_approval || 0)}</p>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                        <p className="font-bold text-green-900 text-xs">✓ WITHIN BUDGET - Remaining: {formatCurrency(changeRequest.overhead_analysis?.remaining_after_approval || 0)}</p>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Compact Grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-white/50 rounded p-2">
+                      <p className="text-gray-600 mb-0.5">Materials Cost</p>
+                      <p className="font-bold text-purple-900">{formatCurrency(changeRequest.materials_total_cost)}</p>
+                    </div>
+                    <div className="bg-white/50 rounded p-2">
+                      <p className="text-gray-600 mb-0.5">Budget Used</p>
+                      <p className="font-bold text-orange-600">
+                        {formatCurrency(changeRequest.overhead_analysis?.consumed_by_this_request || 0)}
+                        {changeRequest.overhead_analysis?.original_allocated && (
+                          <span className="text-[10px] text-gray-600 ml-1">
+                            ({((changeRequest.materials_total_cost / changeRequest.overhead_analysis.original_allocated) * 100).toFixed(1)}%)
+                          </span>
+                        )}
                       </p>
                     </div>
-                    <div>
-                      <p className="text-xs text-purple-700 mb-1">Number of Materials</p>
-                      <p className="text-lg sm:text-xl font-bold text-purple-900 break-words">
-                        {changeRequest.materials_data?.length || 0} {changeRequest.materials_data?.length === 1 ? 'item' : 'items'}
-                      </p>
+                    <div className="bg-white/50 rounded p-2">
+                      <p className="text-gray-600 mb-0.5">Items Count</p>
+                      <p className="font-bold text-gray-900">{changeRequest.materials_data?.length || 0} items</p>
                     </div>
-                    <div>
-                      <p className="text-xs text-purple-700 mb-1">Miscellaneous Budget Used</p>
-                      <p className="text-lg sm:text-xl font-bold text-purple-900 break-words">
-                        {changeRequest.overhead_analysis?.consumed_by_this_request
-                          ? formatCurrency(changeRequest.overhead_analysis.consumed_by_this_request)
-                          : formatCurrency(changeRequest.materials_total_cost)}
-                      </p>
-                      {changeRequest.overhead_analysis?.original_allocated && (
-                        <p className="text-xs sm:text-sm font-semibold text-purple-700">
-                          ({((changeRequest.materials_total_cost / changeRequest.overhead_analysis.original_allocated) * 100).toFixed(1)}% of allocated)
-                        </p>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-xs text-purple-700 mb-1">Budget Status</p>
-                      {changeRequest.overhead_analysis?.balance_type === 'negative' ? (
-                        <div className="flex items-center gap-1">
-                          <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-600 flex-shrink-0" />
-                          <p className="text-sm sm:text-base font-bold text-red-600 break-words">
-                            Over Budget
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1">
-                          <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 flex-shrink-0" />
-                          <p className="text-sm sm:text-base font-bold text-green-600 break-words">
-                            Within Budget
-                          </p>
-                        </div>
-                      )}
+                    <div className="bg-white/50 rounded p-2">
+                      <p className="text-gray-600 mb-0.5">Status</p>
+                      <div className="flex items-center gap-1">
+                        {changeRequest.overhead_analysis?.balance_type === 'negative' ? (
+                          <>
+                            <AlertCircle className="w-3 h-3 text-red-600" />
+                            <p className="font-bold text-red-600 text-[10px]">Over Budget</p>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-3 h-3 text-green-600" />
+                            <p className="font-bold text-green-600 text-[10px]">Within Budget</p>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
+
+              {/* Vendor Details - Only show if TD approved vendor */}
+              {changeRequest.vendor_approved_by_td_id && (
+                <div className="mb-4 sm:mb-6">
+                  <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                    <Package className="w-3 h-3 sm:w-4 sm:h-4" />
+                    Vendor Details
+                  </h3>
+                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-300 rounded-lg p-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="bg-white/70 rounded p-2">
+                        <p className="text-xs text-blue-700 mb-1">Selected Vendor</p>
+                        <p className="text-sm font-bold text-blue-900">{changeRequest.selected_vendor_name || 'N/A'}</p>
+                      </div>
+                      <div className="bg-white/70 rounded p-2">
+                        <p className="text-xs text-blue-700 mb-1">Approved By TD</p>
+                        <p className="text-sm font-bold text-blue-900">{changeRequest.vendor_approved_by_td_name || 'N/A'}</p>
+                      </div>
+                      <div className="bg-white/70 rounded p-2">
+                        <p className="text-xs text-blue-700 mb-1">Approval Date</p>
+                        <p className="text-sm font-bold text-blue-900">
+                          {changeRequest.vendor_approval_date
+                            ? new Date(changeRequest.vendor_approval_date).toLocaleDateString('en-US', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric'
+                              })
+                            : 'N/A'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Approval Info */}
               {isHighValue && (

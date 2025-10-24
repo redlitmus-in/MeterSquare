@@ -31,6 +31,7 @@ import VendorSelectionModal from '../components/VendorSelectionModal';
 
 const PurchaseOrders: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'ongoing' | 'pending_approval' | 'completed'>('ongoing');
+  const [ongoingSubTab, setOngoingSubTab] = useState<'pending_purchase' | 'vendor_approved'>('pending_purchase');
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
@@ -38,20 +39,20 @@ const PurchaseOrders: React.FC = () => {
   const [isVendorSelectionModalOpen, setIsVendorSelectionModalOpen] = useState(false);
   const [completingPurchaseId, setCompletingPurchaseId] = useState<number | null>(null);
 
-  // Fetch pending purchases
+  // Fetch pending purchases - Auto-refresh every 2 seconds
   const { data: pendingData, isLoading: isPendingLoading, refetch: refetchPending } = useAutoSync<PurchaseListResponse>({
     queryKey: ['buyer-pending-purchases'],
     fetchFn: () => buyerService.getPendingPurchases(),
-    staleTime: 30000,
-    refetchInterval: 30000,
+    staleTime: 2000,
+    refetchInterval: 2000,
   });
 
-  // Fetch completed purchases
+  // Fetch completed purchases - Auto-refresh every 2 seconds
   const { data: completedData, isLoading: isCompletedLoading, refetch: refetchCompleted } = useAutoSync<PurchaseListResponse>({
     queryKey: ['buyer-completed-purchases'],
     fetchFn: () => buyerService.getCompletedPurchases(),
-    staleTime: 30000,
-    refetchInterval: 30000,
+    staleTime: 2000,
+    refetchInterval: 2000,
   });
 
   const pendingPurchases: Purchase[] = useMemo(() => {
@@ -62,19 +63,31 @@ const PurchaseOrders: React.FC = () => {
     return (completedData?.completed_purchases || []).map(p => ({ ...p, status: 'completed' as const }));
   }, [completedData]);
 
-  // Separate ongoing and pending approval purchases
-  const ongoingPurchases = useMemo(() => {
-    return pendingPurchases.filter(p => !p.vendor_selection_pending_td_approval);
+  // Separate purchases by vendor approval status
+  const pendingPurchaseItems = useMemo(() => {
+    // No vendor selected yet or vendor pending TD approval
+    return pendingPurchases.filter(p => !p.vendor_id || p.vendor_selection_pending_td_approval);
+  }, [pendingPurchases]);
+
+  const vendorApprovedItems = useMemo(() => {
+    // Vendor selected and approved by TD (no longer pending approval)
+    return pendingPurchases.filter(p => p.vendor_id && !p.vendor_selection_pending_td_approval);
   }, [pendingPurchases]);
 
   const pendingApprovalPurchases = useMemo(() => {
     return pendingPurchases.filter(p => p.vendor_selection_pending_td_approval);
   }, [pendingPurchases]);
 
-  const currentPurchases =
-    activeTab === 'ongoing' ? ongoingPurchases :
-    activeTab === 'pending_approval' ? pendingApprovalPurchases :
-    completedPurchases;
+  // Determine which purchases to show based on active tab and sub-tab
+  const currentPurchases = useMemo(() => {
+    if (activeTab === 'ongoing') {
+      return ongoingSubTab === 'pending_purchase' ? pendingPurchaseItems : vendorApprovedItems;
+    } else if (activeTab === 'pending_approval') {
+      return pendingApprovalPurchases;
+    } else {
+      return completedPurchases;
+    }
+  }, [activeTab, ongoingSubTab, pendingPurchaseItems, vendorApprovedItems, pendingApprovalPurchases, completedPurchases]);
 
   const filteredPurchases = useMemo(() => {
     return currentPurchases.filter(purchase => {
@@ -88,10 +101,12 @@ const PurchaseOrders: React.FC = () => {
   }, [currentPurchases, searchTerm]);
 
   const stats = useMemo(() => ({
-    ongoing: ongoingPurchases.length,
+    ongoing: pendingPurchaseItems.length + vendorApprovedItems.length,
+    pendingPurchase: pendingPurchaseItems.length,
+    vendorApproved: vendorApprovedItems.length,
     pendingApproval: pendingApprovalPurchases.length,
     completed: completedPurchases.length,
-  }), [ongoingPurchases, pendingApprovalPurchases, completedPurchases]);
+  }), [pendingPurchaseItems, vendorApprovedItems, pendingApprovalPurchases, completedPurchases]);
 
   const handleViewDetails = (purchase: Purchase, openInEditMode: boolean = false) => {
     setSelectedPurchase(purchase);
@@ -135,7 +150,7 @@ const PurchaseOrders: React.FC = () => {
   if (isLoading && currentPurchases.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <ModernLoadingSpinners variant="pulse" color="purple" />
+        <ModernLoadingSpinners variant="pulse-wave" color="purple" />
       </div>
     );
   }
@@ -245,13 +260,46 @@ const PurchaseOrders: React.FC = () => {
           </div>
         </div>
 
+        {/* Sub-tabs for Ongoing - Only show when Ongoing tab is active */}
+        {activeTab === 'ongoing' && (
+          <div className="mb-4 flex justify-center">
+            <div className="inline-flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1 shadow-sm">
+              <button
+                onClick={() => setOngoingSubTab('pending_purchase')}
+                className={`px-3 py-1.5 rounded text-xs font-medium transition-all whitespace-nowrap ${
+                  ongoingSubTab === 'pending_purchase'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                <ShoppingCart className="w-3 h-3 inline mr-1" />
+                Pending Purchase ({stats.pendingPurchase})
+              </button>
+              <button
+                onClick={() => setOngoingSubTab('vendor_approved')}
+                className={`px-3 py-1.5 rounded text-xs font-medium transition-all whitespace-nowrap ${
+                  ongoingSubTab === 'vendor_approved'
+                    ? 'bg-green-600 text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                <CheckCircle className="w-3 h-3 inline mr-1" />
+                Vendor Approved ({stats.vendorApproved})
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Content */}
         <div className="space-y-4">
           {filteredPurchases.length === 0 ? (
             <div className="bg-white rounded-2xl shadow-lg border border-purple-100 p-12 text-center">
               <ShoppingCart className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500 text-lg">
-                No {activeTab === 'ongoing' ? 'ongoing' : activeTab === 'pending_approval' ? 'pending approval' : 'completed'} purchases found
+                {activeTab === 'ongoing'
+                  ? `No ${ongoingSubTab === 'pending_purchase' ? 'pending purchase' : 'vendor approved'} items found`
+                  : `No ${activeTab === 'pending_approval' ? 'pending approval' : 'completed'} purchases found`
+                }
               </p>
             </div>
           ) : viewMode === 'card' ? (

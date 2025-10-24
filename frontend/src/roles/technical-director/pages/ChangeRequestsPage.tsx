@@ -28,18 +28,22 @@ import {
   LayoutGrid,
   List,
   Pencil,
-  Store
+  Store,
+  ShoppingCart
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { buyerService, Purchase } from '@/roles/buyer/services/buyerService';
+import { buyerVendorService, Vendor, VendorProduct } from '@/roles/buyer/services/buyerVendorService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import ApprovalWithBuyerModal from '@/components/modals/ApprovalWithBuyerModal';
+import VendorSelectionModal from '@/roles/buyer/components/VendorSelectionModal';
 
 const ChangeRequestsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('pending');
+  const [approvedSubTab, setApprovedSubTab] = useState<'purchase_approved' | 'vendor_approved'>('purchase_approved');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [changeRequests, setChangeRequests] = useState<ChangeRequestItem[]>([]);
@@ -51,27 +55,54 @@ const ChangeRequestsPage: React.FC = () => {
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
   const [approvingVendorId, setApprovingVendorId] = useState<number | null>(null);
+  const [showVendorInfoModal, setShowVendorInfoModal] = useState(false);
+  const [selectedVendorPurchase, setSelectedVendorPurchase] = useState<Purchase | null>(null);
+  const [showVendorSelectionModal, setShowVendorSelectionModal] = useState(false);
+  const [vendorDetails, setVendorDetails] = useState<Vendor | null>(null);
+  const [vendorProducts, setVendorProducts] = useState<VendorProduct[]>([]);
+  const [loadingVendorDetails, setLoadingVendorDetails] = useState(false);
 
-  // Fetch change requests and vendor approvals from backend
+  // Fetch change requests and vendor approvals from backend - Auto-refresh every 2 seconds
   useEffect(() => {
-    loadChangeRequests();
+    // Initial load with loading spinner
+    loadChangeRequests(true);
     loadVendorApprovals();
+
+    // Set up auto-refresh interval (without loading spinner to prevent UI flicker)
+    const refreshInterval = setInterval(() => {
+      loadChangeRequests(false); // Silent background refresh
+      loadVendorApprovals();      // Silent background refresh
+    }, 2000); // Refresh every 2 seconds
+
+    // Cleanup interval on unmount
+    return () => clearInterval(refreshInterval);
   }, []);
 
-  const loadChangeRequests = async () => {
-    setLoading(true);
+  const loadChangeRequests = async (showLoadingSpinner = false) => {
+    // Only show loading spinner on initial load, not on auto-refresh
+    if (showLoadingSpinner) {
+      setLoading(true);
+    }
     try {
       const response = await changeRequestService.getChangeRequests();
       if (response.success) {
         setChangeRequests(response.data);
       } else {
-        toast.error(response.message || 'Failed to load change requests');
+        // Only show error toast on initial load to avoid spam
+        if (showLoadingSpinner) {
+          toast.error(response.message || 'Failed to load change requests');
+        }
       }
     } catch (error) {
       console.error('Error loading change requests:', error);
-      toast.error('Failed to load change requests');
+      // Only show error toast on initial load to avoid spam
+      if (showLoadingSpinner) {
+        toast.error('Failed to load change requests');
+      }
     } finally {
-      setLoading(false);
+      if (showLoadingSpinner) {
+        setLoading(false);
+      }
     }
   };
 
@@ -117,7 +148,24 @@ const ChangeRequestsPage: React.FC = () => {
           vendor_id: cr.selected_vendor_id || 0,
           created_at: cr.created_at,
           status: cr.status,
-          vendor_selection_pending_td_approval: true
+          vendor_selection_pending_td_approval: true,
+          // Map materials_data to materials array format expected by VendorSelectionModal
+          materials: (cr.materials_data || []).map(mat => ({
+            material_name: mat.material_name || '',
+            quantity: mat.quantity || 0,
+            unit: mat.unit || '',
+            unit_price: mat.unit_price || 0,
+            total_price: mat.total_price || 0
+          })),
+          // Add missing required fields from Purchase interface
+          boq_id: cr.boq_id,
+          boq_name: cr.boq_name || '',
+          location: cr.project_location || '',
+          sub_item_name: '',
+          request_type: cr.request_type || '',
+          reason: cr.justification || '',
+          approved_by: 0,
+          approved_at: null
         }));
 
         setVendorApprovals(mappedApprovals);
@@ -279,23 +327,43 @@ const ChangeRequestsPage: React.FC = () => {
     const projectName = req.project_name || req.boq_name || '';
     const matchesSearch = projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          req.requested_by_name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesTab = (
-      (activeTab === 'pending' && ['under_review', 'approved_by_pm', 'pending'].includes(req.status)) ||
-      (activeTab === 'approved' && req.status === 'assigned_to_buyer') ||
-      (activeTab === 'completed' && req.status === 'purchase_completed') ||
-      (activeTab === 'rejected' && req.status === 'rejected')
-    );
+
+    let matchesTab = false;
+
+    if (activeTab === 'pending') {
+      matchesTab = ['under_review', 'approved_by_pm', 'pending'].includes(req.status);
+    } else if (activeTab === 'approved') {
+      // Filter by sub-tab when in approved tab
+      if (approvedSubTab === 'purchase_approved') {
+        // Purchase approved: TD approved purchase, buyer needs to select vendor
+        matchesTab = req.status === 'assigned_to_buyer' && !req.selected_vendor_id;
+      } else if (approvedSubTab === 'vendor_approved') {
+        // Vendor approved: TD approved vendor selection, buyer hasn't completed purchase yet
+        // Once purchase is completed (status = purchase_completed), it moves to Completed tab
+        matchesTab = req.status === 'assigned_to_buyer' &&
+                     !!req.selected_vendor_id && (!!req.vendor_approval_date || !!req.vendor_approved_by_td_id);
+      }
+    } else if (activeTab === 'completed') {
+      // Only show truly completed purchases (purchase_completed status)
+      matchesTab = req.status === 'purchase_completed';
+    } else if (activeTab === 'rejected') {
+      matchesTab = req.status === 'rejected';
+    }
+
     return matchesSearch && matchesTab;
   });
 
   const handleApproveVendor = async (crId: number) => {
     setApprovingVendorId(crId);
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/buyer/purchase/${crId}/td-approve-vendor`, {
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+      const token = localStorage.getItem('access_token');
+
+      const response = await fetch(`${apiUrl}/buyer/purchase/${crId}/td-approve-vendor`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       });
 
@@ -305,47 +373,73 @@ const ChangeRequestsPage: React.FC = () => {
         throw new Error(data.error || 'Failed to approve vendor');
       }
 
-      toast.success('Vendor selection approved successfully!');
-      loadVendorApprovals();
-      loadChangeRequests();
+      toast.success('Vendor selection approved successfully! Buyer has been notified.');
+
+      // Reload data from database to get the latest state
+      await Promise.all([
+        loadVendorApprovals(),
+        loadChangeRequests()
+      ]);
+
+      // Switch to approved tab and vendor_approved sub-tab to show the updated item
+      setActiveTab('approved');
+      setApprovedSubTab('vendor_approved');
     } catch (error: any) {
+      console.error('Error approving vendor:', error);
       toast.error(error.message || 'Failed to approve vendor');
     } finally {
       setApprovingVendorId(null);
     }
   };
 
-  const handleRejectVendor = async (crId: number) => {
-    const reason = prompt('Please provide a reason for rejecting this vendor selection:');
-    if (!reason) return;
-
+  const handleReviewVendorApproval = async (crId: number) => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/buyer/purchase/${crId}/td-reject-vendor`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ reason })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to reject vendor');
+      const response = await changeRequestService.getChangeRequestDetail(crId);
+      if (response.success && response.data) {
+        setSelectedChangeRequest(response.data);
+        setShowDetailsModal(true);
+      } else {
+        toast.error(response.message || 'Failed to load details');
       }
+    } catch (error) {
+      console.error('Error loading vendor approval details:', error);
+      toast.error('Failed to load change request details');
+    }
+  };
 
-      toast.success('Vendor selection rejected');
-      loadVendorApprovals();
-      loadChangeRequests();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to reject vendor');
+  const handleViewVendorInfo = async (purchase: Purchase) => {
+    setSelectedVendorPurchase(purchase);
+    setShowVendorInfoModal(true);
+
+    // Fetch full vendor details
+    if (purchase.vendor_id) {
+      try {
+        setLoadingVendorDetails(true);
+        const [vendor, products] = await Promise.all([
+          buyerVendorService.getVendorById(purchase.vendor_id),
+          buyerVendorService.getVendorProducts(purchase.vendor_id)
+        ]);
+        setVendorDetails(vendor);
+        setVendorProducts(products);
+      } catch (error) {
+        console.error('Error loading vendor details:', error);
+        toast.error('Failed to load vendor details');
+      } finally {
+        setLoadingVendorDetails(false);
+      }
     }
   };
 
   const stats = {
     pending: changeRequests.filter(r => ['under_review', 'approved_by_pm', 'pending'].includes(r.status)).length,
-    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer').length,
+    approved: changeRequests.filter(r =>
+      r.status === 'assigned_to_buyer' // Only count items still in assigned_to_buyer status
+    ).length,
+    purchaseApproved: changeRequests.filter(r => r.status === 'assigned_to_buyer' && !r.selected_vendor_id).length,
+    vendorApproved: changeRequests.filter(r =>
+      r.status === 'assigned_to_buyer' && // Must still be assigned_to_buyer, not purchase_completed
+      !!r.selected_vendor_id && (!!r.vendor_approval_date || !!r.vendor_approved_by_td_id)
+    ).length,
     completed: changeRequests.filter(r => r.status === 'purchase_completed').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length,
     vendorApprovals: vendorApprovals.length
@@ -426,201 +520,235 @@ const ChangeRequestsPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Header - Match EstimatorHub Style */}
+      {/* Header - Compact */}
       <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
-              <FolderOpen className="w-6 h-6 text-red-600" />
+        <div className="max-w-7xl mx-auto px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
+              <FolderOpen className="w-4 h-4 text-red-600" />
             </div>
-            <h1 className="text-2xl font-bold text-[#243d8a]">Change Requests</h1>
+            <h1 className="text-lg font-bold text-[#243d8a]">Change Requests</h1>
           </div>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
-        {/* Search Bar with Controls */}
-        <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
+      {/* Main Content - Compact */}
+      <div className="max-w-7xl mx-auto px-3 py-3">
+        {/* Search Bar with Controls - Compact */}
+        <div className="mb-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
           <div className="relative flex-1 max-w-full sm:max-w-md">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 h-3.5 w-3.5" />
             <Input
               placeholder="Search by project name or PM..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 border-gray-200 focus:border-gray-300 focus:ring-0 text-sm"
+              className="pl-8 h-8 border-gray-200 focus:border-gray-300 focus:ring-0 text-xs"
             />
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* View Mode Toggle */}
-            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+          <div className="flex items-center gap-2">
+            {/* View Mode Toggle - Compact */}
+            <div className="flex items-center gap-0.5 bg-gray-100 rounded p-0.5">
               <Button
                 size="sm"
                 variant={viewMode === 'cards' ? 'default' : 'ghost'}
-                className={`h-8 px-2 sm:px-3 ${viewMode === 'cards' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
+                className={`h-7 px-2 text-xs ${viewMode === 'cards' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
                 style={viewMode === 'cards' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
                 onClick={() => setViewMode('cards')}
               >
-                <LayoutGrid className="h-4 w-4 sm:mr-1.5" />
-                <span className="hidden sm:inline">Cards</span>
+                <LayoutGrid className="h-3 w-3 sm:mr-1" />
+                <span className="hidden sm:inline text-xs">Cards</span>
               </Button>
               <Button
                 size="sm"
                 variant={viewMode === 'table' ? 'default' : 'ghost'}
-                className={`h-8 px-2 sm:px-3 ${viewMode === 'table' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
+                className={`h-7 px-2 text-xs ${viewMode === 'table' ? 'text-white hover:opacity-90' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
                 style={viewMode === 'table' ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
                 onClick={() => setViewMode('table')}
               >
-                <List className="h-4 w-4 sm:mr-1.5" />
-                <span className="hidden sm:inline">Table</span>
+                <List className="h-3 w-3 sm:mr-1" />
+                <span className="hidden sm:inline text-xs">Table</span>
               </Button>
             </div>
           </div>
         </div>
 
-        {/* Content Tabs - Match EstimatorHub Style */}
-        <div className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6">
+        {/* Content Tabs - Compact */}
+        <div className="bg-white rounded-xl shadow border border-blue-100 p-3">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200 mb-6">
+            <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200 mb-3">
               <TabsTrigger
                 value="pending"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-yellow-500 data-[state=active]:text-yellow-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-yellow-500 data-[state=active]:text-yellow-600 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
               >
-                <AlertTriangle className="w-4 h-4 mr-2" />
+                <AlertTriangle className="w-3 h-3 mr-1" />
                 Pending
-                <span className="ml-1 sm:ml-2 text-gray-400">({stats.pending})</span>
+                <span className="ml-1 text-gray-400">({stats.pending})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="vendor-approvals"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:text-orange-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:text-orange-600 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
               >
-                <Store className="w-4 h-4 mr-2" />
-                Vendor Approvals
-                <span className="ml-1 sm:ml-2 text-gray-400">({stats.vendorApprovals})</span>
+                <Store className="w-3 h-3 mr-1" />
+                <span className="hidden sm:inline">Vendor Approvals</span>
+                <span className="sm:hidden">Vendors</span>
+                <span className="ml-1 text-gray-400">({stats.vendorApprovals})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="approved"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-400 data-[state=active]:text-blue-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-400 data-[state=active]:text-blue-500 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
               >
-                <CheckCircle className="w-4 h-4 mr-2" />
+                <CheckCircle className="w-3 h-3 mr-1" />
                 Approved
-                <span className="ml-1 sm:ml-2 text-gray-400">({stats.approved})</span>
+                <span className="ml-1 text-gray-400">({stats.approved})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="completed"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
               >
-                <CheckCircle className="w-4 h-4 mr-2" />
+                <CheckCircle className="w-3 h-3 mr-1" />
                 Completed
-                <span className="ml-1 sm:ml-2 text-gray-400">({stats.completed})</span>
+                <span className="ml-1 text-gray-400">({stats.completed})</span>
               </TabsTrigger>
               <TabsTrigger
                 value="rejected"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-2 py-2 font-semibold text-[10px] sm:text-xs"
               >
-                <XCircle className="w-4 h-4 mr-2" />
+                <XCircle className="w-3 h-3 mr-1" />
                 Rejected
-                <span className="ml-1 sm:ml-2 text-gray-400">({stats.rejected})</span>
+                <span className="ml-1 text-gray-400">({stats.rejected})</span>
               </TabsTrigger>
             </TabsList>
+            {/* Sub-tabs for Approved */}
+            {activeTab === 'approved' && (
+              <div className="mb-2 p-2 bg-blue-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setApprovedSubTab('purchase_approved')}
+                    className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
+                      approvedSubTab === 'purchase_approved'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-blue-700 hover:bg-blue-100'
+                    }`}
+                  >
+                    <ShoppingCart className="w-3 h-3 inline mr-1" />
+                    Purchase Approved ({stats.purchaseApproved})
+                  </button>
+                  <button
+                    onClick={() => setApprovedSubTab('vendor_approved')}
+                    className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
+                      approvedSubTab === 'vendor_approved'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-blue-700 hover:bg-blue-100'
+                    }`}
+                  >
+                    <Store className="w-3 h-3 inline mr-1" />
+                    Vendor Approved ({stats.vendorApproved})
+                  </button>
+                </div>
+                <div className="text-[10px] text-gray-600 mt-1">
+                  {approvedSubTab === 'purchase_approved'
+                    ? 'Approved purchases. Buyers will select vendors.'
+                    : 'Vendor selections approved. Buyers can complete purchases.'}
+                </div>
+              </div>
+            )}
 
             <TabsContent value="pending" className="mt-0 p-0">
-              <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending Approval</h2>
+              <div className="space-y-2">
+                <h2 className="text-sm font-bold text-gray-900">Pending Approval</h2>
                 {filteredRequests.length === 0 ? (
-                  <div className="text-center py-12">
-                    <AlertTriangle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No pending requests found</p>
+                  <div className="text-center py-8">
+                    <AlertTriangle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">No pending requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
                   <RequestsTable requests={filteredRequests} />
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                     {filteredRequests.map((request, index) => {
                       return (
                         <motion.div
                           key={request.cr_id}
-                          initial={{ opacity: 0, y: 20 }}
+                          initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.05 * index }}
-                          className="bg-white rounded-lg shadow-sm hover:shadow-lg transition-all duration-200 border-2 border-yellow-300"
+                          transition={{ delay: 0.02 * index }}
+                          className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-yellow-300"
                         >
-                          {/* Header */}
-                          <div className="p-4">
-                            <div className="flex items-start justify-between mb-2">
-                              <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
-                              <Badge className="bg-yellow-100 text-yellow-800">
+                          {/* Header - Compact */}
+                          <div className="p-2">
+                            <div className="flex items-start justify-between mb-1">
+                              <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{request.project_name}</h3>
+                              <Badge className="bg-yellow-100 text-yellow-800 text-[9px] px-1 py-0">
                                 PENDING
                               </Badge>
                             </div>
 
-                            <div className="space-y-1 text-sm text-gray-600">
-                              <div className="flex items-center gap-1.5">
-                                <Package className="h-3.5 w-3.5 text-gray-400" />
+                            <div className="space-y-0.5 text-[10px] text-gray-600">
+                              <div className="flex items-center gap-1">
+                                <Package className="h-2.5 w-2.5 text-gray-400" />
                                 <span className="truncate">By: {request.requested_by_name}</span>
                               </div>
-                              <div className="flex items-center gap-1.5">
-                                <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                              <div className="flex items-center gap-1">
+                                <Calendar className="h-2.5 w-2.5 text-gray-400" />
                                 <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
                               </div>
                             </div>
                           </div>
 
-                          {/* Stats */}
-                          <div className="px-4 pb-3 text-center text-sm">
-                            <span className="font-bold text-yellow-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                            <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                          {/* Stats - Compact */}
+                          <div className="px-2 pb-1 text-center text-[10px]">
+                            <span className="font-bold text-yellow-600 text-sm">{(request.materials_data?.length || 0)}</span>
+                            <span className="text-gray-600 ml-0.5">Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                           </div>
 
-                          {/* Financial Impact */}
-                          <div className="px-4 pb-3 space-y-1.5 text-xs">
+                          {/* Financial Impact - Compact */}
+                          <div className="px-2 pb-2 space-y-0.5 text-[9px]">
                             <div className="flex justify-between">
-                              <span className="text-gray-500">Additional Cost:</span>
+                              <span className="text-gray-500">Cost:</span>
                               <span className="font-bold text-gray-900">{formatCurrency(request.materials_total_cost)}</span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-gray-500">Cost Increase:</span>
+                              <span className="text-gray-500">Increase:</span>
                               <span className={`font-semibold ${getPercentageColor((request.budget_impact?.increase_percentage || 0))}`}>
                                 +{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%
                               </span>
                             </div>
                           </div>
 
-                          {/* Actions */}
-                          <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
-                            <div className="grid grid-cols-2 gap-2">
+                          {/* Actions - Compact */}
+                          <div className="border-t border-gray-200 p-1.5 flex flex-col gap-1">
+                            <div className="grid grid-cols-2 gap-1">
                               <button
                                 onClick={() => handleReview(request.cr_id)}
-                                className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
                                 style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                               >
-                                <Eye className="h-4 w-4" />
+                                <Eye className="h-3 w-3" />
                                 <span>Review</span>
                               </button>
                               <button
                                 onClick={() => handleEdit(request.cr_id)}
-                                className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                className="bg-blue-600 hover:bg-blue-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
                               >
-                                <Pencil className="h-4 w-4" />
+                                <Pencil className="h-3 w-3" />
                                 <span>Edit</span>
                               </button>
                             </div>
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-2 gap-1">
                               <button
                                 onClick={() => handleApprove(request.cr_id)}
-                                className="text-white text-[10px] sm:text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 font-semibold px-1"
+                                className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
                                 style={{ backgroundColor: 'rgb(22, 163, 74)' }}
                               >
-                                <Check className="h-3.5 w-3.5" />
-                                <span className="hidden sm:inline">Send to Est</span>
-                                <span className="sm:hidden">Approve</span>
+                                <Check className="h-3 w-3" />
+                                <span>Approve</span>
                               </button>
                               <button
                                 onClick={() => handleReject(request.cr_id)}
-                                className="bg-red-600 hover:bg-red-700 text-white text-[10px] sm:text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold px-1"
+                                className="bg-red-600 hover:bg-red-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
                               >
-                                <X className="h-3.5 w-3.5" />
+                                <X className="h-3 w-3" />
                                 <span>Reject</span>
                               </button>
                             </div>
@@ -634,94 +762,105 @@ const ChangeRequestsPage: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="vendor-approvals" className="mt-0 p-0">
-              <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Vendor Selection Approvals</h2>
+              <div className="space-y-2">
+                <h2 className="text-sm font-bold text-gray-900">Vendor Selection Approvals</h2>
                 {vendorApprovals.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Store className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No vendor approvals pending</p>
+                  <div className="text-center py-8">
+                    <Store className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">No vendor approvals pending</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                     {vendorApprovals.map((purchase, index) => (
                       <motion.div
                         key={purchase.cr_id}
-                        initial={{ opacity: 0, y: 20 }}
+                        initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.05 * index }}
-                        className="bg-white rounded-lg shadow-sm hover:shadow-lg transition-all duration-200 border-2 border-orange-300"
+                        transition={{ delay: 0.02 * index }}
+                        className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 border border-orange-300"
                       >
-                        {/* Header */}
-                        <div className="p-4">
-                          <div className="flex items-start justify-between mb-2">
-                            <h3 className="font-semibold text-gray-900 text-base flex-1">{purchase.project_name}</h3>
-                            <Badge className="bg-orange-100 text-orange-800">
+                        {/* Header - Compact */}
+                        <div className="p-2">
+                          <div className="flex items-start justify-between mb-1">
+                            <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{purchase.project_name}</h3>
+                            <Badge className="bg-orange-100 text-orange-800 text-[9px] px-1 py-0">
                               CR #{purchase.cr_id}
                             </Badge>
                           </div>
 
-                          <div className="space-y-1 text-sm text-gray-600">
-                            <div className="flex items-center gap-1.5">
-                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                          <div className="space-y-0.5 text-[10px] text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Package className="h-2.5 w-2.5 text-gray-400" />
                               <span className="truncate">{purchase.client}</span>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-2.5 w-2.5 text-gray-400" />
                               <span className="truncate">{new Date(purchase.created_at).toLocaleDateString()}</span>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Store className="h-3.5 w-3.5 text-orange-500" />
+                            <div className="flex items-center gap-1">
+                              <Store className="h-2.5 w-2.5 text-orange-500" />
                               <span className="truncate font-semibold text-orange-900">{purchase.vendor_name}</span>
                             </div>
                           </div>
                         </div>
 
-                        {/* Stats */}
-                        <div className="px-4 pb-3 text-center text-sm">
-                          <span className="font-bold text-orange-600 text-lg">{purchase.materials_count}</span>
-                          <span className="text-gray-600 ml-1">Material{purchase.materials_count > 1 ? 's' : ''}</span>
+                        {/* Stats - Compact */}
+                        <div className="px-2 pb-1 text-center text-[10px]">
+                          <span className="font-bold text-orange-600 text-sm">{purchase.materials_count}</span>
+                          <span className="text-gray-600 ml-0.5">Material{purchase.materials_count > 1 ? 's' : ''}</span>
                         </div>
 
-                        {/* Financial Impact */}
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
+                        {/* Financial Impact - Compact */}
+                        <div className="px-2 pb-2 space-y-0.5 text-[9px]">
                           <div className="flex justify-between">
                             <span className="text-gray-500">Total Cost:</span>
                             <span className="font-bold text-gray-900">AED {purchase.total_cost.toLocaleString()}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-500">Item:</span>
-                            <span className="font-semibold text-gray-700 truncate ml-2">{purchase.item_name}</span>
+                            <span className="font-semibold text-gray-700 truncate ml-1">{purchase.item_name}</span>
                           </div>
                         </div>
 
-                        {/* Actions */}
-                        <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
-                          <div className="grid grid-cols-2 gap-2">
+                        {/* Actions - Compact */}
+                        <div className="border-t border-gray-200 p-1.5 flex flex-col gap-1">
+                          {/* First Row: View Details and Vendor Info */}
+                          <div className="grid grid-cols-2 gap-1">
                             <button
-                              onClick={() => handleApproveVendor(purchase.cr_id)}
-                              disabled={approvingVendorId === purchase.cr_id}
-                              className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold bg-green-600"
+                              onClick={() => handleReviewVendorApproval(purchase.cr_id)}
+                              className="text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
+                              style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                             >
-                              {approvingVendorId === purchase.cr_id ? (
-                                <>
-                                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                  <span>Approving...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Check className="h-4 w-4" />
-                                  <span>Approve</span>
-                                </>
-                              )}
+                              <Eye className="h-3 w-3" />
+                              <span>Details</span>
                             </button>
                             <button
-                              onClick={() => handleRejectVendor(purchase.cr_id)}
-                              className="bg-red-600 hover:bg-red-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                              onClick={() => handleViewVendorInfo(purchase)}
+                              className="bg-purple-600 hover:bg-purple-700 text-white text-[9px] h-6 rounded transition-all flex items-center justify-center gap-0.5 font-semibold"
                             >
-                              <X className="h-4 w-4" />
-                              <span>Reject</span>
+                              <Store className="h-3 w-3" />
+                              <span>Vendor</span>
                             </button>
                           </div>
+
+                          {/* Second Row: Approve Vendor (Full Width) */}
+                          <button
+                            onClick={() => handleApproveVendor(purchase.cr_id)}
+                            disabled={approvingVendorId === purchase.cr_id}
+                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {approvingVendorId === purchase.cr_id ? (
+                              <>
+                                <div className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                <span className="text-[8px]">Approving...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Check className="h-3 w-3" />
+                                <span>Approve Vendor</span>
+                              </>
+                            )}
+                          </button>
                         </div>
                       </motion.div>
                     ))}
@@ -731,68 +870,67 @@ const ChangeRequestsPage: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="approved" className="mt-0 p-0">
-              <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Approved by TD (Pending Estimator)</h2>
+              <div className="space-y-2">
                 {filteredRequests.length === 0 ? (
-                  <div className="text-center py-12">
-                    <CheckCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No approved requests found</p>
+                  <div className="text-center py-8">
+                    <CheckCircle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">No approved requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
                   <RequestsTable requests={filteredRequests} />
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                     {filteredRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
-                        initial={{ opacity: 0, y: 20 }}
+                        initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.05 * index }}
-                        className="bg-white rounded-lg border border-blue-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                        transition={{ delay: 0.02 * index }}
+                        className="bg-white rounded-lg border border-blue-200 shadow-sm hover:shadow-md transition-all duration-200"
                       >
-                        <div className="p-4">
-                          <div className="flex items-start justify-between mb-2">
-                            <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
-                            <Badge className="bg-blue-100 text-blue-800">APPROVED BY TD</Badge>
+                        <div className="p-2">
+                          <div className="flex items-start justify-between mb-1">
+                            <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{request.project_name}</h3>
+                            <Badge className="bg-blue-100 text-blue-800 text-[9px] px-1 py-0">APPROVED</Badge>
                           </div>
 
-                          <div className="space-y-1 text-sm text-gray-600">
-                            <div className="flex items-center gap-1.5">
-                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                          <div className="space-y-0.5 text-[10px] text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Package className="h-2.5 w-2.5 text-gray-400" />
                               <span className="truncate">By: {request.requested_by_name}</span>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-2.5 w-2.5 text-gray-400" />
                               <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
                             </div>
                           </div>
                         </div>
 
-                        <div className="px-4 pb-3 text-center text-sm">
-                          <span className="font-bold text-blue-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                        <div className="px-2 pb-1 text-center text-[10px]">
+                          <span className="font-bold text-blue-600 text-sm">{(request.materials_data?.length || 0)}</span>
+                          <span className="text-gray-600 ml-0.5">Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                         </div>
 
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
+                        <div className="px-2 pb-2 space-y-0.5 text-[9px]">
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Additional Cost:</span>
+                            <span className="text-gray-500">Cost:</span>
                             <span className="font-bold text-blue-600">{formatCurrency(request.materials_total_cost)}</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Cost Increase:</span>
+                            <span className="text-gray-500">Increase:</span>
                             <span className={`font-semibold ${getPercentageColor((request.budget_impact?.increase_percentage || 0))}`}>
                               +{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%
                             </span>
                           </div>
                         </div>
 
-                        <div className="border-t border-gray-200 p-2 sm:p-3">
+                        <div className="border-t border-gray-200 p-1.5">
                           <button
                             onClick={() => handleReview(request.cr_id)}
-                            className="w-full text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
                             style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                           >
-                            <Eye className="h-4 w-4" />
+                            <Eye className="h-3 w-3" />
                             <span>View Details</span>
                           </button>
                         </div>
@@ -804,68 +942,68 @@ const ChangeRequestsPage: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="completed" className="mt-0 p-0">
-              <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Completed Requests (Final Approval)</h2>
+              <div className="space-y-2">
+                <h2 className="text-sm font-bold text-gray-900">Completed Requests (Final Approval)</h2>
                 {filteredRequests.length === 0 ? (
-                  <div className="text-center py-12">
-                    <CheckCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No completed requests found</p>
+                  <div className="text-center py-8">
+                    <CheckCircle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">No completed requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
                   <RequestsTable requests={filteredRequests} />
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                     {filteredRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
-                        initial={{ opacity: 0, y: 20 }}
+                        initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.05 * index }}
-                        className="bg-white rounded-lg border border-green-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                        transition={{ delay: 0.02 * index }}
+                        className="bg-white rounded-lg border border-green-200 shadow-sm hover:shadow-md transition-all duration-200"
                       >
-                        <div className="p-4">
-                          <div className="flex items-start justify-between mb-2">
-                            <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
-                            <Badge className={getStatusColor(request.status)}>
-                              {request.status.replace('_', ' ').toUpperCase()}
+                        <div className="p-2">
+                          <div className="flex items-start justify-between mb-1">
+                            <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{request.project_name}</h3>
+                            <Badge className="bg-green-100 text-green-800 text-[9px] px-1 py-0">
+                              COMPLETED
                             </Badge>
                           </div>
 
-                          <div className="space-y-1 text-sm text-gray-600">
-                            <div className="flex items-center gap-1.5">
-                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                          <div className="space-y-0.5 text-[10px] text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Package className="h-2.5 w-2.5 text-gray-400" />
                               <span className="truncate">By: {request.requested_by_name}</span>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-2.5 w-2.5 text-gray-400" />
                               <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
                             </div>
                           </div>
                         </div>
 
-                        <div className="px-4 pb-3 text-center text-sm">
-                          <span className="font-bold text-green-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                        <div className="px-2 pb-1 text-center text-[10px]">
+                          <span className="font-bold text-green-600 text-sm">{(request.materials_data?.length || 0)}</span>
+                          <span className="text-gray-600 ml-0.5">Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                         </div>
 
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
+                        <div className="px-2 pb-2 space-y-0.5 text-[9px]">
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Additional Cost:</span>
+                            <span className="text-gray-500">Cost:</span>
                             <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Cost Increase:</span>
+                            <span className="text-gray-500">Increase:</span>
                             <span className="font-semibold text-green-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
                           </div>
                         </div>
 
-                        <div className="border-t border-gray-200 p-2 sm:p-3">
+                        <div className="border-t border-gray-200 p-1.5">
                           <button
                             onClick={() => handleReview(request.cr_id)}
-                            className="w-full text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold"
+                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
                             style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                           >
-                            <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                            <Eye className="h-3 w-3" />
                             <span>View Details</span>
                           </button>
                         </div>
@@ -877,66 +1015,66 @@ const ChangeRequestsPage: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="rejected" className="mt-0 p-0">
-              <div className="space-y-4 sm:space-y-6">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Rejected Requests</h2>
+              <div className="space-y-2">
+                <h2 className="text-sm font-bold text-gray-900">Rejected Requests</h2>
                 {filteredRequests.length === 0 ? (
-                  <div className="text-center py-12">
-                    <XCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No rejected requests found</p>
+                  <div className="text-center py-8">
+                    <XCircle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">No rejected requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
                   <RequestsTable requests={filteredRequests} />
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                     {filteredRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
-                        initial={{ opacity: 0, y: 20 }}
+                        initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.05 * index }}
-                        className="bg-white rounded-lg border border-red-200 shadow-sm hover:shadow-lg transition-all duration-200 opacity-75"
+                        transition={{ delay: 0.02 * index }}
+                        className="bg-white rounded-lg border border-red-200 shadow-sm hover:shadow-md transition-all duration-200 opacity-75"
                       >
-                        <div className="p-4">
-                          <div className="flex items-start justify-between mb-2">
-                            <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
-                            <Badge className={getStatusColor(request.status)}>REJECTED</Badge>
+                        <div className="p-2">
+                          <div className="flex items-start justify-between mb-1">
+                            <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{request.project_name}</h3>
+                            <Badge className="bg-red-100 text-red-800 text-[9px] px-1 py-0">REJECTED</Badge>
                           </div>
 
-                          <div className="space-y-1 text-sm text-gray-600">
-                            <div className="flex items-center gap-1.5">
-                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                          <div className="space-y-0.5 text-[10px] text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Package className="h-2.5 w-2.5 text-gray-400" />
                               <span className="truncate">By: {request.requested_by_name}</span>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-2.5 w-2.5 text-gray-400" />
                               <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
                             </div>
                           </div>
                         </div>
 
-                        <div className="px-4 pb-3 text-center text-sm">
-                          <span className="font-bold text-red-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                        <div className="px-2 pb-1 text-center text-[10px]">
+                          <span className="font-bold text-red-600 text-sm">{(request.materials_data?.length || 0)}</span>
+                          <span className="text-gray-600 ml-0.5">Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                         </div>
 
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
+                        <div className="px-2 pb-2 space-y-0.5 text-[9px]">
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Additional Cost:</span>
+                            <span className="text-gray-500">Cost:</span>
                             <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Cost Increase:</span>
+                            <span className="text-gray-500">Increase:</span>
                             <span className="font-semibold text-red-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
                           </div>
                         </div>
 
-                        <div className="border-t border-gray-200 p-2 sm:p-3">
+                        <div className="border-t border-gray-200 p-1.5">
                           <button
                             onClick={() => handleReview(request.cr_id)}
-                            className="w-full text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold"
+                            className="w-full text-white text-[9px] h-6 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 font-semibold"
                             style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                           >
-                            <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                            <Eye className="h-3 w-3" />
                             <span>View Details</span>
                           </button>
                         </div>
@@ -987,6 +1125,270 @@ const ChangeRequestsPage: React.FC = () => {
           crId={approvingCrId}
           crName={`CR-${approvingCrId}`}
           onSuccess={handleApprovalSuccess}
+        />
+      )}
+
+      {/* Enhanced Vendor Info Modal */}
+      {showVendorInfoModal && selectedVendorPurchase && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+            onClick={() => {
+              setShowVendorInfoModal(false);
+              setVendorDetails(null);
+              setVendorProducts([]);
+            }}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl my-8 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="bg-gradient-to-r from-purple-50 to-purple-100 px-6 py-5 border-b border-purple-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="p-2 bg-purple-500 rounded-full">
+                        <Store className="w-6 h-6 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="text-2xl font-bold text-gray-900">Vendor Details</h3>
+                        <p className="text-sm text-gray-600 mt-0.5">CR #{selectedVendorPurchase.cr_id} - {selectedVendorPurchase.project_name}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowVendorInfoModal(false);
+                      setVendorDetails(null);
+                      setVendorProducts([]);
+                    }}
+                    className="p-2 hover:bg-purple-200 rounded-lg transition-colors"
+                  >
+                    <X className="w-5 h-5 text-gray-600" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="px-6 py-5 max-h-[70vh] overflow-y-auto">
+                {loadingVendorDetails ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                    <span className="ml-3 text-gray-600">Loading vendor details...</span>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Vendor Company Information */}
+                    <div className="bg-purple-50 border border-purple-200 rounded-xl p-5">
+                      <h4 className="text-lg font-bold text-purple-900 mb-4 flex items-center gap-2">
+                        <Store className="w-5 h-5" />
+                        {vendorDetails?.company_name || selectedVendorPurchase.vendor_name}
+                      </h4>
+
+                      {vendorDetails && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                          {vendorDetails.contact_person_name && (
+                            <div>
+                              <span className="text-purple-700 font-medium">Contact Person:</span>
+                              <p className="text-gray-900 mt-1">{vendorDetails.contact_person_name}</p>
+                            </div>
+                          )}
+                          {vendorDetails.email && (
+                            <div>
+                              <span className="text-purple-700 font-medium">Email:</span>
+                              <p className="text-gray-900 mt-1">{vendorDetails.email}</p>
+                            </div>
+                          )}
+                          {vendorDetails.phone && (
+                            <div>
+                              <span className="text-purple-700 font-medium">Phone:</span>
+                              <p className="text-gray-900 mt-1">{vendorDetails.phone_code} {vendorDetails.phone}</p>
+                            </div>
+                          )}
+                          {vendorDetails.category && (
+                            <div>
+                              <span className="text-purple-700 font-medium">Category:</span>
+                              <Badge className="ml-2 bg-purple-200 text-purple-900">{vendorDetails.category}</Badge>
+                            </div>
+                          )}
+                          {(vendorDetails.street_address || vendorDetails.city || vendorDetails.country) && (
+                            <div className="md:col-span-2">
+                              <span className="text-purple-700 font-medium">Address:</span>
+                              <p className="text-gray-900 mt-1">
+                                {[vendorDetails.street_address, vendorDetails.city, vendorDetails.state, vendorDetails.country, vendorDetails.pin_code]
+                                  .filter(Boolean)
+                                  .join(', ')}
+                              </p>
+                            </div>
+                          )}
+                          {vendorDetails.gst_number && (
+                            <div>
+                              <span className="text-purple-700 font-medium">GST Number:</span>
+                              <p className="text-gray-900 mt-1">{vendorDetails.gst_number}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Requested Materials */}
+                    <div>
+                      <h4 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                        <Package className="w-5 h-5 text-blue-600" />
+                        Requested Materials ({selectedVendorPurchase.materials_count})
+                      </h4>
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl overflow-hidden">
+                        <table className="w-full">
+                          <thead className="bg-blue-100">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-blue-900">Material</th>
+                              <th className="px-4 py-3 text-right text-xs font-semibold text-blue-900">Quantity</th>
+                              <th className="px-4 py-3 text-right text-xs font-semibold text-blue-900">Unit Price</th>
+                              <th className="px-4 py-3 text-right text-xs font-semibold text-blue-900">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-blue-200">
+                            {selectedVendorPurchase.materials?.map((material, idx) => (
+                              <tr key={idx} className="hover:bg-blue-100/50 transition-colors">
+                                <td className="px-4 py-3 text-sm text-gray-900 font-medium">{material.material_name}</td>
+                                <td className="px-4 py-3 text-sm text-gray-700 text-right">{material.quantity} {material.unit}</td>
+                                <td className="px-4 py-3 text-sm text-gray-700 text-right">AED {material.unit_price?.toLocaleString()}</td>
+                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right">AED {material.total_price?.toLocaleString()}</td>
+                              </tr>
+                            ))}
+                            <tr className="bg-blue-100 font-bold">
+                              <td colSpan={3} className="px-4 py-3 text-sm text-blue-900 text-right">Grand Total:</td>
+                              <td className="px-4 py-3 text-lg text-blue-900 text-right">AED {selectedVendorPurchase.total_cost.toLocaleString()}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Vendor Products/Services Table */}
+                    {vendorProducts.length > 0 && (
+                      <div>
+                        <h4 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                          <Package className="w-5 h-5 text-green-600" />
+                          Vendor Products/Services ({vendorProducts.length})
+                        </h4>
+                        <div className="bg-green-50 border border-green-200 rounded-xl overflow-hidden">
+                          <table className="w-full">
+                            <thead className="bg-green-100">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-green-900">Product Name</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-green-900">Category</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-green-900">Description</th>
+                                <th className="px-4 py-3 text-right text-xs font-semibold text-green-900">Price</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-green-200">
+                              {vendorProducts.map((product, idx) => (
+                                <tr key={product.product_id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-green-50/30'} hover:bg-green-100/50 transition-colors`}>
+                                  <td className="px-4 py-3 text-sm text-gray-900 font-medium">{product.product_name}</td>
+                                  <td className="px-4 py-3 text-sm">
+                                    {product.category ? (
+                                      <Badge className="bg-green-200 text-green-900 text-[10px]">{product.category}</Badge>
+                                    ) : (
+                                      <span className="text-gray-400 text-xs">-</span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-sm text-gray-700 max-w-xs">
+                                    {product.description ? (
+                                      <span className="line-clamp-2">{product.description}</span>
+                                    ) : (
+                                      <span className="text-gray-400 text-xs">-</span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    {product.unit_price ? (
+                                      <div className="text-sm">
+                                        <div className="font-semibold text-green-900">AED {product.unit_price.toLocaleString()}</div>
+                                        <div className="text-xs text-gray-600">per {product.unit || 'unit'}</div>
+                                      </div>
+                                    ) : (
+                                      <span className="text-gray-400 text-xs">-</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Project Information */}
+                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-3">Project Information</h4>
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <span className="text-gray-500">Project:</span>
+                          <p className="font-semibold text-gray-900 mt-1">{selectedVendorPurchase.project_name}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Client:</span>
+                          <p className="font-semibold text-gray-900 mt-1">{selectedVendorPurchase.client}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Item:</span>
+                          <p className="font-semibold text-gray-900 mt-1">{selectedVendorPurchase.item_name}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Created:</span>
+                          <p className="font-semibold text-gray-900 mt-1">{new Date(selectedVendorPurchase.created_at).toLocaleDateString()}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex justify-between gap-3">
+                <Button
+                  onClick={() => {
+                    setShowVendorInfoModal(false);
+                    setShowVendorSelectionModal(true);
+                  }}
+                  className="px-6 bg-orange-600 hover:bg-orange-700 text-white"
+                >
+                  <Store className="w-4 h-4 mr-2" />
+                  Change Vendor
+                </Button>
+                <Button
+                  onClick={() => {
+                    setShowVendorInfoModal(false);
+                    setVendorDetails(null);
+                    setVendorProducts([]);
+                  }}
+                  variant="outline"
+                  className="px-6"
+                >
+                  Close
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        </>
+      )}
+
+      {/* Vendor Selection Modal - For changing vendor */}
+      {selectedVendorPurchase && (
+        <VendorSelectionModal
+          purchase={selectedVendorPurchase}
+          isOpen={showVendorSelectionModal}
+          onClose={() => setShowVendorSelectionModal(false)}
+          onVendorSelected={() => {
+            setShowVendorSelectionModal(false);
+            loadVendorApprovals();
+            loadChangeRequests();
+            toast.success('Vendor selection updated!');
+          }}
         />
       )}
     </div>

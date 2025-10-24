@@ -149,12 +149,18 @@ class BuyerService {
     }
   }
 
-  // Mark purchase as complete
+  // Mark purchase as complete and merge to BOQ
   async completePurchase(data: CompletePurchaseRequest): Promise<CompletePurchaseResponse> {
     try {
+      // Use the change-request endpoint that properly merges materials to BOQ
+      // This endpoint:
+      // 1. Changes status to 'purchase_completed'
+      // 2. Merges materials to BOQ with 'planned_quantity: 0' marker
+      // 3. Preserves original BOQ totals
+      // 4. Creates MaterialPurchaseTracking entries
       const response = await axios.post<CompletePurchaseResponse>(
-        `${API_URL}/buyer/complete-purchase`,
-        data,
+        `${API_URL}/change-request/${data.cr_id}/complete-purchase`,
+        { purchase_notes: data.notes || '' },
         { headers: this.getAuthHeaders() }
       );
 

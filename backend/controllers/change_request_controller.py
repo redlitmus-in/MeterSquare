@@ -427,12 +427,16 @@ def get_all_change_requests():
             # 1. Requests where approval_required_from = 'technical_director' (pending TD approval)
             # 2. Requests approved by TD that are assigned_to_buyer (approved tab)
             # 3. ALL requests that are purchase_completed (completed tab) - regardless of who approved
+            # 4. Requests with vendor selection pending TD approval (vendor_selection_status = 'pending_td_approval')
+            # 5. Requests with vendor approved by TD (vendor_selection_status = 'approved')
             from sqlalchemy import or_
             query = query.filter(
                 or_(
                     ChangeRequest.approval_required_from == 'technical_director',  # Pending requests
                     ChangeRequest.td_approved_by_user_id.isnot(None),  # Approved by TD
-                    ChangeRequest.status == 'purchase_completed'  # All completed purchases (actual DB value)
+                    ChangeRequest.status == 'purchase_completed',  # All completed purchases (actual DB value)
+                    ChangeRequest.vendor_selection_status == 'pending_td_approval',  # Vendor approval pending
+                    ChangeRequest.vendor_approved_by_td_id.isnot(None)  # Vendor approved by TD
                 )
             )
         elif user_role == 'buyer':

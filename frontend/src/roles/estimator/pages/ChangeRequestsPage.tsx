@@ -53,34 +53,46 @@ const ChangeRequestsPage: React.FC = () => {
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
 
-  // Fetch change requests from backend
+  // Fetch change requests from backend - Auto-refresh every 2 seconds
   useEffect(() => {
-    console.log('[ChangeRequestsPage] Component mounted');
-    loadChangeRequests();
+    // Initial load with toasts
+    loadChangeRequests(true);
+
+    // Set up auto-refresh interval (without toasts to prevent spam and UI flicker)
+    const refreshInterval = setInterval(() => {
+      loadChangeRequests(false); // Silent background refresh
+    }, 2000); // Refresh every 2 seconds
+
+    // Cleanup interval on unmount
+    return () => clearInterval(refreshInterval);
   }, []);
 
-  const loadChangeRequests = async () => {
+  const loadChangeRequests = async (showToasts = false) => {
     try {
-      console.log('[ChangeRequests] Fetching change requests...');
       const response = await changeRequestService.getChangeRequests();
-      console.log('[ChangeRequests] Response:', response);
 
       if (response.success) {
-        console.log('[ChangeRequests] Setting data:', response.data);
         setChangeRequests(response.data);
-        if (response.data.length > 0) {
+        // Only show success toast on initial load to avoid spam
+        if (showToasts && response.data.length > 0) {
           toast.success(`Loaded ${response.data.length} change request(s)`);
         }
       } else {
-        console.error('[ChangeRequests] Failed:', response.message);
-        toast.error(response.message || 'Failed to load change requests');
+        // Only show error toast on initial load to avoid spam
+        if (showToasts) {
+          toast.error(response.message || 'Failed to load change requests');
+        }
       }
     } catch (error) {
       console.error('[ChangeRequests] Error loading change requests:', error);
-      toast.error('Failed to load change requests');
+      // Only show error toast on initial load to avoid spam
+      if (showToasts) {
+        toast.error('Failed to load change requests');
+      }
     } finally {
-      console.log('[ChangeRequests] Setting loading to false');
-      setInitialLoad(false);
+      if (initialLoad) {
+        setInitialLoad(false);
+      }
     }
   };
 

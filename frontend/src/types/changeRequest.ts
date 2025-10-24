@@ -89,6 +89,18 @@ export interface ChangeRequest {
   reason: string;
   notes?: string;
 
+  // Vendor selection and approval
+  selected_vendor_id?: number;
+  selected_vendor_name?: string;
+  vendor_selected_by_buyer_id?: number;
+  vendor_selected_by_buyer_name?: string;
+  vendor_selection_date?: string;
+  vendor_selection_status?: string;
+  vendor_approved_by_td_id?: number;
+  vendor_approved_by_td_name?: string;
+  vendor_approval_date?: string;
+  vendor_rejection_reason?: string;
+
   // Metadata
   created_at: string;
   updated_at: string;

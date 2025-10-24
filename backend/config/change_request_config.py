@@ -31,7 +31,7 @@ class ChangeRequestConfig:
     STATUS_APPROVED_BY_TD = 'approved_by_td'
     STATUS_APPROVED = 'approved'
     STATUS_ASSIGNED_TO_BUYER = 'assigned_to_buyer'
-    STATUS_PURCHASE_COMPLETE = 'purchase_complete'
+    STATUS_PURCHASE_COMPLETE = 'purchase_completed'  # Fixed: was 'purchase_complete', now 'purchase_completed'
     STATUS_REJECTED = 'rejected'
 
     # Request Types
@@ -58,7 +58,7 @@ class ChangeRequestConfig:
                 'approved_by_td': cls.STATUS_APPROVED_BY_TD,
                 'approved': cls.STATUS_APPROVED,
                 'assigned_to_buyer': cls.STATUS_ASSIGNED_TO_BUYER,
-                'purchase_complete': cls.STATUS_PURCHASE_COMPLETE,
+                'purchase_completed': cls.STATUS_PURCHASE_COMPLETE,  # Fixed key to match status value
                 'rejected': cls.STATUS_REJECTED
             }
         }

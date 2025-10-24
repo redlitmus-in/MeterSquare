@@ -324,11 +324,11 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-green-600'
       },
       {
-        name: 'Vendors',
-        href: '/buyer/vendors',
+        name: 'Vendor Management',
+        href: buildPath('/vendors'),
         icon: UsersIcon,
         iconSolid: UsersSolid,
-        color: 'text-blue-600'
+        color: 'text-purple-600'
       },
       {
         name: 'Production Management',

@@ -10,7 +10,8 @@
       "Bash(npx tsc:*)",
       "Bash(find:*)",
       "Bash(awk:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(PGPASSWORD=postgres psql:*)"
     ],
     "deny": [],
     "ask": []

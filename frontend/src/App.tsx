@@ -168,8 +168,18 @@ const RoleSpecificVendorHub: React.FC = () => {
                   roleIdLower === 'buyer' ||
                   userRoleLower === 'buyer';
 
-  // Buyer has vendor management access
-  if (isBuyer) {
+  // Check if user is Technical Director
+  const isTechnicalDirector = userRole === 'Technical Director' ||
+                             userRole === 'technicalDirector' ||
+                             userRoleLower === 'technical director' ||
+                             userRoleLower === 'technical_director' ||
+                             userRoleLower === 'technicaldirector' ||
+                             roleId === UserRole.TECHNICAL_DIRECTOR ||
+                             roleId === 'technicalDirector' ||
+                             roleIdLower === 'technical_director';
+
+  // Buyer and Technical Director have vendor management access
+  if (isBuyer || isTechnicalDirector) {
     return <VendorManagement />;
   }
 
