@@ -33,9 +33,18 @@ interface SubItemForm {
   brand?: string; // Optional
   quantity: number; // Required
   unit: string; // Required
-  rate: number; // Required
+  rate: number; // Required (Client rate per unit)
+
+  // Per-sub-item percentages (calculated from client rate)
+  misc_percentage: number;
+  overhead_profit_percentage: number;
+  transport_percentage: number;
+
   materials: BOQMaterialForm[]; // Raw materials for this sub-item
   labour: BOQLabourForm[]; // Labour for this sub-item
+
+  master_sub_item_id?: number; // Track if this is an existing sub-item
+  is_new?: boolean; // Track if this is a new sub-item
 }
 
 interface BOQItemForm {
@@ -187,6 +196,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [overallOverhead, setOverallOverhead] = useState(10);
   const [overallProfit, setOverallProfit] = useState(15);
+  const [overallDiscount, setOverallDiscount] = useState(0); // Overall BOQ discount percentage
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
   const [isUploadingBulk, setIsUploadingBulk] = useState(false);
@@ -207,9 +217,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [materialSearchTerms, setMaterialSearchTerms] = useState<Record<string, string>>({});
   const [labourSearchTerms, setLabourSearchTerms] = useState<Record<string, string>>({});
 
-  // VAT mode state - tracks which items use per-material VAT
-  const [useMaterialVAT, setUseMaterialVAT] = useState<Record<string, boolean>>({});
-  const [useSubItemMaterialVAT, setUseSubItemMaterialVAT] = useState<Record<string, boolean>>({});
+  // VAT mode state - tracks which items use per-material VAT (REMOVED - No longer needed)
 
   // Preliminaries state
   const [preliminaries, setPreliminaries] = useState<PreliminaryItem[]>([]);
@@ -370,6 +378,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           setPreliminaryNotes(prelimsData.notes);
         }
 
+        // Load overall discount if available
+        if (boqDetails.discount_percentage) {
+          setOverallDiscount(boqDetails.discount_percentage);
+        }
+
         // Get items from existing_purchase.items (backend structure)
         const boqItems = boqDetails.existing_purchase?.items || [];
 
@@ -387,6 +400,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               quantity: subItem.quantity || 1,
               unit: subItem.unit || 'nos',
               rate: subItem.rate || 0,
+              misc_percentage: subItem.misc_percentage || 10,
+              overhead_profit_percentage: subItem.overhead_profit_percentage || 25,
+              transport_percentage: subItem.transport_percentage || 5,
               materials: (subItem.materials || []).map((mat: any, matIndex: number) => ({
                 id: `mat-si-${index}-${siIndex}-${matIndex}-${Date.now()}`,
                 material_name: mat.material_name,
@@ -528,12 +544,15 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           id: `si-${itemId}-${index}-${Date.now()}`,
           sub_item_name: subItem.sub_item_name || '',
           scope: subItem.description || '',
-          size: subItem.size || '',
+          size: (subItem as any).size || '',
           location: subItem.location || '',
           brand: subItem.brand || '',
           quantity: subItem.quantity || 1,
           unit: subItem.unit || 'nos',
           rate: subItem.per_unit_cost || 0,
+          misc_percentage: 10,
+          overhead_profit_percentage: 25,
+          transport_percentage: 5,
           materials: subItem.materials.map((mat, matIndex) => ({
             id: `mat-si-${itemId}-${index}-${matIndex}-${Date.now()}`,
             material_name: mat.material_name,
@@ -650,6 +669,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       quantity: 1,
       unit: 'nos',
       rate: 0,
+      misc_percentage: 10, // Default 10%
+      overhead_profit_percentage: 25, // Default 25%
+      transport_percentage: 5, // Default 5%
       materials: [],
       labour: []
     };
@@ -900,81 +922,158 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     ));
   };
 
-  const calculateItemCost = (item: BOQItemForm) => {
-    // IMPORTANT: Always use item-level quantity × rate for cost calculations
-    // Sub-items are summed to calculate the item rate automatically
-    const itemTotal = (item.quantity || 0) * (item.rate || 0);
+  // Helper function to map sub-item to API payload format
+  const mapSubItemToPayload = (subItem: SubItemForm) => {
+    const subItemCalc = calculateSubItemCost(subItem);
+    return {
+      sub_item_name: subItem.sub_item_name,
+      scope: subItem.scope,
+      size: subItem.size || null,
+      location: subItem.location || null,
+      brand: subItem.brand || null,
+      quantity: subItem.quantity,
+      unit: subItem.unit,
+      rate: subItem.rate,
+      per_unit_cost: subItem.rate,
+      sub_item_total: subItem.quantity * subItem.rate,
 
-    // Calculate percentages based on itemTotal (all applied on base)
-    // overhead_percentage is labeled as "Miscellaneous" in UI
-    // profit_margin_percentage is labeled as "Overhead & Profit" in UI
-    const miscellaneousAmount = itemTotal * (item.overhead_percentage / 100);
-    const overheadProfitAmount = itemTotal * (item.profit_margin_percentage / 100);
+      // Per-sub-item percentages
+      misc_percentage: subItem.misc_percentage,
+      misc_amount: subItemCalc.miscAmount,
+      overhead_profit_percentage: subItem.overhead_profit_percentage,
+      overhead_profit_amount: subItemCalc.overheadProfitAmount,
+      transport_percentage: subItem.transport_percentage,
+      transport_amount: subItemCalc.transportAmount,
 
-    // Subtotal = base + miscellaneous + overhead&profit
-    const subtotal = itemTotal + miscellaneousAmount + overheadProfitAmount;
+      // Cost breakdown
+      material_cost: subItemCalc.materialCost,
+      labour_cost: subItemCalc.labourCost,
+      internal_cost: subItemCalc.internalCost,
+      planned_profit: subItemCalc.plannedProfit,
+      actual_profit: subItemCalc.actualProfit,
 
-    // Calculate discount on subtotal
-    const discountAmount = subtotal * (item.discount_percentage / 100);
-    const afterDiscount = subtotal - discountAmount;
+      materials: subItem.materials?.map(material => {
+        const materialTotal = material.quantity * material.unit_price;
+        const materialVAT = materialTotal * ((material.vat_percentage || 0) / 100);
+        return {
+          material_name: material.material_name,
+          quantity: material.quantity,
+          unit: material.unit,
+          unit_price: material.unit_price,
+          total_price: materialTotal,
+          description: material.description || null,
+          vat_percentage: material.vat_percentage || 0,
+          vat_amount: materialVAT,
+          master_material_id: material.master_material_id || null
+        };
+      }) || [],
 
-    // Calculate VAT (ADDITIONAL/EXTRA on after-discount amount)
-    // Check if using individual material VAT
-    let vatAmount = 0;
-    let individualMaterialVATTotal = 0;
+      labour: subItem.labour?.map(labour => ({
+        labour_role: labour.labour_role,
+        work_type: labour.work_type || 'daily_wages',
+        hours: labour.hours,
+        rate_per_hour: labour.rate_per_hour,
+        total_amount: labour.hours * labour.rate_per_hour,
+        master_labour_id: labour.master_labour_id || null
+      })) || []
+    };
+  };
 
-    // Calculate individual material VAT from sub-items if enabled
-    item.sub_items.forEach(subItem => {
-      if (useSubItemMaterialVAT[`${item.id}-${subItem.id}`]) {
-        subItem.materials.forEach(m => {
-          const materialTotal = m.quantity * m.unit_price;
-          const materialVAT = materialTotal * ((m.vat_percentage || 0) / 100);
-          individualMaterialVATTotal += materialVAT;
-        });
-      }
-    });
+  // Calculate sub-item costs using TOP-DOWN approach (like PDF)
+  const calculateSubItemCost = (subItem: SubItemForm) => {
+    // 1. Start with Client Rate (Total amount client pays for this sub-item)
+    const clientAmount = subItem.quantity * subItem.rate;
 
-    // If any sub-item has individual material VAT enabled, use that instead of overall VAT
-    const hasIndividualVAT = item.sub_items.some(subItem => useSubItemMaterialVAT[`${item.id}-${subItem.id}`]);
+    // 2. Calculate percentages FROM the client rate (subtract approach)
+    const transportAmount = clientAmount * (subItem.transport_percentage / 100);
+    const overheadProfitAmount = clientAmount * (subItem.overhead_profit_percentage / 100);
+    const miscAmount = clientAmount * (subItem.misc_percentage / 100);
 
-    if (hasIndividualVAT) {
-      vatAmount = individualMaterialVATTotal;
-    } else {
-      // Use overall VAT percentage
-      vatAmount = afterDiscount * (item.vat_percentage / 100);
-    }
+    // 3. Calculate Internal Cost (Materials + Labour)
+    const materialCost = subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0);
+    const labourCost = subItem.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0);
+    const internalCost = materialCost + labourCost;
 
-    const sellingPrice = afterDiscount + vatAmount;
+    // 4. Calculate Profits
+    const plannedProfit = overheadProfitAmount; // This is the profit we planned for (25% typically)
+    const actualProfit = clientAmount - internalCost - miscAmount - transportAmount; // Actual profit after all costs
 
-    // Calculate raw materials and labour cost from sub-items
-    let materialCost = 0;
-    let labourCost = 0;
-
-    item.sub_items.forEach(subItem => {
-      materialCost += subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0);
-      labourCost += subItem.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0);
-    });
-
-    // Also include main item materials and labour if any
-    materialCost += item.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0);
-    labourCost += item.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0);
-
-    const rawMaterialsTotal = materialCost + labourCost;
+    // 5. Remaining budget for materials/labour (for reference)
+    const remainingForCosts = clientAmount - transportAmount - overheadProfitAmount - miscAmount;
 
     return {
-      itemTotal, // Total from all sub-items
-      miscellaneousAmount, // Miscellaneous (from overhead_percentage)
-      overheadProfitAmount, // Overhead & Profit (from profit_margin_percentage)
-      subtotal, // itemTotal + miscellaneous + overhead&profit
-      discountAmount, // Discount % on subtotal
-      afterDiscount, // subtotal - discount
-      vatAmount, // VAT % on afterDiscount (ADDITIONAL/EXTRA) or sum of individual material VAT
-      sellingPrice, // Final amount (afterDiscount + VAT)
-      materialCost, // Raw materials cost
-      labourCost, // Labour cost
-      rawMaterialsTotal, // Total raw materials + labour
-      individualMaterialVATTotal, // Total VAT from individual materials
-      hasIndividualVAT // Flag to indicate if individual VAT is used
+      clientAmount,
+      transportAmount,
+      overheadProfitAmount,
+      miscAmount,
+      materialCost,
+      labourCost,
+      internalCost,
+      plannedProfit,
+      actualProfit,
+      remainingForCosts
+    };
+  };
+
+  const calculateItemCost = (item: BOQItemForm) => {
+    // NEW APPROACH: Calculate from sub-items using TOP-DOWN method
+    let totalClientCost = 0;
+    let totalInternalCost = 0;
+    let totalPlannedProfit = 0;
+    let totalActualProfit = 0;
+    let totalMiscAmount = 0;
+    let totalTransportAmount = 0;
+    let totalOverheadProfitAmount = 0;
+
+    // Calculate for each sub-item
+    item.sub_items.forEach(subItem => {
+      const subItemCalc = calculateSubItemCost(subItem);
+      totalClientCost += subItemCalc.clientAmount;
+      totalInternalCost += subItemCalc.internalCost;
+      totalPlannedProfit += subItemCalc.plannedProfit;
+      totalActualProfit += subItemCalc.actualProfit;
+      totalMiscAmount += subItemCalc.miscAmount;
+      totalTransportAmount += subItemCalc.transportAmount;
+      totalOverheadProfitAmount += subItemCalc.overheadProfitAmount;
+    });
+
+    // Also add main item materials/labour if any (backward compatibility)
+    const mainMaterialCost = item.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0);
+    const mainLabourCost = item.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0);
+    totalInternalCost += mainMaterialCost + mainLabourCost;
+
+    // Calculate discount on client cost (item-level discount)
+    const discountAmount = totalClientCost * (item.discount_percentage / 100);
+    const afterDiscount = totalClientCost - discountAmount;
+
+    // No VAT - selling price is same as after discount
+    const sellingPrice = afterDiscount;
+
+    // Calculate project margin (excluding planned profit)
+    const projectMargin = totalClientCost - totalInternalCost - totalMiscAmount - totalTransportAmount;
+
+    return {
+      // New calculation results
+      totalClientCost, // Total amount client pays
+      totalInternalCost, // Total materials + labour cost
+      totalPlannedProfit, // Sum of all sub-item planned profits (from O&P %)
+      totalActualProfit, // Sum of all sub-item actual profits
+      totalMiscAmount, // Total miscellaneous from all sub-items
+      totalTransportAmount, // Total transport from all sub-items
+      totalOverheadProfitAmount, // Total O&P from all sub-items
+      projectMargin, // Client cost - Internal cost - Misc - Transport (excluding planned profit)
+
+      // For backward compatibility and display
+      itemTotal: totalClientCost, // Total from all sub-items
+      miscellaneousAmount: totalMiscAmount,
+      overheadProfitAmount: totalOverheadProfitAmount,
+      subtotal: totalClientCost, // Before discount
+      discountAmount,
+      afterDiscount,
+      sellingPrice, // Final amount (no VAT)
+      materialCost: totalInternalCost - (item.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0)),
+      labourCost: item.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0) + item.sub_items.reduce((sum, si) => sum + si.labour.reduce((s, l) => s + (l.hours * l.rate_per_hour), 0), 0),
+      rawMaterialsTotal: totalInternalCost
     };
   };
 
@@ -1195,8 +1294,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     try {
       // Revision mode - Create a new revision of the BOQ
       if (isRevision && existingBoqData?.boq_id) {
+        const subtotal = items.reduce((sum, item) => {
+          const costs = calculateItemCost(item);
+          return sum + costs.sellingPrice;
+        }, 0);
+        const discountAmount = subtotal * (overallDiscount / 100);
+
         const revisionPayload = {
           boq_name: boqName,
+          discount_percentage: overallDiscount,
+          discount_amount: discountAmount,
           preliminaries: {
             items: preliminaries.map(p => ({
               id: p.id,
@@ -1235,43 +1342,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               selling_price: costs.sellingPrice,
 
               // Add sub_items structure
-              sub_items: item.sub_items && item.sub_items.length > 0 ? item.sub_items.map(subItem => ({
-                sub_item_name: subItem.sub_item_name,
-                scope: subItem.scope,
-                size: subItem.size || null,
-                location: subItem.location || null,
-                brand: subItem.brand || null,
-                quantity: subItem.quantity,
-                unit: subItem.unit,
-                rate: subItem.rate,
-                per_unit_cost: subItem.rate,
-                sub_item_total: subItem.quantity * subItem.rate,
-
-                materials: subItem.materials?.map(material => {
-                  const materialTotal = material.quantity * material.unit_price;
-                  const materialVAT = materialTotal * ((material.vat_percentage || 0) / 100);
-                  return {
-                    material_name: material.material_name,
-                    quantity: material.quantity,
-                    unit: material.unit,
-                    unit_price: material.unit_price,
-                    total_price: materialTotal,
-                    description: material.description || null,
-                    vat_percentage: material.vat_percentage || 0,
-                    vat_amount: materialVAT,
-                    master_material_id: material.master_material_id || null
-                  };
-                }) || [],
-
-                labour: subItem.labour?.map(labour => ({
-                  labour_role: labour.labour_role,
-                  work_type: labour.work_type || 'daily_wages',
-                  hours: labour.hours,
-                  rate_per_hour: labour.rate_per_hour,
-                  total_amount: labour.hours * labour.rate_per_hour,
-                  master_labour_id: labour.master_labour_id || null
-                })) || []
-              })) : [],
+              sub_items: item.sub_items && item.sub_items.length > 0 ? item.sub_items.map(mapSubItemToPayload) : [],
 
               // Item-level materials and labour for backward compatibility
               materials: item.materials && item.materials.length > 0 ? item.materials.map(material => {
@@ -1322,9 +1393,17 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
         const token = localStorage.getItem('access_token');
 
+        const subtotal = items.reduce((sum, item) => {
+          const costs = calculateItemCost(item);
+          return sum + costs.sellingPrice;
+        }, 0);
+        const discountAmount = subtotal * (overallDiscount / 100);
+
         const updatePayload = {
           boq_id: existingBoqData.boq_id,
           boq_name: boqName,
+          discount_percentage: overallDiscount,
+          discount_amount: discountAmount,
           preliminaries: {
             items: preliminaries.map(p => ({
               id: p.id,
@@ -1363,43 +1442,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               selling_price: costs.sellingPrice,
 
               // Add sub_items structure
-              sub_items: item.sub_items && item.sub_items.length > 0 ? item.sub_items.map(subItem => ({
-                sub_item_name: subItem.sub_item_name,
-                scope: subItem.scope,
-                size: subItem.size || null,
-                location: subItem.location || null,
-                brand: subItem.brand || null,
-                quantity: subItem.quantity,
-                unit: subItem.unit,
-                rate: subItem.rate,
-                per_unit_cost: subItem.rate,
-                sub_item_total: subItem.quantity * subItem.rate,
-
-                materials: subItem.materials?.map(material => {
-                  const materialTotal = material.quantity * material.unit_price;
-                  const materialVAT = materialTotal * ((material.vat_percentage || 0) / 100);
-                  return {
-                    material_name: material.material_name,
-                    quantity: material.quantity,
-                    unit: material.unit,
-                    unit_price: material.unit_price,
-                    total_price: materialTotal,
-                    description: material.description || null,
-                    vat_percentage: material.vat_percentage || 0,
-                    vat_amount: materialVAT,
-                    master_material_id: material.master_material_id || null
-                  };
-                }) || [],
-
-                labour: subItem.labour?.map(labour => ({
-                  labour_role: labour.labour_role,
-                  work_type: labour.work_type || 'daily_wages',
-                  hours: labour.hours,
-                  rate_per_hour: labour.rate_per_hour,
-                  total_amount: labour.hours * labour.rate_per_hour,
-                  master_labour_id: labour.master_labour_id || null
-                })) || []
-              })) : [],
+              sub_items: item.sub_items && item.sub_items.length > 0 ? item.sub_items.map(mapSubItemToPayload) : [],
 
               // Item-level materials and labour for backward compatibility
               materials: item.materials && item.materials.length > 0 ? item.materials.map(material => {
@@ -1484,33 +1527,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               selling_price: costs.sellingPrice,
 
               // Add sub_items structure
-              sub_items: item.sub_items.map(subItem => ({
-                sub_item_name: subItem.sub_item_name,
-                scope: subItem.scope,
-                size: subItem.size || null,
-                location: subItem.location || null,
-                brand: subItem.brand || null,
-                quantity: subItem.quantity,
-                unit: subItem.unit,
-                rate: subItem.rate,
-                per_unit_cost: subItem.rate,
-
-                materials: subItem.materials.map(material => ({
-                  material_name: material.material_name,
-                  quantity: material.quantity,
-                  unit: material.unit,
-                  unit_price: material.unit_price,
-                  description: material.description || null,
-                  vat_percentage: material.vat_percentage || 0
-                })),
-
-                labour: subItem.labour.map(labour => ({
-                  labour_role: labour.labour_role,
-                  work_type: labour.work_type || 'daily_wages',
-                  hours: labour.hours,
-                  rate_per_hour: labour.rate_per_hour
-                }))
-              }))
+              sub_items: item.sub_items.map(mapSubItemToPayload)
             };
           })
         };
@@ -1537,11 +1554,19 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         }
       } else {
         // Regular BOQ creation for Estimator
+        const subtotal = items.reduce((sum, item) => {
+          const costs = calculateItemCost(item);
+          return sum + costs.sellingPrice;
+        }, 0);
+        const discountAmount = subtotal * (overallDiscount / 100);
+
         const payload: BOQCreatePayload = {
           project_id: selectedProjectId,
           boq_name: boqName,
           status: 'Draft',
           created_by: 'Estimator',
+          discount_percentage: overallDiscount,
+          discount_amount: discountAmount,
           preliminaries: {
             items: preliminaries.map(p => ({
               id: p.id,
@@ -2101,40 +2126,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               </div>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs text-gray-600 font-medium">Qty:</span>
-                              <input
-                                type="number"
-                                value={item.quantity === 0 ? '' : item.quantity}
-                                onChange={(e) => {
-                                  const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                  updateItem(item.id, 'quantity', value);
-                                }}
-                                className="w-20 px-2 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                placeholder="1"
-                                min="0"
-                                step="0.01"
-                                disabled={isSubmitting}
-                              />
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs text-gray-600 font-medium">Rate:</span>
-                              <input
-                                type="number"
-                                value={item.rate === 0 ? '' : item.rate}
-                                className="w-28 px-3 py-2 text-sm border border-gray-300 rounded-lg bg-gray-100 text-gray-700 font-semibold cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                placeholder="Auto"
-                                disabled
-                                title="Auto-calculated from sub-items"
-                              />
-                            </div>
-                          </div>
                         </div>
                         <div className="flex items-center gap-3 ml-4">
-                          <span className="text-sm font-semibold text-gray-900">
-                            AED {((item.quantity || 0) * (item.rate || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </span>
                           <button
                             type="button"
                             onClick={() => removeItem(item.id)}
@@ -2339,30 +2332,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       </button>
                                     </div>
 
-                                    {/* VAT Mode Toggle */}
-                                    <div className="mb-3 pb-3 border-b border-blue-200">
-                                      <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={useSubItemMaterialVAT[`${item.id}-${subItem.id}`] || false}
-                                          onChange={(e) => {
-                                            setUseSubItemMaterialVAT(prev => ({
-                                              ...prev,
-                                              [`${item.id}-${subItem.id}`]: e.target.checked
-                                            }));
-                                          }}
-                                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                          disabled={isSubmitting}
-                                        />
-                                        <span className="text-xs text-blue-900 font-medium">
-                                          Different VAT rates for materials
-                                        </span>
-                                        <span className="text-xs text-blue-600 italic">
-                                          (Check this if materials have different VAT percentages)
-                                        </span>
-                                      </label>
-                                    </div>
-
                                     <div className="space-y-2">
                                       {/* Column Headers */}
                                       {subItem.materials.length > 0 && (
@@ -2372,12 +2341,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           <div className="w-24 text-xs font-semibold text-gray-700">Unit</div>
                                           <div className="w-24 text-xs font-semibold text-gray-700">Rate (AED)</div>
                                           <div className="w-24 text-xs font-semibold text-gray-700">Total (AED)</div>
-                                          {useSubItemMaterialVAT[`${item.id}-${subItem.id}`] && (
-                                            <>
-                                              <div className="w-20 text-xs font-semibold text-gray-700">VAT %</div>
-                                              <div className="w-24 text-xs font-semibold text-gray-700">VAT Amt</div>
-                                            </>
-                                          )}
                                           <div className="w-4"></div>
                                         </div>
                                       )}
@@ -2486,24 +2449,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               <span className="w-24 text-sm font-medium text-gray-700">
                                                 {(material.quantity * material.unit_price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                               </span>
-                                              {useSubItemMaterialVAT[`${item.id}-${subItem.id}`] && (
-                                                <>
-                                                  <input
-                                                    type="number"
-                                                    value={material.vat_percentage || 0}
-                                                    onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'vat_percentage', parseFloat(e.target.value) || 0)}
-                                                    className="w-20 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                    placeholder="VAT%"
-                                                    min="0"
-                                                    max="100"
-                                                    step="0.01"
-                                                    disabled={isSubmitting}
-                                                  />
-                                                  <span className="w-24 text-sm font-medium text-green-700">
-                                                    {((material.quantity * material.unit_price) * ((material.vat_percentage || 0) / 100)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                                  </span>
-                                                </>
-                                              )}
                                               <button
                                                 type="button"
                                                 onClick={() => removeSubItemMaterial(item.id, subItem.id, material.id)}
@@ -2543,14 +2488,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               AED {subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                             </span>
                                           </div>
-                                          {useSubItemMaterialVAT[`${item.id}-${subItem.id}`] && (
-                                            <div className="flex justify-between items-center mt-2 pt-2 border-t border-blue-200">
-                                              <span className="text-sm font-bold text-green-900">Total VAT Amount:</span>
-                                              <span className="text-sm font-bold text-green-900">
-                                                AED {subItem.materials.reduce((sum, m) => sum + ((m.quantity * m.unit_price) * ((m.vat_percentage || 0) / 100)), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                              </span>
-                                            </div>
-                                          )}
                                         </div>
                                       )}
                                     </div>
@@ -2763,6 +2700,151 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       )}
                                     </div>
                                   </div>
+
+                                  {/* Cost Breakdown Percentages - After Labour */}
+                                  <div className="mt-4 p-3 bg-gradient-to-br from-purple-50 to-blue-50 rounded-lg border border-purple-200">
+                                    <h5 className="text-xs font-bold text-purple-900 mb-2 flex items-center gap-1">
+                                      <Calculator className="w-3.5 h-3.5" />
+                                      Cost Breakdown Percentages
+                                    </h5>
+                                    <div className="grid grid-cols-3 gap-3">
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Misc %
+                                        </label>
+                                        <input
+                                          type="number"
+                                          value={subItem.misc_percentage}
+                                          onChange={(e) => updateSubItem(item.id, subItem.id, 'misc_percentage', parseFloat(e.target.value) || 0)}
+                                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                          min="0"
+                                          max="100"
+                                          step="0.1"
+                                          disabled={isSubmitting}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Overhead & Profit %
+                                        </label>
+                                        <input
+                                          type="number"
+                                          value={subItem.overhead_profit_percentage}
+                                          onChange={(e) => updateSubItem(item.id, subItem.id, 'overhead_profit_percentage', parseFloat(e.target.value) || 0)}
+                                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                          min="0"
+                                          max="100"
+                                          step="0.1"
+                                          disabled={isSubmitting}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Transport %
+                                        </label>
+                                        <input
+                                          type="number"
+                                          value={subItem.transport_percentage}
+                                          onChange={(e) => updateSubItem(item.id, subItem.id, 'transport_percentage', parseFloat(e.target.value) || 0)}
+                                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                          min="0"
+                                          max="100"
+                                          step="0.1"
+                                          disabled={isSubmitting}
+                                        />
+                                      </div>
+                                    </div>
+
+                                    {/* Show calculated amounts */}
+                                    <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                                      <div className="text-center">
+                                        <span className="text-gray-600">Misc:</span>
+                                        <span className="ml-1 font-semibold text-purple-700">
+                                          {((subItem.quantity * subItem.rate) * (subItem.misc_percentage / 100)).toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                        </span>
+                                      </div>
+                                      <div className="text-center">
+                                        <span className="text-gray-600">O&P:</span>
+                                        <span className="ml-1 font-semibold text-purple-700">
+                                          {((subItem.quantity * subItem.rate) * (subItem.overhead_profit_percentage / 100)).toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                        </span>
+                                      </div>
+                                      <div className="text-center">
+                                        <span className="text-gray-600">Trans:</span>
+                                        <span className="ml-1 font-semibold text-purple-700">
+                                          {((subItem.quantity * subItem.rate) * (subItem.transport_percentage / 100)).toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Profit Analysis - Planned vs Actual */}
+                                  {(() => {
+                                    const subItemCalc = calculateSubItemCost(subItem);
+                                    return (
+                                      <div className="mt-4 p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg border-2 border-green-300">
+                                        <h5 className="text-xs font-bold text-green-900 mb-3 flex items-center gap-2">
+                                          <Info className="w-4 h-4" />
+                                          Profit Analysis (Top-Down Calculation)
+                                        </h5>
+
+                                        <div className="space-y-2 text-xs">
+                                          {/* Planned Profit */}
+                                          <div className="flex justify-between items-center p-2 bg-white/60 rounded">
+                                            <div>
+                                              <span className="font-medium text-gray-700">Planned Profit</span>
+                                              <span className="ml-2 text-gray-500 italic">(from {subItem.overhead_profit_percentage}% O&P)</span>
+                                            </div>
+                                            <span className="font-bold text-green-700">
+                                              {subItemCalc.plannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                            </span>
+                                          </div>
+
+                                          {/* Actual Profit */}
+                                          <div className="flex justify-between items-center p-2 bg-white/60 rounded">
+                                            <div>
+                                              <span className="font-medium text-gray-700">Actual Profit</span>
+                                              <span className="ml-2 text-gray-500 italic">(Client Rate - All Costs)</span>
+                                            </div>
+                                            <span className={`font-bold ${subItemCalc.actualProfit >= subItemCalc.plannedProfit ? 'text-emerald-700' : 'text-red-600'}`}>
+                                              {subItemCalc.actualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                            </span>
+                                          </div>
+
+                                          {/* Breakdown */}
+                                          <div className="mt-3 pt-3 border-t border-green-200 space-y-1.5">
+                                            <div className="flex justify-between text-gray-600">
+                                              <span>Client Amount:</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.clientAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                            </div>
+                                            <div className="flex justify-between text-gray-600">
+                                              <span>Internal Cost (Materials + Labour):</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.internalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                            </div>
+                                            <div className="flex justify-between text-gray-600">
+                                              <span>Misc ({subItem.misc_percentage}%):</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.miscAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                            </div>
+                                            <div className="flex justify-between text-gray-600">
+                                              <span>Transport ({subItem.transport_percentage}%):</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.transportAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                            </div>
+                                            <div className="flex justify-between text-gray-600">
+                                              <span>Remaining for Costs:</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.remainingForCosts.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                            </div>
+                                          </div>
+
+                                          {/* Alert if actual < planned */}
+                                          {subItemCalc.actualProfit < subItemCalc.plannedProfit && (
+                                            <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-red-800">
+                                              <strong>⚠️ Warning:</strong> Actual profit is lower than planned! Review material/labour costs.
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                             ))}
@@ -2775,155 +2857,63 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           </div>
                         </div>
 
-                        {/* Miscellaneous, Overhead & Profit Margin, Discount */}
-                        <div className="bg-gradient-to-r from-gray-50 to-gray-100/30 rounded-lg p-4 shadow-sm">
-                          <h5 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
-                            <div className="p-1.5 bg-white rounded shadow-sm">
-                              <Calculator className="w-4 h-4 text-gray-600" />
-                            </div>
-                            Miscellaneous, Overhead & Profit Margin, Discount
-                          </h5>
-                          <div className={`grid gap-3 ${item.sub_items.some(subItem => useSubItemMaterialVAT[`${item.id}-${subItem.id}`]) ? 'grid-cols-3' : 'grid-cols-4'}`}>
-                          {/* Miscellaneous - Internal */}
-                          <div className="border border-red-300 rounded-lg p-3 hover:border-red-400 hover:bg-red-50/30 transition-all duration-200">
-                            <label htmlFor={`overhead-${item.id}`} className="block text-xs text-gray-600 mb-1.5">Miscellaneous %</label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                id={`overhead-${item.id}`}
-                                type="number"
-                                value={item.overhead_percentage === 0 ? '' : item.overhead_percentage}
-                                onChange={(e) => {
-                                  const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                  updateItem(item.id, 'overhead_percentage', value);
-                                }}
-                                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white"
-                                min="0"
-                                step="0.1"
-                                disabled={isSubmitting}
-                                placeholder="10"
-                              />
-                              <span className="text-sm text-gray-500">%</span>
-                            </div>
-                          </div>
-                          {/* Overhead & Profit - Internal */}
-                          <div className="border border-red-300 rounded-lg p-3 hover:border-red-400 hover:bg-red-50/30 transition-all duration-200">
-                            <label htmlFor={`profit-${item.id}`} className="block text-xs text-gray-600 mb-1.5">Overhead & Profit Margin %</label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                id={`profit-${item.id}`}
-                                type="number"
-                                value={item.profit_margin_percentage === 0 ? '' : item.profit_margin_percentage}
-                                onChange={(e) => {
-                                  const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                  updateItem(item.id, 'profit_margin_percentage', value);
-                                }}
-                                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white"
-                                min="0"
-                                step="0.1"
-                                disabled={isSubmitting}
-                                placeholder="15"
-                              />
-                              <span className="text-sm text-gray-500">%</span>
-                            </div>
-                          </div>
-                          {/* Discount - Client */}
-                          <div className="border border-green-400 rounded-lg p-3 hover:border-green-500 hover:bg-green-50/30 transition-all duration-200">
-                            <label htmlFor={`discount-${item.id}`} className="block text-xs text-gray-600 mb-1.5">Discount %</label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                id={`discount-${item.id}`}
-                                type="number"
-                                value={item.discount_percentage === 0 ? '' : item.discount_percentage}
-                                onChange={(e) => {
-                                  const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                  updateItem(item.id, 'discount_percentage', value);
-                                }}
-                                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
-                                min="0"
-                                max="100"
-                                step="0.1"
-                                disabled={isSubmitting}
-                                placeholder="0"
-                              />
-                              <span className="text-sm text-gray-500">%</span>
-                            </div>
-                          </div>
-                          {/* VAT - Client (Only show if no sub-items have individual VAT enabled) */}
-                          {!item.sub_items.some(subItem => useSubItemMaterialVAT[`${item.id}-${subItem.id}`]) && (
-                            <div className="border border-green-400 rounded-lg p-3 hover:border-green-500 hover:bg-green-50/30 transition-all duration-200">
-                              <label htmlFor={`vat-${item.id}`} className="block text-xs text-gray-600 mb-1.5">VAT %</label>
-                              <div className="flex items-center gap-2">
-                                <input
-                                  id={`vat-${item.id}`}
-                                  type="number"
-                                  value={item.vat_percentage === 0 ? '' : item.vat_percentage}
-                                  onChange={(e) => {
-                                    const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                    updateItem(item.id, 'vat_percentage', value);
-                                  }}
-                                  className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
-                                  min="0"
-                                  step="0.1"
-                                  disabled={isSubmitting}
-                                  placeholder="5"
-                                />
-                                <span className="text-sm text-gray-500">%</span>
-                              </div>
-                            </div>
-                          )}
-                          </div>
-                        </div>
-
-                        {/* Cost Summary for this Item */}
+                        {/* Cost Analysis Section - Per Item (Like PDF) */}
                         {(() => {
                           const costs = calculateItemCost(item);
                           return (
-                            <div className="mt-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl p-4 border border-blue-200 shadow-md">
+                            <div className="mt-4 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border-2 border-amber-300 shadow-lg">
                               <div className="flex items-center gap-2 mb-3">
                                 <div className="p-1.5 bg-white rounded shadow-sm">
-                                  <Calculator className="w-4 h-4 text-blue-600" />
+                                  <Calculator className="w-4 h-4 text-amber-600" />
                                 </div>
-                                <h5 className="text-sm font-bold text-blue-900">Cost Summary - {item.item_name || 'Item'}</h5>
+                                <h5 className="text-sm font-bold text-amber-900">Cost Analysis</h5>
                               </div>
-                              <div className="bg-white rounded-lg p-3 space-y-1 text-sm">
-                                <div className="flex justify-between py-1">
-                                  <span className="text-gray-600">Sub Items Total:</span>
-                                  <span className="font-medium text-gray-900">AED {costs.itemTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                              <div className="bg-white rounded-lg p-4 space-y-3">
+                                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                                  <span className="text-sm font-semibold text-gray-700">Client Cost</span>
+                                  <span className="text-lg font-bold text-blue-700">
+                                    {costs.totalClientCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                  </span>
                                 </div>
-                                <div className="flex justify-between py-1">
-                                  <span className="text-gray-600">Miscellaneous ({item.overhead_percentage}%):</span>
-                                  <span className="font-medium text-gray-900">AED {costs.miscellaneousAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                                  <span className="text-sm font-semibold text-gray-700">Internal Cost</span>
+                                  <span className="text-lg font-bold text-red-600">
+                                    {costs.totalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                  </span>
                                 </div>
-                                <div className="flex justify-between py-1">
-                                  <span className="text-gray-600">Overhead & Profit ({item.profit_margin_percentage}%):</span>
-                                  <span className="font-medium text-gray-900">AED {costs.overheadProfitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                </div>
-                                <div className="flex justify-between py-1">
-                                  <span className="text-gray-700 font-medium">Subtotal:</span>
-                                  <span className="font-semibold text-gray-900">AED {costs.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                </div>
-                                <div className="flex justify-between py-1">
-                                  <span className="text-red-600">Discount ({item.discount_percentage}%):</span>
-                                  <span className="font-medium text-red-600">- AED {costs.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                </div>
-                                <div className="flex justify-between py-1">
-                                  <span className="text-gray-700 font-medium">After Discount:</span>
-                                  <span className="font-semibold text-gray-900">AED {costs.afterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                </div>
-                                {costs.hasIndividualVAT ? (
-                                  <div className="flex justify-between py-1">
-                                    <span className="text-gray-600">VAT (Individual Material VAT):</span>
-                                    <span className="font-medium text-gray-900">AED {costs.individualMaterialVATTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <div className="flex justify-between items-center py-2">
+                                  <div>
+                                    <span className="text-sm font-semibold text-gray-700">Project Margin</span>
+                                    <div className="text-xs text-gray-500 italic">(Excluding planned profit of {costs.totalPlannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED)</div>
                                   </div>
-                                ) : (
-                                  <div className="flex justify-between py-1">
-                                    <span className="text-gray-600">VAT ({item.vat_percentage}%):</span>
-                                    <span className="font-medium text-gray-900">AED {costs.vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className={`text-lg font-bold ${costs.projectMargin >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                                    {costs.projectMargin.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                  </span>
+                                </div>
+
+                                {/* Breakdown Details */}
+                                <div className="mt-4 pt-4 border-t-2 border-amber-200 space-y-2 text-xs">
+                                  <div className="font-semibold text-gray-800 mb-2">Detailed Breakdown:</div>
+                                  <div className="flex justify-between text-gray-600">
+                                    <span>Total Misc Amount:</span>
+                                    <span className="font-semibold">{costs.totalMiscAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
                                   </div>
-                                )}
-                                <div className="flex justify-between py-2 border-t border-gray-200 pt-2 mt-2">
-                                  <span className="text-gray-900 font-bold">Item Total:</span>
-                                  <span className="text-lg font-bold text-gray-900">AED {costs.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <div className="flex justify-between text-gray-600">
+                                    <span>Total Overhead & Profit:</span>
+                                    <span className="font-semibold">{costs.totalOverheadProfitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                  </div>
+                                  <div className="flex justify-between text-gray-600">
+                                    <span>Total Transport:</span>
+                                    <span className="font-semibold">{costs.totalTransportAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                  </div>
+                                  <div className="flex justify-between font-semibold text-green-700 pt-2 border-t border-gray-300">
+                                    <span>Total Planned Profit:</span>
+                                    <span>{costs.totalPlannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                  </div>
+                                  <div className="flex justify-between font-semibold text-emerald-700">
+                                    <span>Total Actual Profit:</span>
+                                    <span>{costs.totalActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -2945,24 +2935,67 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               )}
             </div>
 
-            {/* Grand Total Summary */}
+            {/* Grand Total Summary with Overall Discount */}
             {items.length > 0 && (() => {
-              const grandTotal = items.reduce((total, item) => {
+              const subtotal = items.reduce((total, item) => {
                 const costs = calculateItemCost(item);
-                return total + costs.sellingPrice;
+                return total + costs.totalClientCost;
               }, 0);
+
+              const discountAmount = subtotal * (overallDiscount / 100);
+              const grandTotal = subtotal - discountAmount;
 
               return (
                 <div className="mt-6 bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-6 border-2 border-green-300 shadow-xl">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-xl shadow-md">
-                        <Calculator className="w-6 h-6 text-green-600" />
-                      </div>
-                      <h3 className="text-xl font-bold text-green-900">Total Project Value</h3>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-xl shadow-md">
+                      <Calculator className="w-6 h-6 text-green-600" />
                     </div>
-                    <div className="text-3xl font-bold text-green-900">
-                      AED {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    <h3 className="text-xl font-bold text-green-900">Total Project Value</h3>
+                  </div>
+
+                  <div className="bg-white rounded-xl p-4 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-700 font-medium">Subtotal (All Items):</span>
+                      <span className="text-xl font-semibold text-gray-900">
+                        AED {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    {/* Overall Discount Input */}
+                    <div className="flex justify-between items-center py-2 border-t border-gray-200">
+                      <div className="flex items-center gap-3">
+                        <span className="text-gray-700 font-medium">Overall Discount:</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            value={overallDiscount === 0 ? '' : overallDiscount}
+                            onChange={(e) => {
+                              const value = e.target.value === '' ? 0 : Number(e.target.value);
+                              setOverallDiscount(Math.max(0, Math.min(100, value)));
+                            }}
+                            className="w-20 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            disabled={isSubmitting}
+                            placeholder="0"
+                          />
+                          <span className="text-sm text-gray-600">%</span>
+                        </div>
+                      </div>
+                      <span className="text-lg font-semibold text-red-600">
+                        - AED {discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-3 border-t-2 border-green-300">
+                      <span className="text-xl font-bold text-green-900">
+                        Grand Total: <span className="text-sm font-normal text-gray-600">(Excluding VAT)</span>
+                      </span>
+                      <span className="text-3xl font-bold text-green-900">
+                        AED {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
                     </div>
                   </div>
                 </div>

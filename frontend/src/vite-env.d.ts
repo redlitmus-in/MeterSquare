@@ -9,3 +9,14 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+// Allow importing HTML files as raw strings
+declare module '*.html?raw' {
+  const content: string;
+  export default content;
+}
+
+declare module '*.html' {
+  const content: string;
+  export default content;
+}

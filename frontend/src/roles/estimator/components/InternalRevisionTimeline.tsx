@@ -67,9 +67,7 @@ const InternalRevisionTimeline: React.FC = () => {
 
       if (data.success) {
         setBOQs(data.data);
-        if (data.data.length > 0 && !selectedBoq) {
-          setSelectedBoq(data.data[0]);
-        }
+        // Don't auto-select - let user choose from recent projects
       }
     } catch (error) {
       console.error('Error loading BOQs:', error);
@@ -452,6 +450,40 @@ const InternalRevisionTimeline: React.FC = () => {
           View all internal approval cycles (PM edits, TD rejections) before sending to client
         </p>
 
+        {/* Recent Projects - Always visible (4-5 most recent) */}
+        {!selectedBoq && boqs.length > 0 && (
+          <div className="mb-4 space-y-2">
+            <p className="text-sm font-semibold text-gray-700 mb-3">Recent Projects:</p>
+            <div className="space-y-2">
+              {boqs.slice(0, 5).map((boq) => (
+                <button
+                  key={boq.boq_id}
+                  onClick={() => {
+                    setSelectedBoq(boq);
+                    setSearchTerm('');
+                    setSelectedRevisionIndex(null);
+                  }}
+                  className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border border-gray-200 rounded-lg"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="font-semibold text-gray-900">{boq.boq_name}</div>
+                      <div className="text-sm text-gray-600">
+                        {boq.project?.name} • {boq.project?.client}
+                      </div>
+                    </div>
+                    <div className="text-right ml-4">
+                      <div className="text-sm font-semibold px-2 py-1 rounded inline-block bg-blue-100 text-blue-700">
+                        Internal Rev: {boq.internal_revision_number}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Search BOQs */}
         <div className="relative mb-4">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -466,32 +498,33 @@ const InternalRevisionTimeline: React.FC = () => {
           />
         </div>
 
-        {/* BOQ Dropdown */}
-        {isLoadingBOQs ? (
-          <div className="flex justify-center py-8">
-            <ModernLoadingSpinners size="sm" />
-          </div>
-        ) : filteredBOQs.length > 0 ? (
-          <select
-            value={selectedBoq?.boq_id || ''}
-            onChange={(e) => {
-              const boq = boqs.find(b => b.boq_id === parseInt(e.target.value));
-              setSelectedBoq(boq || null);
-              setSelectedRevisionIndex(null);
-            }}
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            {filteredBOQs.map((boq) => (
-              <option key={boq.boq_id} value={boq.boq_id}>
-                {boq.boq_name} - {boq.project?.name} - Internal Rev: {boq.internal_revision_number}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <div className="text-center py-8 text-gray-500">
-            <p className="font-medium">No BOQs with internal revisions found</p>
-            <p className="text-sm mt-1">Internal revisions are tracked before sending to client</p>
-          </div>
+        {/* BOQ Dropdown - Only shows when searching */}
+        {searchTerm && (
+          isLoadingBOQs ? (
+            <div className="flex justify-center py-8">
+              <ModernLoadingSpinners size="sm" />
+            </div>
+          ) : filteredBOQs.length > 0 ? (
+            <select
+              value={selectedBoq?.boq_id || ''}
+              onChange={(e) => {
+                const boq = boqs.find(b => b.boq_id === parseInt(e.target.value));
+                setSelectedBoq(boq || null);
+                setSelectedRevisionIndex(null);
+              }}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
+            >
+              {filteredBOQs.map((boq) => (
+                <option key={boq.boq_id} value={boq.boq_id}>
+                  {boq.boq_name} - {boq.project?.name} - Internal Rev: {boq.internal_revision_number}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="text-center py-8 text-gray-500 mb-4">
+              <p className="font-medium">No BOQs found matching "{searchTerm}"</p>
+            </div>
+          )
         )}
 
         {/* Selected BOQ Info */}

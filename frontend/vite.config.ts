@@ -61,6 +61,9 @@ export default defineConfig(({ mode }) => {
       },
     },
 
+    // Allow importing HTML as raw string
+    assetsInclude: ['**/*.html'],
+
     build: {
       rollupOptions: {
         plugins: [

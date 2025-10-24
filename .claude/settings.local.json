@@ -11,7 +11,8 @@
       "Bash(find:*)",
       "Bash(awk:*)",
       "Bash(cat:*)",
-      "Bash(PGPASSWORD=postgres psql:*)"
+      "Bash(PGPASSWORD=postgres psql:*)",
+      "Bash(cp:*)"
     ],
     "deny": [],
     "ask": []

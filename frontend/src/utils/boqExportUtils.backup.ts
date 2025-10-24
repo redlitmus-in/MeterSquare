@@ -581,18 +581,9 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
 
 /**
  * Export BOQ as PDF - Internal Format (WITH Overhead & Profit)
- * Beautiful professional PDF with all details - NEW CORPORATE TEMPLATE
+ * Beautiful professional PDF with all details
  */
 export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
-  // Use HTML template (boq_internal.html) with REAL data
-  const { exportBOQToPDFInternal: exportInternal } = await import('./boqHtmlToPdf');
-  return exportInternal(estimation);
-};
-
-/**
- * OLD INTERNAL PDF EXPORT - DEPRECATED
- */
-const exportBOQToPDFInternalOld = async (estimation: BOQEstimation) => {
   const { jsPDF } = await import('jspdf');
   const autoTable = (await import('jspdf-autotable')).default;
 
@@ -1265,18 +1256,9 @@ const exportBOQToPDFInternalOld = async (estimation: BOQEstimation) => {
 
 /**
  * Export BOQ as PDF - Client Format (Overhead & Profit distributed into materials and labor)
- * Beautiful corporate template - Clean version for clients
+ * Shows all details with overhead & profit hidden within material/labor costs
  */
 export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
-  // Use HTML template (boq_client.html) with REAL data
-  const { exportBOQToPDFClient: exportClient } = await import('./boqHtmlToPdf');
-  return exportClient(estimation);
-};
-
-/**
- * OLD CLIENT PDF EXPORT - DEPRECATED
- */
-const exportBOQToPDFClientOld = async (estimation: BOQEstimation) => {
   const { jsPDF } = await import('jspdf');
   const autoTable = (await import('jspdf-autotable')).default;
 

@@ -178,6 +178,22 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                 quantity=sub_item.get("quantity"),
                 per_unit_cost=sub_item.get("per_unit_cost"),
                 sub_item_total_cost=sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None,
+
+                # Per-sub-item percentages
+                misc_percentage=sub_item.get("misc_percentage", 10.0),
+                misc_amount=sub_item.get("misc_amount", 0.0),
+                overhead_profit_percentage=sub_item.get("overhead_profit_percentage", 25.0),
+                overhead_profit_amount=sub_item.get("overhead_profit_amount", 0.0),
+                transport_percentage=sub_item.get("transport_percentage", 5.0),
+                transport_amount=sub_item.get("transport_amount", 0.0),
+
+                # Cost breakdown
+                material_cost=sub_item.get("material_cost", 0.0),
+                labour_cost=sub_item.get("labour_cost", 0.0),
+                internal_cost=sub_item.get("internal_cost", 0.0),
+                planned_profit=sub_item.get("planned_profit", 0.0),
+                actual_profit=sub_item.get("actual_profit", 0.0),
+
                 created_by=created_by
             )
             db.session.add(master_sub_item)
@@ -192,6 +208,22 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             master_sub_item.quantity = sub_item.get("quantity")
             master_sub_item.per_unit_cost = sub_item.get("per_unit_cost")
             master_sub_item.sub_item_total_cost = sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None
+
+            # Update percentages
+            master_sub_item.misc_percentage = sub_item.get("misc_percentage", 10.0)
+            master_sub_item.misc_amount = sub_item.get("misc_amount", 0.0)
+            master_sub_item.overhead_profit_percentage = sub_item.get("overhead_profit_percentage", 25.0)
+            master_sub_item.overhead_profit_amount = sub_item.get("overhead_profit_amount", 0.0)
+            master_sub_item.transport_percentage = sub_item.get("transport_percentage", 5.0)
+            master_sub_item.transport_amount = sub_item.get("transport_amount", 0.0)
+
+            # Update cost breakdown
+            master_sub_item.material_cost = sub_item.get("material_cost", 0.0)
+            master_sub_item.labour_cost = sub_item.get("labour_cost", 0.0)
+            master_sub_item.internal_cost = sub_item.get("internal_cost", 0.0)
+            master_sub_item.planned_profit = sub_item.get("planned_profit", 0.0)
+            master_sub_item.actual_profit = sub_item.get("actual_profit", 0.0)
+
             db.session.flush()
 
         master_sub_item_ids.append(master_sub_item.sub_item_id)
@@ -299,6 +331,22 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                 quantity=sub_item.get("quantity"),
                 per_unit_cost=sub_item.get("per_unit_cost"),
                 sub_item_total_cost=sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None,
+
+                # Per-sub-item percentages
+                misc_percentage=sub_item.get("misc_percentage", 10.0),
+                misc_amount=sub_item.get("misc_amount", 0.0),
+                overhead_profit_percentage=sub_item.get("overhead_profit_percentage", 25.0),
+                overhead_profit_amount=sub_item.get("overhead_profit_amount", 0.0),
+                transport_percentage=sub_item.get("transport_percentage", 5.0),
+                transport_amount=sub_item.get("transport_amount", 0.0),
+
+                # Cost breakdown
+                material_cost=sub_item.get("material_cost", 0.0),
+                labour_cost=sub_item.get("labour_cost", 0.0),
+                internal_cost=sub_item.get("internal_cost", 0.0),
+                planned_profit=sub_item.get("planned_profit", 0.0),
+                actual_profit=sub_item.get("actual_profit", 0.0),
+
                 created_by=created_by
             )
             db.session.add(master_sub_item)
@@ -313,6 +361,22 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             master_sub_item.quantity = sub_item.get("quantity")
             master_sub_item.per_unit_cost = sub_item.get("per_unit_cost")
             master_sub_item.sub_item_total_cost = sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None
+
+            # Update percentages
+            master_sub_item.misc_percentage = sub_item.get("misc_percentage", 10.0)
+            master_sub_item.misc_amount = sub_item.get("misc_amount", 0.0)
+            master_sub_item.overhead_profit_percentage = sub_item.get("overhead_profit_percentage", 25.0)
+            master_sub_item.overhead_profit_amount = sub_item.get("overhead_profit_amount", 0.0)
+            master_sub_item.transport_percentage = sub_item.get("transport_percentage", 5.0)
+            master_sub_item.transport_amount = sub_item.get("transport_amount", 0.0)
+
+            # Update cost breakdown
+            master_sub_item.material_cost = sub_item.get("material_cost", 0.0)
+            master_sub_item.labour_cost = sub_item.get("labour_cost", 0.0)
+            master_sub_item.internal_cost = sub_item.get("internal_cost", 0.0)
+            master_sub_item.planned_profit = sub_item.get("planned_profit", 0.0)
+            master_sub_item.actual_profit = sub_item.get("actual_profit", 0.0)
+
             db.session.flush()
 
         master_sub_item_ids.append(master_sub_item.sub_item_id)
@@ -550,6 +614,28 @@ def create_boq():
                         "total_cost": total_cost_labour
                     })
 
+                # Get per-sub-item percentages from payload
+                misc_percentage = sub_item.get("misc_percentage", 10.0)
+                overhead_profit_percentage = sub_item.get("overhead_profit_percentage", 25.0)
+                transport_percentage = sub_item.get("transport_percentage", 5.0)
+
+                # Calculate sub-item client amount
+                sub_item_quantity = sub_item.get("quantity", 0)
+                sub_item_rate = sub_item.get("rate", 0) or sub_item.get("per_unit_cost", 0)
+                sub_item_client_amount = sub_item_quantity * sub_item_rate
+
+                # Calculate percentage amounts (from client rate)
+                misc_amount = sub_item_client_amount * (misc_percentage / 100)
+                overhead_profit_amount = sub_item_client_amount * (overhead_profit_percentage / 100)
+                transport_amount = sub_item_client_amount * (transport_percentage / 100)
+
+                # Calculate internal cost (materials + labour)
+                sub_item_internal_cost = sub_item_materials_cost + sub_item_labour_cost
+
+                # Calculate profits
+                planned_profit = overhead_profit_amount
+                actual_profit = sub_item_client_amount - sub_item_internal_cost - misc_amount - transport_amount
+
                 # Store processed sub-item
                 processed_sub_items.append({
                     "sub_item_name": sub_item.get("sub_item_name"),
@@ -558,10 +644,29 @@ def create_boq():
                     "location": sub_item.get("location", ""),
                     "brand": sub_item.get("brand", ""),
                     "unit": sub_item.get("unit"),
-                    "quantity": sub_item.get("quantity"),
-                    "per_unit_cost": sub_item.get("per_unit_cost"),
+                    "quantity": sub_item_quantity,
+                    "per_unit_cost": sub_item_rate,
+                    "rate": sub_item_rate,
+                    "sub_item_total": sub_item_client_amount,
+
+                    # Per-sub-item percentages
+                    "misc_percentage": misc_percentage,
+                    "misc_amount": misc_amount,
+                    "overhead_profit_percentage": overhead_profit_percentage,
+                    "overhead_profit_amount": overhead_profit_amount,
+                    "transport_percentage": transport_percentage,
+                    "transport_amount": transport_amount,
+
+                    # Cost breakdown
                     "materials": sub_item_materials,
                     "labour": sub_item_labour,
+                    "material_cost": sub_item_materials_cost,
+                    "labour_cost": sub_item_labour_cost,
+                    "internal_cost": sub_item_internal_cost,
+                    "planned_profit": planned_profit,
+                    "actual_profit": actual_profit,
+
+                    # Legacy fields for backward compatibility
                     "total_materials_cost": sub_item_materials_cost,
                     "total_labour_cost": sub_item_labour_cost,
                     "total_cost": sub_item_materials_cost + sub_item_labour_cost
@@ -927,6 +1032,8 @@ def create_boq():
         boq_details_json = {
             "boq_id": boq.boq_id,
             "preliminaries": preliminaries,
+            "discount_percentage": data.get("discount_percentage", 0),
+            "discount_amount": data.get("discount_amount", 0),
             "items": boq_items,
             "summary": {
                 "total_items": len(boq_items),
@@ -1293,6 +1400,10 @@ def get_boq(boq_id):
         # Get preliminaries from boq_details
         preliminaries = boq_details.boq_details.get("preliminaries", {}) if boq_details.boq_details else {}
 
+        # Get discount values from boq_details JSON
+        discount_percentage = boq_details.boq_details.get("discount_percentage", 0) if boq_details.boq_details else 0
+        discount_amount = boq_details.boq_details.get("discount_amount", 0) if boq_details.boq_details else 0
+
         # Build response with project details
         response_data = {
             "boq_id": boq.boq_id,
@@ -1303,6 +1414,8 @@ def get_boq(boq_id):
             "created_at": boq.created_at.isoformat() if boq.created_at else None,
             "created_by": boq.created_by,
             "user_id": project.user_id if project else None,
+            "discount_percentage": discount_percentage,
+            "discount_amount": discount_amount,
             "preliminaries": preliminaries,
             "project_details": {
                 "project_name": project.project_name if project else None,
@@ -1822,6 +1935,8 @@ def update_boq(boq_id):
             updated_json = {
                 "boq_id": boq.boq_id,
                 "preliminaries": preliminaries,
+                "discount_percentage": data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)),
+                "discount_amount": data.get("discount_amount", old_boq_details_json.get("discount_amount", 0)),
                 "items": boq_items,
                 "summary": {
                     "total_items": len(boq_items),
@@ -2421,6 +2536,8 @@ def revision_boq(boq_id):
             updated_json = {
                 "boq_id": boq.boq_id,
                 "preliminaries": preliminaries,
+                "discount_percentage": data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)),
+                "discount_amount": data.get("discount_amount", old_boq_details_json.get("discount_amount", 0)),
                 "items": boq_items,
                 "summary": {
                     "total_items": len(boq_items),
