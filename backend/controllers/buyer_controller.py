@@ -465,6 +465,11 @@ def get_buyer_pending_purchases():
             # Get the first sub-item's sub_item_name for display (since all materials in a CR should be from same sub-item)
             first_sub_item_name = materials_list[0].get('sub_item_name', 'N/A') if materials_list else 'N/A'
 
+            # Check if vendor selection is pending TD approval
+            vendor_selection_pending_td_approval = (
+                cr.vendor_selection_status == 'pending_td_approval'
+            )
+
             pending_purchases.append({
                 "cr_id": cr.cr_id,
                 "project_id": project.project_id,
@@ -482,7 +487,10 @@ def get_buyer_pending_purchases():
                 "total_cost": round(cr_total, 2),
                 "approved_by": cr.approved_by_user_id,
                 "approved_at": cr.approval_date.isoformat() if cr.approval_date else None,
-                "created_at": cr.created_at.isoformat() if cr.created_at else None
+                "created_at": cr.created_at.isoformat() if cr.created_at else None,
+                "vendor_id": cr.selected_vendor_id,
+                "vendor_name": cr.selected_vendor_name,
+                "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval
             })
         return jsonify({
             "success": True,
@@ -574,6 +582,11 @@ def get_buyer_completed_purchases():
             # Get the first sub-item's sub_item_name for display (since all materials in a CR should be from same sub-item)
             first_sub_item_name = materials_list[0].get('sub_item_name', 'N/A') if materials_list else 'N/A'
 
+            # Check if vendor selection is pending TD approval
+            vendor_selection_pending_td_approval = (
+                cr.vendor_selection_status == 'pending_td_approval'
+            )
+
             completed_purchases.append({
                 "cr_id": cr.cr_id,
                 "project_id": project.project_id,
@@ -596,7 +609,10 @@ def get_buyer_completed_purchases():
                 "purchase_completed_by_user_id": cr.purchase_completed_by_user_id,
                 "purchase_completed_by_name": cr.purchase_completed_by_name,
                 "purchase_completion_date": cr.purchase_completion_date.isoformat() if cr.purchase_completion_date else None,
-                "purchase_notes": cr.purchase_notes
+                "purchase_notes": cr.purchase_notes,
+                "vendor_id": cr.selected_vendor_id,
+                "vendor_name": cr.selected_vendor_name,
+                "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval
             })
 
         return jsonify({
@@ -752,6 +768,11 @@ def get_purchase_by_id(cr_id):
 
         purchase_status = 'completed' if cr.status == 'purchase_completed' else 'pending'
 
+        # Check if vendor selection is pending TD approval
+        vendor_selection_pending_td_approval = (
+            cr.vendor_selection_status == 'pending_td_approval'
+        )
+
         purchase = {
             "cr_id": cr.cr_id,
             "project_id": project.project_id,
@@ -774,7 +795,10 @@ def get_purchase_by_id(cr_id):
             "purchase_completed_by_user_id": cr.purchase_completed_by_user_id,
             "purchase_completed_by_name": cr.purchase_completed_by_name,
             "purchase_completion_date": cr.purchase_completion_date.isoformat() if cr.purchase_completion_date else None,
-            "purchase_notes": cr.purchase_notes
+            "purchase_notes": cr.purchase_notes,
+            "vendor_id": cr.selected_vendor_id,
+            "vendor_name": cr.selected_vendor_name,
+            "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval
         }
 
         return jsonify({
@@ -787,3 +811,311 @@ def get_purchase_by_id(cr_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to fetch purchase: {str(e)}"}), 500
+
+
+def select_vendor_for_purchase(cr_id):
+    """Select vendor for purchase (requires TD approval)"""
+    try:
+        current_user = g.user
+        buyer_id = current_user['user_id']
+        buyer_name = current_user.get('full_name', 'Unknown Buyer')
+
+        data = request.get_json()
+        vendor_id = data.get('vendor_id')
+
+        if not vendor_id:
+            return jsonify({"error": "Vendor ID is required"}), 400
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Verify it's assigned to this buyer
+        if cr.assigned_to_buyer_user_id != buyer_id:
+            return jsonify({"error": "This purchase is not assigned to you"}), 403
+
+        # Verify it's in the correct status
+        if cr.status != 'assigned_to_buyer':
+            return jsonify({"error": f"Cannot select vendor. Current status: {cr.status}"}), 400
+
+        # Verify vendor exists
+        from models.vendor import Vendor
+        vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+        if not vendor:
+            return jsonify({"error": "Vendor not found"}), 404
+
+        # Verify vendor is active
+        if vendor.status != 'active':
+            return jsonify({"error": "Selected vendor is not active"}), 400
+
+        # Update the change request with vendor selection
+        cr.selected_vendor_id = vendor_id
+        cr.selected_vendor_name = vendor.company_name
+        cr.vendor_selected_by_buyer_id = buyer_id
+        cr.vendor_selected_by_buyer_name = buyer_name
+        cr.vendor_selection_date = datetime.utcnow()
+        cr.vendor_selection_status = 'pending_td_approval'
+        cr.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        log.info(f"Vendor {vendor_id} selected for purchase CR-{cr_id} by buyer {buyer_id}, pending TD approval")
+
+        return jsonify({
+            "success": True,
+            "message": "Vendor selection sent to TD for approval",
+            "purchase": {
+                "cr_id": cr.cr_id,
+                "selected_vendor_id": cr.selected_vendor_id,
+                "selected_vendor_name": cr.selected_vendor_name,
+                "vendor_selection_status": cr.vendor_selection_status,
+                "vendor_selection_date": cr.vendor_selection_date.isoformat()
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error selecting vendor for purchase: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to select vendor: {str(e)}"}), 500
+
+
+def update_purchase_order(cr_id):
+    """Update purchase order materials and costs"""
+    try:
+        current_user = g.user
+        buyer_id = current_user['user_id']
+
+        data = request.get_json()
+        materials = data.get('materials')
+        total_cost = data.get('total_cost')
+
+        if not materials or total_cost is None:
+            return jsonify({"error": "Materials and total cost are required"}), 400
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Verify it's assigned to this buyer
+        if cr.assigned_to_buyer_user_id != buyer_id:
+            return jsonify({"error": "This purchase is not assigned to you"}), 403
+
+        # Verify it's in the correct status (can only edit pending purchases)
+        if cr.status != 'assigned_to_buyer':
+            return jsonify({"error": f"Cannot edit purchase. Current status: {cr.status}"}), 400
+
+        # Validate materials structure
+        if not isinstance(materials, list):
+            return jsonify({"error": "Materials must be an array"}), 400
+
+        # Update materials in sub_items_data format
+        updated_materials = []
+        for material in materials:
+            updated_materials.append({
+                "material_name": material.get('material_name', ''),
+                "sub_item_name": material.get('sub_item_name', ''),
+                "quantity": float(material.get('quantity', 0)),
+                "unit": material.get('unit', ''),
+                "unit_price": float(material.get('unit_price', 0)),
+                "total_price": float(material.get('total_price', 0))
+            })
+
+        # Update the change request
+        cr.sub_items_data = updated_materials
+        cr.materials_total_cost = float(total_cost)
+        cr.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        log.info(f"Purchase order CR-{cr_id} updated by buyer {buyer_id}")
+
+        return jsonify({
+            "success": True,
+            "message": "Purchase order updated successfully",
+            "purchase": {
+                "cr_id": cr.cr_id,
+                "materials": cr.sub_items_data,
+                "total_cost": cr.materials_total_cost
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error updating purchase order: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to update purchase order: {str(e)}"}), 500
+
+
+def update_purchase_notes(cr_id):
+    """Update purchase notes"""
+    try:
+        current_user = g.user
+        buyer_id = current_user['user_id']
+
+        data = request.get_json()
+        notes = data.get('notes', '')
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Verify it's assigned to this buyer or completed by this buyer
+        if cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
+            return jsonify({"error": "This purchase is not assigned to you"}), 403
+
+        # Update notes
+        cr.purchase_notes = notes
+        cr.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        log.info(f"Purchase notes updated for CR-{cr_id} by buyer {buyer_id}")
+
+        return jsonify({
+            "success": True,
+            "message": "Purchase notes updated successfully",
+            "purchase": {
+                "cr_id": cr.cr_id,
+                "purchase_notes": cr.purchase_notes
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error updating purchase notes: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to update notes: {str(e)}"}), 500
+
+
+def td_approve_vendor(cr_id):
+    """TD approves vendor selection for purchase"""
+    try:
+        current_user = g.user
+        td_id = current_user['user_id']
+        td_name = current_user.get('full_name', 'Unknown TD')
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Verify vendor selection is pending approval
+        if cr.vendor_selection_status != 'pending_td_approval':
+            return jsonify({"error": f"Vendor selection not pending approval. Status: {cr.vendor_selection_status}"}), 400
+
+        # Approve the vendor selection
+        cr.vendor_selection_status = 'approved'
+        cr.vendor_approved_by_td_id = td_id
+        cr.vendor_approved_by_td_name = td_name
+        cr.vendor_approval_date = datetime.utcnow()
+        cr.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        log.info(f"Vendor selection for CR-{cr_id} approved by TD {td_id}")
+
+        return jsonify({
+            "success": True,
+            "message": "Vendor selection approved successfully",
+            "purchase": {
+                "cr_id": cr.cr_id,
+                "vendor_selection_status": cr.vendor_selection_status,
+                "vendor_approved_by_td_id": cr.vendor_approved_by_td_id,
+                "vendor_approved_by_td_name": cr.vendor_approved_by_td_name,
+                "vendor_approval_date": cr.vendor_approval_date.isoformat()
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error approving vendor: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to approve vendor: {str(e)}"}), 500
+
+
+def td_reject_vendor(cr_id):
+    """TD rejects vendor selection for purchase"""
+    try:
+        current_user = g.user
+        td_id = current_user['user_id']
+        td_name = current_user.get('full_name', 'Unknown TD')
+
+        data = request.get_json()
+        reason = data.get('reason', '')
+
+        if not reason:
+            return jsonify({"error": "Rejection reason is required"}), 400
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Verify vendor selection is pending approval
+        if cr.vendor_selection_status != 'pending_td_approval':
+            return jsonify({"error": f"Vendor selection not pending approval. Status: {cr.vendor_selection_status}"}), 400
+
+        # Reject the vendor selection - clear vendor and allow buyer to select again
+        cr.vendor_selection_status = 'rejected'
+        cr.vendor_approved_by_td_id = td_id
+        cr.vendor_approved_by_td_name = td_name
+        cr.vendor_approval_date = datetime.utcnow()
+        cr.vendor_rejection_reason = reason
+
+        # Clear vendor selection so buyer can select new vendor
+        cr.selected_vendor_id = None
+        cr.selected_vendor_name = None
+        cr.vendor_selected_by_buyer_id = None
+        cr.vendor_selected_by_buyer_name = None
+        cr.vendor_selection_date = None
+
+        cr.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        log.info(f"Vendor selection for CR-{cr_id} rejected by TD {td_id}: {reason}")
+
+        return jsonify({
+            "success": True,
+            "message": "Vendor selection rejected",
+            "purchase": {
+                "cr_id": cr.cr_id,
+                "vendor_selection_status": cr.vendor_selection_status,
+                "vendor_rejection_reason": cr.vendor_rejection_reason
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error rejecting vendor: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to reject vendor: {str(e)}"}), 500

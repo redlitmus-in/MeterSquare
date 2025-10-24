@@ -10,7 +10,12 @@ from controllers.buyer_controller import (
     get_buyer_completed_purchases,
     complete_purchase,
     get_purchase_by_id,
-    get_buyer_dashboard
+    get_buyer_dashboard,
+    select_vendor_for_purchase,
+    update_purchase_order,
+    update_purchase_notes,
+    td_approve_vendor,
+    td_reject_vendor
 )
 from controllers.auth_controller import jwt_required
 
@@ -95,3 +100,38 @@ def complete_purchase_route():
 def get_purchase_by_id_route(cr_id):
     """Get purchase details by change request ID"""
     return get_purchase_by_id(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/select-vendor', methods=['POST'])
+@jwt_required
+def select_vendor_for_purchase_route(cr_id):
+    """Select vendor for purchase (requires TD approval)"""
+    return select_vendor_for_purchase(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/update', methods=['PUT'])
+@jwt_required
+def update_purchase_order_route(cr_id):
+    """Update purchase order materials and costs"""
+    return update_purchase_order(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/notes', methods=['PUT'])
+@jwt_required
+def update_purchase_notes_route(cr_id):
+    """Update purchase notes"""
+    return update_purchase_notes(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/td-approve-vendor', methods=['POST'])
+@jwt_required
+def td_approve_vendor_route(cr_id):
+    """TD approves vendor selection for purchase"""
+    return td_approve_vendor(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/td-reject-vendor', methods=['POST'])
+@jwt_required
+def td_reject_vendor_route(cr_id):
+    """TD rejects vendor selection for purchase"""
+    return td_reject_vendor(cr_id)

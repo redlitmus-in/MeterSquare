@@ -111,6 +111,18 @@ class ChangeRequest(db.Model):
     purchase_completion_date = db.Column(db.DateTime, nullable=True)
     purchase_notes = db.Column(db.Text, nullable=True)
 
+    # Vendor Selection (requires TD approval)
+    selected_vendor_id = db.Column(db.Integer, db.ForeignKey('vendors.vendor_id'), nullable=True)
+    selected_vendor_name = db.Column(db.String(255), nullable=True)
+    vendor_selected_by_buyer_id = db.Column(db.Integer, nullable=True)
+    vendor_selected_by_buyer_name = db.Column(db.String(255), nullable=True)
+    vendor_selection_date = db.Column(db.DateTime, nullable=True)
+    vendor_selection_status = db.Column(db.String(50), nullable=True)  # 'pending_td_approval', 'approved', 'rejected'
+    vendor_approved_by_td_id = db.Column(db.Integer, nullable=True)
+    vendor_approved_by_td_name = db.Column(db.String(255), nullable=True)
+    vendor_approval_date = db.Column(db.DateTime, nullable=True)
+    vendor_rejection_reason = db.Column(db.Text, nullable=True)
+
     # Rejection
     rejection_reason = db.Column(db.Text, nullable=True)
     rejected_by_user_id = db.Column(db.Integer, nullable=True)
@@ -129,6 +141,7 @@ class ChangeRequest(db.Model):
     # Relationships
     boq = db.relationship("BOQ", backref=db.backref("change_requests", lazy=True))
     project = db.relationship("Project", backref=db.backref("change_requests", lazy=True))
+    vendor = db.relationship("Vendor", backref=db.backref("change_requests", lazy=True))
 
     def to_dict(self):
         """Convert to dictionary for JSON response"""
@@ -216,6 +229,18 @@ class ChangeRequest(db.Model):
             'purchase_completed_by_name': self.purchase_completed_by_name,
             'purchase_completion_date': self.purchase_completion_date.isoformat() if self.purchase_completion_date else None,
             'purchase_notes': self.purchase_notes,
+
+            # Vendor Selection
+            'selected_vendor_id': self.selected_vendor_id,
+            'selected_vendor_name': self.selected_vendor_name,
+            'vendor_selected_by_buyer_id': self.vendor_selected_by_buyer_id,
+            'vendor_selected_by_buyer_name': self.vendor_selected_by_buyer_name,
+            'vendor_selection_date': self.vendor_selection_date.isoformat() if self.vendor_selection_date else None,
+            'vendor_selection_status': self.vendor_selection_status,
+            'vendor_approved_by_td_id': self.vendor_approved_by_td_id,
+            'vendor_approved_by_td_name': self.vendor_approved_by_td_name,
+            'vendor_approval_date': self.vendor_approval_date.isoformat() if self.vendor_approval_date else None,
+            'vendor_rejection_reason': self.vendor_rejection_reason,
 
             # Rejection
             'rejection_reason': self.rejection_reason,

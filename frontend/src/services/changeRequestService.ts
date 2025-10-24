@@ -92,6 +92,24 @@ export interface ChangeRequestItem {
     consumed_before: number;
   };
   percentage_of_item_overhead?: number;
+
+  // Vendor Selection Fields
+  selected_vendor_id?: number | null;
+  selected_vendor_name?: string | null;
+  vendor_selected_by_buyer_id?: number | null;
+  vendor_selected_by_buyer_name?: string | null;
+  vendor_selection_date?: string | null;
+  vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
+  vendor_approved_by_td_id?: number | null;
+  vendor_approved_by_td_name?: string | null;
+  vendor_approval_date?: string | null;
+  vendor_rejection_reason?: string | null;
+
+  // Buyer Assignment
+  assigned_to_buyer_user_id?: number | null;
+  assigned_to_buyer_name?: string | null;
+  assigned_to_buyer_date?: string | null;
+  project_client?: string | null;
 }
 
 export interface CreateChangeRequestData {

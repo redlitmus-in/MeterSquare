@@ -148,68 +148,14 @@ const VendorManagement: React.FC = () => {
             </div>
             <button
               onClick={handleAddVendor}
-              className="hidden sm:flex items-center gap-2 bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors shadow-md"
+              className="hidden sm:flex items-center gap-1.5 bg-purple-600 text-white px-4 py-2 text-sm rounded-lg hover:bg-purple-700 transition-colors shadow-md"
             >
-              <PlusIcon className="w-5 h-5" />
+              <PlusIcon className="w-4 h-4" />
               Add Vendor
             </button>
           </div>
         </div>
       </motion.div>
-
-      {/* Statistics */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mb-6">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600 mb-1">Total Vendors</p>
-              <p className="text-3xl font-bold text-purple-600">{statistics.total_vendors}</p>
-            </div>
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <BuildingOfficeIcon className="w-8 h-8 text-purple-600" />
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600 mb-1">Active Vendors</p>
-              <p className="text-3xl font-bold text-green-600">{statistics.total_active}</p>
-            </div>
-            <div className="p-3 bg-green-100 rounded-lg">
-              <BuildingOfficeIcon className="w-8 h-8 text-green-600" />
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600 mb-1">Inactive Vendors</p>
-              <p className="text-3xl font-bold text-gray-600">{statistics.total_inactive}</p>
-            </div>
-            <div className="p-3 bg-gray-100 rounded-lg">
-              <BuildingOfficeIcon className="w-8 h-8 text-gray-600" />
-            </div>
-          </div>
-        </motion.div>
-      </div>
 
       {/* Filters */}
       <motion.div
@@ -327,19 +273,19 @@ const VendorManagement: React.FC = () => {
               </div>
 
               {/* Contact Info */}
-              <div className="space-y-2 mb-4">
+              <div className="space-y-1.5 mb-4">
                 {vendor.contact_person_name && (
-                  <p className="text-sm text-gray-600">Contact: {vendor.contact_person_name}</p>
+                  <p className="text-xs text-gray-600">Contact: {vendor.contact_person_name}</p>
                 )}
                 {vendor.email && (
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <EnvelopeIcon className="w-4 h-4" />
+                  <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                    <EnvelopeIcon className="w-3.5 h-3.5" />
                     <span className="truncate">{vendor.email}</span>
                   </div>
                 )}
                 {vendor.phone && (
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <PhoneIcon className="w-4 h-4" />
+                  <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                    <PhoneIcon className="w-3.5 h-3.5" />
                     <span>{vendor.phone_code} {vendor.phone}</span>
                   </div>
                 )}
@@ -349,23 +295,24 @@ const VendorManagement: React.FC = () => {
               <div className="flex gap-2 pt-4 border-t border-gray-200">
                 <button
                   onClick={() => handleViewVendor(vendor)}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors"
                 >
-                  <EyeIcon className="w-4 h-4" />
+                  <EyeIcon className="w-3.5 h-3.5" />
                   View
                 </button>
                 <button
                   onClick={() => handleEditVendor(vendor)}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-xs bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors"
                 >
-                  <PencilIcon className="w-4 h-4" />
+                  <PencilIcon className="w-3.5 h-3.5" />
                   Edit
                 </button>
                 <button
                   onClick={() => handleDeleteVendor(vendor)}
-                  className="px-4 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors"
+                  className="px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors"
+                  title="Delete vendor"
                 >
-                  <TrashIcon className="w-4 h-4" />
+                  <TrashIcon className="w-3.5 h-3.5" />
                 </button>
               </div>
             </motion.div>
@@ -376,9 +323,10 @@ const VendorManagement: React.FC = () => {
       {/* Mobile Add Button */}
       <button
         onClick={handleAddVendor}
-        className="sm:hidden fixed bottom-6 right-6 bg-purple-600 text-white p-4 rounded-full shadow-lg hover:bg-purple-700 transition-colors z-10"
+        className="sm:hidden fixed bottom-6 right-6 bg-purple-600 text-white p-3 rounded-full shadow-lg hover:bg-purple-700 transition-colors z-10"
+        title="Add vendor"
       >
-        <PlusIcon className="w-6 h-6" />
+        <PlusIcon className="w-5 h-5" />
       </button>
 
       {/* Add/Edit Vendor Modal */}

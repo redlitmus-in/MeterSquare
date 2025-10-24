@@ -150,10 +150,10 @@ const VendorDetails: React.FC = () => {
       >
         <button
           onClick={() => navigate('/buyer/vendors')}
-          className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
+          className="inline-flex items-center justify-center w-8 h-8 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors mb-4"
+          title="Back to Vendors"
         >
           <ArrowLeftIcon className="w-5 h-5" />
-          Back to Vendors
         </button>
 
         <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 border border-purple-200">
@@ -182,16 +182,16 @@ const VendorDetails: React.FC = () => {
             <div className="flex gap-2">
               <button
                 onClick={handleEditVendor}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-1.5"
               >
-                <PencilIcon className="w-4 h-4" />
+                <PencilIcon className="w-3.5 h-3.5" />
                 Edit
               </button>
               <button
                 onClick={handleDeleteVendor}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
+                className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-1.5"
               >
-                <TrashIcon className="w-4 h-4" />
+                <TrashIcon className="w-3.5 h-3.5" />
                 Delete
               </button>
             </div>
@@ -208,31 +208,31 @@ const VendorDetails: React.FC = () => {
             transition={{ delay: 0.1 }}
             className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm"
           >
-            <h2 className="text-lg font-bold text-gray-800 mb-4">Contact Information</h2>
-            <div className="space-y-4">
+            <h2 className="text-base font-bold text-gray-800 mb-3">Contact Information</h2>
+            <div className="space-y-3">
               {vendor.contact_person_name && (
                 <div>
-                  <p className="text-sm text-gray-500 mb-1">Contact Person</p>
-                  <p className="text-gray-800 font-medium">{vendor.contact_person_name}</p>
+                  <p className="text-xs text-gray-500 mb-0.5">Contact Person</p>
+                  <p className="text-sm text-gray-800 font-medium">{vendor.contact_person_name}</p>
                 </div>
               )}
 
               {vendor.email && (
-                <div className="flex items-start gap-3">
-                  <EnvelopeIcon className="w-5 h-5 text-purple-600 mt-1" />
+                <div className="flex items-start gap-2">
+                  <EnvelopeIcon className="w-4 h-4 text-purple-600 mt-0.5" />
                   <div>
-                    <p className="text-sm text-gray-500 mb-1">Email</p>
-                    <p className="text-gray-800">{vendor.email}</p>
+                    <p className="text-xs text-gray-500 mb-0.5">Email</p>
+                    <p className="text-sm text-gray-800">{vendor.email}</p>
                   </div>
                 </div>
               )}
 
               {vendor.phone && (
-                <div className="flex items-start gap-3">
-                  <PhoneIcon className="w-5 h-5 text-purple-600 mt-1" />
+                <div className="flex items-start gap-2">
+                  <PhoneIcon className="w-4 h-4 text-purple-600 mt-0.5" />
                   <div>
-                    <p className="text-sm text-gray-500 mb-1">Phone</p>
-                    <p className="text-gray-800">
+                    <p className="text-xs text-gray-500 mb-0.5">Phone</p>
+                    <p className="text-sm text-gray-800">
                       {vendor.phone_code} {vendor.phone}
                     </p>
                   </div>
@@ -240,11 +240,11 @@ const VendorDetails: React.FC = () => {
               )}
 
               {(vendor.street_address || vendor.city || vendor.state || vendor.country) && (
-                <div className="flex items-start gap-3">
-                  <MapPinIcon className="w-5 h-5 text-purple-600 mt-1" />
+                <div className="flex items-start gap-2">
+                  <MapPinIcon className="w-4 h-4 text-purple-600 mt-0.5" />
                   <div>
-                    <p className="text-sm text-gray-500 mb-1">Address</p>
-                    <div className="text-gray-800">
+                    <p className="text-xs text-gray-500 mb-0.5">Address</p>
+                    <div className="text-sm text-gray-800">
                       {vendor.street_address && <p>{vendor.street_address}</p>}
                       {(vendor.city || vendor.state) && (
                         <p>
@@ -262,8 +262,8 @@ const VendorDetails: React.FC = () => {
 
               {vendor.gst_number && (
                 <div>
-                  <p className="text-sm text-gray-500 mb-1">GST Number</p>
-                  <p className="text-gray-800 font-mono">{vendor.gst_number}</p>
+                  <p className="text-xs text-gray-500 mb-0.5">GST Number</p>
+                  <p className="text-sm text-gray-800 font-mono">{vendor.gst_number}</p>
                 </div>
               )}
             </div>
@@ -278,18 +278,18 @@ const VendorDetails: React.FC = () => {
             transition={{ delay: 0.2 }}
             className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm"
           >
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="text-lg font-bold text-gray-800">Products & Services</h2>
-                <p className="text-sm text-gray-500 mt-1">
+                <h2 className="text-base font-bold text-gray-800">Products & Services</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
                   {products.length} {products.length === 1 ? 'item' : 'items'}
                 </p>
               </div>
               <button
                 onClick={handleAddProduct}
-                className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-1.5 text-sm rounded-lg hover:bg-blue-700 transition-colors"
               >
-                <PlusIcon className="w-4 h-4" />
+                <PlusIcon className="w-3.5 h-3.5" />
                 Add Product
               </button>
             </div>
@@ -310,29 +310,29 @@ const VendorDetails: React.FC = () => {
                 </button>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {products.map((product, index) => (
                   <motion.div
                     key={product.product_id}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 + index * 0.05 }}
-                    className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 transition-colors"
+                    className="border border-gray-200 rounded-lg p-3 hover:border-purple-300 transition-colors"
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-1">
+                        <h3 className="text-base font-semibold text-gray-800 mb-1">
                           {product.product_name}
                         </h3>
                         {product.category && (
-                          <span className="inline-block px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded mb-2">
+                          <span className="inline-block px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded mb-1.5">
                             {product.category}
                           </span>
                         )}
                         {product.description && (
-                          <p className="text-sm text-gray-600 mt-2">{product.description}</p>
+                          <p className="text-xs text-gray-600 mt-1.5">{product.description}</p>
                         )}
-                        <div className="flex gap-6 mt-3 text-sm">
+                        <div className="flex gap-4 mt-2 text-xs">
                           {product.unit && (
                             <div>
                               <span className="text-gray-500">Unit:</span>{' '}
@@ -349,18 +349,20 @@ const VendorDetails: React.FC = () => {
                           )}
                         </div>
                       </div>
-                      <div className="flex gap-2 ml-4">
+                      <div className="flex gap-1 ml-3">
                         <button
                           onClick={() => handleEditProduct(product)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Edit product"
                         >
-                          <PencilIcon className="w-4 h-4" />
+                          <PencilIcon className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => handleDeleteProduct(product)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Delete product"
                         >
-                          <TrashIcon className="w-4 h-4" />
+                          <TrashIcon className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>

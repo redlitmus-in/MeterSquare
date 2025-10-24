@@ -34,6 +34,46 @@ export interface Purchase {
   purchase_completed_by_name?: string;
   purchase_completion_date?: string;
   purchase_notes?: string;
+  vendor_id?: number | null;
+  vendor_name?: string | null;
+  vendor_selection_pending_td_approval?: boolean;
+}
+
+export interface SelectVendorRequest {
+  cr_id: number;
+  vendor_id: number;
+}
+
+export interface SelectVendorResponse {
+  success: boolean;
+  message: string;
+  purchase?: Purchase;
+  error?: string;
+}
+
+export interface UpdatePurchaseNotesRequest {
+  cr_id: number;
+  notes: string;
+}
+
+export interface UpdatePurchaseNotesResponse {
+  success: boolean;
+  message: string;
+  purchase?: Purchase;
+  error?: string;
+}
+
+export interface UpdatePurchaseOrderRequest {
+  cr_id: number;
+  materials: PurchaseMaterial[];
+  total_cost: number;
+}
+
+export interface UpdatePurchaseOrderResponse {
+  success: boolean;
+  message: string;
+  purchase?: Purchase;
+  error?: string;
 }
 
 export interface PurchaseListResponse {
@@ -155,6 +195,89 @@ class BuyerService {
         throw new Error('Purchase not found');
       }
       throw new Error(error.response?.data?.error || 'Failed to fetch purchase details');
+    }
+  }
+
+  // Select vendor for purchase (requires TD approval)
+  // Note: Backend endpoint needs to be implemented at /api/buyer/purchase/{cr_id}/select-vendor
+  async selectVendor(data: SelectVendorRequest): Promise<SelectVendorResponse> {
+    try {
+      const response = await axios.post<SelectVendorResponse>(
+        `${API_URL}/buyer/purchase/${data.cr_id}/select-vendor`,
+        { vendor_id: data.vendor_id },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to select vendor');
+    } catch (error: any) {
+      console.error('Error selecting vendor:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Backend endpoint not implemented yet. Please contact the development team.');
+      }
+      throw new Error(error.response?.data?.error || 'This feature requires backend implementation. Please contact support.');
+    }
+  }
+
+  // Update purchase notes
+  async updatePurchaseNotes(data: UpdatePurchaseNotesRequest): Promise<UpdatePurchaseNotesResponse> {
+    try {
+      const response = await axios.put<UpdatePurchaseNotesResponse>(
+        `${API_URL}/buyer/purchase/${data.cr_id}/notes`,
+        { notes: data.notes },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to update notes');
+    } catch (error: any) {
+      console.error('Error updating purchase notes:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to update notes');
+    }
+  }
+
+  // Update purchase order (materials and total cost)
+  // Note: Backend endpoint needs to be implemented at /api/buyer/purchase/{cr_id}/update
+  async updatePurchaseOrder(data: UpdatePurchaseOrderRequest): Promise<UpdatePurchaseOrderResponse> {
+    try {
+      const response = await axios.put<UpdatePurchaseOrderResponse>(
+        `${API_URL}/buyer/purchase/${data.cr_id}/update`,
+        {
+          materials: data.materials,
+          total_cost: data.total_cost
+        },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to update purchase order');
+    } catch (error: any) {
+      console.error('Error updating purchase order:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Backend endpoint not implemented yet. Please contact the development team.');
+      }
+      if (error.response?.status === 403) {
+        throw new Error('You do not have permission to edit this purchase order');
+      }
+      throw new Error(error.response?.data?.error || 'This feature requires backend implementation. Please contact support.');
     }
   }
 }

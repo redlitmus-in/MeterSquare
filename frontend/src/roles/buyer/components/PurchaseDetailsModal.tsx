@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -10,9 +10,14 @@ import {
   User,
   CheckCircle,
   DollarSign,
-  Hash
+  Hash,
+  Store,
+  AlertCircle,
+  Edit,
+  Save
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -22,19 +27,128 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency } from '@/utils/formatters';
-import { Purchase } from '../services/buyerService';
+import { Purchase, buyerService } from '../services/buyerService';
+import { buyerVendorService, Vendor } from '../services/buyerVendorService';
+import { toast } from 'sonner';
 
 interface PurchaseDetailsModalProps {
   purchase: Purchase;
   isOpen: boolean;
   onClose: () => void;
+  onVendorSelected?: () => void;
 }
 
 const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
   purchase,
   isOpen,
-  onClose
+  onClose,
+  onVendorSelected
 }) => {
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [selectedVendorId, setSelectedVendorId] = useState<number | null>(purchase.vendor_id || null);
+  const [isSelectingVendor, setIsSelectingVendor] = useState(false);
+  const [loadingVendors, setLoadingVendors] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedMaterials, setEditedMaterials] = useState(purchase.materials);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && purchase.status === 'pending') {
+      loadVendors();
+      // Check if should open in edit mode
+      const shouldEdit = sessionStorage.getItem('purchaseEditMode') === 'true';
+      if (shouldEdit && purchase.status === 'pending') {
+        setIsEditing(true);
+        sessionStorage.removeItem('purchaseEditMode'); // Clear after use
+      }
+    }
+  }, [isOpen, purchase.status]);
+
+  const loadVendors = async () => {
+    try {
+      setLoadingVendors(true);
+      const response = await buyerVendorService.getAllVendors({
+        status: 'active',
+        per_page: 100
+      });
+      setVendors(response.vendors);
+    } catch (error: any) {
+      console.error('Error loading vendors:', error);
+      toast.error('Failed to load vendors');
+    } finally {
+      setLoadingVendors(false);
+    }
+  };
+
+  const handleSelectVendor = async () => {
+    if (!selectedVendorId) {
+      toast.error('Please select a vendor');
+      return;
+    }
+
+    try {
+      setIsSelectingVendor(true);
+      await buyerService.selectVendor({
+        cr_id: purchase.cr_id,
+        vendor_id: selectedVendorId
+      });
+      toast.success('Vendor selected successfully! Waiting for TD approval.');
+      onVendorSelected?.();
+      onClose();
+    } catch (error: any) {
+      console.error('Error selecting vendor:', error);
+      toast.error(error.message || 'Failed to select vendor');
+    } finally {
+      setIsSelectingVendor(false);
+    }
+  };
+
+  const handleSavePurchase = async () => {
+    try {
+      setIsSaving(true);
+      // Calculate total cost
+      const totalCost = editedMaterials.reduce((sum, mat) => sum + mat.total_price, 0);
+
+      await buyerService.updatePurchaseOrder({
+        cr_id: purchase.cr_id,
+        materials: editedMaterials,
+        total_cost: totalCost
+      });
+      toast.success('Purchase order updated successfully!');
+      setIsEditing(false);
+      onVendorSelected?.(); // Refetch data
+    } catch (error: any) {
+      console.error('Error saving purchase order:', error);
+      toast.error(error.message || 'Failed to update purchase order');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditedMaterials(purchase.materials);
+    setIsEditing(false);
+  };
+
+  const handleClose = () => {
+    setIsEditing(false);
+    setEditedMaterials(purchase.materials);
+    sessionStorage.removeItem('purchaseEditMode');
+    onClose();
+  };
+
+  const handleMaterialChange = (index: number, field: string, value: any) => {
+    const updated = [...editedMaterials];
+    updated[index] = { ...updated[index], [field]: value };
+
+    // Recalculate total price if quantity or unit_price changed
+    if (field === 'quantity' || field === 'unit_price') {
+      updated[index].total_price = updated[index].quantity * updated[index].unit_price;
+    }
+
+    setEditedMaterials(updated);
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -46,7 +160,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
+            onClick={handleClose}
             className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
           />
 
@@ -93,7 +207,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                     </div>
                   </div>
                   <button
-                    onClick={onClose}
+                    onClick={handleClose}
                     className="p-2 hover:bg-purple-200 rounded-lg transition-colors"
                   >
                     <X className="w-5 h-5 text-gray-600" />
@@ -229,45 +343,120 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
 
                 {/* Materials Table */}
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <Package className="w-5 h-5" />
-                    Materials Breakdown
-                  </h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                      <Package className="w-5 h-5" />
+                      Materials Breakdown
+                    </h3>
+                    {purchase.status === 'pending' && (
+                      !isEditing ? (
+                        <Button
+                          onClick={() => setIsEditing(true)}
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs px-3"
+                        >
+                          <Edit className="w-3.5 h-3.5 mr-1.5" />
+                          Edit
+                        </Button>
+                      ) : (
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={handleCancelEdit}
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs px-3"
+                            disabled={isSaving}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            onClick={handleSavePurchase}
+                            size="sm"
+                            className="h-8 text-xs px-3 bg-green-600 hover:bg-green-700 text-white"
+                            disabled={isSaving}
+                          >
+                            {isSaving ? (
+                              <>
+                                <div className="w-3.5 h-3.5 mr-1.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                Saving...
+                              </>
+                            ) : (
+                              <>
+                                <Save className="w-3.5 h-3.5 mr-1.5" />
+                                Save Changes
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )
+                    )}
+                  </div>
                   <div className="border rounded-xl overflow-hidden">
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-gray-50">
-                          <TableHead className="font-semibold">Material Name</TableHead>
-                          <TableHead className="font-semibold">Sub-Item</TableHead>
-                          <TableHead className="font-semibold">Quantity</TableHead>
-                          <TableHead className="font-semibold">Unit Price</TableHead>
-                          <TableHead className="font-semibold text-right">Total Price</TableHead>
+                          <TableHead className="font-semibold text-sm">Material Name</TableHead>
+                          <TableHead className="font-semibold text-sm">Sub-Item</TableHead>
+                          <TableHead className="font-semibold text-sm">Quantity</TableHead>
+                          <TableHead className="font-semibold text-sm">Unit</TableHead>
+                          <TableHead className="font-semibold text-sm">Unit Price</TableHead>
+                          <TableHead className="font-semibold text-sm text-right">Total Price</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {purchase.materials.map((material, idx) => (
+                        {(isEditing ? editedMaterials : purchase.materials).map((material, idx) => (
                           <TableRow key={idx} className="hover:bg-gray-50">
-                            <TableCell className="font-medium">{material.material_name}</TableCell>
-                            <TableCell>
+                            <TableCell className="font-medium text-sm">{material.material_name}</TableCell>
+                            <TableCell className="text-sm">
                               {material.sub_item_name && (
                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                                   {material.sub_item_name}
                                 </span>
                               )}
                             </TableCell>
-                            <TableCell>
-                              {material.quantity} {material.unit}
+                            <TableCell className="text-sm">
+                              {isEditing ? (
+                                <input
+                                  type="number"
+                                  value={material.quantity}
+                                  onChange={(e) => handleMaterialChange(idx, 'quantity', parseFloat(e.target.value) || 0)}
+                                  className="w-20 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  min="0"
+                                  step="0.01"
+                                />
+                              ) : (
+                                material.quantity
+                              )}
                             </TableCell>
-                            <TableCell>{formatCurrency(material.unit_price)}</TableCell>
-                            <TableCell className="text-right font-bold text-purple-600">
+                            <TableCell className="text-sm">{material.unit}</TableCell>
+                            <TableCell className="text-sm">
+                              {isEditing ? (
+                                <input
+                                  type="number"
+                                  value={material.unit_price}
+                                  onChange={(e) => handleMaterialChange(idx, 'unit_price', parseFloat(e.target.value) || 0)}
+                                  className="w-24 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  min="0"
+                                  step="0.01"
+                                />
+                              ) : (
+                                formatCurrency(material.unit_price)
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right font-bold text-purple-600 text-sm">
                               {formatCurrency(material.total_price)}
                             </TableCell>
                           </TableRow>
                         ))}
                         <TableRow className="bg-purple-50 font-bold">
-                          <TableCell colSpan={4} className="text-right">Total Cost:</TableCell>
-                          <TableCell className="text-right text-purple-700 text-lg">
-                            {formatCurrency(purchase.total_cost)}
+                          <TableCell colSpan={5} className="text-right text-sm">Total Cost:</TableCell>
+                          <TableCell className="text-right text-purple-700 text-base">
+                            {formatCurrency(
+                              isEditing
+                                ? editedMaterials.reduce((sum, mat) => sum + mat.total_price, 0)
+                                : purchase.total_cost
+                            )}
                           </TableCell>
                         </TableRow>
                       </TableBody>
@@ -279,7 +468,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
               {/* Footer */}
               <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex justify-end">
                 <button
-                  onClick={onClose}
+                  onClick={handleClose}
                   className="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-colors"
                 >
                   Close

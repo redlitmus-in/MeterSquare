@@ -27,9 +27,11 @@ import {
   Info,
   LayoutGrid,
   List,
-  Pencil
+  Pencil,
+  Store
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
+import { buyerService, Purchase } from '@/roles/buyer/services/buyerService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
@@ -41,16 +43,19 @@ const ChangeRequestsPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [changeRequests, setChangeRequests] = useState<ChangeRequestItem[]>([]);
+  const [vendorApprovals, setVendorApprovals] = useState<Purchase[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
+  const [approvingVendorId, setApprovingVendorId] = useState<number | null>(null);
 
-  // Fetch change requests from backend
+  // Fetch change requests and vendor approvals from backend
   useEffect(() => {
     loadChangeRequests();
+    loadVendorApprovals();
   }, []);
 
   const loadChangeRequests = async () => {
@@ -67,6 +72,58 @@ const ChangeRequestsPage: React.FC = () => {
       toast.error('Failed to load change requests');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadVendorApprovals = async () => {
+    try {
+      // Fetch all change requests and filter for vendor approvals
+      const response = await changeRequestService.getChangeRequests();
+      if (response.success && response.data) {
+        console.log('🔍 All change requests:', response.data);
+        console.log('📊 Total change requests:', response.data.length);
+
+        // Filter for change requests with vendor selection pending TD approval
+        const pendingVendorApprovals = response.data.filter(
+          (cr: ChangeRequestItem) => {
+            const hasStatus = cr.status === 'assigned_to_buyer';
+            const hasVendorPending = cr.vendor_selection_status === 'pending_td_approval';
+
+            console.log(`CR-${cr.cr_id}:`, {
+              status: cr.status,
+              vendor_selection_status: cr.vendor_selection_status,
+              selected_vendor_name: cr.selected_vendor_name,
+              hasStatus,
+              hasVendorPending,
+              matches: hasStatus && hasVendorPending
+            });
+
+            return hasStatus && hasVendorPending;
+          }
+        );
+
+        console.log('✅ Filtered vendor approvals:', pendingVendorApprovals.length);
+
+        // Map to Purchase format for compatibility
+        const mappedApprovals: Purchase[] = pendingVendorApprovals.map((cr: ChangeRequestItem) => ({
+          cr_id: cr.cr_id,
+          project_id: cr.project_id,
+          project_name: cr.project_name || cr.boq_name || 'Unknown Project',
+          client: cr.project_client || '',
+          item_name: cr.item_name || '',
+          materials_count: cr.materials_data?.length || 0,
+          total_cost: cr.materials_total_cost || 0,
+          vendor_name: cr.selected_vendor_name || 'No Vendor',
+          vendor_id: cr.selected_vendor_id || 0,
+          created_at: cr.created_at,
+          status: cr.status,
+          vendor_selection_pending_td_approval: true
+        }));
+
+        setVendorApprovals(mappedApprovals);
+      }
+    } catch (error) {
+      console.error('Error loading vendor approvals:', error);
     }
   };
 
@@ -231,11 +288,67 @@ const ChangeRequestsPage: React.FC = () => {
     return matchesSearch && matchesTab;
   });
 
+  const handleApproveVendor = async (crId: number) => {
+    setApprovingVendorId(crId);
+    try {
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/buyer/purchase/${crId}/td-approve-vendor`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to approve vendor');
+      }
+
+      toast.success('Vendor selection approved successfully!');
+      loadVendorApprovals();
+      loadChangeRequests();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to approve vendor');
+    } finally {
+      setApprovingVendorId(null);
+    }
+  };
+
+  const handleRejectVendor = async (crId: number) => {
+    const reason = prompt('Please provide a reason for rejecting this vendor selection:');
+    if (!reason) return;
+
+    try {
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/buyer/purchase/${crId}/td-reject-vendor`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ reason })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to reject vendor');
+      }
+
+      toast.success('Vendor selection rejected');
+      loadVendorApprovals();
+      loadChangeRequests();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to reject vendor');
+    }
+  };
+
   const stats = {
     pending: changeRequests.filter(r => ['under_review', 'approved_by_pm', 'pending'].includes(r.status)).length,
     approved: changeRequests.filter(r => r.status === 'assigned_to_buyer').length,
     completed: changeRequests.filter(r => r.status === 'purchase_completed').length,
-    rejected: changeRequests.filter(r => r.status === 'rejected').length
+    rejected: changeRequests.filter(r => r.status === 'rejected').length,
+    vendorApprovals: vendorApprovals.length
   };
 
   if (loading) {
@@ -379,6 +492,14 @@ const ChangeRequestsPage: React.FC = () => {
                 <span className="ml-1 sm:ml-2 text-gray-400">({stats.pending})</span>
               </TabsTrigger>
               <TabsTrigger
+                value="vendor-approvals"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:text-orange-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+              >
+                <Store className="w-4 h-4 mr-2" />
+                Vendor Approvals
+                <span className="ml-1 sm:ml-2 text-gray-400">({stats.vendorApprovals})</span>
+              </TabsTrigger>
+              <TabsTrigger
                 value="approved"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-400 data-[state=active]:text-blue-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
@@ -507,6 +628,103 @@ const ChangeRequestsPage: React.FC = () => {
                         </motion.div>
                       );
                     })}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="vendor-approvals" className="mt-0 p-0">
+              <div className="space-y-4 sm:space-y-6">
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Vendor Selection Approvals</h2>
+                {vendorApprovals.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Store className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500 text-lg">No vendor approvals pending</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                    {vendorApprovals.map((purchase, index) => (
+                      <motion.div
+                        key={purchase.cr_id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.05 * index }}
+                        className="bg-white rounded-lg shadow-sm hover:shadow-lg transition-all duration-200 border-2 border-orange-300"
+                      >
+                        {/* Header */}
+                        <div className="p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <h3 className="font-semibold text-gray-900 text-base flex-1">{purchase.project_name}</h3>
+                            <Badge className="bg-orange-100 text-orange-800">
+                              CR #{purchase.cr_id}
+                            </Badge>
+                          </div>
+
+                          <div className="space-y-1 text-sm text-gray-600">
+                            <div className="flex items-center gap-1.5">
+                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate">{purchase.client}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate">{new Date(purchase.created_at).toLocaleDateString()}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Store className="h-3.5 w-3.5 text-orange-500" />
+                              <span className="truncate font-semibold text-orange-900">{purchase.vendor_name}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Stats */}
+                        <div className="px-4 pb-3 text-center text-sm">
+                          <span className="font-bold text-orange-600 text-lg">{purchase.materials_count}</span>
+                          <span className="text-gray-600 ml-1">Material{purchase.materials_count > 1 ? 's' : ''}</span>
+                        </div>
+
+                        {/* Financial Impact */}
+                        <div className="px-4 pb-3 space-y-1.5 text-xs">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Total Cost:</span>
+                            <span className="font-bold text-gray-900">AED {purchase.total_cost.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Item:</span>
+                            <span className="font-semibold text-gray-700 truncate ml-2">{purchase.item_name}</span>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => handleApproveVendor(purchase.cr_id)}
+                              disabled={approvingVendorId === purchase.cr_id}
+                              className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold bg-green-600"
+                            >
+                              {approvingVendorId === purchase.cr_id ? (
+                                <>
+                                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                  <span>Approving...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Check className="h-4 w-4" />
+                                  <span>Approve</span>
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleRejectVendor(purchase.cr_id)}
+                              className="bg-red-600 hover:bg-red-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                            >
+                              <X className="h-4 w-4" />
+                              <span>Reject</span>
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
                   </div>
                 )}
               </div>
