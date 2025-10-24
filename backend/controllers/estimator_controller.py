@@ -215,66 +215,79 @@ def cancel_boq(boq_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 def get_boq_details_history(boq_id):
-    """Get all version history of BOQ details for a particular BOQ ID"""
+    """Get BOQ version history and current details only if history exists"""
     try:
-        # Check if BOQ exists
+        # 1️⃣ Check if BOQ exists
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
-
         if not boq:
             return jsonify({
                 "success": False,
                 "error": "BOQ not found"
             }), 404
 
-        # Get current BOQ details
-        current_boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        # 2️⃣ Get history records for this BOQ
+        history_records = (
+            BOQDetailsHistory.query
+            .filter_by(boq_id=boq_id)
+            .order_by(BOQDetailsHistory.version.desc())
+            .all()
+        )
 
-        if not current_boq_details:
+        # 3️⃣ If no history exists, return empty response (don’t show BOQDetails)
+        if not history_records:
             return jsonify({
-                "success": False,
-                "error": "BOQ details not found"
-            }), 404
+                "success": True,
+                "boq_id": boq_id,
+                "boq_name": boq.boq_name,
+                "message": "No history found for this BOQ",
+                "total_versions": 0,
+                "current_version": None,
+                "history": []
+            }), 200
 
-        # Get all history versions for this BOQ detail
-        history_records = BOQDetailsHistory.query.filter_by(
-            boq_id=boq_id
-        ).order_by(BOQDetailsHistory.version.desc()).all()
+        # 4️⃣ Fetch current BOQ details (only if history exists)
+        current_boq_details = (
+            BOQDetails.query
+            .filter_by(boq_id=boq_id, is_deleted=False)
+            .first()
+        )
 
-        # Prepare history list
+        # 5️⃣ Build history list
         history_list = []
-
         for history in history_records:
-            history_data = {
+            history_list.append({
                 "boq_detail_history_id": history.boq_detail_history_id,
                 "boq_id": history.boq_id,
                 "boq_detail_id": history.boq_detail_id,
                 "version": history.version,
-                "boq_details": history.boq_details,  # Complete BOQ structure
+                "boq_details": history.boq_details,
                 "total_cost": history.total_cost,
                 "total_items": history.total_items,
                 "total_materials": history.total_materials,
                 "total_labour": history.total_labour,
                 "created_at": history.created_at.isoformat() if history.created_at else None,
                 "created_by": history.created_by
+            })
+
+        # 6️⃣ Prepare current version info
+        current_version = None
+        if current_boq_details:
+            current_version = {
+                "boq_detail_id": current_boq_details.boq_detail_id,
+                "boq_id": current_boq_details.boq_id,
+                "version": "current",
+                "boq_details": current_boq_details.boq_details,
+                "total_cost": current_boq_details.total_cost,
+                "total_items": current_boq_details.total_items,
+                "total_materials": current_boq_details.total_materials,
+                "total_labour": current_boq_details.total_labour,
+                "created_at": current_boq_details.created_at.isoformat() if current_boq_details.created_at else None,
+                "created_by": current_boq_details.created_by,
+                "last_modified_at": current_boq_details.last_modified_at.isoformat() if current_boq_details.last_modified_at else None,
+                "last_modified_by": current_boq_details.last_modified_by
             }
-            history_list.append(history_data)
 
-        # Get current/latest version info
-        current_version = {
-            "boq_detail_id": current_boq_details.boq_detail_id,
-            "boq_id": current_boq_details.boq_id,
-            "version": "current",
-            "boq_details": current_boq_details.boq_details,
-            "total_cost": current_boq_details.total_cost,
-            "total_items": current_boq_details.total_items,
-            "total_materials": current_boq_details.total_materials,
-            "total_labour": current_boq_details.total_labour,
-            "created_at": current_boq_details.created_at.isoformat() if current_boq_details.created_at else None,
-            "created_by": current_boq_details.created_by,
-            "last_modified_at": current_boq_details.last_modified_at.isoformat() if current_boq_details.last_modified_at else None,
-            "last_modified_by": current_boq_details.last_modified_by
-        }
-
+        # 7️⃣ Return response
         return jsonify({
             "success": True,
             "boq_id": boq_id,
@@ -285,10 +298,11 @@ def get_boq_details_history(boq_id):
         }), 200
 
     except Exception as e:
+        db.session.rollback()
         log.error(f"Error fetching BOQ details history: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": f"Failed to fetch BOQ history: {str(e)}"
         }), 500
 
 def send_boq_to_project_manager():

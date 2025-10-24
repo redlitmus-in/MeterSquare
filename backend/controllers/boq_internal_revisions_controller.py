@@ -580,9 +580,12 @@ def update_internal_revision_boq(boq_id):
             db.session.add(boq_history)
 
         # Store internal revision in BOQInternalRevision table
-        # Increment internal revision number
-        current_internal_rev = boq.internal_revision_number or 0
-        new_internal_rev = current_internal_rev + 1
+        # Check if there are any existing internal revisions for this BOQ
+        existing_internal_revisions_count = BOQInternalRevision.query.filter_by(boq_id=boq_id).count()
+
+        # Set internal revision number based on existing count
+        # First revision should be 1, not 2
+        new_internal_rev = existing_internal_revisions_count + 1
         boq.internal_revision_number = new_internal_rev
         boq.has_internal_revisions = True
 

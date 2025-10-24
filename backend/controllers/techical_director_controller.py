@@ -372,21 +372,21 @@ def td_mail_send():
                 "last_modified_at": datetime.utcnow().isoformat()
             }
 
-            # Create internal revision record for TD rejection
-            internal_revision = BOQInternalRevision(
-                boq_id=boq_id,
-                internal_revision_number=new_internal_rev,
-                action_type='TD_REJECTED',
-                actor_role='technicalDirector',
-                actor_name=td_name,
-                actor_user_id=td_user_id,
-                status_before=boq.status,
-                status_after=new_status,
-                rejection_reason=rejection_reason or comments,
-                changes_summary=complete_boq_snapshot
-            )
-            db.session.add(internal_revision)
-            log.info(f"✅ Internal revision {new_internal_rev} created for TD rejection of BOQ {boq_id}")
+            # # Create internal revision record for TD rejection
+            # internal_revision = BOQInternalRevision(
+            #     boq_id=boq_id,
+            #     internal_revision_number=new_internal_rev,
+            #     action_type='TD_REJECTED',
+            #     actor_role='technicalDirector',
+            #     actor_name=td_name,
+            #     actor_user_id=td_user_id,
+            #     status_before=boq.status,
+            #     status_after=new_status,
+            #     rejection_reason=rejection_reason or comments,
+            #     changes_summary=complete_boq_snapshot
+            # )
+            # db.session.add(internal_revision)
+            # log.info(f"✅ Internal revision {new_internal_rev} created for TD rejection of BOQ {boq_id}")
 
         # ==================== UPDATE BOQ & HISTORY ====================
         # Update BOQ status
