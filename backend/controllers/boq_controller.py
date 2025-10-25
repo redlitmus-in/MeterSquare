@@ -3450,6 +3450,7 @@ def get_sub_item(item_id):
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
+
 def request_day_extension(boq_id):
     """
     PM requests additional days to finish the project
