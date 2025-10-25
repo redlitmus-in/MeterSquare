@@ -862,6 +862,76 @@ def select_vendor_for_purchase(cr_id):
         cr.vendor_selection_status = 'pending_td_approval'
         cr.updated_at = datetime.utcnow()
 
+        # Add to BOQ History - Vendor Selection
+        from models.boq import BOQHistory
+        from sqlalchemy.orm.attributes import flag_modified
+
+        existing_history = BOQHistory.query.filter_by(boq_id=cr.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        if existing_history:
+            if existing_history.action is None:
+                current_actions = []
+            elif isinstance(existing_history.action, list):
+                current_actions = existing_history.action
+            elif isinstance(existing_history.action, dict):
+                current_actions = [existing_history.action]
+            else:
+                current_actions = []
+        else:
+            current_actions = []
+
+        new_action = {
+            "role": "buyer",
+            "type": "change_request_vendor_selected",
+            "sender": buyer_name,
+            "receiver": "Technical Director",
+            "sender_role": "buyer",
+            "receiver_role": "technical_director",
+            "status": cr.status,
+            "cr_id": cr_id,
+            "item_name": cr.item_name or f"CR #{cr_id}",
+            "materials_count": len(cr.materials_data) if cr.materials_data else 0,
+            "total_cost": cr.materials_total_cost,
+            "vendor_id": vendor_id,
+            "vendor_name": vendor.company_name,
+            "vendor_selection_status": "pending_td_approval",
+            "comments": f"Buyer selected vendor '{vendor.company_name}' for purchase. Awaiting TD approval.",
+            "timestamp": datetime.utcnow().isoformat(),
+            "sender_name": buyer_name,
+            "sender_user_id": buyer_id,
+            "project_name": cr.project.project_name if cr.project else None,
+            "project_id": cr.project_id
+        }
+
+        current_actions.append(new_action)
+        log.info(f"Appending change_request_vendor_selected action to BOQ {cr.boq_id} history")
+
+        if existing_history:
+            existing_history.action = current_actions
+            flag_modified(existing_history, "action")
+            existing_history.action_by = buyer_name
+            existing_history.sender = buyer_name
+            existing_history.receiver = "Technical Director"
+            existing_history.comments = f"CR #{cr_id} vendor selected, pending TD approval"
+            existing_history.action_date = datetime.utcnow()
+            existing_history.last_modified_by = buyer_name
+            existing_history.last_modified_at = datetime.utcnow()
+        else:
+            boq_history = BOQHistory(
+                boq_id=cr.boq_id,
+                action=current_actions,
+                action_by=buyer_name,
+                boq_status=cr.boq.status if cr.boq else 'unknown',
+                sender=buyer_name,
+                receiver="Technical Director",
+                comments=f"CR #{cr_id} vendor selected",
+                sender_role='buyer',
+                receiver_role='technical_director',
+                action_date=datetime.utcnow(),
+                created_by=buyer_name
+            )
+            db.session.add(boq_history)
+
         db.session.commit()
 
         log.info(f"Vendor {vendor_id} selected for purchase CR-{cr_id} by buyer {buyer_id}, pending TD approval")
@@ -1032,6 +1102,76 @@ def td_approve_vendor(cr_id):
         cr.vendor_approved_by_td_name = td_name
         cr.vendor_approval_date = datetime.utcnow()
         cr.updated_at = datetime.utcnow()
+
+        # Add to BOQ History - TD Vendor Approval
+        from models.boq import BOQHistory
+        from sqlalchemy.orm.attributes import flag_modified
+
+        existing_history = BOQHistory.query.filter_by(boq_id=cr.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        if existing_history:
+            if existing_history.action is None:
+                current_actions = []
+            elif isinstance(existing_history.action, list):
+                current_actions = existing_history.action
+            elif isinstance(existing_history.action, dict):
+                current_actions = [existing_history.action]
+            else:
+                current_actions = []
+        else:
+            current_actions = []
+
+        new_action = {
+            "role": "technical_director",
+            "type": "change_request_vendor_approved_by_td",
+            "sender": td_name,
+            "receiver": cr.vendor_selected_by_buyer_name or "Buyer",
+            "sender_role": "technical_director",
+            "receiver_role": "buyer",
+            "status": cr.status,
+            "cr_id": cr_id,
+            "item_name": cr.item_name or f"CR #{cr_id}",
+            "materials_count": len(cr.materials_data) if cr.materials_data else 0,
+            "total_cost": cr.materials_total_cost,
+            "vendor_id": cr.selected_vendor_id,
+            "vendor_name": cr.selected_vendor_name,
+            "vendor_selection_status": "approved",
+            "comments": f"TD approved vendor selection: '{cr.selected_vendor_name}'. Buyer can proceed with purchase.",
+            "timestamp": datetime.utcnow().isoformat(),
+            "sender_name": td_name,
+            "sender_user_id": td_id,
+            "project_name": cr.project.project_name if cr.project else None,
+            "project_id": cr.project_id
+        }
+
+        current_actions.append(new_action)
+        log.info(f"Appending change_request_vendor_approved_by_td action to BOQ {cr.boq_id} history")
+
+        if existing_history:
+            existing_history.action = current_actions
+            flag_modified(existing_history, "action")
+            existing_history.action_by = td_name
+            existing_history.sender = td_name
+            existing_history.receiver = cr.vendor_selected_by_buyer_name or "Buyer"
+            existing_history.comments = f"CR #{cr_id} vendor approved by TD"
+            existing_history.action_date = datetime.utcnow()
+            existing_history.last_modified_by = td_name
+            existing_history.last_modified_at = datetime.utcnow()
+        else:
+            boq_history = BOQHistory(
+                boq_id=cr.boq_id,
+                action=current_actions,
+                action_by=td_name,
+                boq_status=cr.boq.status if cr.boq else 'unknown',
+                sender=td_name,
+                receiver=cr.vendor_selected_by_buyer_name or "Buyer",
+                comments=f"CR #{cr_id} vendor approved by TD",
+                sender_role='technical_director',
+                receiver_role='buyer',
+                action_date=datetime.utcnow(),
+                created_by=td_name
+            )
+            db.session.add(boq_history)
 
         db.session.commit()
 

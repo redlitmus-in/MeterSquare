@@ -12,7 +12,11 @@ import {
   RefreshCw,
   ArrowRight,
   Calendar,
-  Filter
+  Filter,
+  ShoppingCart,
+  Package,
+  Store,
+  TruckIcon
 } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
 import { toast } from 'sonner';
@@ -39,6 +43,15 @@ interface BackendHistoryAction {
   recipient_name?: string;
   attachments?: string[];
   rejection_reason?: string;
+  justification?: string;
+  cr_id?: number;
+  item_name?: string;
+  materials_count?: number;
+  total_cost?: number;
+  vendor_id?: number;
+  vendor_name?: string;
+  purchase_notes?: string;
+  vendor_selection_status?: string;
 }
 
 interface BackendHistoryRecord {
@@ -74,6 +87,12 @@ interface HistoryAction {
   item_count?: number;
   attachments?: string[];
   rejection_reason?: string;
+  justification?: string;
+  cr_id?: number;
+  item_name?: string;
+  materials_count?: number;
+  vendor_name?: string;
+  purchase_notes?: string;
 }
 
 const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
@@ -171,6 +190,30 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
       case 'TD_REJECTED':
       case 'CLIENT_REJECTED':
         return <XCircle className="w-5 h-5 text-red-600" />;
+      // Change Request Actions
+      case 'CHANGE_REQUEST_CREATED':
+        return <ShoppingCart className="w-5 h-5 text-blue-600" />;
+      case 'CHANGE_REQUEST_SENT_FOR_REVIEW':
+        return <Mail className="w-5 h-5 text-indigo-600" />;
+      case 'CHANGE_REQUEST_APPROVED_BY_PM':
+      case 'CHANGE_REQUEST_APPROVED_BY_TD':
+      case 'CHANGE_REQUEST_APPROVED_BY_ESTIMATOR':
+        return <CheckCircle className="w-5 h-5 text-green-600" />;
+      case 'CHANGE_REQUEST_REJECTED':
+        return <XCircle className="w-5 h-5 text-red-600" />;
+      case 'CHANGE_REQUEST_VENDOR_SELECTED':
+        return <Store className="w-5 h-5 text-purple-600" />;
+      case 'CHANGE_REQUEST_VENDOR_APPROVED_BY_TD':
+        return <CheckCircle className="w-5 h-5 text-green-600" />;
+      case 'CHANGE_REQUEST_PURCHASE_COMPLETED':
+        return <Package className="w-5 h-5 text-blue-600" />;
+      // Day Extension Actions
+      case 'DAY_EXTENSION_REQUESTED':
+        return <Calendar className="w-5 h-5 text-blue-600" />;
+      case 'DAY_EXTENSION_APPROVED':
+        return <CheckCircle className="w-5 h-5 text-green-600" />;
+      case 'DAY_EXTENSION_REJECTED':
+        return <XCircle className="w-5 h-5 text-red-600" />;
       default:
         return <Clock className="w-5 h-5 text-gray-600" />;
     }
@@ -203,6 +246,29 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
       case 'REJECTED':
       case 'TD_REJECTED':
       case 'CLIENT_REJECTED':
+        return 'from-red-50 to-red-100/30 border-red-200';
+      // Change Request Actions
+      case 'CHANGE_REQUEST_CREATED':
+        return 'from-blue-50 to-blue-100/30 border-blue-200';
+      case 'CHANGE_REQUEST_SENT_FOR_REVIEW':
+        return 'from-indigo-50 to-indigo-100/30 border-indigo-200';
+      case 'CHANGE_REQUEST_APPROVED_BY_PM':
+      case 'CHANGE_REQUEST_APPROVED_BY_TD':
+      case 'CHANGE_REQUEST_APPROVED_BY_ESTIMATOR':
+      case 'CHANGE_REQUEST_VENDOR_APPROVED_BY_TD':
+        return 'from-green-50 to-green-100/30 border-green-200';
+      case 'CHANGE_REQUEST_REJECTED':
+        return 'from-red-50 to-red-100/30 border-red-200';
+      case 'CHANGE_REQUEST_VENDOR_SELECTED':
+        return 'from-purple-50 to-purple-100/30 border-purple-200';
+      case 'CHANGE_REQUEST_PURCHASE_COMPLETED':
+        return 'from-cyan-50 to-cyan-100/30 border-cyan-200';
+      // Day Extension Actions
+      case 'DAY_EXTENSION_REQUESTED':
+        return 'from-blue-50 to-blue-100/30 border-blue-200';
+      case 'DAY_EXTENSION_APPROVED':
+        return 'from-green-50 to-green-100/30 border-green-200';
+      case 'DAY_EXTENSION_REJECTED':
         return 'from-red-50 to-red-100/30 border-red-200';
       default:
         return 'from-gray-50 to-gray-100/30 border-gray-200';
@@ -238,6 +304,32 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
         return 'BOQ Rejected by Technical Director';
       case 'CLIENT_REJECTED':
         return 'BOQ Rejected by Client';
+      // Change Request Actions
+      case 'CHANGE_REQUEST_CREATED':
+        return 'Change Request Created';
+      case 'CHANGE_REQUEST_SENT_FOR_REVIEW':
+        return 'Change Request Sent for Review';
+      case 'CHANGE_REQUEST_APPROVED_BY_PM':
+        return 'Change Request Approved by Project Manager';
+      case 'CHANGE_REQUEST_APPROVED_BY_TD':
+        return 'Change Request Approved by Technical Director';
+      case 'CHANGE_REQUEST_APPROVED_BY_ESTIMATOR':
+        return 'Change Request Approved by Estimator';
+      case 'CHANGE_REQUEST_REJECTED':
+        return 'Change Request Rejected';
+      case 'CHANGE_REQUEST_VENDOR_SELECTED':
+        return 'Vendor Selected for Purchase';
+      case 'CHANGE_REQUEST_VENDOR_APPROVED_BY_TD':
+        return 'Vendor Approved by Technical Director';
+      case 'CHANGE_REQUEST_PURCHASE_COMPLETED':
+        return 'Purchase Completed & Materials Merged';
+      // Day Extension Actions
+      case 'DAY_EXTENSION_REQUESTED':
+        return 'Day Extension Requested';
+      case 'DAY_EXTENSION_APPROVED':
+        return 'Day Extension Approved';
+      case 'DAY_EXTENSION_REJECTED':
+        return 'Day Extension Rejected';
       default:
         return action.action_type?.replace(/_/g, ' ') || 'Action Performed';
     }

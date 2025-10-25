@@ -200,6 +200,76 @@ def create_change_request():
         # All users create requests in pending status - no auto-send
         # User must explicitly click "Send for Review" button
         db.session.add(change_request)
+        db.session.flush()  # Get the cr_id before committing
+
+        # Add to BOQ History - Track change request creation
+        existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        # Handle existing actions - ensure it's always a list
+        if existing_history:
+            if existing_history.action is None:
+                current_actions = []
+            elif isinstance(existing_history.action, list):
+                current_actions = existing_history.action
+            elif isinstance(existing_history.action, dict):
+                current_actions = [existing_history.action]
+            else:
+                current_actions = []
+        else:
+            current_actions = []
+
+        # Prepare new action for change request creation
+        new_action = {
+            "role": user_role,
+            "type": "change_request_created",
+            "sender": user_name,
+            "sender_role": user_role,
+            "status": "pending",
+            "cr_id": change_request.cr_id,
+            "item_name": item_name or f"Extra Materials - CR #{change_request.cr_id}",
+            "materials_count": len(materials_data),
+            "total_cost": materials_total_cost,
+            "comments": f"Change request created: {justification[:100]}{'...' if len(justification) > 100 else ''}",
+            "timestamp": datetime.utcnow().isoformat(),
+            "sender_name": user_name,
+            "sender_user_id": user_id,
+            "project_name": project.project_name if project else None,
+            "project_id": boq.project_id,
+            "justification": justification
+        }
+
+        # Append new action
+        current_actions.append(new_action)
+        log.info(f"Appending change_request_created action to BOQ {boq_id} history for CR {change_request.cr_id}")
+
+        if existing_history:
+            # Update existing history
+            existing_history.action = current_actions
+            flag_modified(existing_history, "action")
+            existing_history.action_by = user_name
+            existing_history.sender = user_name
+            existing_history.receiver = "Change Request System"
+            existing_history.comments = f"Change request #{change_request.cr_id} created"
+            existing_history.action_date = datetime.utcnow()
+            existing_history.last_modified_by = user_name
+            existing_history.last_modified_at = datetime.utcnow()
+        else:
+            # Create new history entry
+            boq_history = BOQHistory(
+                boq_id=boq_id,
+                action=current_actions,
+                action_by=user_name,
+                boq_status=boq.status,
+                sender=user_name,
+                receiver="Change Request System",
+                comments=f"Change request #{change_request.cr_id} created",
+                sender_role=user_role,
+                receiver_role='system',
+                action_date=datetime.utcnow(),
+                created_by=user_name
+            )
+            db.session.add(boq_history)
+
         db.session.commit()
 
         response_message = "Change request created successfully"
@@ -333,6 +403,71 @@ def send_for_review(cr_id):
         change_request.current_approver_role = next_role
         change_request.status = CR_CONFIG.STATUS_UNDER_REVIEW
         change_request.updated_at = datetime.utcnow()
+
+        # Add to BOQ History - Track sending for review
+        existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        if existing_history:
+            if existing_history.action is None:
+                current_actions = []
+            elif isinstance(existing_history.action, list):
+                current_actions = existing_history.action
+            elif isinstance(existing_history.action, dict):
+                current_actions = [existing_history.action]
+            else:
+                current_actions = []
+        else:
+            current_actions = []
+
+        # Prepare action for sending for review
+        new_action = {
+            "role": user_role,
+            "type": "change_request_sent_for_review",
+            "sender": current_user.get('full_name') or current_user.get('username'),
+            "receiver": next_approver,
+            "sender_role": user_role,
+            "receiver_role": next_role,
+            "status": CR_CONFIG.STATUS_UNDER_REVIEW,
+            "cr_id": cr_id,
+            "item_name": change_request.item_name or f"CR #{cr_id}",
+            "materials_count": len(change_request.materials_data) if change_request.materials_data else 0,
+            "total_cost": change_request.materials_total_cost,
+            "comments": f"Change request sent to {next_approver} for review",
+            "timestamp": datetime.utcnow().isoformat(),
+            "sender_name": current_user.get('full_name') or current_user.get('username'),
+            "sender_user_id": user_id,
+            "project_name": change_request.project.project_name if change_request.project else None,
+            "project_id": change_request.project_id
+        }
+
+        current_actions.append(new_action)
+        log.info(f"Appending change_request_sent_for_review action to BOQ {change_request.boq_id} history")
+
+        if existing_history:
+            existing_history.action = current_actions
+            flag_modified(existing_history, "action")
+            existing_history.action_by = current_user.get('full_name') or current_user.get('username')
+            existing_history.sender = current_user.get('full_name') or current_user.get('username')
+            existing_history.receiver = next_approver
+            existing_history.comments = f"CR #{cr_id} sent for review"
+            existing_history.action_date = datetime.utcnow()
+            existing_history.last_modified_by = current_user.get('full_name') or current_user.get('username')
+            existing_history.last_modified_at = datetime.utcnow()
+        else:
+            boq_history = BOQHistory(
+                boq_id=change_request.boq_id,
+                action=current_actions,
+                action_by=current_user.get('full_name') or current_user.get('username'),
+                boq_status=change_request.boq.status if change_request.boq else 'unknown',
+                sender=current_user.get('full_name') or current_user.get('username'),
+                receiver=next_approver,
+                comments=f"CR #{cr_id} sent for review",
+                sender_role=user_role,
+                receiver_role=next_role,
+                action_date=datetime.utcnow(),
+                created_by=current_user.get('full_name') or current_user.get('username')
+            )
+            db.session.add(boq_history)
 
         db.session.commit()
 
@@ -615,6 +750,71 @@ def approve_change_request(cr_id):
                 change_request.current_approver_role = next_role
                 log.info(f"PM approved CR {cr_id} with {percentage:.2f}% overhead (≤40%), routing to Estimator")
 
+            # Add to BOQ History - PM Approval
+            existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+            if existing_history:
+                if existing_history.action is None:
+                    current_actions = []
+                elif isinstance(existing_history.action, list):
+                    current_actions = existing_history.action
+                elif isinstance(existing_history.action, dict):
+                    current_actions = [existing_history.action]
+                else:
+                    current_actions = []
+            else:
+                current_actions = []
+
+            new_action = {
+                "role": "project_manager",
+                "type": "change_request_approved_by_pm",
+                "sender": approver_name,
+                "receiver": next_approver,
+                "sender_role": "project_manager",
+                "receiver_role": next_role,
+                "status": CR_CONFIG.STATUS_APPROVED_BY_PM,
+                "cr_id": cr_id,
+                "item_name": change_request.item_name or f"CR #{cr_id}",
+                "materials_count": len(change_request.materials_data) if change_request.materials_data else 0,
+                "total_cost": change_request.materials_total_cost,
+                "overhead_percentage": percentage,
+                "comments": f"PM approved. Routed to {next_approver} (Overhead: {percentage:.2f}%)",
+                "timestamp": datetime.utcnow().isoformat(),
+                "sender_name": approver_name,
+                "sender_user_id": approver_id,
+                "project_name": change_request.project.project_name if change_request.project else None,
+                "project_id": change_request.project_id
+            }
+
+            current_actions.append(new_action)
+            log.info(f"Appending change_request_approved_by_pm action to BOQ {change_request.boq_id} history")
+
+            if existing_history:
+                existing_history.action = current_actions
+                flag_modified(existing_history, "action")
+                existing_history.action_by = approver_name
+                existing_history.sender = approver_name
+                existing_history.receiver = next_approver
+                existing_history.comments = f"CR #{cr_id} approved by PM"
+                existing_history.action_date = datetime.utcnow()
+                existing_history.last_modified_by = approver_name
+                existing_history.last_modified_at = datetime.utcnow()
+            else:
+                boq_history = BOQHistory(
+                    boq_id=change_request.boq_id,
+                    action=current_actions,
+                    action_by=approver_name,
+                    boq_status=change_request.boq.status if change_request.boq else 'unknown',
+                    sender=approver_name,
+                    receiver=next_approver,
+                    comments=f"CR #{cr_id} approved by PM",
+                    sender_role='project_manager',
+                    receiver_role=next_role,
+                    action_date=datetime.utcnow(),
+                    created_by=approver_name
+                )
+                db.session.add(boq_history)
+
             db.session.commit()
 
             return jsonify({
@@ -672,6 +872,70 @@ def approve_change_request(cr_id):
                 log.info(f"CR {cr_id} assigned to buyer {buyer.full_name} (ID: {buyer.user_id})")
             else:
                 log.warning(f"CR {cr_id} approved but no buyer found in system!")
+
+            # Add to BOQ History - TD Approval
+            existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+            if existing_history:
+                if existing_history.action is None:
+                    current_actions = []
+                elif isinstance(existing_history.action, list):
+                    current_actions = existing_history.action
+                elif isinstance(existing_history.action, dict):
+                    current_actions = [existing_history.action]
+                else:
+                    current_actions = []
+            else:
+                current_actions = []
+
+            new_action = {
+                "role": "technical_director",
+                "type": "change_request_approved_by_td",
+                "sender": approver_name,
+                "receiver": change_request.assigned_to_buyer_name or "Buyer",
+                "sender_role": "technical_director",
+                "receiver_role": "buyer",
+                "status": CR_CONFIG.STATUS_ASSIGNED_TO_BUYER,
+                "cr_id": cr_id,
+                "item_name": change_request.item_name or f"CR #{cr_id}",
+                "materials_count": len(change_request.materials_data) if change_request.materials_data else 0,
+                "total_cost": change_request.materials_total_cost,
+                "comments": f"TD approved. Assigned to {change_request.assigned_to_buyer_name or 'Buyer'} for purchase",
+                "timestamp": datetime.utcnow().isoformat(),
+                "sender_name": approver_name,
+                "sender_user_id": approver_id,
+                "project_name": change_request.project.project_name if change_request.project else None,
+                "project_id": change_request.project_id
+            }
+
+            current_actions.append(new_action)
+            log.info(f"Appending change_request_approved_by_td action to BOQ {change_request.boq_id} history")
+
+            if existing_history:
+                existing_history.action = current_actions
+                flag_modified(existing_history, "action")
+                existing_history.action_by = approver_name
+                existing_history.sender = approver_name
+                existing_history.receiver = change_request.assigned_to_buyer_name or "Buyer"
+                existing_history.comments = f"CR #{cr_id} approved by TD"
+                existing_history.action_date = datetime.utcnow()
+                existing_history.last_modified_by = approver_name
+                existing_history.last_modified_at = datetime.utcnow()
+            else:
+                boq_history = BOQHistory(
+                    boq_id=change_request.boq_id,
+                    action=current_actions,
+                    action_by=approver_name,
+                    boq_status=change_request.boq.status if change_request.boq else 'unknown',
+                    sender=approver_name,
+                    receiver=change_request.assigned_to_buyer_name or "Buyer",
+                    comments=f"CR #{cr_id} approved by TD",
+                    sender_role='technical_director',
+                    receiver_role='buyer',
+                    action_date=datetime.utcnow(),
+                    created_by=approver_name
+                )
+                db.session.add(boq_history)
 
             db.session.commit()
 
@@ -733,6 +997,70 @@ def approve_change_request(cr_id):
                 log.info(f"CR {cr_id} assigned to buyer {buyer.full_name} (ID: {buyer.user_id})")
             else:
                 log.warning(f"CR {cr_id} approved but no buyer found in system!")
+
+            # Add to BOQ History - Estimator Approval
+            existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+            if existing_history:
+                if existing_history.action is None:
+                    current_actions = []
+                elif isinstance(existing_history.action, list):
+                    current_actions = existing_history.action
+                elif isinstance(existing_history.action, dict):
+                    current_actions = [existing_history.action]
+                else:
+                    current_actions = []
+            else:
+                current_actions = []
+
+            new_action = {
+                "role": "estimator",
+                "type": "change_request_approved_by_estimator",
+                "sender": approver_name,
+                "receiver": change_request.assigned_to_buyer_name or "Buyer",
+                "sender_role": "estimator",
+                "receiver_role": "buyer",
+                "status": CR_CONFIG.STATUS_ASSIGNED_TO_BUYER,
+                "cr_id": cr_id,
+                "item_name": change_request.item_name or f"CR #{cr_id}",
+                "materials_count": len(change_request.materials_data) if change_request.materials_data else 0,
+                "total_cost": change_request.materials_total_cost,
+                "comments": f"Estimator approved. Assigned to {change_request.assigned_to_buyer_name or 'Buyer'} for purchase",
+                "timestamp": datetime.utcnow().isoformat(),
+                "sender_name": approver_name,
+                "sender_user_id": approver_id,
+                "project_name": change_request.project.project_name if change_request.project else None,
+                "project_id": change_request.project_id
+            }
+
+            current_actions.append(new_action)
+            log.info(f"Appending change_request_approved_by_estimator action to BOQ {change_request.boq_id} history")
+
+            if existing_history:
+                existing_history.action = current_actions
+                flag_modified(existing_history, "action")
+                existing_history.action_by = approver_name
+                existing_history.sender = approver_name
+                existing_history.receiver = change_request.assigned_to_buyer_name or "Buyer"
+                existing_history.comments = f"CR #{cr_id} approved by Estimator"
+                existing_history.action_date = datetime.utcnow()
+                existing_history.last_modified_by = approver_name
+                existing_history.last_modified_at = datetime.utcnow()
+            else:
+                boq_history = BOQHistory(
+                    boq_id=change_request.boq_id,
+                    action=current_actions,
+                    action_by=approver_name,
+                    boq_status=change_request.boq.status if change_request.boq else 'unknown',
+                    sender=approver_name,
+                    receiver=change_request.assigned_to_buyer_name or "Buyer",
+                    comments=f"CR #{cr_id} approved by Estimator",
+                    sender_role='estimator',
+                    receiver_role='buyer',
+                    action_date=datetime.utcnow(),
+                    created_by=approver_name
+                )
+                db.session.add(boq_history)
 
             db.session.commit()
 
@@ -1027,6 +1355,72 @@ def complete_purchase_and_merge_to_boq(cr_id):
                 db.session.add(tracking_entry)
                 log.info(f"Created MaterialPurchaseTracking for CR #{cr_id} material: {material.get('material_name')}")
 
+        # Add to BOQ History - Purchase Completion
+        existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        if existing_history:
+            if existing_history.action is None:
+                current_actions = []
+            elif isinstance(existing_history.action, list):
+                current_actions = existing_history.action
+            elif isinstance(existing_history.action, dict):
+                current_actions = [existing_history.action]
+            else:
+                current_actions = []
+        else:
+            current_actions = []
+
+        new_action = {
+            "role": "buyer",
+            "type": "change_request_purchase_completed",
+            "sender": buyer_name,
+            "receiver": "BOQ System",
+            "sender_role": "buyer",
+            "receiver_role": "system",
+            "status": CR_CONFIG.STATUS_PURCHASE_COMPLETE,
+            "cr_id": cr_id,
+            "item_name": change_request.item_name or f"CR #{cr_id}",
+            "materials_count": len(materials),
+            "total_cost": change_request.materials_total_cost,
+            "vendor_name": change_request.selected_vendor_name if change_request.selected_vendor_name else None,
+            "comments": f"Purchase completed and {len(materials)} material(s) merged to BOQ. {purchase_notes if purchase_notes else ''}".strip(),
+            "timestamp": datetime.utcnow().isoformat(),
+            "sender_name": buyer_name,
+            "sender_user_id": buyer_id,
+            "project_name": change_request.project.project_name if change_request.project else None,
+            "project_id": change_request.project_id,
+            "purchase_notes": purchase_notes
+        }
+
+        current_actions.append(new_action)
+        log.info(f"Appending change_request_purchase_completed action to BOQ {change_request.boq_id} history")
+
+        if existing_history:
+            existing_history.action = current_actions
+            flag_modified(existing_history, "action")
+            existing_history.action_by = buyer_name
+            existing_history.sender = buyer_name
+            existing_history.receiver = "BOQ System"
+            existing_history.comments = f"CR #{cr_id} purchase completed, materials merged"
+            existing_history.action_date = datetime.utcnow()
+            existing_history.last_modified_by = buyer_name
+            existing_history.last_modified_at = datetime.utcnow()
+        else:
+            boq_history = BOQHistory(
+                boq_id=change_request.boq_id,
+                action=current_actions,
+                action_by=buyer_name,
+                boq_status=change_request.boq.status if change_request.boq else 'unknown',
+                sender=buyer_name,
+                receiver="BOQ System",
+                comments=f"CR #{cr_id} purchase completed, materials merged",
+                sender_role='buyer',
+                receiver_role='system',
+                action_date=datetime.utcnow(),
+                created_by=buyer_name
+            )
+            db.session.add(boq_history)
+
         db.session.commit()
 
         log.info(f"Buyer {buyer_name} completed purchase for CR {cr_id} and merged into BOQ {change_request.boq_id}")
@@ -1306,6 +1700,72 @@ def reject_change_request(cr_id):
         change_request.rejected_at_stage = approver_role
         change_request.rejection_reason = rejection_reason
         change_request.updated_at = datetime.utcnow()
+
+        # Add to BOQ History - Rejection
+        existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        if existing_history:
+            if existing_history.action is None:
+                current_actions = []
+            elif isinstance(existing_history.action, list):
+                current_actions = existing_history.action
+            elif isinstance(existing_history.action, dict):
+                current_actions = [existing_history.action]
+            else:
+                current_actions = []
+        else:
+            current_actions = []
+
+        new_action = {
+            "role": normalized_role,
+            "type": "change_request_rejected",
+            "sender": approver_name,
+            "receiver": change_request.requested_by_name,
+            "sender_role": approver_role,
+            "receiver_role": change_request.requested_by_role,
+            "status": "rejected",
+            "cr_id": cr_id,
+            "item_name": change_request.item_name or f"CR #{cr_id}",
+            "materials_count": len(change_request.materials_data) if change_request.materials_data else 0,
+            "total_cost": change_request.materials_total_cost,
+            "rejection_reason": rejection_reason,
+            "rejected_at_stage": approver_role,
+            "comments": f"Rejected by {approver_role.replace('_', ' ').title()}: {rejection_reason}",
+            "timestamp": datetime.utcnow().isoformat(),
+            "sender_name": approver_name,
+            "sender_user_id": approver_id,
+            "project_name": change_request.project.project_name if change_request.project else None,
+            "project_id": change_request.project_id
+        }
+
+        current_actions.append(new_action)
+        log.info(f"Appending change_request_rejected action to BOQ {change_request.boq_id} history")
+
+        if existing_history:
+            existing_history.action = current_actions
+            flag_modified(existing_history, "action")
+            existing_history.action_by = approver_name
+            existing_history.sender = approver_name
+            existing_history.receiver = change_request.requested_by_name
+            existing_history.comments = f"CR #{cr_id} rejected by {approver_role}"
+            existing_history.action_date = datetime.utcnow()
+            existing_history.last_modified_by = approver_name
+            existing_history.last_modified_at = datetime.utcnow()
+        else:
+            boq_history = BOQHistory(
+                boq_id=change_request.boq_id,
+                action=current_actions,
+                action_by=approver_name,
+                boq_status=change_request.boq.status if change_request.boq else 'unknown',
+                sender=approver_name,
+                receiver=change_request.requested_by_name,
+                comments=f"CR #{cr_id} rejected by {approver_role}",
+                sender_role=approver_role,
+                receiver_role=change_request.requested_by_role,
+                action_date=datetime.utcnow(),
+                created_by=approver_name
+            )
+            db.session.add(boq_history)
 
         db.session.commit()
 

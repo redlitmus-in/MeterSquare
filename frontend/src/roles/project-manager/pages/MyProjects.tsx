@@ -30,6 +30,7 @@ import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMateria
 import RejectedRequestsSection from '@/components/boq/RejectedRequestsSection';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
+import DayExtensionRequestModal from '../components/DayExtensionRequestModal';
 
 interface BOQDetails {
   boq_detail_id?: number;
@@ -212,6 +213,7 @@ const MyProjects: React.FC = () => {
   const [rejectedChangeRequests, setRejectedChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
   const [showChangeRequestModal, setShowChangeRequestModal] = useState(false);
+  const [showDayExtensionModal, setShowDayExtensionModal] = useState(false);
   const [projectToComplete, setProjectToComplete] = useState<Project | null>(null);
   const [completing, setCompleting] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
@@ -1607,10 +1609,22 @@ const MyProjects: React.FC = () => {
                     {/* Status Badge or Approve/Reject/Edit Buttons */}
                     <div className="flex items-center gap-3">
                       {selectedProject.boq_status?.toLowerCase() === 'approved' ? (
-                        <div className="px-6 py-2.5 bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-500 rounded-lg flex items-center gap-2">
-                          <CheckCircleIcon className="w-5 h-5 text-green-600" />
-                          <span className="font-semibold text-green-700">Approved</span>
-                        </div>
+                        <>
+                          <div className="px-6 py-2.5 bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-500 rounded-lg flex items-center gap-2">
+                            <CheckCircleIcon className="w-5 h-5 text-green-600" />
+                            <span className="font-semibold text-green-700">Approved</span>
+                          </div>
+                          {/* Show Request Extension button for assigned/active projects */}
+                          {selectedProject.site_supervisor_id && selectedProject.status?.toLowerCase() !== 'completed' && (
+                            <button
+                              onClick={() => setShowDayExtensionModal(true)}
+                              className="px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
+                            >
+                              <CalendarIcon className="w-4 h-4" />
+                              Request Extension
+                            </button>
+                          )}
+                        </>
                       ) : selectedProject.boq_status?.toLowerCase() === 'rejected' ? (
                         <div className="px-6 py-2.5 bg-gradient-to-r from-red-50 to-red-100 border-2 border-red-500 rounded-lg flex items-center gap-2">
                           <XMarkIcon className="w-5 h-5 text-red-600" />
@@ -1641,6 +1655,13 @@ const MyProjects: React.FC = () => {
                           >
                             <CheckCircleIcon className="w-4 h-4" />
                             Approve BOQ
+                          </button>
+                          <button
+                            onClick={() => setShowDayExtensionModal(true)}
+                            className="px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
+                          >
+                            <CalendarIcon className="w-4 h-4" />
+                            Request Extension
                           </button>
                         </>
                       ) : (
@@ -3121,6 +3142,20 @@ const MyProjects: React.FC = () => {
             </div>
           </motion.div>
         </div>
+      )}
+
+      {/* Day Extension Request Modal */}
+      {showDayExtensionModal && selectedProject && (
+        <DayExtensionRequestModal
+          isOpen={showDayExtensionModal}
+          onClose={() => setShowDayExtensionModal(false)}
+          onSuccess={() => refetch()}
+          boqId={selectedProject.boq_id || 0}
+          projectName={selectedProject.project_name || selectedProject.projectName || 'Project'}
+          currentDuration={selectedProject.duration_days}
+          startDate={selectedProject.start_date}
+          endDate={selectedProject.end_date}
+        />
       )}
     </div>
   );
