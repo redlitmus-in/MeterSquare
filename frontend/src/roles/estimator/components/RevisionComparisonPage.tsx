@@ -55,19 +55,24 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
     return revNum === 0 ? 'Original' : `${revNum}`;
   };
 
-  // Filter BOQs for Revisions tab:
+  // Filter BOQs for Client Revisions tab:
   // 1. BOQs with revisions (revision_number > 0)
   // 2. Approved BOQs waiting to send to client (approved/revision_approved)
   // 3. BOQs pending TD approval (pending_approval/pending_revision)
   // 4. BOQs being edited (under_revision)
+  // 5. BOQs with client interactions
   const boqsWithRevisions = boqList.filter(boq => {
     const status = boq.status?.toLowerCase() || '';
     const hasRevisions = (boq.revision_number || 0) > 0;
     const isApprovedNotSent = (status === 'approved' || status === 'revision_approved');
     const isPendingApproval = (status === 'pending_approval' || status === 'pending_revision' || status === 'pending');
     const isUnderRevision = (status === 'under_revision');
+    const isSentToClient = (status === 'sent_for_confirmation');
+    const isClientRejected = (status === 'client_rejected');
+    const isClientConfirmed = (status === 'client_confirmed');
+    const isClientCancelled = (status === 'client_cancelled');
 
-    return hasRevisions || isApprovedNotSent || isPendingApproval || isUnderRevision;
+    return hasRevisions || isApprovedNotSent || isPendingApproval || isUnderRevision || isSentToClient || isClientRejected || isClientConfirmed || isClientCancelled;
   });
 
   // Filter based on search
@@ -315,6 +320,65 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
           <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200">
         <h3 className="text-lg font-bold text-gray-900 mb-4">Select Project to View Revisions</h3>
 
+        {/* Recent Projects - Always visible (4-5 most recent) */}
+        {!selectedBoq && boqsWithRevisions.length > 0 && (
+          <div className="mb-4 space-y-2">
+            <p className="text-sm font-semibold text-gray-700 mb-3">Recent Projects:</p>
+            <div className="space-y-2">
+              {boqsWithRevisions.slice(0, 5).map((boq) => (
+                <button
+                  key={boq.boq_id}
+                  onClick={() => {
+                    setSelectedBoq(boq);
+                    setSearchTerm('');
+                    setShowDropdown(false);
+                  }}
+                  className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border border-gray-200 rounded-lg"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="font-semibold text-gray-900">{boq.title}</div>
+                        {/* Status Badge */}
+                        {(() => {
+                          const status = boq.status?.toLowerCase() || '';
+                          if (status === 'approved' || status === 'revision_approved') {
+                            return (
+                              <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-medium">
+                                ✓ Ready
+                              </span>
+                            );
+                          } else if (status === 'pending_approval' || status === 'pending_revision' || status === 'pending') {
+                            return (
+                              <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-medium">
+                                ⏳ Pending
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        {boq.project?.name} • {boq.project?.client}
+                      </div>
+                    </div>
+                    <div className="text-right ml-4">
+                      <div className={`text-sm font-semibold px-2 py-1 rounded inline-block ${
+                        getDisplayRevisionNumber(boq) >= 7 ? 'bg-red-100 text-red-700' :
+                        getDisplayRevisionNumber(boq) >= 4 ? 'bg-orange-100 text-orange-700' :
+                        getDisplayRevisionNumber(boq) >= 1 ? 'bg-blue-100 text-blue-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        Rev {getDisplayRevisionNumber(boq)}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Search/Select Dropdown */}
         <div className="relative" ref={dropdownRef}>
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
@@ -341,7 +405,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
               className="absolute z-20 w-full mt-2 bg-white border border-gray-300 rounded-lg shadow-xl max-h-80 overflow-y-auto"
             >
               {boqsWithRevisions.length > 0 ? (
-                (searchTerm ? filteredBOQs : boqsWithRevisions).map((boq) => (
+                (searchTerm ? filteredBOQs : boqsWithRevisions.slice(0, 20)).map((boq) => (
                   <button
                     key={boq.boq_id}
                     onClick={() => {
@@ -1201,84 +1265,6 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
         </div>
       )}
 
-      {/* No Selection State - Show Recent Projects */}
-      {!selectedBoq && !searchTerm && (
-        <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
-          <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-6 border-b border-blue-200">
-            <h3 className="text-xl font-bold text-blue-900">📋 Recent Projects</h3>
-            <p className="text-sm text-blue-700 mt-1">Click on any project to view revisions and details</p>
-          </div>
-
-          {boqsWithRevisions.length > 0 ? (
-            <div className="p-4 space-y-3 max-h-[600px] overflow-y-auto">
-              {boqsWithRevisions.map((boq, index) => (
-                <motion.div
-                  key={boq.boq_id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                >
-                  <button
-                    onClick={() => {
-                      setSelectedBoq(boq);
-                      setShowDropdown(false);
-                    }}
-                    className="w-full text-left px-4 py-3 bg-white hover:bg-blue-50 transition-colors border border-gray-200 rounded-lg"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="font-semibold text-gray-900">{boq.title}</div>
-                          {/* Status Badge */}
-                          {(() => {
-                            const status = boq.status?.toLowerCase() || '';
-                            if (status === 'approved' || status === 'revision_approved') {
-                              return (
-                                <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-medium">
-                                  ✓ Ready to Send
-                                </span>
-                              );
-                            } else if (status === 'pending_approval' || status === 'pending_revision' || status === 'pending') {
-                              return (
-                                <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-medium">
-                                  ⏳ Pending TD
-                                </span>
-                              );
-                            }
-                            return null;
-                          })()}
-                        </div>
-                        <div className="text-sm text-gray-600">
-                          {boq.project?.name} • {boq.project?.client}
-                        </div>
-                      </div>
-                      <div className="text-right ml-4">
-                        <div className={`text-sm font-semibold px-2 py-1 rounded inline-block ${
-                          getDisplayRevisionNumber(boq) >= 7 ? 'bg-red-100 text-red-700' :
-                          getDisplayRevisionNumber(boq) >= 4 ? 'bg-orange-100 text-orange-700' :
-                          getDisplayRevisionNumber(boq) > 0 ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-blue-100 text-blue-700'
-                        }`}>
-                          {getRevisionLabel(boq)}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">{formatCurrency(boq.total_cost || 0)}</div>
-                      </div>
-                    </div>
-                  </button>
-                </motion.div>
-              ))}
-            </div>
-          ) : (
-            <div className="p-12 text-center text-gray-500">
-              <div className="text-6xl mb-4">📝</div>
-              <h3 className="text-lg font-bold text-gray-900 mb-2">No Projects with Revisions</h3>
-              <p className="text-sm text-gray-600">
-                Projects will appear here once they have revisions or are approved
-              </p>
-            </div>
-          )}
-        </div>
-      )}
         </TabsContent>
 
         {/* Internal Revisions Tab */}

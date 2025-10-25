@@ -14,6 +14,8 @@ export interface BOQMaterial {
   unit: string;
   unit_price: number;
   total_price: number;
+  vat_percentage?: number;
+  vat_amount?: number;
 }
 
 // Backend-aligned Labour interface
@@ -23,6 +25,38 @@ export interface BOQLabour {
   hours: number;
   rate_per_hour: number;
   total_cost: number;
+  work_type?: 'contract' | 'daily_wages' | 'piece_rate';
+}
+
+// Sub-Item interface (used in BOQ items)
+export interface BOQSubItem {
+  sub_item_id?: number;
+  sub_item_name: string;
+  scope?: string;
+  size?: string;
+  location?: string;
+  brand?: string;
+  quantity: number;
+  unit: string;
+  rate: number; // Client rate per unit
+  amount: number; // quantity × rate
+
+  // Per-sub-item percentages (calculated from client rate)
+  misc_percentage: number;
+  misc_amount: number;
+  overhead_profit_percentage: number;
+  overhead_profit_amount: number;
+  transport_percentage: number;
+  transport_amount: number;
+
+  // Cost breakdown
+  materials: BOQMaterial[];
+  labour: BOQLabour[];
+  material_cost: number; // Sum of materials
+  labour_cost: number; // Sum of labour
+  internal_cost: number; // material_cost + labour_cost
+  planned_profit: number; // overhead_profit_amount
+  actual_profit: number; // amount - internal_cost - misc_amount - transport_amount
 }
 
 // Backend-aligned BOQ Item interface
@@ -31,8 +65,14 @@ export interface BOQItemDetailed {
   item_name: string;
   description?: string;
   work_type?: WorkType;
+  quantity?: number;
+  unit?: string;
+  rate?: number;
 
-  // Cost calculations
+  // Sub-items (hierarchical structure)
+  sub_items: BOQSubItem[];
+
+  // Item-level cost calculations (sum of sub-items)
   base_cost: number;
   overhead_percentage: number;
   overhead_amount: number;
@@ -45,7 +85,14 @@ export interface BOQItemDetailed {
   actualItemCost: number;
   estimatedSellingPrice: number;
 
-  // Related data
+  // Cost analysis
+  client_cost: number; // Total client cost
+  internal_cost: number; // Total internal cost (materials + labour)
+  project_margin: number; // client_cost - internal_cost (excluding planned profit)
+  total_planned_profit: number; // Sum of all sub-item planned profits
+  total_actual_profit: number; // Sum of all sub-item actual profits
+
+  // Related data (backward compatibility - for items without sub-items)
   materials: BOQMaterial[];
   labour: BOQLabour[];
 }
@@ -310,6 +357,8 @@ export interface BOQGetResponse {
   created_at: string;
   created_by: string;
   email_sent?: boolean;
+  discount_percentage?: number;
+  discount_amount?: number;
   project_details: {
     project_name: string | null;
     location: string | null;

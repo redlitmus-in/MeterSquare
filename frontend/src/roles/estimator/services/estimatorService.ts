@@ -261,14 +261,27 @@ class EstimatorService {
         is_revision: true, // Flag to indicate this is a revision
         items: updateData.items.map((item: any) => ({
           ...item,
-          materials: item.materials.map((mat: any) => ({
+          // Process sub_items if they exist
+          sub_items: item.sub_items?.map((subItem: any) => ({
+            ...subItem,
+            materials: subItem.materials?.map((mat: any) => ({
+              ...mat,
+              total_price: mat.total_price || (mat.quantity * mat.unit_price)
+            })) || [],
+            labour: subItem.labour?.map((lab: any) => ({
+              ...lab,
+              total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour)
+            })) || []
+          })) || [],
+          // Process item-level materials and labour (for items without sub_items)
+          materials: item.materials?.map((mat: any) => ({
             ...mat,
             total_price: mat.total_price || (mat.quantity * mat.unit_price)
-          })),
-          labour: item.labour.map((lab: any) => ({
+          })) || [],
+          labour: item.labour?.map((lab: any) => ({
             ...lab,
             total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour)
-          }))
+          })) || []
         }))
       };
 
@@ -332,21 +345,34 @@ class EstimatorService {
         ...updateData,
         items: updateData.items.map((item: any) => ({
           ...item,
-          materials: item.materials.map((mat: any) => ({
+          // Process sub_items if they exist
+          sub_items: item.sub_items?.map((subItem: any) => ({
+            ...subItem,
+            materials: subItem.materials?.map((mat: any) => ({
+              ...mat,
+              total_price: mat.total_price || (mat.quantity * mat.unit_price)
+            })) || [],
+            labour: subItem.labour?.map((lab: any) => ({
+              ...lab,
+              total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour)
+            })) || []
+          })) || [],
+          // Process item-level materials and labour (for items without sub_items)
+          materials: item.materials?.map((mat: any) => ({
             ...mat,
             total_price: mat.total_price || (mat.quantity * mat.unit_price)
-          })),
-          labour: item.labour.map((lab: any) => ({
+          })) || [],
+          labour: item.labour?.map((lab: any) => ({
             ...lab,
             total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour)
-          }))
+          })) || []
         }))
       };
 
       console.log('=== PROCESSED INTERNAL REVISION PAYLOAD ===', JSON.stringify(processedData, null, 2));
 
       // Call internal revision API endpoint
-      const response = await apiClient.put(`/boq/${boqId}/internal_revision`, processedData);
+      const response = await apiClient.put(`/update_internal_boq/${boqId}`, processedData);
       console.log('BOQ internal revision response:', response.data);
 
       return {
@@ -475,7 +501,7 @@ class EstimatorService {
         };
       }
 
-      const response = await apiClient.put(`/boq/update_boq/${boqId}`, {
+      const response = await apiClient.put(`/boq/update_internal_boq/${boqId}`, {
         status: 'Rejected',
         notes: reason
       });

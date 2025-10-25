@@ -366,10 +366,10 @@ const EstimatorHub: React.FC = () => {
 
     fetchData();
 
-    // Set up auto-refresh polling every 3 seconds for instant updates
+    // Set up auto-refresh polling every 2 seconds for instant updates
     const intervalId = setInterval(() => {
       loadBOQs(false); // Auto-refresh BOQs in background without showing loading spinner
-    }, 3000); // 3 seconds for instant updates
+    }, 2000); // 2 seconds for instant updates
 
     return () => {
       abortController.abort();

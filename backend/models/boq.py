@@ -66,6 +66,22 @@ class MasterSubItem(db.Model):
     quantity = db.Column(db.Float, nullable=True)
     per_unit_cost = db.Column(db.Float, nullable=True)
     sub_item_total_cost = db.Column(db.Float, nullable=True)
+
+    # Per-sub-item percentages (calculated from client rate)
+    misc_percentage = db.Column(db.Float, default=10.0)
+    misc_amount = db.Column(db.Float, default=0.0)
+    overhead_profit_percentage = db.Column(db.Float, default=25.0)
+    overhead_profit_amount = db.Column(db.Float, default=0.0)
+    transport_percentage = db.Column(db.Float, default=5.0)
+    transport_amount = db.Column(db.Float, default=0.0)
+
+    # Cost breakdown
+    material_cost = db.Column(db.Float, default=0.0)
+    labour_cost = db.Column(db.Float, default=0.0)
+    internal_cost = db.Column(db.Float, default=0.0)
+    planned_profit = db.Column(db.Float, default=0.0)
+    actual_profit = db.Column(db.Float, default=0.0)
+
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)

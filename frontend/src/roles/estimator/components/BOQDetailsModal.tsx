@@ -16,7 +16,8 @@ import {
   Printer,
   Edit,
   Eye,
-  Clock
+  Clock,
+  TrendingUp
 } from 'lucide-react';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
 import { estimatorService } from '../services/estimatorService';
@@ -445,31 +446,13 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                         )}
                                       </div>
                                     </div>
-                                    <div className="text-right">
-                                      <p className="text-lg font-semibold text-green-600">
-                                        {formatCurrency(item.selling_price || item.item_total || 0)}
-                                      </p>
-                                      <p className="text-xs text-gray-600">Total Price</p>
+                                  </div>
+                                  {/* Second row with description only */}
+                                  {item.description && (
+                                    <div className="ml-9 text-sm text-gray-600">
+                                      {item.description}
                                     </div>
-                                  </div>
-                                  {/* Second row with description and item details */}
-                                  <div className="ml-9 flex items-center gap-4 text-sm text-gray-700">
-                                    {item.description && (
-                                      <span className="text-gray-600">{item.description}</span>
-                                    )}
-                                    {item.quantity && item.rate && (
-                                      <div className="flex items-center gap-3 ml-auto">
-                                        <span className="text-xs text-gray-500">Qty:</span>
-                                        <span className="font-medium">{item.quantity}</span>
-                                        <span className="text-xs text-gray-500">{item.unit || 'nos'}</span>
-                                        <span className="text-gray-400">×</span>
-                                        <span className="text-xs text-gray-500">Rate:</span>
-                                        <span className="font-medium">{formatCurrency(item.rate)}</span>
-                                        <span className="text-gray-400">=</span>
-                                        <span className="font-semibold text-blue-600">{formatCurrency(item.item_total || (item.quantity * item.rate))}</span>
-                                      </div>
-                                    )}
-                                  </div>
+                                  )}
                                 </div>
 
                                 {/* Item Details (Expandable) */}
@@ -515,20 +498,11 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                         <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Unit</th>
                                                         <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Rate</th>
                                                         <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Total</th>
-                                                        {subItem.materials.some((m: any) => m.vat_percentage > 0) && (
-                                                          <>
-                                                            <th className="text-center py-1.5 px-2 font-semibold text-blue-900">VAT %</th>
-                                                            <th className="text-right py-1.5 px-2 font-semibold text-blue-900">VAT Amt</th>
-                                                            <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Total w/ VAT</th>
-                                                          </>
-                                                        )}
                                                       </tr>
                                                     </thead>
                                                     <tbody>
                                                       {subItem.materials.map((material: any, mIndex: number) => {
-                                                        const hasVAT = subItem.materials.some((m: any) => m.vat_percentage > 0);
                                                         const materialTotal = material.total_price || (material.quantity * material.unit_price);
-                                                        const vatAmount = material.vat_amount || (materialTotal * ((material.vat_percentage || 0) / 100));
                                                         return (
                                                           <tr key={mIndex} className={`border-b border-blue-100 ${mIndex % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
                                                             <td className="py-1.5 px-2 text-gray-900">
@@ -539,40 +513,14 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                             <td className="py-1.5 px-2 text-center text-gray-700 uppercase">{material.unit}</td>
                                                             <td className="py-1.5 px-2 text-right text-gray-700">{formatCurrency(material.unit_price)}</td>
                                                             <td className="py-1.5 px-2 text-right font-semibold text-blue-700">{formatCurrency(materialTotal)}</td>
-                                                            {hasVAT && (
-                                                              <>
-                                                                <td className="py-1.5 px-2 text-center text-gray-700">{material.vat_percentage || 0}%</td>
-                                                                <td className="py-1.5 px-2 text-right text-green-700 font-semibold">{formatCurrency(vatAmount)}</td>
-                                                                <td className="py-1.5 px-2 text-right text-indigo-700 font-bold">{formatCurrency(materialTotal + vatAmount)}</td>
-                                                              </>
-                                                            )}
                                                           </tr>
                                                         );
                                                       })}
                                                       <tr className="bg-blue-200 border-t-2 border-blue-400">
-                                                        <td colSpan={subItem.materials.some((m: any) => m.vat_percentage > 0) ? 4 : 4} className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">Materials Total:</td>
+                                                        <td colSpan={4} className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">Materials Total:</td>
                                                         <td className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">
                                                           {formatCurrency(subItem.materials.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0))}
                                                         </td>
-                                                        {subItem.materials.some((m: any) => m.vat_percentage > 0) && (
-                                                          <>
-                                                            <td className="py-1.5 px-2 font-bold text-blue-900 text-center text-xs">-</td>
-                                                            <td className="py-1.5 px-2 font-bold text-green-900 text-right text-xs">
-                                                              {formatCurrency(subItem.materials.reduce((sum: number, m: any) => {
-                                                                const matTotal = m.total_price || (m.quantity * m.unit_price);
-                                                                const matVAT = m.vat_amount || (matTotal * ((m.vat_percentage || 0) / 100));
-                                                                return sum + matVAT;
-                                                              }, 0))}
-                                                            </td>
-                                                            <td className="py-1.5 px-2 font-bold text-indigo-900 text-right text-xs">
-                                                              {formatCurrency(subItem.materials.reduce((sum: number, m: any) => {
-                                                                const matTotal = m.total_price || (m.quantity * m.unit_price);
-                                                                const matVAT = m.vat_amount || (matTotal * ((m.vat_percentage || 0) / 100));
-                                                                return sum + matTotal + matVAT;
-                                                              }, 0))}
-                                                            </td>
-                                                          </>
-                                                        )}
                                                       </tr>
                                                     </tbody>
                                                   </table>
@@ -617,117 +565,141 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                 </div>
                                               </div>
                                             )}
+
+                                            {/* Cost Breakdown Percentages (Per-Sub-Item) */}
+                                            <div className="bg-purple-50/50 rounded-lg p-3 border border-purple-300 mt-3">
+                                              <h5 className="text-xs font-bold text-purple-900 mb-2 flex items-center gap-2">
+                                                <Calculator className="w-3.5 h-3.5" />
+                                                Cost Breakdown Percentages
+                                              </h5>
+                                              <div className="space-y-1.5 text-xs">
+                                                {(() => {
+                                                  const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                                  const miscPercentage = subItem.misc_percentage || 10;
+                                                  const miscAmount = subItem.misc_amount || (clientAmount * (miscPercentage / 100));
+                                                  const overheadProfitPercentage = subItem.overhead_profit_percentage || 25;
+                                                  const overheadProfitAmount = subItem.overhead_profit_amount || (clientAmount * (overheadProfitPercentage / 100));
+                                                  const transportPercentage = subItem.transport_percentage || 5;
+                                                  const transportAmount = subItem.transport_amount || (clientAmount * (transportPercentage / 100));
+
+                                                  return (
+                                                    <>
+                                                      <div className="flex justify-between">
+                                                        <span className="text-gray-700">Client Amount (Qty × Rate):</span>
+                                                        <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between">
+                                                        <span className="text-gray-700">Miscellaneous ({miscPercentage}%):</span>
+                                                        <span className="font-semibold text-red-600">- {formatCurrency(miscAmount)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between">
+                                                        <span className="text-gray-700">Overhead & Profit ({overheadProfitPercentage}%):</span>
+                                                        <span className="font-semibold text-red-600">- {formatCurrency(overheadProfitAmount)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between">
+                                                        <span className="text-gray-700">Transport ({transportPercentage}%):</span>
+                                                        <span className="font-semibold text-red-600">- {formatCurrency(transportAmount)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between pt-1.5 border-t border-purple-300">
+                                                        <span className="text-gray-800 font-medium">Remaining for Costs:</span>
+                                                        <span className="font-bold text-green-600">{formatCurrency(clientAmount - miscAmount - overheadProfitAmount - transportAmount)}</span>
+                                                      </div>
+                                                    </>
+                                                  );
+                                                })()}
+                                              </div>
+                                            </div>
+
+                                            {/* Profit Analysis (Per-Sub-Item) */}
+                                            <div className="bg-green-50/50 rounded-lg p-3 border border-green-300 mt-3">
+                                              <h5 className="text-xs font-bold text-green-900 mb-2 flex items-center gap-2">
+                                                <TrendingUp className="w-3.5 h-3.5" />
+                                                Profit Analysis
+                                              </h5>
+                                              <div className="space-y-1.5 text-xs">
+                                                {(() => {
+                                                  const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                                  const materialCost = subItem.material_cost || (subItem.materials?.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0) || 0);
+                                                  const labourCost = subItem.labour_cost || (subItem.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0);
+                                                  const internalCost = subItem.internal_cost || (materialCost + labourCost);
+                                                  const miscAmount = subItem.misc_amount || (clientAmount * ((subItem.misc_percentage || 10) / 100));
+                                                  const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || 5) / 100));
+                                                  const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || 25) / 100));
+                                                  const actualProfit = subItem.actual_profit || (clientAmount - internalCost - miscAmount - transportAmount);
+
+                                                  return (
+                                                    <>
+                                                      <div className="flex justify-between">
+                                                        <span className="text-gray-700">Internal Cost (Mat + Lab):</span>
+                                                        <span className="font-semibold text-gray-900">{formatCurrency(internalCost)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between">
+                                                        <span className="text-gray-700">Planned Profit (O&P):</span>
+                                                        <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between pt-1.5 border-t border-green-300">
+                                                        <span className="text-gray-800 font-medium">Actual Profit:</span>
+                                                        <span className={`font-bold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
+                                                          {formatCurrency(actualProfit)}
+                                                        </span>
+                                                      </div>
+                                                      <div className="flex justify-between text-xs">
+                                                        <span className="text-gray-600">Variance:</span>
+                                                        <span className={`font-semibold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-red-600'}`}>
+                                                          {actualProfit >= plannedProfit ? '+' : ''}{formatCurrency(actualProfit - plannedProfit)}
+                                                        </span>
+                                                      </div>
+                                                    </>
+                                                  );
+                                                })()}
+                                              </div>
+                                            </div>
                                           </div>
                                         ))}
                                       </div>
                                     )}
 
-                                    {/* Cost Summary */}
-                                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                                      <h5 className="text-sm font-bold text-gray-900 mb-3">Cost Summary</h5>
-                                      <div className="space-y-1 text-xs">
-                                        <div className="flex justify-between py-1">
-                                          <span className="text-gray-600">Item Total (Qty × Rate):</span>
-                                          <span className="font-semibold">{formatCurrency(item.item_total || (item.quantity || 0) * (item.rate || 0))}</span>
-                                        </div>
-                                        <div className="flex justify-between py-1">
-                                          <span className="text-gray-600">Miscellaneous ({item.overhead_percentage || 0}%):</span>
-                                          <span className="font-semibold">{formatCurrency(item.overhead_amount || 0)}</span>
-                                        </div>
-                                        <div className="flex justify-between py-1">
-                                          <span className="text-gray-600">Overhead & Profit ({item.profit_margin_percentage || item.overhead_profit_percentage || 0}%):</span>
-                                          <span className="font-semibold">{formatCurrency(item.profit_margin_amount || item.overhead_profit_amount || 0)}</span>
-                                        </div>
-                                        <div className="flex justify-between py-1 border-t border-gray-200 pt-1">
-                                          <span className="text-gray-700 font-medium">Subtotal:</span>
-                                          <span className="font-semibold">{formatCurrency(item.subtotal || item.before_discount || ((item.item_total || 0) + (item.miscellaneous_amount || 0) + (item.overhead_amount || 0) + (item.profit_margin_amount || item.overhead_profit_amount || 0)))}</span>
-                                        </div>
-                                        {(item.discount_percentage || 0) > 0 && (
-                                          <>
-                                            <div className="flex justify-between py-1 text-red-600">
-                                              <span>Discount ({item.discount_percentage}%):</span>
-                                              <span className="font-semibold">- {formatCurrency(item.discount_amount || 0)}</span>
-                                            </div>
-                                            <div className="flex justify-between py-1 border-t border-gray-200 pt-1">
-                                              <span className="text-gray-700 font-medium">After Discount:</span>
-                                              <span className="font-semibold">{formatCurrency(item.after_discount || 0)}</span>
-                                            </div>
-                                          </>
-                                        )}
+                                    {/* Cost Analysis (Item-Level) */}
+                                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-300 shadow-sm">
+                                      <h5 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
+                                        <Calculator className="w-4 h-4" />
+                                        Cost Analysis
+                                      </h5>
+                                      <div className="space-y-2 text-sm">
                                         {(() => {
-                                          // Check if individual material VAT is being used
-                                          const hasIndividualVAT = item.sub_items?.some((si: any) =>
-                                            si.materials?.some((m: any) => (m.vat_percentage || 0) > 0)
-                                          );
-
-                                          // Calculate total individual material VAT
-                                          const individualVATTotal = item.sub_items?.reduce((total: number, si: any) => {
-                                            return total + (si.materials?.reduce((sum: number, m: any) => {
-                                              const matTotal = m.total_price || (m.quantity * m.unit_price);
-                                              const matVAT = m.vat_amount || (matTotal * ((m.vat_percentage || 0) / 100));
-                                              return sum + matVAT;
-                                            }, 0) || 0);
+                                          const clientCost = item.client_cost || item.sub_items?.reduce((sum: number, si: any) => sum + ((si.quantity || 0) * (si.rate || 0)), 0) || 0;
+                                          const internalCost = item.internal_cost || item.sub_items?.reduce((sum: number, si: any) => {
+                                            const materialCost = si.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || m.quantity * m.unit_price), 0) || 0;
+                                            const labourCost = si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0;
+                                            return sum + materialCost + labourCost;
                                           }, 0) || 0;
-
-                                          // Store for use in Final Total calculation
-                                          (window as any)._tempIndividualVAT = hasIndividualVAT ? individualVATTotal : 0;
-
-                                          if (hasIndividualVAT && individualVATTotal > 0) {
-                                            return (
-                                              <div className="flex justify-between py-1 border-t border-gray-200 pt-1">
-                                                <span className="text-gray-700 font-medium">VAT (Individual Material VAT) <span className="text-xs text-green-600">[ADDITIONAL]</span>:</span>
-                                                <span className="font-semibold text-green-600">+ {formatCurrency(individualVATTotal)}</span>
-                                              </div>
-                                            );
-                                          } else if ((item.vat_percentage || 0) > 0) {
-                                            return (
-                                              <div className="flex justify-between py-1 border-t border-gray-200 pt-1">
-                                                <span className="text-gray-700 font-medium">VAT ({item.vat_percentage}%) <span className="text-xs text-green-600">[ADDITIONAL]</span>:</span>
-                                                <span className="font-semibold text-green-600">+ {formatCurrency(item.vat_amount || 0)}</span>
-                                              </div>
-                                            );
-                                          }
-                                          return null;
-                                        })()}
-                                        {(() => {
-                                          const individualVAT = (window as any)._tempIndividualVAT || 0;
-                                          const hasIndividualVAT = individualVAT > 0;
-
-                                          // If individual VAT is used, recalculate final total
-                                          const finalTotal = hasIndividualVAT
-                                            ? ((item.after_discount || (item.subtotal || 0) - (item.discount_amount || 0)) + individualVAT)
-                                            : (item.selling_price || item.estimatedSellingPrice || ((item.after_discount || 0) + (item.vat_amount || 0)));
+                                          const projectMargin = item.project_margin || (clientCost - internalCost);
+                                          const marginPercentage = clientCost > 0 ? ((projectMargin / clientCost) * 100) : 0;
 
                                           return (
-                                            <div className="flex justify-between pt-2 border-t-2 border-gray-400 font-bold">
-                                              <span className="text-gray-900">Final Total Price:</span>
-                                              <span className="text-green-600">{formatCurrency(finalTotal)}</span>
-                                            </div>
+                                            <>
+                                              <div className="flex justify-between items-center py-1">
+                                                <span className="text-gray-700 font-medium">Client Cost (Total):</span>
+                                                <span className="text-blue-700 font-bold text-base">{formatCurrency(clientCost)}</span>
+                                              </div>
+                                              <div className="flex justify-between items-center py-1">
+                                                <span className="text-gray-700 font-medium">Internal Cost (Mat + Lab):</span>
+                                                <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
+                                              </div>
+                                              <div className="flex justify-between items-center pt-2 border-t-2 border-blue-400">
+                                                <span className="text-gray-900 font-bold">Project Margin:</span>
+                                                <div className="text-right">
+                                                  <div className={`font-bold text-lg ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {formatCurrency(projectMargin)}
+                                                  </div>
+                                                  <div className={`text-xs font-semibold ${marginPercentage >= 20 ? 'text-green-600' : marginPercentage >= 10 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                                    ({marginPercentage.toFixed(1)}% margin)
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </>
                                           );
                                         })()}
-                                        {(item.subItemsTotal || item.totalMaterialCost || item.totalLabourCost) && (item.subItemsTotal > 0 || item.totalMaterialCost > 0 || item.totalLabourCost > 0) && (
-                                          <div className="mt-3 pt-3 border-t border-gray-300">
-                                            <div className="text-xs text-gray-500 mb-2 font-medium">Raw Materials Breakdown:</div>
-                                            {item.totalMaterialCost > 0 && (
-                                              <div className="flex justify-between py-0.5">
-                                                <span className="text-gray-500 text-xs">Materials:</span>
-                                                <span className="text-gray-700 text-xs">{formatCurrency(item.totalMaterialCost)}</span>
-                                              </div>
-                                            )}
-                                            {item.totalLabourCost > 0 && (
-                                              <div className="flex justify-between py-0.5">
-                                                <span className="text-gray-500 text-xs">Labour:</span>
-                                                <span className="text-gray-700 text-xs">{formatCurrency(item.totalLabourCost)}</span>
-                                              </div>
-                                            )}
-                                            {(item.subItemsTotal || (item.totalMaterialCost + item.totalLabourCost)) > 0 && (
-                                              <div className="flex justify-between py-0.5 border-t border-gray-200 mt-1 pt-1">
-                                                <span className="text-gray-600 text-xs font-medium">Raw Materials Total:</span>
-                                                <span className="text-gray-700 text-xs font-semibold">{formatCurrency(item.subItemsTotal || (item.totalMaterialCost + item.totalLabourCost))}</span>
-                                              </div>
-                                            )}
-                                          </div>
-                                        )}
                                       </div>
                                     </div>
                                   </div>
@@ -771,12 +743,6 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                         <span className="ml-2 text-sm text-gray-600">{item.description}</span>
                                       )}
                                     </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <p className="text-lg font-semibold text-green-600">
-                                      {formatCurrency(item.selling_price)}
-                                    </p>
-                                    <p className="text-xs text-gray-600">Selling Price</p>
                                   </div>
                                 </div>
 
@@ -865,58 +831,47 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                       </div>
                                     )}
 
-                                    {/* Overheads & Profit - Green Theme */}
-                                    <div className="bg-red-50/20 rounded-lg p-4 border border-red-300 hover:border-red-400 transition-all duration-200">
-                                      <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
-                                        <div className="p-1.5 bg-white rounded shadow-sm">
-                                          <Calculator className="w-4 h-4 text-green-600" />
-                                        </div>
-                                        Overheads & Profit
+                                    {/* Cost Analysis (Item-Level) */}
+                                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-300 shadow-sm">
+                                      <h5 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
+                                        <Calculator className="w-4 h-4" />
+                                        Cost Analysis
                                       </h5>
                                       <div className="space-y-2 text-sm">
-                                        <div className="flex justify-between">
-                                          <span className="text-gray-600">Overhead ({item.overhead_percentage}%):</span>
-                                          <span className="font-semibold">{formatCurrency(item.overhead_amount)}</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-gray-600">Profit Margin ({item.profit_margin_percentage}%):</span>
-                                          <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
-                                        </div>
-                                      </div>
-                                    </div>
+                                        {(() => {
+                                          const clientCost = item.client_cost || item.sub_items?.reduce((sum: number, si: any) => sum + ((si.quantity || 0) * (si.rate || 0)), 0) || 0;
+                                          const internalCost = item.internal_cost || item.sub_items?.reduce((sum: number, si: any) => {
+                                            const materialCost = si.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || m.quantity * m.unit_price), 0) || 0;
+                                            const labourCost = si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0;
+                                            return sum + materialCost + labourCost;
+                                          }, 0) || 0;
+                                          const projectMargin = item.project_margin || (clientCost - internalCost);
+                                          const marginPercentage = clientCost > 0 ? ((projectMargin / clientCost) * 100) : 0;
 
-                                    {/* Cost Summary - Gray Theme */}
-                                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                                      <h5 className="text-sm font-bold text-gray-900 mb-3">Cost Summary</h5>
-                                      <div className="space-y-1 text-sm">
-                                        <div className="flex justify-between">
-                                          <span className="text-gray-600">Base Cost:</span>
-                                          <span className="font-semibold">{formatCurrency(item.base_cost)}</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-gray-600">Overhead ({item.overhead_percentage || 0}%):</span>
-                                          <span className="font-semibold">{formatCurrency(item.overhead_amount)}</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-gray-600">Profit ({item.profit_margin_percentage || 0}%):</span>
-                                          <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
-                                        </div>
-                                        {(item.discount_percentage || 0) > 0 && (
-                                          <div className="flex justify-between text-red-600">
-                                            <span>Discount ({item.discount_percentage}%):</span>
-                                            <span className="font-semibold">- {formatCurrency(item.discount_amount || 0)}</span>
-                                          </div>
-                                        )}
-                                        {(item.vat_percentage || 0) > 0 && (
-                                          <div className="flex justify-between text-blue-600">
-                                            <span>VAT ({item.vat_percentage}%):</span>
-                                            <span className="font-semibold">+ {formatCurrency(item.vat_amount || 0)}</span>
-                                          </div>
-                                        )}
-                                        <div className="flex justify-between pt-2 border-t border-gray-300 font-bold">
-                                          <span className="text-gray-900">Selling Price:</span>
-                                          <span className="text-green-600">{formatCurrency(item.selling_price || item.estimatedSellingPrice || item.total_cost)}</span>
-                                        </div>
+                                          return (
+                                            <>
+                                              <div className="flex justify-between items-center py-1">
+                                                <span className="text-gray-700 font-medium">Client Cost (Total):</span>
+                                                <span className="text-blue-700 font-bold text-base">{formatCurrency(clientCost)}</span>
+                                              </div>
+                                              <div className="flex justify-between items-center py-1">
+                                                <span className="text-gray-700 font-medium">Internal Cost (Mat + Lab):</span>
+                                                <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
+                                              </div>
+                                              <div className="flex justify-between items-center pt-2 border-t-2 border-blue-400">
+                                                <span className="text-gray-900 font-bold">Project Margin:</span>
+                                                <div className="text-right">
+                                                  <div className={`font-bold text-lg ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {formatCurrency(projectMargin)}
+                                                  </div>
+                                                  <div className={`text-xs font-semibold ${marginPercentage >= 20 ? 'text-green-600' : marginPercentage >= 10 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                                    ({marginPercentage.toFixed(1)}% margin)
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </>
+                                          );
+                                        })()}
                                       </div>
                                     </div>
                                   </div>
@@ -958,12 +913,6 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                     </span>
                                   )}
                                 </div>
-                              </div>
-                              <div className="text-right">
-                                <p className="text-lg font-semibold text-green-600">
-                                  {formatCurrency(item.selling_price)}
-                                </p>
-                                <p className="text-xs text-gray-600">Selling Price</p>
                               </div>
                             </div>
 
@@ -1079,58 +1028,47 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                   </div>
                                 )}
 
-                                {/* Overheads & Profit - Green Theme */}
-                                <div className="bg-red-50/20 rounded-lg p-4 border border-red-300 hover:border-red-400 transition-all duration-200">
-                                  <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
-                                    <div className="p-1.5 bg-white rounded shadow-sm">
-                                      <Calculator className="w-4 h-4 text-green-600" />
-                                    </div>
-                                    Overheads & Profit
+                                {/* Cost Analysis (Item-Level) */}
+                                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-300 shadow-sm">
+                                  <h5 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
+                                    <Calculator className="w-4 h-4" />
+                                    Cost Analysis
                                   </h5>
                                   <div className="space-y-2 text-sm">
-                                    <div className="flex justify-between">
-                                      <span className="text-gray-600">Overhead ({item.overhead_percentage}%):</span>
-                                      <span className="font-semibold">{formatCurrency(item.overhead_amount)}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-gray-600">Profit Margin ({item.profit_margin_percentage}%):</span>
-                                      <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
-                                    </div>
-                                  </div>
-                                </div>
+                                    {(() => {
+                                      const clientCost = item.client_cost || item.sub_items?.reduce((sum: number, si: any) => sum + ((si.quantity || 0) * (si.rate || 0)), 0) || 0;
+                                      const internalCost = item.internal_cost || item.sub_items?.reduce((sum: number, si: any) => {
+                                        const materialCost = si.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || m.quantity * m.unit_price), 0) || 0;
+                                        const labourCost = si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0;
+                                        return sum + materialCost + labourCost;
+                                      }, 0) || 0;
+                                      const projectMargin = item.project_margin || (clientCost - internalCost);
+                                      const marginPercentage = clientCost > 0 ? ((projectMargin / clientCost) * 100) : 0;
 
-                                {/* Cost Summary - Gray Theme */}
-                                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                                  <h5 className="text-sm font-bold text-gray-900 mb-3">Cost Summary</h5>
-                                  <div className="space-y-1 text-sm">
-                                    <div className="flex justify-between">
-                                      <span className="text-gray-600">Base Cost:</span>
-                                      <span className="font-semibold">{formatCurrency(item.base_cost)}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-gray-600">Overhead ({item.overhead_percentage || 0}%):</span>
-                                      <span className="font-semibold">{formatCurrency(item.overhead_amount)}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-gray-600">Profit ({item.profit_margin_percentage || 0}%):</span>
-                                      <span className="font-semibold">{formatCurrency(item.profit_margin_amount)}</span>
-                                    </div>
-                                    {(item.discount_percentage || 0) > 0 && (
-                                      <div className="flex justify-between text-red-600">
-                                        <span>Discount ({item.discount_percentage}%):</span>
-                                        <span className="font-semibold">- {formatCurrency(item.discount_amount || 0)}</span>
-                                      </div>
-                                    )}
-                                    {(item.vat_percentage || 0) > 0 && (
-                                      <div className="flex justify-between text-blue-600">
-                                        <span>VAT ({item.vat_percentage}%):</span>
-                                        <span className="font-semibold">+ {formatCurrency(item.vat_amount || 0)}</span>
-                                      </div>
-                                    )}
-                                    <div className="flex justify-between pt-2 border-t border-gray-300 font-bold">
-                                      <span className="text-gray-900">Selling Price:</span>
-                                      <span className="text-green-600">{formatCurrency(item.selling_price || item.estimatedSellingPrice || item.total_cost)}</span>
-                                    </div>
+                                      return (
+                                        <>
+                                          <div className="flex justify-between items-center py-1">
+                                            <span className="text-gray-700 font-medium">Client Cost (Total):</span>
+                                            <span className="text-blue-700 font-bold text-base">{formatCurrency(clientCost)}</span>
+                                          </div>
+                                          <div className="flex justify-between items-center py-1">
+                                            <span className="text-gray-700 font-medium">Internal Cost (Mat + Lab):</span>
+                                            <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
+                                          </div>
+                                          <div className="flex justify-between items-center pt-2 border-t-2 border-blue-400">
+                                            <span className="text-gray-900 font-bold">Project Margin:</span>
+                                            <div className="text-right">
+                                              <div className={`font-bold text-lg ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                {formatCurrency(projectMargin)}
+                                              </div>
+                                              <div className={`text-xs font-semibold ${marginPercentage >= 20 ? 'text-green-600' : marginPercentage >= 10 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                                ({marginPercentage.toFixed(1)}% margin)
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
                                   </div>
                                 </div>
                               </div>
@@ -1153,105 +1091,147 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                             Overall Cost Summary
                           </h3>
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {/* Materials Summary */}
-                            <div className="bg-white rounded-lg p-4 border border-blue-200 shadow-sm">
-                              <div className="flex items-center gap-2 mb-3">
-                                <Package className="w-5 h-5 text-blue-600" />
-                                <h4 className="font-semibold text-blue-900">Total Materials</h4>
-                              </div>
-                              <div className="space-y-2 text-sm">
-                                {(() => {
-                                  // Use combined_summary if available, otherwise calculate from items
-                                  const allItems = boqData.existing_purchase?.items || boqData.items || [];
-                                  const totalMaterialCost = boqData.combined_summary?.total_material_cost ||
-                                                          boqData.summary?.total_material_cost ||
-                                                          allItems.reduce((sum, item) => {
-                                                            // Check if item has sub_items with materials
-                                                            if (item.sub_items && item.sub_items.length > 0) {
-                                                              return sum + item.sub_items.reduce((siSum: number, si: any) =>
-                                                                siSum + (si.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || 0), 0) || 0), 0
-                                                              );
-                                                            }
-                                                            // Otherwise use item-level materials
-                                                            return sum + (item.materials?.reduce((mSum, m) => mSum + (m.total_price || 0), 0) || 0);
-                                                          }, 0);
-                                  const totalMaterialCount = boqData.combined_summary?.total_materials ||
-                                                           boqData.summary?.total_materials ||
-                                                           allItems.reduce((sum, item) => {
-                                                             // Check if item has sub_items with materials
-                                                             if (item.sub_items && item.sub_items.length > 0) {
-                                                               return sum + item.sub_items.reduce((siSum: number, si: any) =>
-                                                                 siSum + (si.materials?.length || 0), 0
-                                                               );
-                                                             }
-                                                             // Otherwise use item-level materials
-                                                             return sum + (item.materials?.length || 0);
-                                                           }, 0);
-                                  return (
-                                    <>
-                                      <div className="flex justify-between text-gray-600">
-                                        <span>Total Items:</span>
-                                        <span className="font-medium">{totalMaterialCount}</span>
-                                      </div>
-                                      <div className="flex justify-between pt-2 border-t border-blue-100 font-bold text-blue-700">
-                                        <span>Total Cost:</span>
-                                        <span>{formatCurrency(totalMaterialCost)}</span>
-                                      </div>
-                                    </>
-                                  );
-                                })()}
-                              </div>
-                            </div>
+                          {/* BOQ Financial Summary */}
+                          <div className="space-y-4">
+                            {(() => {
+                              const allItems = boqData.existing_purchase?.items || boqData.items || [];
 
-                            {/* Labour Summary */}
-                            <div className="bg-white rounded-lg p-4 border border-orange-200 shadow-sm">
-                              <div className="flex items-center gap-2 mb-3">
-                                <Users className="w-5 h-5 text-orange-600" />
-                                <h4 className="font-semibold text-orange-900">Total Labour</h4>
-                              </div>
-                              <div className="space-y-2 text-sm">
-                                {(() => {
-                                  const allItems = boqData.existing_purchase?.items || boqData.items || [];
-                                  const totalLabourCost = boqData.combined_summary?.total_labour_cost ||
-                                                        boqData.summary?.total_labour_cost ||
-                                                        allItems.reduce((sum, item) => {
-                                                          // Check if item has sub_items with labour
-                                                          if (item.sub_items && item.sub_items.length > 0) {
-                                                            return sum + item.sub_items.reduce((siSum: number, si: any) =>
-                                                              siSum + (si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || 0), 0) || 0), 0
-                                                            );
-                                                          }
-                                                          // Otherwise use item-level labour
-                                                          return sum + (item.labour?.reduce((lSum, l) => lSum + (l.total_cost || 0), 0) || 0);
-                                                        }, 0);
-                                  const totalLabourCount = boqData.combined_summary?.total_labour ||
-                                                         boqData.summary?.total_labour ||
-                                                         allItems.reduce((sum, item) => {
-                                                           // Check if item has sub_items with labour
-                                                           if (item.sub_items && item.sub_items.length > 0) {
-                                                             return sum + item.sub_items.reduce((siSum: number, si: any) =>
-                                                               siSum + (si.labour?.length || 0), 0
-                                                             );
-                                                           }
-                                                           // Otherwise use item-level labour
-                                                           return sum + (item.labour?.length || 0);
-                                                         }, 0);
-                                  return (
-                                    <>
-                                      <div className="flex justify-between text-gray-600">
-                                        <span>Total Resources:</span>
-                                        <span className="font-medium">{totalLabourCount}</span>
-                                      </div>
-                                      <div className="flex justify-between pt-2 border-t border-orange-100 font-bold text-orange-700">
-                                        <span>Total Cost:</span>
-                                        <span>{formatCurrency(totalLabourCost)}</span>
-                                      </div>
-                                    </>
+                              // Calculate totals
+                              const totalClientAmount = allItems.reduce((sum, item) => {
+                                if (item.sub_items && item.sub_items.length > 0) {
+                                  return sum + item.sub_items.reduce((siSum: number, si: any) =>
+                                    siSum + ((si.quantity || 0) * (si.rate || 0)), 0
                                   );
-                                })()}
-                              </div>
-                            </div>
+                                }
+                                return sum + (item.client_cost || 0);
+                              }, 0);
+
+                              const totalMaterialCost = allItems.reduce((sum, item) => {
+                                if (item.sub_items && item.sub_items.length > 0) {
+                                  return sum + item.sub_items.reduce((siSum: number, si: any) =>
+                                    siSum + (si.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || m.quantity * m.unit_price), 0) || 0), 0
+                                  );
+                                }
+                                return sum + (item.materials?.reduce((mSum, m) => mSum + (m.total_price || 0), 0) || 0);
+                              }, 0);
+
+                              const totalLabourCost = allItems.reduce((sum, item) => {
+                                if (item.sub_items && item.sub_items.length > 0) {
+                                  return sum + item.sub_items.reduce((siSum: number, si: any) =>
+                                    siSum + (si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0), 0
+                                  );
+                                }
+                                return sum + (item.labour?.reduce((lSum, l) => lSum + (l.total_cost || 0), 0) || 0);
+                              }, 0);
+
+                              const totalInternalCost = totalMaterialCost + totalLabourCost;
+                              const projectMargin = totalClientAmount - totalInternalCost;
+                              const marginPercentage = totalClientAmount > 0 ? ((projectMargin / totalClientAmount) * 100) : 0;
+
+                              // Calculate planned profit (sum of all O&P)
+                              const totalPlannedProfit = allItems.reduce((sum, item) => {
+                                if (item.sub_items && item.sub_items.length > 0) {
+                                  return sum + item.sub_items.reduce((siSum: number, si: any) => {
+                                    const clientAmt = (si.quantity || 0) * (si.rate || 0);
+                                    const opPercentage = si.overhead_profit_percentage || 25;
+                                    return siSum + (clientAmt * (opPercentage / 100));
+                                  }, 0);
+                                }
+                                return sum;
+                              }, 0);
+
+                              // Calculate actual profit (sum of all actual profits)
+                              const totalActualProfit = allItems.reduce((sum, item) => {
+                                if (item.sub_items && item.sub_items.length > 0) {
+                                  return sum + item.sub_items.reduce((siSum: number, si: any) => {
+                                    const clientAmt = (si.quantity || 0) * (si.rate || 0);
+                                    const matCost = si.materials?.reduce((m: number, mat: any) => m + (mat.total_price || mat.quantity * mat.unit_price), 0) || 0;
+                                    const labCost = si.labour?.reduce((l: number, lab: any) => l + (lab.total_cost || lab.hours * lab.rate_per_hour), 0) || 0;
+                                    const miscAmt = clientAmt * ((si.misc_percentage || 10) / 100);
+                                    const transportAmt = clientAmt * ((si.transport_percentage || 5) / 100);
+                                    return siSum + (clientAmt - matCost - labCost - miscAmt - transportAmt);
+                                  }, 0);
+                                }
+                                return sum;
+                              }, 0);
+
+                              const profitVariance = totalActualProfit - totalPlannedProfit;
+                              const profitVariancePercentage = totalPlannedProfit > 0 ? ((profitVariance / totalPlannedProfit) * 100) : 0;
+
+                              return (
+                                <>
+                                  {/* BOQ Financials */}
+                                  <div className="bg-white rounded-lg p-5 border-2 border-blue-300 shadow-sm">
+                                    <h4 className="font-bold text-blue-900 mb-4 flex items-center gap-2">
+                                      <DollarSign className="w-5 h-5" />
+                                      BOQ Financials
+                                    </h4>
+                                    <div className="space-y-3">
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-gray-700 font-medium">Client Amount:</span>
+                                        <span className="text-xl font-bold text-blue-700">{formatCurrency(totalClientAmount)}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-gray-700 font-medium">Internal Cost:</span>
+                                        <span className="text-base font-semibold text-orange-600">{formatCurrency(totalInternalCost)}</span>
+                                      </div>
+                                      <div className="ml-6 space-y-1 text-sm text-gray-600">
+                                        <div className="flex justify-between">
+                                          <span>Materials:</span>
+                                          <span className="font-medium">{formatCurrency(totalMaterialCost)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span>Labour:</span>
+                                          <span className="font-medium">{formatCurrency(totalLabourCost)}</span>
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-between items-center pt-3 border-t-2 border-blue-300">
+                                        <span className="text-gray-900 font-bold">Project Margin:</span>
+                                        <div className="text-right">
+                                          <div className={`text-xl font-bold ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            {formatCurrency(projectMargin)}
+                                          </div>
+                                          <div className={`text-xs font-semibold ${marginPercentage >= 30 ? 'text-green-600' : marginPercentage >= 20 ? 'text-yellow-600' : 'text-orange-600'}`}>
+                                            ({marginPercentage.toFixed(1)}%)
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Profit Analysis */}
+                                  <div className="bg-white rounded-lg p-5 border-2 border-green-300 shadow-sm">
+                                    <h4 className="font-bold text-green-900 mb-4 flex items-center gap-2">
+                                      <TrendingUp className="w-5 h-5" />
+                                      Profit Analysis
+                                    </h4>
+                                    <div className="space-y-3">
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-gray-700 font-medium">Planned Profit (O&P):</span>
+                                        <span className="text-base font-semibold text-blue-600">{formatCurrency(totalPlannedProfit)}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                        <span className={`text-xl font-bold ${totalActualProfit >= totalPlannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
+                                          {formatCurrency(totalActualProfit)}
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between items-center pt-3 border-t-2 border-green-300">
+                                        <span className="text-gray-900 font-bold">Variance:</span>
+                                        <div className="text-right">
+                                          <div className={`text-lg font-bold ${profitVariance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            {profitVariance >= 0 ? '+' : ''}{formatCurrency(profitVariance)}
+                                          </div>
+                                          <div className={`text-xs font-semibold ${profitVariance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            ({profitVariance >= 0 ? '+' : ''}{profitVariancePercentage.toFixed(1)}%)
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
 
                           {/* Grand Total */}
@@ -1260,90 +1240,56 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                               {(() => {
                                 const allItems = boqData.existing_purchase?.items || boqData.items || [];
 
-                                // Calculate totals from all items
-                                const totalItemsAmount = allItems.reduce((sum, item) => sum + (item.item_total || 0), 0);
-                                const totalMiscellaneous = allItems.reduce((sum, item) => sum + (item.overhead_amount || 0), 0);
-                                const totalOverheadProfit = allItems.reduce((sum, item) => sum + (item.profit_margin_amount || 0), 0);
-                                const totalSubtotal = allItems.reduce((sum, item) => sum + (item.subtotal || 0), 0);
-                                const totalDiscount = allItems.reduce((sum, item) => sum + (item.discount_amount || 0), 0);
-                                const totalAfterDiscount = allItems.reduce((sum, item) => {
-                                  // Calculate after discount if not provided
-                                  return sum + (item.after_discount || (item.subtotal || 0) - (item.discount_amount || 0));
-                                }, 0);
-
-                                // Calculate total VAT (including individual material VAT)
-                                const totalVAT = allItems.reduce((sum, item) => {
-                                  // Check if individual material VAT is used
-                                  const hasIndividualVAT = item.sub_items?.some((si: any) =>
-                                    si.materials?.some((m: any) => (m.vat_percentage || 0) > 0)
-                                  );
-
-                                  if (hasIndividualVAT) {
-                                    // Calculate individual material VAT total
-                                    const individualVAT = item.sub_items?.reduce((total: number, si: any) => {
-                                      return total + (si.materials?.reduce((mSum: number, m: any) => {
-                                        const matTotal = m.total_price || (m.quantity * m.unit_price);
-                                        const matVAT = m.vat_amount || (matTotal * ((m.vat_percentage || 0) / 100));
-                                        return mSum + matVAT;
-                                      }, 0) || 0);
-                                    }, 0) || 0;
-                                    return sum + individualVAT;
-                                  } else {
-                                    // Use item-level VAT
-                                    return sum + (item.vat_amount || 0);
+                                // Calculate subtotal (sum of all sub-item client amounts)
+                                const subtotal = allItems.reduce((sum, item) => {
+                                  if (item.sub_items && item.sub_items.length > 0) {
+                                    return sum + item.sub_items.reduce((siSum: number, si: any) =>
+                                      siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+                                    );
                                   }
+                                  return sum + (item.client_cost || 0);
                                 }, 0);
 
-                                // Check if any item uses individual material VAT
-                                const hasAnyIndividualVAT = allItems.some(item =>
-                                  item.sub_items?.some((si: any) =>
-                                    si.materials?.some((m: any) => (m.vat_percentage || 0) > 0)
-                                  )
-                                );
+                                // Overall discount (BOQ-level from overall discount input OR sum of item discounts)
+                                let overallDiscount = boqData.discount_amount || 0;
+                                let overallDiscountPercentage = boqData.discount_percentage || 0;
 
-                                // If individual VAT is used, always recalculate grand total
-                                const grandTotal = hasAnyIndividualVAT
-                                  ? (totalAfterDiscount + totalVAT)
-                                  : (boqData.combined_summary?.selling_price ||
-                                     boqData.summary?.selling_price ||
-                                     (totalAfterDiscount + totalVAT));
+                                // If no BOQ-level discount, calculate from items
+                                if (overallDiscount === 0) {
+                                  allItems.forEach((item: any) => {
+                                    overallDiscount += (item.discount_amount || 0);
+                                  });
+                                  // Calculate percentage from total
+                                  if (subtotal > 0 && overallDiscount > 0) {
+                                    overallDiscountPercentage = (overallDiscount / subtotal) * 100;
+                                  }
+                                }
+
+                                // Grand total
+                                const grandTotal = subtotal - overallDiscount;
 
                                 return (
                                   <>
-                                    <div className="flex justify-between text-sm">
-                                      <span className="text-gray-700">Total Items Amount:</span>
-                                      <span className="font-semibold">{formatCurrency(totalItemsAmount)}</span>
-                                    </div>
-                                    <div className="flex justify-between text-sm">
-                                      <span className="text-gray-700">Miscellaneous:</span>
-                                      <span className="font-semibold">{formatCurrency(totalMiscellaneous)}</span>
-                                    </div>
-                                    <div className="flex justify-between text-sm">
-                                      <span className="text-gray-700">Overhead & Profit:</span>
-                                      <span className="font-semibold">{formatCurrency(totalOverheadProfit)}</span>
-                                    </div>
-                                    <div className="flex justify-between text-sm font-medium border-t border-green-300 pt-2 mt-2">
+                                    <div className="flex justify-between text-base font-medium">
                                       <span className="text-gray-800">Subtotal:</span>
-                                      <span className="font-semibold">{formatCurrency(totalSubtotal)}</span>
+                                      <span className="font-semibold">{formatCurrency(subtotal)}</span>
                                     </div>
-                                    {totalDiscount > 0 && (
-                                      <div className="flex justify-between text-sm text-red-600">
-                                        <span>Total Discount:</span>
-                                        <span className="font-semibold">- {formatCurrency(totalDiscount)}</span>
-                                      </div>
-                                    )}
-                                    <div className="flex justify-between text-sm font-medium">
-                                      <span className="text-gray-800">After Discount:</span>
-                                      <span className="font-semibold">{formatCurrency(totalAfterDiscount)}</span>
-                                    </div>
-                                    {totalVAT > 0 && (
-                                      <div className="flex justify-between text-sm text-green-600 font-medium">
-                                        <span>Total VAT <span className="text-xs">[ADDITIONAL]</span>:</span>
-                                        <span className="font-semibold">+ {formatCurrency(totalVAT)}</span>
-                                      </div>
+                                    {overallDiscount > 0 && (
+                                      <>
+                                        <div className="flex justify-between text-sm text-red-600">
+                                          <span>Discount ({overallDiscountPercentage.toFixed(1)}%):</span>
+                                          <span className="font-semibold">- {formatCurrency(overallDiscount)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-sm font-medium">
+                                          <span className="text-gray-700">After Discount:</span>
+                                          <span className="font-semibold">{formatCurrency(grandTotal)}</span>
+                                        </div>
+                                      </>
                                     )}
                                     <div className="flex justify-between pt-3 border-t-2 border-green-400 text-lg font-bold">
-                                      <span className="text-green-900">Grand Total:</span>
+                                      <span className="text-green-900">
+                                        Grand Total: <span className="text-xs font-normal text-gray-600">(Excluding VAT)</span>
+                                      </span>
                                       <span className="text-green-700">{formatCurrency(grandTotal)}</span>
                                     </div>
                                   </>
