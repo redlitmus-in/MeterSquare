@@ -128,6 +128,7 @@ interface EstimationItem {
   profitMargin: number;
   overheadPercentage: number;
   discountPercentage?: number;
+  discount_amount?: number;
   submittedDate: string;
   status: 'pending' | 'pending_revision' | 'revision_approved' | 'approved' | 'rejected' | 'sent_for_confirmation' | 'client_confirmed' | 'client_rejected' | 'cancelled' | 'completed';
   priority: 'high' | 'medium' | 'low';
@@ -366,6 +367,7 @@ const ProjectApprovals: React.FC = () => {
       profitMargin: boq.profit_margin || boq.profit_margin_percentage || 0,
       overheadPercentage: boq.overhead_percentage || boq.overhead || 0,
       discountPercentage: boq.discount_percentage || 0,
+      discount_amount: boq.discount_amount || 0,
       submittedDate: boq.created_at ? new Date(boq.created_at).toISOString().split('T')[0] : '',
       status: status,
       priority: 'medium',
@@ -3282,11 +3284,23 @@ const ProjectApprovals: React.FC = () => {
                           }
                         });
 
+                        // BOQ-level discount (overall discount applied to entire BOQ)
+                        const overallDiscountAmount = (selectedEstimation as any).discount_amount || 0;
+                        const overallDiscountPct = selectedEstimation.discountPercentage || 0;
+
+                        // Calculate discount amount from percentage if amount is not provided
+                        let totalDiscount = overallDiscountAmount;
+                        if (totalDiscount === 0 && overallDiscountPct > 0 && totalClientAmount > 0) {
+                          totalDiscount = totalClientAmount * (overallDiscountPct / 100);
+                        }
+
                         const totalInternalCost = materialCost + labourCost;
                         const projectMargin = totalClientAmount - totalInternalCost;
                         const marginPercentage = totalClientAmount > 0 ? ((projectMargin / totalClientAmount) * 100) : 0;
                         const profitVariance = totalActualProfit - totalPlannedProfit;
                         const profitVariancePercentage = totalPlannedProfit > 0 ? ((profitVariance / totalPlannedProfit) * 100) : 0;
+                        const discountPercentage = totalClientAmount > 0 ? ((totalDiscount / totalClientAmount) * 100) : overallDiscountPct;
+                        const grandTotalAfterDiscount = totalClientAmount - totalDiscount;
 
                         return (
                           <>
@@ -3352,11 +3366,23 @@ const ProjectApprovals: React.FC = () => {
 
                             {/* Grand Total */}
                             <div className="bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-3 border-2 border-green-300">
-                              <div className="flex justify-between text-base font-bold">
-                                <span className="text-green-900">
-                                  Grand Total: <span className="text-xs font-normal text-gray-600">(Excluding VAT)</span>
-                                </span>
-                                <span className="text-green-700">AED{formatCurrency(totalClientAmount)}</span>
+                              <div className="space-y-2">
+                                <div className="flex justify-between text-sm font-medium">
+                                  <span className="text-gray-800">Subtotal:</span>
+                                  <span className="font-semibold">AED{formatCurrency(totalClientAmount)}</span>
+                                </div>
+                                {totalDiscount > 0 && (
+                                  <div className="flex justify-between text-xs text-red-600">
+                                    <span>Discount ({discountPercentage.toFixed(1)}%):</span>
+                                    <span className="font-semibold">- AED{formatCurrency(totalDiscount)}</span>
+                                  </div>
+                                )}
+                                <div className="flex justify-between text-base font-bold pt-2 border-t border-green-400">
+                                  <span className="text-green-900">
+                                    Grand Total: <span className="text-xs font-normal text-gray-600">(Excluding VAT)</span>
+                                  </span>
+                                  <span className="text-green-700">AED{formatCurrency(grandTotalAfterDiscount)}</span>
+                                </div>
                               </div>
                             </div>
                           </>
@@ -3525,29 +3551,36 @@ const ProjectApprovals: React.FC = () => {
                     <h3 className="font-bold text-gray-900 mb-3">Cost Summary</h3>
                     <div className="space-y-3">
                       {(() => {
-                        // Client version - Only show Subtotal and Grand Total (no internal breakdown)
-                        let totalClientAmount = 0;
-                        let overallDiscount = 0;
+                        // Client version - Calculate subtotal from sub-items (quantity × rate)
+                        let subtotal = 0;
 
                         (selectedEstimation.boqItems || []).forEach((item: any) => {
+                          // Calculate subtotal from sub-items (client amount)
                           if (item.sub_items && item.sub_items.length > 0) {
                             item.sub_items.forEach((si: any) => {
-                              const clientAmt = (si.quantity || 0) * (si.rate || 0);
-                              totalClientAmount += clientAmt;
+                              subtotal += (si.quantity || 0) * (si.rate || 0);
                             });
                           }
-                          // Overall discount at BOQ level
-                          overallDiscount += (item as any).discount_amount || 0;
                         });
 
-                        const grandTotal = totalClientAmount - overallDiscount;
-                        const discountPercentage = totalClientAmount > 0 ? ((overallDiscount / totalClientAmount) * 100) : 0;
+                        // BOQ-level discount (overall discount applied to entire BOQ)
+                        const overallDiscountAmount = (selectedEstimation as any).discount_amount || 0;
+                        const overallDiscountPct = selectedEstimation.discountPercentage || 0;
+
+                        // Calculate discount amount from percentage if amount is not provided
+                        let overallDiscount = overallDiscountAmount;
+                        if (overallDiscount === 0 && overallDiscountPct > 0 && subtotal > 0) {
+                          overallDiscount = subtotal * (overallDiscountPct / 100);
+                        }
+
+                        const grandTotal = subtotal - overallDiscount;
+                        const discountPercentage = subtotal > 0 ? ((overallDiscount / subtotal) * 100) : overallDiscountPct;
 
                         return (
                           <>
                             <div className="flex justify-between text-base font-medium">
                               <span className="text-gray-800">Subtotal:</span>
-                              <span className="font-semibold">AED{formatCurrency(totalClientAmount)}</span>
+                              <span className="font-semibold">AED{formatCurrency(subtotal)}</span>
                             </div>
                             {overallDiscount > 0 && (
                               <div className="flex justify-between text-sm text-red-600">
