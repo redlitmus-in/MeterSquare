@@ -33,6 +33,7 @@ interface TDRevisionComparisonPageProps {
   onReject: (boq: BOQ) => void;
   onViewDetails: (boq: BOQ) => void;
   onRefresh?: () => Promise<void>;
+  refreshTrigger?: number; // Trigger for InternalRevisionTimeline refresh
 }
 
 const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
@@ -40,7 +41,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
   onApprove,
   onReject,
   onViewDetails,
-  onRefresh
+  onRefresh,
+  refreshTrigger
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBoq, setSelectedBoq] = useState<BOQ | null>(null);
@@ -1046,7 +1048,12 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
 
         {/* Internal Revisions Tab */}
         <TabsContent value="internal">
-          <InternalRevisionTimeline />
+          <InternalRevisionTimeline
+            userRole="technical_director"
+            onApprove={onApprove}
+            onReject={onReject}
+            refreshTrigger={refreshTrigger}
+          />
         </TabsContent>
       </Tabs>
     </div>

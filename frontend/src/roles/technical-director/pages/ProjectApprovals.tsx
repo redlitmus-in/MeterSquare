@@ -1250,34 +1250,80 @@ const ProjectApprovals: React.FC = () => {
           <TDRevisionComparisonPage
             boqList={boqs}
             onApprove={(boq) => {
-              // Find the estimation and open approval modal
-              const estimation = filteredEstimations.find(est => est.id === boq.boq_id);
-              if (estimation) {
-                setSelectedEstimation(estimation);
-                setIsRevisionApproval(true); // Flag to skip comparison modal
-                setShowApprovalModal(true);
+              // Try to find in filteredEstimations first, otherwise create from BOQ
+              let estimation = filteredEstimations.find(est => est.id === boq.boq_id);
+
+              if (!estimation) {
+                // Create estimation object from BOQ data
+                estimation = {
+                  id: boq.boq_id,
+                  projectName: boq.title || boq.boq_name || `BOQ ${boq.boq_id}`,
+                  clientName: boq.client || 'N/A',
+                  estimatedValue: boq.total_cost || boq.selling_price || 0,
+                  status: boq.status || 'pending',
+                  materialCost: 0,
+                  laborCost: 0,
+                  overheadPercentage: 0,
+                  profitMargin: 0,
+                  submittedAt: boq.created_at || new Date().toISOString(),
+                };
               }
+
+              setSelectedEstimation(estimation);
+              setIsRevisionApproval(true);
+              setShowApprovalModal(true);
             }}
             onReject={(boq) => {
-              // Find the estimation and open rejection modal
-              const estimation = filteredEstimations.find(est => est.id === boq.boq_id);
-              if (estimation) {
-                setSelectedEstimation(estimation);
-                setShowRejectionModal(true);
+              // Try to find in filteredEstimations first, otherwise create from BOQ
+              let estimation = filteredEstimations.find(est => est.id === boq.boq_id);
+
+              if (!estimation) {
+                // Create estimation object from BOQ data
+                estimation = {
+                  id: boq.boq_id,
+                  projectName: boq.title || boq.boq_name || `BOQ ${boq.boq_id}`,
+                  clientName: boq.client || 'N/A',
+                  estimatedValue: boq.total_cost || boq.selling_price || 0,
+                  status: boq.status || 'pending',
+                  materialCost: 0,
+                  laborCost: 0,
+                  overheadPercentage: 0,
+                  profitMargin: 0,
+                  submittedAt: boq.created_at || new Date().toISOString(),
+                };
               }
+
+              setSelectedEstimation(estimation);
+              setShowRejectionModal(true);
             }}
             onViewDetails={async (boq) => {
-              // Find the estimation and load details
-              const estimation = filteredEstimations.find(est => est.id === boq.boq_id);
-              if (estimation) {
-                await loadBOQDetails(estimation.id, estimation);
-                setShowBOQModal(true);
+              // Try to find in filteredEstimations first, otherwise create from BOQ
+              let estimation = filteredEstimations.find(est => est.id === boq.boq_id);
+
+              if (!estimation) {
+                // Create estimation object from BOQ data
+                estimation = {
+                  id: boq.boq_id,
+                  projectName: boq.title || boq.boq_name || `BOQ ${boq.boq_id}`,
+                  clientName: boq.client || 'N/A',
+                  estimatedValue: boq.total_cost || boq.selling_price || 0,
+                  status: boq.status || 'pending',
+                  materialCost: 0,
+                  laborCost: 0,
+                  overheadPercentage: 0,
+                  profitMargin: 0,
+                  submittedAt: boq.created_at || new Date().toISOString(),
+                };
               }
+
+              await loadBOQDetails(estimation.id, estimation);
+              setShowBOQModal(true);
             }}
             onRefresh={async () => {
               await loadBOQs(false);
               await loadRevisionTabs();
             }}
+            refreshTrigger={boqDetailsRefreshTrigger}
           />
         ) : (
           /* Estimations List - Show for all other tabs */

@@ -1476,7 +1476,17 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           })
         };
 
-        const response = await fetch(`${API_URL}/boq/update_boq/${existingBoqData.boq_id}`, {
+        // Determine which API endpoint to use based on BOQ status
+        const boqStatus = existingBoqData.status?.toLowerCase();
+        const apiEndpoint = boqStatus === 'rejected'
+          ? `${API_URL}/update_internal_boq/${existingBoqData.boq_id}`
+          : `${API_URL}/boq/update_boq/${existingBoqData.boq_id}`;
+
+        console.log('=== BOQCreationForm Edit Mode ===');
+        console.log('BOQ Status:', existingBoqData.status, '(lowercase:', boqStatus, ')');
+        console.log('API Endpoint:', apiEndpoint);
+
+        const response = await fetch(apiEndpoint, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',

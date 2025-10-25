@@ -51,7 +51,8 @@ interface BOQEditModalProps {
   onClose: () => void;
   boq: BOQ | null;
   onSave: () => void;
-  isRevision?: boolean; // Flag to indicate this is a revision edit
+  isRevision?: boolean; // Flag to indicate this is a client-facing revision edit
+  isInternalRevision?: boolean; // Flag to indicate this is an internal revision edit
 }
 
 // Unit options for materials
@@ -85,7 +86,8 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
   onClose,
   boq,
   onSave,
-  isRevision = false
+  isRevision = false,
+  isInternalRevision = false
 }) => {
   const [editedBoq, setEditedBoq] = useState<BOQUpdatePayload | null>(null);
   const [originalBoq, setOriginalBoq] = useState<any>(null);
@@ -282,7 +284,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
           boq_name: response.data.boq_name || boq.boq_name || boq.title || '',
           status: response.data.status,
           items: items.map((item: BOQItemDetailed) => ({
-            item_id: item.master_item_id,
+            item_id: item.master_item_id || (item as any).item_id,
             item_name: item.item_name,
             description: item.description || '',
             work_type: item.work_type || 'contract',
@@ -303,7 +305,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
               unit: si.unit || 'nos',
               rate: si.rate || si.per_unit_cost || 0,
               materials: (si.materials || []).map((mat: any) => ({
-                material_id: mat.master_material_id,
+                material_id: mat.master_material_id || mat.material_id,
                 material_name: mat.material_name,
                 description: mat.description || '',
                 quantity: mat.quantity,
@@ -313,7 +315,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                 vat_percentage: mat.vat_percentage || 0
               })),
               labour: (si.labour || []).map((lab: any) => ({
-                labour_id: lab.master_labour_id,
+                labour_id: lab.master_labour_id || lab.labour_id,
                 labour_role: lab.labour_role,
                 hours: lab.hours,
                 rate_per_hour: lab.rate_per_hour,
@@ -322,8 +324,8 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
               }))
             })) || [],
             // Old format fallback - materials and labour at item level
-            materials: (item as any).sub_items?.length > 0 ? [] : (item.materials || []).map(mat => ({
-              material_id: mat.master_material_id,
+            materials: (item as any).sub_items?.length > 0 ? [] : (item.materials || []).map((mat: any) => ({
+              material_id: mat.master_material_id || mat.material_id,
               material_name: mat.material_name,
               description: mat.description || '',
               quantity: mat.quantity,
@@ -332,8 +334,8 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
               total_price: mat.total_price || (mat.quantity * mat.unit_price),
               vat_percentage: mat.vat_percentage || 0
             })),
-            labour: (item as any).sub_items?.length > 0 ? [] : (item.labour || []).map(lab => ({
-              labour_id: lab.master_labour_id,
+            labour: (item as any).sub_items?.length > 0 ? [] : (item.labour || []).map((lab: any) => ({
+              labour_id: lab.master_labour_id || lab.labour_id,
               labour_role: lab.labour_role,
               hours: lab.hours,
               rate_per_hour: lab.rate_per_hour,
@@ -786,6 +788,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
   };
 
   const handleSave = async () => {
+    console.log('🔥🔥🔥 HANDLE SAVE CALLED - FILE VERSION: 2024-10-24-v2 🔥🔥🔥');
     setIsSaving(true);
     try {
       if (!editedBoq.boq_id) {
@@ -800,20 +803,32 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       };
 
       // Determine which API to call based on BOQ status
-      // - If status is "Rejected" (TD rejection): Use internal revision API
-      // - If status is "Client_Rejected" or "Sent_for_Confirmation": Use client revision API
+      // - If status is "rejected" (TD rejection): Use internal revision API
+      // - If isRevision flag is set: Use client revision API (for client-facing revisions)
       // - Otherwise: Use regular update API
+      console.log('=== BOQ EDIT MODAL DEBUG ===');
+      console.log('BOQ Status (original):', boq?.status);
+      console.log('isRevision flag:', isRevision);
+
       let result;
-      if (boq?.status === 'Rejected') {
-        // TD rejected - use internal revision API (for internal approval cycles)
+      const boqStatus = boq?.status?.toLowerCase();
+      console.log('BOQ Status (lowercase):', boqStatus);
+      console.log('isInternalRevision flag:', isInternalRevision);
+
+      if (isInternalRevision || boqStatus === 'rejected') {
+        console.log('✅ Calling updateInternalRevisionBOQ API (Internal Revision)');
+        // Internal revision - save to boq_internal_revision table
         result = await estimatorService.updateInternalRevisionBOQ(editedBoq.boq_id, payload);
       } else if (isRevision) {
+        console.log('✅ Calling revisionBOQ API (Client Revision)');
         // Client revision - use revision_boq API (for client-facing revisions)
         result = await estimatorService.revisionBOQ(editedBoq.boq_id, payload);
       } else {
-        // Regular update
+        console.log('✅ Calling regular updateBOQ API');
+        // Regular update - for Draft and other statuses
         result = await estimatorService.updateBOQ(editedBoq.boq_id, payload);
       }
+      console.log('=== END DEBUG ===');
 
       if (result.success) {
         toast.success(isRevision ? 'BOQ revision saved successfully' : 'BOQ updated successfully');
@@ -1069,164 +1084,318 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                           {/* Item Details (Expandable) */}
                           {expandedItems.has(itemIndex) && (
                             <div className="p-4 space-y-4 bg-gray-50/50">
-                              {/* Sub Items Section */}
-                              <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-4 border border-purple-200">
-                                <div className="flex items-center justify-between mb-3">
-                                  <h4 className="text-sm font-bold text-purple-900 flex items-center gap-2">
-                                    <div className="p-1.5 bg-white rounded shadow-sm">
-                                      <Package className="w-4 h-4 text-purple-600" />
-                                    </div>
-                                    Sub Items
-                                  </h4>
-                                  <button
-                                    type="button"
-                                    onClick={() => addSubItem(itemIndex)}
-                                    className="text-xs font-semibold text-purple-700 hover:text-purple-800 px-3 py-1.5 bg-purple-200 rounded-lg"
-                                    disabled={isSaving}
-                                  >
-                                    + Add Sub Item
-                                  </button>
-                                </div>
-
-                                {/* VAT Mode Toggle */}
-                                <div className="mb-3 pb-3 border-b border-blue-200">
-                                  <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={useMaterialVAT[itemIndex] || false}
-                                      onChange={(e) => {
-                                        setUseMaterialVAT(prev => ({
-                                          ...prev,
-                                          [itemIndex]: e.target.checked
-                                        }));
-                                      }}
-                                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              {/* Sub Items Section - Check if sub_items exist */}
+                              {item.sub_items && item.sub_items.length > 0 ? (
+                                <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-4 border border-purple-200">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <h4 className="text-sm font-bold text-purple-900 flex items-center gap-2">
+                                      <div className="p-1.5 bg-white rounded shadow-sm">
+                                        <Package className="w-4 h-4 text-purple-600" />
+                                      </div>
+                                      Sub Items
+                                    </h4>
+                                    <button
+                                      type="button"
+                                      onClick={() => addSubItem(itemIndex)}
+                                      className="text-xs font-semibold text-purple-700 hover:text-purple-800 px-3 py-1.5 bg-purple-200 rounded-lg"
                                       disabled={isSaving}
-                                    />
-                                    <span className="text-xs text-blue-900 font-medium">
-                                      Different VAT rates for materials
-                                    </span>
-                                    <span className="text-xs text-blue-600 italic">
-                                      (Check this if materials have different VAT percentages)
-                                    </span>
-                                  </label>
-                                </div>
-
-                                {item.materials.length === 0 ? (
-                                  <div className="text-center py-4 text-blue-700 bg-blue-50 rounded-lg border border-blue-200">
-                                    No materials added yet
+                                    >
+                                      + Add Sub Item
+                                    </button>
                                   </div>
-                                ) : (
-                                  <div className="overflow-x-auto bg-white rounded-lg">
-                                    <table className="w-full">
-                                      <thead className="bg-blue-100 border-b border-blue-200">
-                                        <tr>
-                                          <th className="text-left p-3 text-xs font-bold text-blue-900">Material</th>
-                                          <th className="text-left p-3 text-xs font-bold text-blue-900">Qty</th>
-                                          <th className="text-left p-3 text-xs font-bold text-blue-900">Unit</th>
-                                          <th className="text-left p-3 text-xs font-bold text-blue-900">Rate</th>
-                                          <th className="text-left p-3 text-xs font-bold text-blue-900">Total</th>
-                                          <th className="text-left p-3 text-xs font-bold text-blue-900"></th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {item.materials.map((material, matIndex) => (
-                                          <tr key={matIndex} className="border-t border-gray-100">
-                                            <td className="p-2">
+
+                                  {/* Render each sub-item */}
+                                  <div className="space-y-4">
+                                    {item.sub_items.map((subItem: any, subIndex: number) => (
+                                      <div key={subIndex} className="bg-white rounded-lg p-4 border border-purple-200">
+                                        {/* Sub-item header */}
+                                        <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-200">
+                                          <div className="flex-1">
+                                            <input
+                                              type="text"
+                                              value={subItem.sub_item_name}
+                                              onChange={(e) => handleSubItemChange(itemIndex, subIndex, 'sub_item_name', e.target.value)}
+                                              className="font-semibold text-purple-900 px-2 py-1 border border-purple-300 rounded"
+                                              placeholder="Sub-item name"
+                                            />
+                                            <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
                                               <input
                                                 type="text"
-                                                value={material.material_name}
-                                                onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'material_name', e.target.value)}
-                                                className={`w-full px-3 py-1.5 border rounded-lg focus:outline-none focus:ring-2 ${
-                                                  material.is_from_master
-                                                    ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                                    : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
-                                                }`}
-                                                disabled={material.is_from_master}
-                                                placeholder="Material name"
-                                                title={material.is_from_master ? 'Material from master data cannot be edited' : ''}
+                                                value={subItem.scope || ''}
+                                                onChange={(e) => handleSubItemChange(itemIndex, subIndex, 'scope', e.target.value)}
+                                                className="px-2 py-1 border border-gray-300 rounded"
+                                                placeholder="Scope"
                                               />
                                               <input
                                                 type="text"
-                                                value={(material as any).description || ''}
-                                                onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'description', e.target.value)}
-                                                className="w-full px-3 py-1.5 mt-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                                                placeholder="Description (optional)"
+                                                value={subItem.size || ''}
+                                                onChange={(e) => handleSubItemChange(itemIndex, subIndex, 'size', e.target.value)}
+                                                className="px-2 py-1 border border-gray-300 rounded"
+                                                placeholder="Size"
                                               />
-                                              {useMaterialVAT[itemIndex] && (
-                                                <div className="flex items-center gap-1 mt-1">
-                                                  <span className="text-xs text-blue-700 font-medium">VAT:</span>
+                                              <input
+                                                type="text"
+                                                value={subItem.location || ''}
+                                                onChange={(e) => handleSubItemChange(itemIndex, subIndex, 'location', e.target.value)}
+                                                className="px-2 py-1 border border-gray-300 rounded"
+                                                placeholder="Location"
+                                              />
+                                              <input
+                                                type="text"
+                                                value={subItem.brand || ''}
+                                                onChange={(e) => handleSubItemChange(itemIndex, subIndex, 'brand', e.target.value)}
+                                                className="px-2 py-1 border border-gray-300 rounded"
+                                                placeholder="Brand"
+                                              />
+                                            </div>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => removeSubItem(itemIndex, subIndex)}
+                                            className="ml-2 p-1 text-red-600 hover:bg-red-100 rounded"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </button>
+                                        </div>
+
+                                        {/* Materials for this sub-item */}
+                                        <div className="mb-3">
+                                          <div className="flex items-center justify-between mb-2">
+                                            <h5 className="text-xs font-bold text-blue-900">📦 Materials</h5>
+                                            <button
+                                              type="button"
+                                              onClick={() => addSubItemMaterial(itemIndex, subIndex)}
+                                              className="text-xs text-blue-700 hover:text-blue-800"
+                                            >
+                                              + Add Material
+                                            </button>
+                                          </div>
+                                          {subItem.materials && subItem.materials.length > 0 ? (
+                                            <div className="space-y-2">
+                                              {subItem.materials.map((mat: any, matIndex: number) => (
+                                                <div key={matIndex} className="grid grid-cols-6 gap-2 items-center bg-blue-50 p-2 rounded">
+                                                  <input
+                                                    type="text"
+                                                    value={mat.material_name}
+                                                    onChange={(e) => handleSubItemMaterialChange(itemIndex, subIndex, matIndex, 'material_name', e.target.value)}
+                                                    className="col-span-2 px-2 py-1 text-xs border border-blue-300 rounded"
+                                                    placeholder="Material"
+                                                  />
                                                   <input
                                                     type="number"
-                                                    value={(material as any).vat_percentage === 0 ? '' : (material as any).vat_percentage || ''}
-                                                    onChange={(e) => {
-                                                      const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                                      handleMaterialChange(itemIndex, matIndex, 'vat_percentage', value);
-                                                    }}
-                                                    className="w-16 px-2 py-1 text-xs border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white"
-                                                    placeholder="0"
-                                                    min="0"
-                                                    step="0.1"
-                                                    disabled={isSaving}
+                                                    value={mat.quantity}
+                                                    onChange={(e) => handleSubItemMaterialChange(itemIndex, subIndex, matIndex, 'quantity', Number(e.target.value))}
+                                                    className="px-2 py-1 text-xs border border-blue-300 rounded"
+                                                    placeholder="Qty"
                                                   />
-                                                  <span className="text-xs text-gray-600">%</span>
+                                                  <input
+                                                    type="text"
+                                                    value={mat.unit}
+                                                    onChange={(e) => handleSubItemMaterialChange(itemIndex, subIndex, matIndex, 'unit', e.target.value)}
+                                                    className="px-2 py-1 text-xs border border-blue-300 rounded"
+                                                    placeholder="Unit"
+                                                  />
+                                                  <input
+                                                    type="number"
+                                                    value={mat.unit_price}
+                                                    onChange={(e) => handleSubItemMaterialChange(itemIndex, subIndex, matIndex, 'unit_price', Number(e.target.value))}
+                                                    className="px-2 py-1 text-xs border border-blue-300 rounded"
+                                                    placeholder="Rate"
+                                                  />
+                                                  <div className="flex items-center justify-between">
+                                                    <span className="text-xs font-semibold">AED {mat.total_price?.toLocaleString() || (mat.quantity * mat.unit_price).toLocaleString()}</span>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => removeSubItemMaterial(itemIndex, subIndex, matIndex)}
+                                                      className="p-1 text-red-600 hover:bg-red-100 rounded"
+                                                    >
+                                                      <Trash2 className="w-3 h-3" />
+                                                    </button>
+                                                  </div>
                                                 </div>
-                                              )}
-                                            </td>
-                                            <td className="p-2">
-                                              <div className="relative">
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <div className="text-center py-2 text-xs text-blue-700 bg-blue-50 rounded">No materials</div>
+                                          )}
+                                        </div>
+
+                                        {/* Labour for this sub-item */}
+                                        <div>
+                                          <div className="flex items-center justify-between mb-2">
+                                            <h5 className="text-xs font-bold text-orange-900">👷 Labour</h5>
+                                            <button
+                                              type="button"
+                                              onClick={() => addSubItemLabour(itemIndex, subIndex)}
+                                              className="text-xs text-orange-700 hover:text-orange-800"
+                                            >
+                                              + Add Labour
+                                            </button>
+                                          </div>
+                                          {subItem.labour && subItem.labour.length > 0 ? (
+                                            <div className="space-y-2">
+                                              {subItem.labour.map((lab: any, labIndex: number) => (
+                                                <div key={labIndex} className="grid grid-cols-5 gap-2 items-center bg-orange-50 p-2 rounded">
+                                                  <input
+                                                    type="text"
+                                                    value={lab.labour_role}
+                                                    onChange={(e) => handleSubItemLabourChange(itemIndex, subIndex, labIndex, 'labour_role', e.target.value)}
+                                                    className="col-span-2 px-2 py-1 text-xs border border-orange-300 rounded"
+                                                    placeholder="Role"
+                                                  />
+                                                  <input
+                                                    type="number"
+                                                    value={lab.hours}
+                                                    onChange={(e) => handleSubItemLabourChange(itemIndex, subIndex, labIndex, 'hours', Number(e.target.value))}
+                                                    className="px-2 py-1 text-xs border border-orange-300 rounded"
+                                                    placeholder="Hours"
+                                                  />
+                                                  <input
+                                                    type="number"
+                                                    value={lab.rate_per_hour}
+                                                    onChange={(e) => handleSubItemLabourChange(itemIndex, subIndex, labIndex, 'rate_per_hour', Number(e.target.value))}
+                                                    className="px-2 py-1 text-xs border border-orange-300 rounded"
+                                                    placeholder="Rate"
+                                                  />
+                                                  <div className="flex items-center justify-between">
+                                                    <span className="text-xs font-semibold">AED {lab.total_cost?.toLocaleString() || (lab.hours * lab.rate_per_hour).toLocaleString()}</span>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => removeSubItemLabour(itemIndex, subIndex, labIndex)}
+                                                      className="p-1 text-red-600 hover:bg-red-100 rounded"
+                                                    >
+                                                      <Trash2 className="w-3 h-3" />
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <div className="text-center py-2 text-xs text-orange-700 bg-orange-50 rounded">No labour</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                // No sub_items - show direct materials and labour
+                                <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-4 border border-purple-200">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <h4 className="text-sm font-bold text-purple-900 flex items-center gap-2">
+                                      <div className="p-1.5 bg-white rounded shadow-sm">
+                                        <Package className="w-4 h-4 text-purple-600" />
+                                      </div>
+                                      Materials & Labour
+                                    </h4>
+                                    <button
+                                      type="button"
+                                      onClick={() => addSubItem(itemIndex)}
+                                      className="text-xs font-semibold text-purple-700 hover:text-purple-800 px-3 py-1.5 bg-purple-200 rounded-lg"
+                                      disabled={isSaving}
+                                    >
+                                      + Add Sub Item
+                                    </button>
+                                  </div>
+
+                                  {/* VAT Mode Toggle */}
+                                  <div className="mb-3 pb-3 border-b border-blue-200">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={useMaterialVAT[itemIndex] || false}
+                                        onChange={(e) => {
+                                          setUseMaterialVAT(prev => ({
+                                            ...prev,
+                                            [itemIndex]: e.target.checked
+                                          }));
+                                        }}
+                                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                        disabled={isSaving}
+                                      />
+                                      <span className="text-xs text-blue-900 font-medium">
+                                        Different VAT rates for materials
+                                      </span>
+                                      <span className="text-xs text-blue-600 italic">
+                                        (Check this if materials have different VAT percentages)
+                                      </span>
+                                    </label>
+                                  </div>
+
+                                  {item.materials.length === 0 ? (
+                                    <div className="text-center py-4 text-blue-700 bg-blue-50 rounded-lg border border-blue-200">
+                                      No materials added yet
+                                    </div>
+                                  ) : (
+                                    <div className="overflow-x-auto bg-white rounded-lg">
+                                      <table className="w-full">
+                                        <thead className="bg-blue-100 border-b border-blue-200">
+                                          <tr>
+                                            <th className="text-left p-3 text-xs font-bold text-blue-900">Material</th>
+                                            <th className="text-left p-3 text-xs font-bold text-blue-900">Qty</th>
+                                            <th className="text-left p-3 text-xs font-bold text-blue-900">Unit</th>
+                                            <th className="text-left p-3 text-xs font-bold text-blue-900">Rate</th>
+                                            <th className="text-left p-3 text-xs font-bold text-blue-900">Total</th>
+                                            <th className="text-left p-3 text-xs font-bold text-blue-900"></th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {item.materials.map((material, matIndex) => (
+                                            <tr key={matIndex} className="border-t border-gray-100">
+                                              <td className="p-2">
                                                 <input
-                                                  type="number"
-                                                  value={material.quantity}
-                                                  onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'quantity', Number(e.target.value))}
-                                                  className="w-24 px-3 py-1.5 pr-9 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                  placeholder="1"
+                                                  type="text"
+                                                  value={material.material_name}
+                                                  onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'material_name', e.target.value)}
+                                                  className={`w-full px-3 py-1.5 border rounded-lg focus:outline-none focus:ring-2 ${
+                                                    material.is_from_master
+                                                      ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
+                                                      : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
+                                                  }`}
+                                                  disabled={material.is_from_master}
+                                                  placeholder="Material name"
+                                                  title={material.is_from_master ? 'Material from master data cannot be edited' : ''}
                                                 />
-                                                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col">
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => handleMaterialChange(itemIndex, matIndex, 'quantity', material.quantity + 1)}
-                                                    className="px-1 hover:bg-blue-100 rounded text-blue-600"
-                                                  >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                                    </svg>
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => handleMaterialChange(itemIndex, matIndex, 'quantity', Math.max(0, material.quantity - 1))}
-                                                    className="px-1 hover:bg-blue-100 rounded text-blue-600"
-                                                  >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                    </svg>
-                                                  </button>
-                                                </div>
-                                              </div>
-                                            </td>
-                                            <td className="p-2">
-                                              <ModernSelect
-                                                value={material.unit}
-                                                onChange={(value) => handleMaterialChange(itemIndex, matIndex, 'unit', value)}
-                                                options={UNIT_OPTIONS}
-                                                className="w-28"
-                                              />
-                                            </td>
-                                            <td className="p-2">
-                                              <div className="flex items-center gap-1">
-                                                <span className="text-sm text-gray-500 font-medium">AED</span>
+                                                <input
+                                                  type="text"
+                                                  value={(material as any).description || ''}
+                                                  onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'description', e.target.value)}
+                                                  className="w-full px-3 py-1.5 mt-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                                  placeholder="Description (optional)"
+                                                />
+                                                {useMaterialVAT[itemIndex] && (
+                                                  <div className="flex items-center gap-1 mt-1">
+                                                    <span className="text-xs text-blue-700 font-medium">VAT:</span>
+                                                    <input
+                                                      type="number"
+                                                      value={(material as any).vat_percentage === 0 ? '' : (material as any).vat_percentage || ''}
+                                                      onChange={(e) => {
+                                                        const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                                        handleMaterialChange(itemIndex, matIndex, 'vat_percentage', value);
+                                                      }}
+                                                      className="w-16 px-2 py-1 text-xs border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white"
+                                                      placeholder="0"
+                                                      min="0"
+                                                      step="0.1"
+                                                      disabled={isSaving}
+                                                    />
+                                                    <span className="text-xs text-gray-600">%</span>
+                                                  </div>
+                                                )}
+                                              </td>
+                                              <td className="p-2">
                                                 <div className="relative">
                                                   <input
                                                     type="number"
-                                                    value={material.unit_price}
-                                                    onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'unit_price', Number(e.target.value))}
-                                                    className="w-28 px-3 py-1.5 pr-9 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                    placeholder="0.00"
+                                                    value={material.quantity}
+                                                    onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'quantity', Number(e.target.value))}
+                                                    className="w-24 px-3 py-1.5 pr-9 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                    placeholder="1"
                                                   />
                                                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col">
                                                     <button
                                                       type="button"
-                                                      onClick={() => handleMaterialChange(itemIndex, matIndex, 'unit_price', material.unit_price + 10)}
+                                                      onClick={() => handleMaterialChange(itemIndex, matIndex, 'quantity', material.quantity + 1)}
                                                       className="px-1 hover:bg-blue-100 rounded text-blue-600"
                                                     >
                                                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1235,7 +1404,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                                     </button>
                                                     <button
                                                       type="button"
-                                                      onClick={() => handleMaterialChange(itemIndex, matIndex, 'unit_price', Math.max(0, material.unit_price - 10))}
+                                                      onClick={() => handleMaterialChange(itemIndex, matIndex, 'quantity', Math.max(0, material.quantity - 1))}
                                                       className="px-1 hover:bg-blue-100 rounded text-blue-600"
                                                     >
                                                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1244,28 +1413,71 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                                     </button>
                                                   </div>
                                                 </div>
-                                              </div>
-                                            </td>
-                                            <td className="p-2">
-                                              <span className="font-medium">AED {material.total_price.toLocaleString()}</span>
-                                            </td>
-                                            <td className="p-2">
-                                              <button
-                                                onClick={() => removeMaterial(itemIndex, matIndex)}
-                                                className="p-1 text-red-600 hover:bg-red-100 rounded"
-                                              >
-                                                <Trash2 className="w-4 h-4" />
-                                              </button>
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
-                              </div>
+                                              </td>
+                                              <td className="p-2">
+                                                <ModernSelect
+                                                  value={material.unit}
+                                                  onChange={(value) => handleMaterialChange(itemIndex, matIndex, 'unit', value)}
+                                                  options={UNIT_OPTIONS}
+                                                  className="w-28"
+                                                />
+                                              </td>
+                                              <td className="p-2">
+                                                <div className="flex items-center gap-1">
+                                                  <span className="text-sm text-gray-500 font-medium">AED</span>
+                                                  <div className="relative">
+                                                    <input
+                                                      type="number"
+                                                      value={material.unit_price}
+                                                      onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'unit_price', Number(e.target.value))}
+                                                      className="w-28 px-3 py-1.5 pr-9 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                      placeholder="0.00"
+                                                    />
+                                                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleMaterialChange(itemIndex, matIndex, 'unit_price', material.unit_price + 10)}
+                                                        className="px-1 hover:bg-blue-100 rounded text-blue-600"
+                                                      >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                                        </svg>
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleMaterialChange(itemIndex, matIndex, 'unit_price', Math.max(0, material.unit_price - 10))}
+                                                        className="px-1 hover:bg-blue-100 rounded text-blue-600"
+                                                      >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                        </svg>
+                                                      </button>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </td>
+                                              <td className="p-2">
+                                                <span className="font-medium">AED {material.total_price.toLocaleString()}</span>
+                                              </td>
+                                              <td className="p-2">
+                                                <button
+                                                  onClick={() => removeMaterial(itemIndex, matIndex)}
+                                                  className="p-1 text-red-600 hover:bg-red-100 rounded"
+                                                >
+                                                  <Trash2 className="w-4 h-4" />
+                                                </button>
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
 
-                              {/* Labour Section - Orange Card */}
+                              {/* Labour Section - Orange Card - Only show if NO sub_items */}
+                              {!(item.sub_items && item.sub_items.length > 0) && (
                               <div className="bg-gradient-to-r from-orange-50 to-orange-100/30 rounded-lg p-4 border border-orange-200">
                                 <div className="flex items-center justify-between mb-3">
                                   <h4 className="text-sm font-bold text-orange-900 flex items-center gap-2">
@@ -1413,6 +1625,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                   </div>
                                 )}
                               </div>
+                              )}
 
                               {/* Overheads, Profit & Discount Section */}
                               <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">

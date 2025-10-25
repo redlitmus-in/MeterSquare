@@ -55,19 +55,24 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
     return revNum === 0 ? 'Original' : `${revNum}`;
   };
 
-  // Filter BOQs for Revisions tab:
+  // Filter BOQs for Client Revisions tab:
   // 1. BOQs with revisions (revision_number > 0)
   // 2. Approved BOQs waiting to send to client (approved/revision_approved)
   // 3. BOQs pending TD approval (pending_approval/pending_revision)
   // 4. BOQs being edited (under_revision)
+  // 5. BOQs with client interactions
   const boqsWithRevisions = boqList.filter(boq => {
     const status = boq.status?.toLowerCase() || '';
     const hasRevisions = (boq.revision_number || 0) > 0;
     const isApprovedNotSent = (status === 'approved' || status === 'revision_approved');
     const isPendingApproval = (status === 'pending_approval' || status === 'pending_revision' || status === 'pending');
     const isUnderRevision = (status === 'under_revision');
+    const isSentToClient = (status === 'sent_for_confirmation');
+    const isClientRejected = (status === 'client_rejected');
+    const isClientConfirmed = (status === 'client_confirmed');
+    const isClientCancelled = (status === 'client_cancelled');
 
-    return hasRevisions || isApprovedNotSent || isPendingApproval || isUnderRevision;
+    return hasRevisions || isApprovedNotSent || isPendingApproval || isUnderRevision || isSentToClient || isClientRejected || isClientConfirmed || isClientCancelled;
   });
 
   // Filter based on search
