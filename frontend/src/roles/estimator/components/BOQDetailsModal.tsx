@@ -36,6 +36,7 @@ interface BOQDetailsModalProps {
   onPrint?: () => void;
   onApprove?: () => void; // For TD/PM approval
   onReject?: () => void; // For TD/PM rejection
+  onRequestExtension?: () => void; // For PM to request day extension
   showNewPurchaseItems?: boolean; // Control whether to show new_purchase section (default: false for Projects, true for Change Requests)
   refreshTrigger?: number; // Add a trigger to force refresh from parent
 }
@@ -49,6 +50,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
   onPrint,
   onApprove,
   onReject,
+  onRequestExtension,
   showNewPurchaseItems = false, // Default to false (Projects page won't show new items)
   refreshTrigger
 }) => {
@@ -178,6 +180,18 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                       >
                         <XCircleIcon className="w-5 h-5" />
                         Reject
+                      </button>
+                    )}
+
+                    {/* Request Extension Button - For PM on approved projects */}
+                    {onRequestExtension && (
+                      <button
+                        onClick={onRequestExtension}
+                        className="px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg transition-colors flex items-center gap-2 font-medium shadow-sm"
+                        title="Request Day Extension"
+                      >
+                        <Calendar className="w-5 h-5" />
+                        Request Extension
                       </button>
                     )}
 

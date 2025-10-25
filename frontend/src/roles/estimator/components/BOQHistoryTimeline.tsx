@@ -138,7 +138,13 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
                 total_value: actionItem.total_value || actionItem.total_cost,
                 item_count: actionItem.item_count || actionItem.total_items,
                 attachments: actionItem.attachments,
-                rejection_reason: actionItem.rejection_reason
+                rejection_reason: actionItem.rejection_reason,
+                justification: actionItem.justification,
+                cr_id: actionItem.cr_id,
+                item_name: actionItem.item_name,
+                materials_count: actionItem.materials_count,
+                vendor_name: actionItem.vendor_name,
+                purchase_notes: actionItem.purchase_notes
               });
             });
           } else {
@@ -562,6 +568,75 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
                         <div>
                           <p className="text-xs font-medium text-gray-700 mb-1">Comments:</p>
                           <p className="text-xs text-gray-600">{action.comments}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Change Request Details */}
+                  {action.action_type?.toUpperCase().includes('CHANGE_REQUEST') && (
+                    <div className="bg-blue-50/60 rounded p-2 mt-2 space-y-1">
+                      {action.cr_id && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="font-medium text-blue-700">CR ID:</span>
+                          <span className="text-blue-600">#{action.cr_id}</span>
+                        </div>
+                      )}
+                      {action.item_name && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="font-medium text-blue-700">Item:</span>
+                          <span className="text-blue-600">{action.item_name}</span>
+                        </div>
+                      )}
+                      {action.materials_count !== undefined && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="font-medium text-blue-700">Materials:</span>
+                          <span className="text-blue-600">{action.materials_count} item(s)</span>
+                        </div>
+                      )}
+                      {action.total_value && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="font-medium text-blue-700">Total Cost:</span>
+                          <span className="text-blue-600">AED {action.total_value.toLocaleString()}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Justification/Reason for Change Request */}
+                  {action.justification && action.action_type?.toUpperCase().includes('CHANGE_REQUEST') && (
+                    <div className="bg-amber-50 border border-amber-200 rounded p-2 mt-2">
+                      <div className="flex items-start gap-2">
+                        <FileText className="w-4 h-4 text-amber-600 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-medium text-amber-700 mb-1">Justification:</p>
+                          <p className="text-xs text-amber-600">{action.justification}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Vendor Information */}
+                  {action.vendor_name && (action.action_type?.toUpperCase().includes('VENDOR') || action.action_type?.toUpperCase().includes('PURCHASE')) && (
+                    <div className="bg-purple-50 border border-purple-200 rounded p-2 mt-2">
+                      <div className="flex items-start gap-2">
+                        <Store className="w-4 h-4 text-purple-600 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-medium text-purple-700 mb-1">Vendor:</p>
+                          <p className="text-xs text-purple-600">{action.vendor_name}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Purchase Notes */}
+                  {action.purchase_notes && action.action_type?.toUpperCase().includes('PURCHASE') && (
+                    <div className="bg-green-50 border border-green-200 rounded p-2 mt-2">
+                      <div className="flex items-start gap-2">
+                        <Package className="w-4 h-4 text-green-600 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-medium text-green-700 mb-1">Purchase Notes:</p>
+                          <p className="text-xs text-green-600">{action.purchase_notes}</p>
                         </div>
                       </div>
                     </div>

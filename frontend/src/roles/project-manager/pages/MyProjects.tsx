@@ -1152,6 +1152,10 @@ const MyProjects: React.FC = () => {
           setShowRejectModal(true);
           setShowBOQModal(false);
         } : undefined}
+        onRequestExtension={selectedProject?.boq_status?.toLowerCase() === 'approved' && selectedProject?.site_supervisor_id && selectedProject?.status?.toLowerCase() !== 'completed' ? () => {
+          setShowDayExtensionModal(true);
+          setShowBOQModal(false);
+        } : undefined}
         showNewPurchaseItems={true}
       />
 
