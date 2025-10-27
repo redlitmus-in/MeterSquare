@@ -1543,18 +1543,23 @@ def get_boq(boq_id):
 def get_all_boq():
     """Get all BOQs with their details from JSON storage"""
     try:
-        # Get all BOQs with their details
+         # Get current logged-in user
+        current_user = getattr(g, 'user', None)
+        user_id = current_user.get('user_id') if current_user else None
+        print("user_id:",user_id)
+        # Get all BOQs with their details - filter by Project.estimator_id
         boqs = (
-            db.session.query(BOQ, BOQDetails)
+            db.session.query(BOQ, BOQDetails, Project)
             .join(BOQDetails, BOQ.boq_id == BOQDetails.boq_id)
-            .filter(BOQ.is_deleted == False)
+            .join(Project, BOQ.project_id == Project.project_id)
+            .filter(
+                BOQ.is_deleted == False,
+                Project.estimator_id == user_id
+            )
             .all()
         )
         complete_boqs = []
-        for boq, boq_detail in boqs:
-            # Fetch project details
-            project = Project.query.filter_by(project_id=boq.project_id).first()
-
+        for boq, boq_detail, project in boqs:
             # Check BOQ history for sender and receiver roles
             display_status = boq.status
             boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.created_at.desc()).first()

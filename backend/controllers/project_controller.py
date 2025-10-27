@@ -86,6 +86,7 @@ def create_project():
             completion_requested=False,
             user_id=None,  # PM will be assigned later by TD, not set on creation
             created_by=current_user.get('email'),
+            estimator_id=current_user.get('user_id'),
             created_at=datetime.utcnow(),
             is_deleted=False
         )
@@ -114,6 +115,10 @@ def get_all_projects():
     - work_type: filter by work type
     """
     try:
+        current_user = getattr(g, 'user', None)
+        user_id = current_user.get('user_id') if current_user else None
+        user_role = current_user.get('role', '').lower() if current_user else ''
+        user_name = current_user.get('full_name') or current_user.get('username') or 'Unknown' if current_user else 'Unknown'
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 10, type=int), 100)
@@ -122,7 +127,7 @@ def get_all_projects():
         work_type = request.args.get('work_type', '')
 
         # Build query
-        query = Project.query.filter_by(is_deleted=False)
+        query = Project.query.filter_by(is_deleted=False,estimator_id=user_id)
 
         # Apply filters
         if search:
