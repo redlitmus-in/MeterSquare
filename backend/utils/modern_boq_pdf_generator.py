@@ -255,6 +255,31 @@ class ModernBOQPDFGenerator:
             ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ('LEFTPADDING', (0, 0), (-1, -1), 8),
             ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        # Project details in modern card style - Create separate paragraphs for each field
+        info_style = ParagraphStyle(
+            'InfoField',
+            parent=self.styles['Normal'],
+            leftIndent=10,
+            rightIndent=10,
+            spaceBefore=5,
+            spaceAfter=5
+        )
+
+        info_paras = [
+            Paragraph(f'<b><font color="#1F4788">Project Name:</font></b><br/><font size="11">{project.project_name or "N/A"}</font>', info_style),
+            Paragraph(f'<b><font color="#1F4788">Client Name:</font></b><br/><font size="11">{project.client or "N/A"}</font>', info_style),
+            Paragraph(f'<b><font color="#1F4788">Location:</font></b><br/><font size="11">{project.location or "N/A"}</font>', info_style),
+            Paragraph(f'<b><font color="#1F4788">Quotation Date:</font></b><br/><font size="11">{date.today().strftime("%B %d, %Y")}</font>', info_style),
+        ]
+
+        info_card = Table([[p] for p in info_paras], colWidths=[6.7*inch])
+        info_card.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F9FAFB')),
+            ('BOX', (0, 0), (-1, -1), 1.5, colors.HexColor('#E5E7EB')),
+            ('TOPPADDING', (0, 0), (-1, -1), 15),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
+            ('LEFTPADDING', (0, 0), (-1, -1), 15),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 15),
         ]))
         elements.append(info_table)
         elements.append(Spacer(1, 8))

@@ -820,8 +820,8 @@ const ProjectApprovals: React.FC = () => {
       return 'approved';
     }
 
-    // Check for rejected status
-    if (normalizedStatus === 'rejected' || normalizedStatus === 'reject') {
+    // Check for rejected status (including client revision rejected)
+    if (normalizedStatus === 'rejected' || normalizedStatus === 'reject' || normalizedStatus === 'client_revision_rejected') {
       return 'rejected';
     }
 
@@ -936,7 +936,10 @@ const ProjectApprovals: React.FC = () => {
         );
         setBOQs(optimisticBOQs);
 
-        const response = await tdService.rejectBOQ(id, notes);
+        // Use client revision method if in revisions tab, otherwise use regular method
+        const response = filterStatus === 'revisions'
+          ? await tdService.rejectClientRevision(id, notes)
+          : await tdService.rejectBOQ(id, notes);
         if (response.success) {
           toast.success('BOQ rejected successfully');
 
@@ -984,7 +987,10 @@ const ProjectApprovals: React.FC = () => {
       );
       setBOQs(optimisticBOQs);
 
-      const response = await tdService.approveBOQ(selectedEstimation.id, approvalNotes);
+      // Use client revision method if in revisions tab, otherwise use regular method
+      const response = filterStatus === 'revisions'
+        ? await tdService.approveClientRevision(selectedEstimation.id, approvalNotes)
+        : await tdService.approveBOQ(selectedEstimation.id, approvalNotes);
       if (response.success) {
         toast.success('BOQ approved successfully');
 

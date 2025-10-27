@@ -50,6 +50,56 @@ class TDService {
     }
   }
 
+  // Client Revision approval/rejection methods (separate from regular approval)
+  async approveClientRevision(boqId: number, notes?: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await apiClient.post('/client_td_approval', {
+        boq_id: boqId,
+        technical_director_status: 'approved',
+        rejection_reason: '',
+        comments: notes || 'Client revision approved.'
+      });
+      return {
+        success: true,
+        message: response.data.message || 'Client revision approved successfully'
+      };
+    } catch (error: any) {
+      console.error('Client revision approval error:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to approve client revision'
+      };
+    }
+  }
+
+  async rejectClientRevision(boqId: number, reason: string): Promise<{ success: boolean; message: string }> {
+    try {
+      if (!reason || !reason.trim()) {
+        return {
+          success: false,
+          message: 'Rejection reason is required'
+        };
+      }
+
+      const response = await apiClient.post('/client_td_approval', {
+        boq_id: boqId,
+        technical_director_status: 'rejected',
+        rejection_reason: reason,
+        comments: reason
+      });
+      return {
+        success: true,
+        message: response.data.message || 'Client revision rejected successfully'
+      };
+    } catch (error: any) {
+      console.error('Client revision rejection error:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to reject client revision'
+      };
+    }
+  }
+
   async getBOQHistory(boqId: number): Promise<{ success: boolean; data?: any[]; message?: string }> {
     try {
       const response = await apiClient.get(`/boq_history/${boqId}`);

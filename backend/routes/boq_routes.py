@@ -6,9 +6,9 @@ from utils.authentication import jwt_required
 from controllers.boq_controller import *
 from controllers.boq_upload_controller import *
 from controllers.boq_bulk_controller import bulk_upload_boq
-from controllers.boq_revisions import get_revision_tabs, get_projects_by_revision, get_revision_statistics
+from controllers.boq_revisions import *
 from controllers.boq_internal_revisions_controller import *
-from controllers.download_boq_pdf import download_internal_pdf, download_client_pdf
+from controllers.download_boq_pdf import *
 
 boq_routes = Blueprint('boq_routes', __name__, url_prefix='/api')
 
@@ -149,3 +149,7 @@ def download_internal_pdf_route(boq_id):
 def download_client_pdf_route(boq_id):
     return download_client_pdf()
 
+@boq_routes.route('/client_td_approval', methods=['POST'])
+@jwt_required
+def client_revision_td_mail_send_route():
+    return client_revision_td_mail_send()

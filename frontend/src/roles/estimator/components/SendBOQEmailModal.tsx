@@ -65,6 +65,7 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
               profitMargin: boq.profit_margin || boq.profit_margin_percentage || 0,
               overheadPercentage: boq.overhead_percentage || boq.overhead || 0,
               discountPercentage: boq.discount_percentage || 0,
+              discount_amount: boq.discount_amount || 0,
               submittedDate: boq.created_at ? new Date(boq.created_at).toISOString().split('T')[0] : '',
               location: boq.location || boq.project_details?.location || boq.project?.location || 'N/A',
               floor: boq.floor || boq.floor_name || boq.project_details?.floor || boq.project?.floor_name || 'N/A',
@@ -73,33 +74,73 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
               totalVatAmount: boq.total_vat_amount || boq.totalVatAmount || 0,
               overallVatPercentage: boq.overall_vat_percentage || boq.overallVatPercentage || 0,
               boqItems: items.map((item: any) => {
-                const totalQuantity = item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
+                const hasSubItems = item.sub_items && item.sub_items.length > 0;
+                const totalQuantity = hasSubItems
+                  ? item.sub_items.reduce((sum: number, si: any) => sum + (si.quantity || 0), 0)
+                  : item.materials?.reduce((sum: number, m: any) => sum + (m.quantity || 0), 0) || 1;
                 const sellingPrice = item.selling_price || 0;
 
                 return {
                   id: item.item_id,
                   description: item.item_name,
                   briefDescription: item.description || '',
-                  unit: item.materials?.[0]?.unit || 'nos',
+                  unit: hasSubItems ? item.sub_items[0]?.unit : (item.materials?.[0]?.unit || 'nos'),
                   quantity: totalQuantity,
                   rate: totalQuantity > 0 ? sellingPrice / totalQuantity : sellingPrice,
                   amount: sellingPrice,
-                  materials: item.materials?.map((mat: any) => ({
+                  has_sub_items: hasSubItems,
+                  sub_items: hasSubItems ? item.sub_items.map((subItem: any) => ({
+                    sub_item_name: subItem.sub_item_name || subItem.name,
+                    scope: subItem.scope,
+                    size: subItem.size,
+                    description: subItem.description,
+                    location: subItem.location,
+                    brand: subItem.brand,
+                    quantity: subItem.quantity,
+                    unit: subItem.unit,
+                    rate: subItem.rate,
+                    base_total: subItem.base_total || (subItem.quantity * subItem.rate),
+                    materials_cost: subItem.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) || 0,
+                    labour_cost: subItem.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+                    materials: subItem.materials?.map((mat: any) => ({
+                      name: mat.material_name,
+                      material_name: mat.material_name,
+                      quantity: mat.quantity,
+                      unit: mat.unit,
+                      rate: mat.unit_price || mat.rate_per_unit,
+                      amount: mat.total_price,
+                      total_price: mat.total_price,
+                      vat_percentage: mat.vat_percentage || 0
+                    })) || [],
+                    labour: subItem.labour?.map((lab: any) => ({
+                      type: lab.labour_role,
+                      labour_role: lab.labour_role,
+                      quantity: lab.hours || lab.no_of_hours,
+                      hours: lab.hours || lab.no_of_hours,
+                      unit: 'hrs',
+                      rate: lab.rate_per_hour,
+                      amount: lab.total_cost,
+                      total_cost: lab.total_cost
+                    })) || []
+                  })) : undefined,
+                  materials: !hasSubItems ? (item.materials?.map((mat: any) => ({
                     name: mat.material_name,
                     quantity: mat.quantity,
                     unit: mat.unit,
                     rate: mat.unit_price || mat.rate_per_unit,
                     amount: mat.total_price,
                     vat_percentage: mat.vat_percentage || 0
-                  })) || [],
-                  labour: item.labour?.map((lab: any) => ({
+                  })) || []) : [],
+                  labour: !hasSubItems ? (item.labour?.map((lab: any) => ({
                     type: lab.labour_role,
                     quantity: lab.hours || lab.no_of_hours,
                     unit: 'hrs',
                     rate: lab.rate_per_hour,
                     amount: lab.total_cost
-                  })) || [],
-                  laborCost: item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
+                  })) || []) : [],
+                  laborCost: hasSubItems
+                    ? item.sub_items.reduce((sum: number, si: any) => sum + (si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || 0), 0) || 0), 0)
+                    : item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0,
                   estimatedSellingPrice: sellingPrice,
                   overheadPercentage: item.overhead_percentage || 0,
                   profitMarginPercentage: item.profit_margin_percentage || 0,

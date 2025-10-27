@@ -345,6 +345,16 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     return `AED ${amount?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`;
   };
 
+  const getStatusBadge = (status: string) => {
+    const statusLower = status?.toLowerCase().replace(/_/g, '');
+    if (statusLower === 'internalrevisionpending') {
+      return { label: 'Internal Revision Pending', color: 'bg-orange-100 text-orange-700' };
+    } else if (statusLower === 'rejected') {
+      return { label: 'Rejected', color: 'bg-red-100 text-red-700' };
+    }
+    return { label: status, color: 'bg-gray-100 text-gray-700' };
+  };
+
   const filteredBOQs = boqs.filter(boq =>
     boq.boq_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     boq.project?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -636,31 +646,37 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           <div className="mb-4 space-y-2">
             <p className="text-sm font-semibold text-gray-700 mb-3">Recent Projects:</p>
             <div className="space-y-2">
-              {boqs.slice(0, 5).map((boq) => (
-                <button
-                  key={boq.boq_id}
-                  onClick={() => {
-                    setSelectedBoq(boq);
-                    setSearchTerm('');
-                    setSelectedRevisionIndex(null);
-                  }}
-                  className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border border-gray-200 rounded-lg"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="font-semibold text-gray-900">{boq.boq_name}</div>
-                      <div className="text-sm text-gray-600">
-                        {boq.project?.name} • {boq.project?.client}
+              {boqs.slice(0, 5).map((boq) => {
+                const statusBadge = getStatusBadge(boq.status);
+                return (
+                  <button
+                    key={boq.boq_id}
+                    onClick={() => {
+                      setSelectedBoq(boq);
+                      setSearchTerm('');
+                      setSelectedRevisionIndex(null);
+                    }}
+                    className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border border-gray-200 rounded-lg"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-900">{boq.boq_name}</div>
+                        <div className="text-sm text-gray-600">
+                          {boq.project?.name} • {boq.project?.client}
+                        </div>
+                      </div>
+                      <div className="text-right ml-4 space-y-1">
+                        <div className={`text-xs font-semibold px-2 py-1 rounded inline-block ${statusBadge.color}`}>
+                          {statusBadge.label}
+                        </div>
+                        <div className="text-sm font-semibold px-2 py-1 rounded inline-block bg-blue-100 text-blue-700">
+                          Internal Rev: {boq.internal_revision_number}
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right ml-4">
-                      <div className="text-sm font-semibold px-2 py-1 rounded inline-block bg-blue-100 text-blue-700">
-                        Internal Rev: {boq.internal_revision_number}
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -695,11 +711,14 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
               }}
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
             >
-              {filteredBOQs.map((boq) => (
-                <option key={boq.boq_id} value={boq.boq_id}>
-                  {boq.boq_name} - {boq.project?.name} - Internal Rev: {boq.internal_revision_number}
-                </option>
-              ))}
+              {filteredBOQs.map((boq) => {
+                const statusBadge = getStatusBadge(boq.status);
+                return (
+                  <option key={boq.boq_id} value={boq.boq_id}>
+                    {boq.boq_name} - {statusBadge.label} - Internal Rev: {boq.internal_revision_number}
+                  </option>
+                );
+              })}
             </select>
           ) : (
             <div className="text-center py-8 text-gray-500 mb-4">
@@ -829,6 +848,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                 {(() => {
                   const status = selectedBoq?.status?.toLowerCase()?.replace(/_/g, '') || '';
                   const isRejected = status === 'rejected';
+                  const isClientRevisionRejected = status === 'clientrevisionrejected';
                   const isApproved = status === 'approved' || status === 'revisionapproved';
                   const isUnderRevision = status === 'underrevision';
                   const isSentForConfirmation = status === 'sentforconfirmation';
@@ -840,7 +860,8 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   const isSentToTD = lastAction === 'SENT_TO_TD';
 
                   // Statuses where buttons should be hidden (BOQ is in a final or processing state)
-                  const isInFinalOrProcessingState = isApproved || isUnderRevision || isSentForConfirmation || isPendingTDApproval || isClientConfirmed || isPendingRevision;
+                  // Note: isClientRevisionRejected IS included here to hide buttons in Internal Revisions tab
+                  const isInFinalOrProcessingState = isApproved || isUnderRevision || isSentForConfirmation || isPendingTDApproval || isClientConfirmed || isPendingRevision || isClientRevisionRejected;
 
                   // Technical Director: Show Approve/Reject buttons when pending approval
                   if (userRole === 'technical_director' || userRole === 'technical-director') {
@@ -960,6 +981,15 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                       return (
                         <div className="mt-4 text-center py-3 bg-orange-50 border border-orange-200 rounded-lg">
                           <p className="text-sm font-medium text-orange-800">🔄 Under Revision</p>
+                        </div>
+                      );
+                    }
+
+                    // Show message for client_revision_rejected
+                    if (isClientRevisionRejected) {
+                      return (
+                        <div className="mt-4 text-center py-3 bg-red-50 border border-red-200 rounded-lg">
+                          <p className="text-sm font-medium text-red-800">❌ Client Revision Rejected by TD - Use Client Revisions tab to revise</p>
                         </div>
                       );
                     }
