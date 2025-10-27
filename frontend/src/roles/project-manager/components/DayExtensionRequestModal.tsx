@@ -71,7 +71,7 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/boq/${boqId}/request-day-extension`, {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/boq/${boqId}/request-day-extension`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

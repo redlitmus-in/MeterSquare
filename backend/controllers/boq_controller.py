@@ -1606,10 +1606,11 @@ def get_all_boq():
                 "created_by": boq.created_by
             }
 
-            # Add items from JSON
+            # Add items from JSON - handle both old and new formats
             items_list = []
             total_material_cost = 0
             total_labour_cost = 0
+            total_selling_price = 0
             overhead_percentage = 0
             profit_margin = 0
 
@@ -1619,21 +1620,65 @@ def get_all_boq():
 
                 # Calculate totals from items
                 for item in items:
-                    # Calculate material cost
-                    materials = item.get("materials", [])
-                    for mat in materials:
-                        total_material_cost += mat.get("total_price", 0)
+                    item_materials_cost = 0
+                    item_labour_cost = 0
 
-                    # Calculate labour cost
-                    labour = item.get("labour", [])
-                    for lab in labour:
-                        total_labour_cost += lab.get("total_cost", 0)
+                    # Check if item has sub_items (new format)
+                    if "sub_items" in item and item.get("sub_items"):
+                        # NEW FORMAT: materials/labour are inside sub_items
+                        for sub_item in item.get("sub_items", []):
+                            # Sum up materials cost from sub_item
+                            materials = sub_item.get("materials", [])
+                            for mat in materials:
+                                mat_cost = mat.get("total_price", 0)
+                                total_material_cost += mat_cost
+                                item_materials_cost += mat_cost
+                            # Sum up labour cost from sub_item
+                            labour = sub_item.get("labour", [])
+                            for lab in labour:
+                                lab_cost = lab.get("total_cost", 0)
+                                total_labour_cost += lab_cost
+                                item_labour_cost += lab_cost
+                    else:
+                        # OLD FORMAT: materials/labour are at item level
+                        materials = item.get("materials", [])
+                        for mat in materials:
+                            mat_cost = mat.get("total_price", 0)
+                            total_material_cost += mat_cost
+                            item_materials_cost += mat_cost
+                        labour = item.get("labour", [])
+                        for lab in labour:
+                            lab_cost = lab.get("total_cost", 0)
+                            total_labour_cost += lab_cost
+                            item_labour_cost += lab_cost
+
+                    # Get selling price from item - if not available, calculate it
+                    item_selling_price = item.get("selling_price", 0) or item.get("estimatedSellingPrice", 0)
+
+                    if not item_selling_price or item_selling_price == 0:
+                        # Calculate selling price from base cost + overhead + profit + misc
+                        item_base_cost = item_materials_cost + item_labour_cost
+                        item_overhead = item.get("overhead_amount", 0)
+                        item_profit = item.get("profit_margin_amount", 0)
+                        item_misc = item.get("miscellaneous_amount", 0)
+
+                        # If amounts are not present, calculate from percentages
+                        if item_overhead == 0 and item.get("overhead_percentage", 0) > 0:
+                            item_overhead = item_base_cost * (item.get("overhead_percentage", 0) / 100)
+                        if item_profit == 0 and item.get("profit_margin_percentage", 0) > 0:
+                            item_profit = item_base_cost * (item.get("profit_margin_percentage", 0) / 100)
+                        if item_misc == 0 and item.get("miscellaneous_percentage", 0) > 0:
+                            item_misc = item_base_cost * (item.get("miscellaneous_percentage", 0) / 100)
+
+                        item_selling_price = item_base_cost + item_overhead + item_profit + item_misc
+
+                    total_selling_price += item_selling_price
 
                     # Get overhead and profit from first item
                     if overhead_percentage == 0:
                         overhead_percentage = item.get("overhead_percentage", 0)
                     if profit_margin == 0:
-                        profit_margin = item.get("profit_margin", 0)
+                        profit_margin = item.get("profit_margin", 0) or item.get("profit_margin_percentage", 0)
 
             # Add summary from JSON if available (this will override calculated values if present)
             if boq_detail.boq_details and "summary" in boq_detail.boq_details:
@@ -1646,6 +1691,15 @@ def get_all_boq():
                     overhead_percentage = summary.get("overhead_percentage", 0)
                 if summary.get("profit_margin", 0) > 0:
                     profit_margin = summary.get("profit_margin", 0)
+                # Also check for selling price in summary
+                if summary.get("selling_price", 0) > 0 or summary.get("estimatedSellingPrice", 0) > 0:
+                    total_selling_price = summary.get("selling_price", 0) or summary.get("estimatedSellingPrice", 0) or summary.get("grandTotal", 0)
+
+            # Update total_cost if we calculated a selling price
+            if total_selling_price > 0:
+                boq_summary["total_cost"] = total_selling_price
+                boq_summary["selling_price"] = total_selling_price
+                boq_summary["estimatedSellingPrice"] = total_selling_price
 
             boq_summary.update({
                 "items": items_list,

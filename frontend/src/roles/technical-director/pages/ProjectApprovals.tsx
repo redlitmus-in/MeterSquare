@@ -35,6 +35,7 @@ import {
   exportBOQToPDFInternal,
   exportBOQToPDFClient
 } from '@/utils/boqExportUtils';
+import { downloadInternalBOQPDF, downloadClientBOQPDF } from '@/services/boqPdfService';
 import {
   Table,
   TableHeader,
@@ -348,9 +349,25 @@ const ProjectApprovals: React.FC = () => {
     const clientName = boq.client || boq.project_details?.client || boq.project?.client || 'Unknown Client';
     const status = mapBOQStatus(boq.status);
 
-    // Use API-provided totals directly (these come from backend calculations)
-    // IMPORTANT: Use selling_price (includes O&P), NOT total_cost (only base + overhead)
-    const totalValue = boq.selling_price || boq.total_cost || 0;
+    // Calculate grand total from sub-items (Client Amount = sum of all quantity × rate)
+    let totalValue = 0;
+    if (boq.items && Array.isArray(boq.items)) {
+      boq.items.forEach((item: any) => {
+        if (item.sub_items && Array.isArray(item.sub_items)) {
+          item.sub_items.forEach((si: any) => {
+            totalValue += (si.quantity || 0) * (si.rate || 0);
+          });
+        } else {
+          // Fallback for old format without sub-items
+          totalValue += (item.quantity || 0) * (item.rate || 0);
+        }
+      });
+    }
+    // Fallback to backend values if no items
+    if (totalValue === 0) {
+      totalValue = boq.selling_price || boq.total_cost || 0;
+    }
+
     const laborCost = boq.total_labour_cost || 0;
     const materialCost = boq.total_material_cost || 0;
     const itemCount = boq.items_count || 0;
@@ -1017,10 +1034,11 @@ const ProjectApprovals: React.FC = () => {
           await exportBOQToExcelClient(selectedEstimation);
         }
       } else {
+        // Use backend API for PDF generation (modern template with correct port)
         if (isInternal) {
-          await exportBOQToPDFInternal(selectedEstimation);
+          await downloadInternalBOQPDF(selectedEstimation.id);
         } else {
-          await exportBOQToPDFClient(selectedEstimation);
+          await downloadClientBOQPDF(selectedEstimation.id);
         }
       }
 
@@ -3266,6 +3284,8 @@ const ProjectApprovals: React.FC = () => {
                         let totalClientAmount = 0;
                         let totalPlannedProfit = 0;
                         let totalActualProfit = 0;
+                        let totalMiscCost = 0;
+                        let totalTransportCost = 0;
 
                         (selectedEstimation.boqItems || []).forEach((item: any) => {
                           if (item.sub_items && item.sub_items.length > 0) {
@@ -3279,7 +3299,9 @@ const ProjectApprovals: React.FC = () => {
 
                               totalClientAmount += clientAmt;
                               totalPlannedProfit += opAmt;
-                              totalActualProfit += (clientAmt - matCost - labCost - miscAmt - transportAmt);
+                              totalMiscCost += miscAmt;
+                              totalTransportCost += transportAmt;
+                              totalActualProfit += (clientAmt - matCost - labCost - miscAmt - opAmt - transportAmt);
                             });
                           }
                         });
@@ -3294,7 +3316,7 @@ const ProjectApprovals: React.FC = () => {
                           totalDiscount = totalClientAmount * (overallDiscountPct / 100);
                         }
 
-                        const totalInternalCost = materialCost + labourCost;
+                        const totalInternalCost = materialCost + labourCost + totalMiscCost + totalPlannedProfit + totalTransportCost;
                         const projectMargin = totalClientAmount - totalInternalCost;
                         const marginPercentage = totalClientAmount > 0 ? ((projectMargin / totalClientAmount) * 100) : 0;
                         const profitVariance = totalActualProfit - totalPlannedProfit;
@@ -3324,6 +3346,18 @@ const ProjectApprovals: React.FC = () => {
                                   <div className="flex justify-between">
                                     <span>Labour:</span>
                                     <span>AED{formatCurrency(labourCost)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Miscellaneous:</span>
+                                    <span>AED{formatCurrency(totalMiscCost)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Overhead & Profit:</span>
+                                    <span>AED{formatCurrency(totalPlannedProfit)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Transport:</span>
+                                    <span>AED{formatCurrency(totalTransportCost)}</span>
                                   </div>
                                 </div>
                                 <div className="flex justify-between pt-2 border-t border-blue-300">

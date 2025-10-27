@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 import { estimatorService } from '../services/estimatorService';
 import { exportBOQToExcelClient, exportBOQToPDFClient } from '@/utils/boqExportUtils';
+import { downloadClientBOQPDF } from '@/services/boqPdfService';
 
 interface SendBOQEmailModalProps {
   isOpen: boolean;
@@ -386,7 +387,8 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                                 }
                                 try {
                                   toast.loading('Generating PDF file...');
-                                  await exportBOQToPDFClient(boqData);
+                                  // Use backend API for PDF generation (modern template with correct port)
+                                  await downloadClientBOQPDF(boqData.id);
                                   toast.dismiss();
                                   toast.success('PDF file downloaded successfully');
                                 } catch (error) {

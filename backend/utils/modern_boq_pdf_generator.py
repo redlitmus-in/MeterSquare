@@ -128,6 +128,10 @@ class ModernBOQPDFGenerator:
         if boq_json and boq_json.get('preliminaries'):
             elements.extend(self._add_preliminaries(boq_json['preliminaries']))
 
+        # Signatures on new page
+        elements.append(PageBreak())
+        elements.extend(self._add_signatures())
+
         # Build PDF
         doc.build(elements)
         buffer.seek(0)
@@ -145,13 +149,12 @@ class ModernBOQPDFGenerator:
 
         if os.path.exists(logo_path):
             try:
-                logo = Image(logo_path, width=2*inch, height=0.8*inch)
+                logo = Image(logo_path, width=1.2*inch, height=0.5*inch)
                 company_info = Paragraph(
-                    '''<b>METERSQUARE INTERIORS LLC</b><br/>
-                    <font size="8">P.O. Box 12345, Dubai, UAE<br/>
-                    Tel: +971 4 123 4567 | Email: info@metersquare.com<br/>
-                    www.metersquare.com</font>''',
-                    ParagraphStyle('CompanyInfo', parent=self.styles['Normal'], fontSize=9, alignment=TA_RIGHT)
+                    '''<b><font size="10">METERSQUARE INTERIORS LLC</font></b><br/>
+                    <font size="7">P.O. Box 12345, Dubai, UAE<br/>
+                    Tel: +971 4 123 4567</font>''',
+                    ParagraphStyle('CompanyInfo', parent=self.styles['Normal'], fontSize=8, alignment=TA_RIGHT)
                 )
                 header_data = [[logo, company_info]]
             except:
@@ -172,156 +175,151 @@ class ModernBOQPDFGenerator:
             header_data = [[company_info]]
 
         if len(header_data[0]) == 2:
-            header_table = Table(header_data, colWidths=[3*inch, 3.7*inch])
+            header_table = Table(header_data, colWidths=[1.5*inch, 5.2*inch])
         else:
             header_table = Table(header_data, colWidths=[6.7*inch])
 
         header_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-            ('LINEBELOW', (0, 0), (-1, -1), 2, colors.HexColor('#1F4788')),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LINEBELOW', (0, 0), (-1, -1), 1.5, colors.HexColor('#1F4788')),
         ]))
         elements.append(header_table)
-        elements.append(Spacer(1, 20))
+        elements.append(Spacer(1, 8))
 
-        # Professional Title with colored background
+        # Professional Title with colored background - more compact
         title_table = Table([[Paragraph(f"<b>{title_text}</b>", self.styles['CustomTitle'])]],
                            colWidths=[6.7*inch])
         title_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1F4788')),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('TOPPADDING', (0, 0), (-1, -1), 15),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 20),
+            ('FONTSIZE', (0, 0), (-1, -1), 14),
         ]))
         elements.append(title_table)
 
-        # Subtitle
+        # Subtitle - more compact
         subtitle_table = Table([[Paragraph("Bill of Quantities", ParagraphStyle(
             'Subtitle',
             parent=self.styles['Normal'],
-            fontSize=11,
-            textColor=colors.HexColor('#6B7280'),
+            fontSize=9,
+            textColor=colors.HexColor('#64748B'),
             alignment=TA_CENTER,
             fontName='Helvetica-Oblique'
         ))]], colWidths=[6.7*inch])
         subtitle_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F3F4F6')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ]))
         elements.append(subtitle_table)
-        elements.append(Spacer(1, 20))
+        elements.append(Spacer(1, 8))
 
-        # Modern Project Information Card (No table borders, clean design)
+        # Project Information - Clean 2-column table - more compact
         elements.append(Paragraph("<b>PROJECT INFORMATION</b>", ParagraphStyle(
             'SectionTitle',
             parent=self.styles['Normal'],
-            fontSize=11,
+            fontSize=10,
             textColor=colors.HexColor('#1F4788'),
             fontName='Helvetica-Bold',
-            spaceAfter=10
+            spaceAfter=4,
+            spaceBefore=0
         )))
 
-        # Project details in modern card style
-        info_content = f'''
-        <para leftIndent="10" rightIndent="10" spaceBefore="5" spaceAfter="5">
-            <b><font color="#1F4788">Project Name:</font></b><br/>
-            <font size="11">{project.project_name or 'N/A'}</font>
-        </para>
-        <para leftIndent="10" rightIndent="10" spaceBefore="5" spaceAfter="5">
-            <b><font color="#1F4788">Client Name:</font></b><br/>
-            <font size="11">{project.client or 'N/A'}</font>
-        </para>
-        <para leftIndent="10" rightIndent="10" spaceBefore="5" spaceAfter="5">
-            <b><font color="#1F4788">Location:</font></b><br/>
-            <font size="11">{project.location or 'N/A'}</font>
-        </para>
-        <para leftIndent="10" rightIndent="10" spaceBefore="5" spaceAfter="5">
-            <b><font color="#1F4788">Quotation Date:</font></b><br/>
-            <font size="11">{date.today().strftime('%B %d, %Y')}</font>
-        </para>
-        '''
+        # Clean 2-column table layout
+        info_data = [
+            ['Project Name:', project.project_name or 'N/A'],
+            ['Client Name:', project.client or 'N/A'],
+            ['Location:', project.location or 'N/A'],
+            ['Quotation Date:', date.today().strftime('%B %d, %Y')],
+        ]
 
-        info_para = Paragraph(info_content, self.styles['Normal'])
-        info_card = Table([[info_para]], colWidths=[6.7*inch])
-        info_card.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F9FAFB')),
-            ('BOX', (0, 0), (-1, -1), 1.5, colors.HexColor('#E5E7EB')),
-            ('TOPPADDING', (0, 0), (-1, -1), 15),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
-            ('LEFTPADDING', (0, 0), (-1, -1), 15),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 15),
+        info_table = Table(info_data, colWidths=[1.8*inch, 4.9*inch])
+        info_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#1F4788')),
+            ('TEXTCOLOR', (1, 0), (1, -1), colors.HexColor('#475569')),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
         ]))
-        elements.append(info_card)
-        elements.append(Spacer(1, 25))
+        elements.append(info_table)
+        elements.append(Spacer(1, 8))
 
         return elements
 
     def _add_client_items(self, items, boq_json):
-        """Add client BOQ items - clean view"""
+        """Add client BOQ items - clean professional view"""
         elements = []
 
-        # Section header
+        # Section header - compact
         section_header = Table([['SCOPE OF WORK']], colWidths=[6.7*inch])
         section_header.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#3B82F6')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1F4788')),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 14),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ]))
         elements.append(section_header)
-        elements.append(Spacer(1, 15))
+        elements.append(Spacer(1, 6))
 
         for idx, item in enumerate(items, 1):
-            # Item header
-            item_header = Table([[f"{idx}. {item.get('item_name', 'N/A')}"]], colWidths=[6.7*inch])
+            # Item header - more compact and professional
+            item_name = item.get('item_name', 'N/A')
+            item_desc = item.get('description', '')
+
+            # Combine header and description in one table
+            if item_desc:
+                header_text = f"<b>{idx}. {item_name}</b><br/><font size='8' color='#64748B'><i>{item_desc}</i></font>"
+            else:
+                header_text = f"<b>{idx}. {item_name}</b>"
+
+            item_header = Table([[Paragraph(header_text, self.styles['Normal'])]], colWidths=[6.7*inch])
             item_header.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#E0E7FF')),
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F1F5F9')),
                 ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#1F4788')),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                 ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 11),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
             ]))
             elements.append(item_header)
-
-            # Description
-            if item.get('description'):
-                desc = Paragraph(item['description'], ParagraphStyle(
-                    'ItemDesc',
-                    parent=self.styles['Normal'],
-                    fontSize=9,
-                    textColor=colors.HexColor('#6B7280'),
-                    fontName='Helvetica-Oblique',
-                    leftIndent=10
-                ))
-                elements.append(desc)
-
-            elements.append(Spacer(1, 8))
+            elements.append(Spacer(1, 3))
 
             # Check for sub-items
             has_sub_items = item.get('has_sub_items', False)
             sub_items = item.get('sub_items', [])
 
             if has_sub_items and sub_items:
-                # Sub-items table
+                # Sub-items table - professional and compact
+                header_style = ParagraphStyle('TableHeader', parent=self.styles['Normal'],
+                                             fontSize=8, textColor=colors.white, alignment=TA_CENTER)
                 table_data = [[
-                    Paragraph('<b>Description</b>', self.styles['Normal']),
-                    Paragraph('<b>Scope</b>', self.styles['Normal']),
-                    Paragraph('<b>Qty</b>', self.styles['Normal']),
-                    Paragraph('<b>Unit</b>', self.styles['Normal']),
-                    Paragraph('<b>Rate (AED)</b>', self.styles['Normal']),
-                    Paragraph('<b>Amount (AED)</b>', self.styles['Normal'])
+                    Paragraph('<b>Description</b>', header_style),
+                    Paragraph('<b>Scope / Specifications</b>', header_style),
+                    Paragraph('<b>Qty</b>', header_style),
+                    Paragraph('<b>Unit</b>', header_style),
+                    Paragraph('<b>Rate</b>', header_style),
+                    Paragraph('<b>Amount</b>', header_style)
                 ]]
 
                 # Calculate distributed markup
@@ -367,101 +365,255 @@ class ModernBOQPDFGenerator:
                         f"{sub_total:,.2f}"
                     ])
 
-                sub_table = Table(table_data, colWidths=[2*inch, 1.5*inch, 0.6*inch, 0.5*inch, 1*inch, 1.1*inch])
+                sub_table = Table(table_data, colWidths=[1.8*inch, 1.6*inch, 0.5*inch, 0.5*inch, 0.9*inch, 1.4*inch])
                 sub_table.setStyle(TableStyle([
-                    # Header
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3B82F6')),
+                    # Header row styling
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1F4788')),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                     ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                     ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 9),
-                    # Data
+                    ('FONTSIZE', (0, 0), (-1, 0), 8),
+                    ('TOPPADDING', (0, 0), (-1, 0), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                    # Data rows styling
                     ('ALIGN', (0, 1), (1, -1), 'LEFT'),
                     ('ALIGN', (2, 1), (3, -1), 'CENTER'),
                     ('ALIGN', (4, 1), (-1, -1), 'RIGHT'),
                     ('FONTSIZE', (0, 1), (-1, -1), 8),
-                    ('TOPPADDING', (0, 0), (-1, -1), 6),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                    # Grid
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1D5DB')),
-                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F9FAFB')]),
+                    ('TOPPADDING', (0, 1), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                    # Grid and borders
+                    ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#94A3B8')),
+                    ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#1F4788')),
+                    ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#CBD5E1')),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFC')]),
                 ]))
                 elements.append(sub_table)
             else:
-                # Old format - single item
-                info = Paragraph(
-                    f"<b>Quantity:</b> {item.get('quantity', 0):.2f} {item.get('unit', 'nos')} @ AED {item.get('rate', 0):,.2f}/{item.get('unit', 'nos')}",
-                    ParagraphStyle('ItemInfo', parent=self.styles['Normal'], fontSize=9, leftIndent=15)
-                )
-                elements.append(info)
+                # Old format - single item (make it cleaner)
+                qty = item.get('quantity', 0)
+                unit = item.get('unit', 'nos')
+                rate = item.get('rate', 0)
 
-            elements.append(Spacer(1, 8))
+                simple_data = [[
+                    'Quantity', 'Unit', 'Rate (AED)', 'Amount (AED)'
+                ], [
+                    f"{qty:.2f}", unit, f"{rate:,.2f}", f"{item.get('selling_price', 0):,.2f}"
+                ]]
 
-            # Item total
-            item_total_data = [['Item Total:', f"AED {item.get('selling_price', 0):,.2f}"]]
-            item_total_table = Table(item_total_data, colWidths=[5.6*inch, 1.1*inch])
+                simple_table = Table(simple_data, colWidths=[1.6*inch, 1.6*inch, 1.6*inch, 1.9*inch])
+                simple_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1F4788')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 8),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTSIZE', (0, 1), (-1, 1), 8),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                    ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#94A3B8')),
+                    ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#CBD5E1')),
+                ]))
+                elements.append(simple_table)
+
+            elements.append(Spacer(1, 3))
+
+            # Item total - more compact
+            item_total_data = [[f"Item {idx} Total:", f"AED {item.get('selling_price', 0):,.2f}"]]
+            item_total_table = Table(item_total_data, colWidths=[5.3*inch, 1.4*inch])
             item_total_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#D1FAE5')),
-                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#10B981')),
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#ECFDF5')),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#059669')),
                 ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
                 ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
                 ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 11),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('RIGHTPADDING', (1, 0), (1, -1), 10),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#059669')),
             ]))
             elements.append(item_total_table)
-            elements.append(Spacer(1, 20))
+            elements.append(Spacer(1, 6))
 
         return elements
 
     def _add_internal_items(self, items, boq_json):
-        """Add internal BOQ items - detailed breakdown"""
+        """Add internal BOQ items - clean table format matching screenshot"""
         elements = []
 
-        # Section header
-        section_header = Table([['DETAILED BOQ BREAKDOWN']], colWidths=[6.7*inch])
-        section_header.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1F4788')),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 14),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
-        ]))
-        elements.append(section_header)
-        elements.append(Spacer(1, 15))
+        # Build unified table data
+        table_data = []
 
+        # Header row
+        header_style = ParagraphStyle('TableHeader', parent=self.styles['Normal'],
+                                      fontSize=9, textColor=colors.HexColor('#2C3E50'),
+                                      fontName='Helvetica-Bold', alignment=TA_CENTER)
+        table_data.append([
+            Paragraph('<b>S.No</b>', header_style),
+            Paragraph('<b>Category / Item</b>', header_style),
+            Paragraph('<b>Description</b>', header_style),
+            Paragraph('<b>Qty</b>', header_style),
+            Paragraph('<b>Unit</b>', header_style),
+            Paragraph('<b>Unit Rate (AED)</b>', header_style),
+            Paragraph('<b>Amount (AED)</b>', header_style)
+        ])
+
+        # Process each item
         for idx, item in enumerate(items, 1):
-            # Item header
-            item_header = Table([[f"{idx}. {item.get('item_name', 'N/A')}"]], colWidths=[6.7*inch])
-            item_header.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#E0E7FF')),
-                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#1F4788')),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 11),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-                ('LEFTPADDING', (0, 0), (-1, -1), 10),
-            ]))
-            elements.append(item_header)
-            elements.append(Spacer(1, 8))
-
             has_sub_items = item.get('has_sub_items', False)
             sub_items = item.get('sub_items', [])
 
             if has_sub_items and sub_items:
-                # Process each sub-item with full breakdown
+                # Process sub-items
                 for sub_idx, sub_item in enumerate(sub_items, 1):
-                    elements.extend(self._add_sub_item_breakdown(sub_item, idx, sub_idx, item))
-            else:
-                # Single item breakdown
-                elements.extend(self._add_item_breakdown(item, idx))
+                    # Sub-item main row
+                    sub_name = sub_item.get('sub_item_name', 'N/A')
+                    sub_desc_parts = []
+                    if sub_item.get('scope'):
+                        sub_desc_parts.append(sub_item['scope'])
+                    if sub_item.get('size'):
+                        sub_desc_parts.append(f"Size: {sub_item['size']}")
+                    sub_desc = '<br/>'.join(sub_desc_parts) if sub_desc_parts else ''
 
-            elements.append(Spacer(1, 20))
+                    qty = sub_item.get('quantity', 0)
+                    unit = sub_item.get('unit', 'nos')
+
+                    # Calculate client rate (distributed with markup)
+                    materials_cost = sum([m.get('total_price', 0) for m in sub_item.get('materials', [])])
+                    labour_cost = sum([l.get('total_cost', 0) for l in sub_item.get('labour', [])])
+                    base_cost = materials_cost + labour_cost
+
+                    # Get markup from parent item
+                    misc_pct = item.get('miscellaneous_percentage', 0)
+                    overhead_pct = item.get('overhead_percentage', item.get('profit_margin_percentage', 0))
+
+                    markup = base_cost * ((misc_pct + overhead_pct) / 100)
+                    total_with_markup = base_cost + markup
+                    rate = total_with_markup / qty if qty > 0 else 0
+
+                    # Main sub-item row
+                    item_style = ParagraphStyle('ItemText', parent=self.styles['Normal'],
+                                               fontSize=9, textColor=colors.HexColor('#2C3E50'))
+                    desc_style = ParagraphStyle('DescText', parent=self.styles['Normal'],
+                                               fontSize=8, textColor=colors.HexColor('#546E7A'))
+
+                    table_data.append([
+                        str(idx) if sub_idx == 1 else '',
+                        Paragraph(f"<b>{item.get('item_name', 'N/A')}</b><br/><font size='8' color='#78909C'>{sub_name}</font>", item_style),
+                        Paragraph(sub_desc, desc_style) if sub_desc else '',
+                        f"{qty:.0f}",
+                        unit,
+                        f"{rate:,.2f} AED",
+                        f"{total_with_markup:,.2f} AED"
+                    ])
+
+                    # Materials row
+                    materials_style = ParagraphStyle('MaterialsText', parent=self.styles['Normal'],
+                                                    fontSize=8, textColor=colors.HexColor('#D32F2F'),
+                                                    fontName='Helvetica-Bold')
+                    table_data.append([
+                        '',
+                        Paragraph('<font color="#D32F2F">Materials</font>', materials_style),
+                        '',
+                        '',
+                        '',
+                        f"{materials_cost:,.2f} AED",
+                        f"{materials_cost:,.2f} AED"
+                    ])
+
+                    # Labour row
+                    labour_style = ParagraphStyle('LabourText', parent=self.styles['Normal'],
+                                                  fontSize=8, textColor=colors.HexColor('#D32F2F'),
+                                                  fontName='Helvetica-Bold')
+                    table_data.append([
+                        '',
+                        Paragraph('<font color="#D32F2F">Labour</font>', labour_style),
+                        '',
+                        '',
+                        '',
+                        f"{labour_cost:,.2f} AED",
+                        f"{labour_cost:,.2f} AED"
+                    ])
+
+                    # Planned Profit row
+                    profit_style = ParagraphStyle('ProfitText', parent=self.styles['Normal'],
+                                                  fontSize=8, textColor=colors.HexColor('#4CAF50'),
+                                                  fontName='Helvetica-Bold')
+                    table_data.append([
+                        '',
+                        Paragraph('Planned Profit', profit_style),
+                        '',
+                        '',
+                        '',
+                        '',
+                        Paragraph(f'<font color="#4CAF50">{markup:,.2f} AED</font>', profit_style)
+                    ])
+            else:
+                # Single item without sub-items
+                item_name = item.get('item_name', 'N/A')
+                item_desc = item.get('description', '')
+                qty = item.get('quantity', 0)
+                unit = item.get('unit', 'nos')
+                rate = item.get('rate', 0)
+                selling_price = item.get('selling_price', 0)
+
+                item_style = ParagraphStyle('ItemText', parent=self.styles['Normal'],
+                                           fontSize=9, textColor=colors.HexColor('#2C3E50'))
+                desc_style = ParagraphStyle('DescText', parent=self.styles['Normal'],
+                                           fontSize=8, textColor=colors.HexColor('#546E7A'))
+
+                table_data.append([
+                    str(idx),
+                    Paragraph(f"<b>{item_name}</b>", item_style),
+                    Paragraph(item_desc, desc_style),
+                    f"{qty:.0f}",
+                    unit,
+                    f"{rate:,.2f} AED",
+                    f"{selling_price:,.2f} AED"
+                ])
+
+        # Create the main table
+        main_table = Table(table_data, colWidths=[0.4*inch, 1.8*inch, 1.8*inch, 0.5*inch, 0.5*inch, 0.9*inch, 0.8*inch])
+
+        # Apply styling
+        style_commands = [
+            # Header row
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F5F5F5')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#2C3E50')),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('LINEBELOW', (0, 0), (-1, 0), 1.5, colors.HexColor('#BDBDBD')),
+
+            # All cells alignment
+            ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # S.No center
+            ('ALIGN', (1, 1), (2, -1), 'LEFT'),     # Category and Description left
+            ('ALIGN', (3, 1), (4, -1), 'CENTER'),   # Qty and Unit center
+            ('ALIGN', (5, 1), (-1, -1), 'RIGHT'),   # Rates and Amounts right
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+
+            # Borders
+            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#E0E0E0')),
+            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#EEEEEE')),
+
+            # Padding
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+
+            # Row backgrounds
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#FAFAFA')]),
+        ]
+
+        main_table.setStyle(TableStyle(style_commands))
+        elements.append(main_table)
 
         return elements
 
@@ -469,14 +621,15 @@ class ModernBOQPDFGenerator:
         """Add detailed sub-item breakdown for internal view"""
         elements = []
 
-        # Sub-item header
+        # Sub-item header with soft corporate styling
         sub_header = Paragraph(
             f"<b>{item_idx}.{sub_idx}. {sub_item.get('sub_item_name', 'N/A')}</b>",
-            ParagraphStyle('SubItemHeader', parent=self.styles['Normal'], fontSize=10, leftIndent=10, textColor=colors.HexColor('#1F4788'))
+            ParagraphStyle('SubItemHeader', parent=self.styles['Normal'], fontSize=10, leftIndent=10,
+                          textColor=colors.HexColor('#455A64'), fontName='Helvetica-Bold')
         )
         elements.append(sub_header)
 
-        # Scope details
+        # Scope details with professional styling
         scope_parts = []
         if sub_item.get('scope'):
             scope_parts.append(f"Scope: {sub_item['scope']}")
@@ -484,7 +637,8 @@ class ModernBOQPDFGenerator:
             scope_parts.append(f"Size: {sub_item['size']}")
         if scope_parts:
             scope_text = Paragraph(' | '.join(scope_parts), ParagraphStyle(
-                'Scope', parent=self.styles['Normal'], fontSize=8, leftIndent=15, textColor=colors.HexColor('#6B7280')
+                'Scope', parent=self.styles['Normal'], fontSize=8, leftIndent=15,
+                textColor=colors.HexColor('#78909C'), fontName='Helvetica-Oblique'
             ))
             elements.append(scope_text)
 
@@ -521,16 +675,29 @@ class ModernBOQPDFGenerator:
 
             mat_table = Table(mat_data, colWidths=[2.5*inch, 0.8*inch, 0.7*inch, 1*inch, 1*inch])
             mat_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#BFDBFE')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1E40AF')),
+                # Header with soft blue-gray gradient effect
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E8EAF6')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#37474F')),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 8),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('TOPPADDING', (0, 0), (-1, 0), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                # Data rows with soft alternating background
                 ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
-                ('FONTSIZE', (0, 1), (-1, -1), 7),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1D5DB')),
-                ('TOPPADDING', (0, 0), (-1, -1), 4),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#FAFAFA')]),
+                # Subtle borders
+                ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#E0E0E0')),
+                ('LINEBELOW', (0, 0), (-1, 0), 1.5, colors.HexColor('#B0BEC5')),
+                ('INNERGRID', (0, 1), (-1, -1), 0.25, colors.HexColor('#EEEEEE')),
+                ('TOPPADDING', (0, 1), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                # Total row subtle highlight
+                ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#F5F5F5')),
+                ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#BDBDBD')),
             ]))
             elements.append(mat_table)
             elements.append(Spacer(1, 5))
@@ -564,16 +731,29 @@ class ModernBOQPDFGenerator:
 
             lab_table = Table(lab_data, colWidths=[2.5*inch, 1*inch, 1.2*inch, 1.3*inch])
             lab_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D8B4FE')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#6B21A8')),
+                # Header with soft warm gray
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFF3E0')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#37474F')),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 8),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('TOPPADDING', (0, 0), (-1, 0), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                # Data rows with soft alternating background
                 ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
-                ('FONTSIZE', (0, 1), (-1, -1), 7),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1D5DB')),
-                ('TOPPADDING', (0, 0), (-1, -1), 4),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#FAFAFA')]),
+                # Subtle borders
+                ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#E0E0E0')),
+                ('LINEBELOW', (0, 0), (-1, 0), 1.5, colors.HexColor('#BCAAA4')),
+                ('INNERGRID', (0, 1), (-1, -1), 0.25, colors.HexColor('#EEEEEE')),
+                ('TOPPADDING', (0, 1), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                # Total row subtle highlight
+                ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#F5F5F5')),
+                ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#BDBDBD')),
             ]))
             elements.append(lab_table)
             elements.append(Spacer(1, 5))
@@ -642,23 +822,23 @@ class ModernBOQPDFGenerator:
         return elements
 
     def _add_client_summary(self, items):
-        """Add client summary section"""
+        """Add client summary section - professional and compact"""
         elements = []
 
-        elements.append(Spacer(1, 10))
+        elements.append(Spacer(1, 6))
 
         summary_header = Table([['COST SUMMARY']], colWidths=[6.7*inch])
         summary_header.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#DBEAFE')),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#1F4788')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1F4788')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 13),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ]))
         elements.append(summary_header)
-        elements.append(Spacer(1, 10))
+        elements.append(Spacer(1, 4))
 
         # Calculate totals
         subtotal = sum([item.get('selling_price', 0) for item in items])
@@ -678,24 +858,28 @@ class ModernBOQPDFGenerator:
             vat_pct = (total_vat / subtotal_after_discount * 100) if subtotal_after_discount > 0 else 0
             summary_data.append([f'VAT ({vat_pct:.1f}%):', f'AED {total_vat:,.2f}'])
 
-        summary_data.append(['', ''])
         summary_data.append(['TOTAL PROJECT VALUE:', f'AED {grand_total:,.2f}'])
 
-        summary_table = Table(summary_data, colWidths=[5*inch, 1.7*inch])
+        summary_table = Table(summary_data, colWidths=[5.2*inch, 1.5*inch])
         summary_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (0, -2), 'RIGHT'),
+            ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-            ('FONTSIZE', (0, 0), (-1, -2), 11),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('RIGHTPADDING', (1, 0), (1, -1), 10),
-            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#10B981')),
+            ('FONTSIZE', (0, 0), (-1, -2), 9),
+            ('TOPPADDING', (0, 0), (-1, -2), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -2), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (1, 0), (1, -1), 8),
+            # Grand total row - green background
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#059669')),
             ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
             ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, -1), (-1, -1), 13),
-            ('TOPPADDING', (0, -1), (-1, -1), 12),
-            ('BOTTOMPADDING', (0, -1), (-1, -1), 12),
-            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#D1D5DB')),
+            ('FONTSIZE', (0, -1), (-1, -1), 11),
+            ('TOPPADDING', (0, -1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, -1), (-1, -1), 8),
+            # Borders
+            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#94A3B8')),
+            ('LINEABOVE', (0, -1), (-1, -1), 2, colors.HexColor('#059669')),
+            ('INNERGRID', (0, 0), (-1, -2), 0.25, colors.HexColor('#CBD5E1')),
         ]))
         elements.append(summary_table)
 
@@ -705,7 +889,7 @@ class ModernBOQPDFGenerator:
         """Add internal cost analysis - MATCHING FRONTEND EXACTLY"""
         elements = []
 
-        elements.append(Spacer(1, 20))
+        elements.append(Spacer(1, 12))
 
         # Calculate totals exactly like frontend
         client_amount = sum([item.get('selling_price', 0) for item in items])
@@ -884,19 +1068,19 @@ class ModernBOQPDFGenerator:
         """Add preliminaries section"""
         elements = []
 
-        elements.append(Spacer(1, 25))
+        elements.append(Spacer(1, 8))
 
         prelim_header = Paragraph(
             "<b>PRELIMINARIES & APPROVAL WORKS</b>",
-            ParagraphStyle('PrelimHeader', parent=self.styles['Heading3'], fontSize=12,
-                          textColor=colors.HexColor('#7C3AED'), fontName='Helvetica-Bold')
+            ParagraphStyle('PrelimHeader', parent=self.styles['Heading3'], fontSize=11,
+                          textColor=colors.HexColor('#1F4788'), fontName='Helvetica-Bold')
         )
         elements.append(prelim_header)
 
         prelim_sub = Paragraph(
             "Selected conditions and terms",
-            ParagraphStyle('PrelimSub', parent=self.styles['Normal'], fontSize=9,
-                          textColor=colors.grey, fontName='Helvetica-Oblique', spaceAfter=12)
+            ParagraphStyle('PrelimSub', parent=self.styles['Normal'], fontSize=8,
+                          textColor=colors.HexColor('#64748B'), fontName='Helvetica-Oblique', spaceAfter=4)
         )
         elements.append(prelim_sub)
 
@@ -905,18 +1089,19 @@ class ModernBOQPDFGenerator:
             desc = item.get('description', item) if isinstance(item, dict) else str(item)
             item_para = Paragraph(
                 f"✓ {desc}",
-                ParagraphStyle('PrelimItem', parent=self.styles['Normal'], fontSize=9,
-                              leftIndent=15, spaceAfter=5)
+                ParagraphStyle('PrelimItem', parent=self.styles['Normal'], fontSize=8,
+                              leftIndent=12, spaceAfter=3)
             )
             elements.append(item_para)
 
         if preliminaries.get('notes'):
-            elements.append(Spacer(1, 10))
-            elements.append(Paragraph("<b>Additional Notes:</b>", self.styles['Normal']))
+            elements.append(Spacer(1, 4))
+            elements.append(Paragraph("<b>Additional Notes:</b>",
+                ParagraphStyle('NotesHeader', parent=self.styles['Normal'], fontSize=9, fontName='Helvetica-Bold')))
             notes_para = Paragraph(
                 preliminaries['notes'],
-                ParagraphStyle('Notes', parent=self.styles['Normal'], fontSize=9,
-                              fontName='Helvetica-Oblique', leftIndent=10)
+                ParagraphStyle('Notes', parent=self.styles['Normal'], fontSize=8,
+                              fontName='Helvetica-Oblique', leftIndent=8, spaceAfter=2)
             )
             elements.append(notes_para)
 
@@ -928,7 +1113,7 @@ class ModernBOQPDFGenerator:
 
         from reportlab.platypus import HRFlowable
 
-        elements.append(Spacer(1, 30))
+        elements.append(Spacer(1, 10))
 
         # Signature Section Header
         sig_header = Table([['AUTHORIZATION & ACCEPTANCE']], colWidths=[6.7*inch])
@@ -937,12 +1122,12 @@ class ModernBOQPDFGenerator:
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#1F4788')),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 13),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ]))
         elements.append(sig_header)
-        elements.append(Spacer(1, 30))
+        elements.append(Spacer(1, 8))
 
         # Two-column signature layout
         sig_data = [
@@ -981,7 +1166,7 @@ class ModernBOQPDFGenerator:
         ]))
         elements.append(sig_table)
 
-        elements.append(Spacer(1, 40))
+        elements.append(Spacer(1, 15))
 
         # Terms and Conditions
         elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#D1D5DB')))

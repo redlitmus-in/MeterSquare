@@ -623,8 +623,8 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                   const labourCost = subItem.labour_cost || (subItem.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0);
                                                   const miscAmount = subItem.misc_amount || (clientAmount * ((subItem.misc_percentage || 10) / 100));
                                                   const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || 5) / 100));
-                                                  const internalCost = subItem.internal_cost || (materialCost + labourCost + miscAmount + transportAmount);
                                                   const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || 25) / 100));
+                                                  const internalCost = subItem.internal_cost || (materialCost + labourCost + miscAmount + plannedProfit + transportAmount);
                                                   const actualProfit = subItem.actual_profit || (clientAmount - internalCost);
 
                                                   return (
@@ -642,16 +642,16 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                         <span className="font-semibold text-gray-900">{formatCurrency(miscAmount)}</span>
                                                       </div>
                                                       <div className="flex justify-between">
+                                                        <span className="text-gray-700">Overhead & Profit ({subItem.overhead_profit_percentage || 25}%):</span>
+                                                        <span className="font-semibold text-gray-900">{formatCurrency(plannedProfit)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between">
                                                         <span className="text-gray-700">Transport ({subItem.transport_percentage || 5}%):</span>
                                                         <span className="font-semibold text-gray-900">{formatCurrency(transportAmount)}</span>
                                                       </div>
                                                       <div className="flex justify-between pt-1.5 border-t border-gray-300">
                                                         <span className="text-gray-800 font-bold">Internal Cost (Total):</span>
                                                         <span className="font-bold text-red-600">{formatCurrency(internalCost)}</span>
-                                                      </div>
-                                                      <div className="flex justify-between mt-2">
-                                                        <span className="text-gray-700">Planned Profit (O&P):</span>
-                                                        <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
                                                       </div>
                                                       <div className="flex justify-between pt-1.5 border-t border-green-300">
                                                         <span className="text-gray-800 font-medium">Actual Profit:</span>
@@ -689,8 +689,9 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                             const labourCost = si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0;
                                             const subClientAmount = (si.quantity || 0) * (si.rate || 0);
                                             const miscAmount = subClientAmount * ((si.misc_percentage || 10) / 100);
+                                            const overheadProfitAmount = subClientAmount * ((si.overhead_profit_percentage || 25) / 100);
                                             const transportAmount = subClientAmount * ((si.transport_percentage || 5) / 100);
-                                            return sum + materialCost + labourCost + miscAmount + transportAmount;
+                                            return sum + materialCost + labourCost + miscAmount + overheadProfitAmount + transportAmount;
                                           }, 0) || 0;
                                           const projectMargin = item.project_margin || (clientCost - internalCost);
                                           const marginPercentage = clientCost > 0 ? ((projectMargin / clientCost) * 100) : 0;
@@ -864,8 +865,9 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                             const labourCost = si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0;
                                             const subClientAmount = (si.quantity || 0) * (si.rate || 0);
                                             const miscAmount = subClientAmount * ((si.misc_percentage || 10) / 100);
+                                            const overheadProfitAmount = subClientAmount * ((si.overhead_profit_percentage || 25) / 100);
                                             const transportAmount = subClientAmount * ((si.transport_percentage || 5) / 100);
-                                            return sum + materialCost + labourCost + miscAmount + transportAmount;
+                                            return sum + materialCost + labourCost + miscAmount + overheadProfitAmount + transportAmount;
                                           }, 0) || 0;
                                           const projectMargin = item.project_margin || (clientCost - internalCost);
                                           const marginPercentage = clientCost > 0 ? ((projectMargin / clientCost) * 100) : 0;
@@ -1166,10 +1168,6 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 return sum;
                               }, 0);
 
-                              const totalInternalCost = totalMaterialCost + totalLabourCost + totalMiscCost + totalTransportCost;
-                              const projectMargin = totalClientAmount - totalInternalCost;
-                              const marginPercentage = totalClientAmount > 0 ? ((projectMargin / totalClientAmount) * 100) : 0;
-
                               // Calculate planned profit (sum of all O&P)
                               const totalPlannedProfit = allItems.reduce((sum, item) => {
                                 if (item.sub_items && item.sub_items.length > 0) {
@@ -1182,6 +1180,10 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 return sum;
                               }, 0);
 
+                              const totalInternalCost = totalMaterialCost + totalLabourCost + totalMiscCost + totalPlannedProfit + totalTransportCost;
+                              const projectMargin = totalClientAmount - totalInternalCost;
+                              const marginPercentage = totalClientAmount > 0 ? ((projectMargin / totalClientAmount) * 100) : 0;
+
                               // Calculate actual profit (sum of all actual profits)
                               const totalActualProfit = allItems.reduce((sum, item) => {
                                 if (item.sub_items && item.sub_items.length > 0) {
@@ -1190,8 +1192,9 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                     const matCost = si.materials?.reduce((m: number, mat: any) => m + (mat.total_price || mat.quantity * mat.unit_price), 0) || 0;
                                     const labCost = si.labour?.reduce((l: number, lab: any) => l + (lab.total_cost || lab.hours * lab.rate_per_hour), 0) || 0;
                                     const miscAmt = clientAmt * ((si.misc_percentage || 10) / 100);
+                                    const opAmt = clientAmt * ((si.overhead_profit_percentage || 25) / 100);
                                     const transportAmt = clientAmt * ((si.transport_percentage || 5) / 100);
-                                    return siSum + (clientAmt - matCost - labCost - miscAmt - transportAmt);
+                                    return siSum + (clientAmt - matCost - labCost - miscAmt - opAmt - transportAmt);
                                   }, 0);
                                 }
                                 return sum;
@@ -1229,6 +1232,10 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                         <div className="flex justify-between">
                                           <span>Miscellaneous:</span>
                                           <span className="font-medium">{formatCurrency(totalMiscCost)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span>Overhead & Profit:</span>
+                                          <span className="font-medium">{formatCurrency(totalPlannedProfit)}</span>
                                         </div>
                                         <div className="flex justify-between">
                                           <span>Transport:</span>

@@ -989,14 +989,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     const overheadProfitAmount = clientAmount * (subItem.overhead_profit_percentage / 100);
     const miscAmount = clientAmount * (subItem.misc_percentage / 100);
 
-    // 3. Calculate Internal Cost (Materials + Labour + Misc + Transport)
+    // 3. Calculate Internal Cost (Materials + Labour + Misc + Overhead & Profit + Transport)
     const materialCost = subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0);
     const labourCost = subItem.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0);
-    const internalCost = materialCost + labourCost + miscAmount + transportAmount;
+    const internalCost = materialCost + labourCost + miscAmount + overheadProfitAmount + transportAmount;
 
     // 4. Calculate Profits
     const plannedProfit = overheadProfitAmount; // This is the profit we planned for (25% typically)
-    const actualProfit = clientAmount - internalCost; // Actual profit after all costs (materials, labour, misc, transport)
+    const actualProfit = clientAmount - internalCost; // Actual profit after all costs (should be 0 or near 0 in ideal case)
 
     // 5. Remaining budget for materials/labour (for reference)
     const remainingForCosts = clientAmount - transportAmount - overheadProfitAmount - miscAmount;
@@ -1049,19 +1049,19 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     // No VAT - selling price is same as after discount
     const sellingPrice = afterDiscount;
 
-    // Calculate project margin (this is essentially the O&P amount, since internal cost now includes all other costs)
+    // Calculate project margin (should be 0 or near 0 in ideal case, since internal cost now includes all costs including O&P)
     const projectMargin = totalClientCost - totalInternalCost;
 
     return {
       // New calculation results
       totalClientCost, // Total amount client pays
-      totalInternalCost, // Total internal cost (materials + labour + misc + transport)
+      totalInternalCost, // Total internal cost (materials + labour + misc + O&P + transport)
       totalPlannedProfit, // Sum of all sub-item planned profits (from O&P %)
       totalActualProfit, // Sum of all sub-item actual profits
       totalMiscAmount, // Total miscellaneous from all sub-items
       totalTransportAmount, // Total transport from all sub-items
       totalOverheadProfitAmount, // Total O&P from all sub-items
-      projectMargin, // Client cost - Internal cost (which now includes all costs except O&P)
+      projectMargin, // Client cost - Internal cost (should be ~0 since internal cost includes O&P)
 
       // For backward compatibility and display
       itemTotal: totalClientCost, // Total from all sub-items

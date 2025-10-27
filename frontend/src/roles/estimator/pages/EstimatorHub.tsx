@@ -70,6 +70,7 @@ import {
   exportBOQToPDFInternal,
   exportBOQToPDFClient
 } from '@/utils/boqExportUtils';
+import { downloadInternalBOQPDF, downloadClientBOQPDF } from '@/services/boqPdfService';
 
 // Project Creation Form Component
 const ProjectCreationForm: React.FC<{
@@ -900,10 +901,11 @@ const EstimatorHub: React.FC = () => {
           await exportBOQToExcelClient(boqToDownload);
         }
       } else {
+        // Use backend API for PDF generation (modern template with correct port)
         if (isInternal) {
-          await exportBOQToPDFInternal(boqToDownload);
+          await downloadInternalBOQPDF(boqToDownload.id);
         } else {
-          await exportBOQToPDFClient(boqToDownload);
+          await downloadClientBOQPDF(boqToDownload.id);
         }
       }
 
