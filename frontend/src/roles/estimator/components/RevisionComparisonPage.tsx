@@ -69,10 +69,11 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
     const isUnderRevision = (status === 'under_revision');
     const isSentToClient = (status === 'sent_for_confirmation');
     const isClientRejected = (status === 'client_rejected');
+    const isClientRevisionRejected = (status === 'client_revision_rejected');
     const isClientConfirmed = (status === 'client_confirmed');
     const isClientCancelled = (status === 'client_cancelled');
 
-    return hasRevisions || isApprovedNotSent || isPendingApproval || isUnderRevision || isSentToClient || isClientRejected || isClientConfirmed || isClientCancelled;
+    return hasRevisions || isApprovedNotSent || isPendingApproval || isUnderRevision || isSentToClient || isClientRejected || isClientRevisionRejected || isClientConfirmed || isClientCancelled;
   });
 
   // Filter based on search
@@ -163,6 +164,15 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
       if (onRefresh) {
         await onRefresh();
       }
+
+      // Wait a bit for the data to refresh, then update selectedBoq with latest status
+      setTimeout(() => {
+        const updatedBoq = boqList.find(b => b.boq_id === boq.boq_id);
+        if (updatedBoq) {
+          setSelectedBoq(updatedBoq);
+        }
+      }, 500);
+
       // Reload revision data
       await loadRevisionData(boq);
       // Start polling for approval
@@ -762,6 +772,8 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                 const isApprovedByTD = status === 'approved' || status === 'revision_approved';
                 const isSentToClient = status === 'sent_for_confirmation';
                 const isClientRejected = status === 'client_rejected';
+                const isClientRevisionRejected = status === 'client_revision_rejected';
+                const isClientRevisionAccepted = status === 'client_revision_accepted';
                 const isClientConfirmed = status === 'client_confirmed';
                 const isClientCancelled = status === 'client_cancelled';
                 const isPendingRevision = status === 'pending_revision';
@@ -797,7 +809,17 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                   );
                 }
 
-                if (isClientRejected) {
+                if (isClientRevisionAccepted) {
+                  return (
+                    <div className="text-center text-xs text-green-700 font-medium py-2">
+                      <CheckCircle className="h-5 w-5 mx-auto mb-1 text-green-600" />
+                      Client Revision Accepted by TD
+                    </div>
+                  );
+                }
+
+                // Handle both client_rejected and client_revision_rejected statuses
+                if (isClientRejected || isClientRevisionRejected) {
                   return (
                     <div className="grid grid-cols-3 gap-2">
                       {/* Revise BOQ */}
@@ -805,7 +827,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                         onClick={() => onEdit(selectedBoq)}
                         className="text-white text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1"
                         style={{ backgroundColor: 'rgb(34, 197, 94)' }}
-                        title="Revise BOQ based on client feedback"
+                        title={isClientRevisionRejected ? "Revise BOQ - Rejected by TD" : "Revise BOQ based on client feedback"}
                       >
                         <Edit className="h-3.5 w-3.5" />
                         <span className="hidden sm:inline">Revise BOQ</span>

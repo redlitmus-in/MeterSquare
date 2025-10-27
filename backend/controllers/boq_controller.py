@@ -1546,7 +1546,6 @@ def get_all_boq():
          # Get current logged-in user
         current_user = getattr(g, 'user', None)
         user_id = current_user.get('user_id') if current_user else None
-        print("user_id:",user_id)
         # Get all BOQs with their details - filter by Project.estimator_id
         boqs = (
             db.session.query(BOQ, BOQDetails, Project)
@@ -2798,7 +2797,6 @@ def get_sub_item_material(sub_item_id):
             sub_item_id=sub_item_id,
             is_deleted=False
         ).first()
-        print("boq_sub_item:",boq_sub_item)
         if not boq_sub_item:
             return jsonify([]), 200
 
@@ -3021,8 +3019,8 @@ def send_boq_email(boq_id):
 
             if email_sent:
                 # Update BOQ status and mark email as sent to TD
-                # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, or Revision_Approved) or a new submission
-                is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved"]
+                # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, Revision_Approved, or client_revision_rejected) or a new submission
+                is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved", "client_revision_rejected"]
                 new_status = "Pending_Revision" if is_revision else "Pending"
                 boq.email_sent = True
                 boq.status = new_status
@@ -3167,8 +3165,8 @@ def send_boq_email(boq_id):
 
             if email_sent:
                 # Update BOQ status and mark email as sent to TD
-                # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, or Revision_Approved) or a new submission
-                is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved"]
+                # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, Revision_Approved, or client_revision_rejected) or a new submission
+                is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved", "client_revision_rejected"]
                 new_status = "Pending_Revision" if is_revision else "Pending"
 
                 boq.email_sent = True

@@ -71,8 +71,6 @@ def get_all_internal_revision():
 
     except Exception as e:
         log.error(f"Error fetching internal revisions: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
         

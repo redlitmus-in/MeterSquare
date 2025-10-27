@@ -227,28 +227,24 @@ class ModernBOQPDFGenerator:
             spaceAfter=10
         )))
 
-        # Project details in modern card style
-        info_content = f'''
-        <para leftIndent="10" rightIndent="10" spaceBefore="5" spaceAfter="5">
-            <b><font color="#1F4788">Project Name:</font></b><br/>
-            <font size="11">{project.project_name or 'N/A'}</font>
-        </para>
-        <para leftIndent="10" rightIndent="10" spaceBefore="5" spaceAfter="5">
-            <b><font color="#1F4788">Client Name:</font></b><br/>
-            <font size="11">{project.client or 'N/A'}</font>
-        </para>
-        <para leftIndent="10" rightIndent="10" spaceBefore="5" spaceAfter="5">
-            <b><font color="#1F4788">Location:</font></b><br/>
-            <font size="11">{project.location or 'N/A'}</font>
-        </para>
-        <para leftIndent="10" rightIndent="10" spaceBefore="5" spaceAfter="5">
-            <b><font color="#1F4788">Quotation Date:</font></b><br/>
-            <font size="11">{date.today().strftime('%B %d, %Y')}</font>
-        </para>
-        '''
+        # Project details in modern card style - Create separate paragraphs for each field
+        info_style = ParagraphStyle(
+            'InfoField',
+            parent=self.styles['Normal'],
+            leftIndent=10,
+            rightIndent=10,
+            spaceBefore=5,
+            spaceAfter=5
+        )
 
-        info_para = Paragraph(info_content, self.styles['Normal'])
-        info_card = Table([[info_para]], colWidths=[6.7*inch])
+        info_paras = [
+            Paragraph(f'<b><font color="#1F4788">Project Name:</font></b><br/><font size="11">{project.project_name or "N/A"}</font>', info_style),
+            Paragraph(f'<b><font color="#1F4788">Client Name:</font></b><br/><font size="11">{project.client or "N/A"}</font>', info_style),
+            Paragraph(f'<b><font color="#1F4788">Location:</font></b><br/><font size="11">{project.location or "N/A"}</font>', info_style),
+            Paragraph(f'<b><font color="#1F4788">Quotation Date:</font></b><br/><font size="11">{date.today().strftime("%B %d, %Y")}</font>', info_style),
+        ]
+
+        info_card = Table([[p] for p in info_paras], colWidths=[6.7*inch])
         info_card.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F9FAFB')),
             ('BOX', (0, 0), (-1, -1), 1.5, colors.HexColor('#E5E7EB')),

@@ -25,6 +25,7 @@ interface BOQ {
   total_cost?: number;
   selling_price?: number;
   status?: string;
+  client_rejection_reason?: string | null;
 }
 
 interface TDRevisionComparisonPageProps {
@@ -81,13 +82,33 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
     return revNum === 0 ? 'Original' : `${revNum}`;
   };
 
-  // Filter BOQs for TD - show only those pending approval or with revisions
+  // State for active tab
+  const [activeTab, setActiveTab] = useState<'client' | 'internal'>('client');
+
+  // Filter BOQs for TD based on active tab
   const boqsWithRevisions = boqList.filter(boq => {
     const status = boq.status?.toLowerCase() || '';
-    const hasRevisions = (boq.revision_number || 0) > 0;
-    const isPendingApproval = (status === 'pending_approval' || status === 'pending_revision' || status === 'pending');
 
-    return hasRevisions || isPendingApproval;
+    if (activeTab === 'client') {
+      // Client Revisions tab: Show ONLY BOQs that have client_rejection_reason (client actually rejected it)
+      const hasClientRejectionReason = boq.client_rejection_reason !== null && boq.client_rejection_reason !== undefined && boq.client_rejection_reason !== '';
+
+      // Also check if status is client-related
+      const isClientRejected = (status === 'client_rejected');
+      const isClientRevisionRejected = (status === 'client_revision_rejected');
+      const isClientRevisionAccepted = (status === 'client_revision_accepted');
+      const isSentToClient = (status === 'sent_for_confirmation');
+      const isClientConfirmed = (status === 'client_confirmed');
+      const isClientCancelled = (status === 'client_cancelled');
+
+      // Show only if it has client_rejection_reason OR is in a client-related status
+      return hasClientRejectionReason || isSentToClient || isClientConfirmed || isClientCancelled || isClientRejected || isClientRevisionRejected || isClientRevisionAccepted;
+    } else {
+      // Internal Revisions tab: Show pending approval or with revisions (original logic)
+      const hasRevisions = (boq.revision_number || 0) > 0;
+      const isPendingApproval = (status === 'pending_approval' || status === 'pending_revision' || status === 'pending');
+      return hasRevisions || isPendingApproval;
+    }
   });
 
   // Filter based on search
@@ -108,14 +129,31 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
     if (selectedBoq && boqList.length > 0) {
       const updatedBoq = boqList.find(b => b.boq_id === selectedBoq.boq_id);
       if (updatedBoq) {
-        // Only update if the status actually changed (not just any property)
-        if (updatedBoq.status !== selectedBoq.status) {
+        // Check if BOQ still exists in filtered list based on current tab
+        const stillInFilteredList = boqsWithRevisions.find(b => b.boq_id === selectedBoq.boq_id);
+
+        if (!stillInFilteredList) {
+          // BOQ no longer matches filter criteria, clear selection and return to list
+          console.log('🔄 BOQ no longer in filtered list, clearing selection');
+          setSelectedBoq(null);
+          setCurrentRevisionData(null);
+          setPreviousRevisions([]);
+          // Don't auto-select, let user manually choose next BOQ
+        } else if (updatedBoq.status !== selectedBoq.status) {
+          // Update if status changed but still in list
           console.log('🔄 BOQ status updated from', selectedBoq.status, 'to', updatedBoq.status);
           setSelectedBoq(updatedBoq);
         }
+      } else {
+        // BOQ no longer exists in boqList, clear selection and return to list
+        console.log('🔄 BOQ no longer exists, clearing selection');
+        setSelectedBoq(null);
+        setCurrentRevisionData(null);
+        setPreviousRevisions([]);
+        // Don't auto-select, let user manually choose next BOQ
       }
     }
-  }, [boqList]);
+  }, [boqList, boqsWithRevisions]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -235,7 +273,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="client" className="w-full">
+      <Tabs defaultValue="client" className="w-full" onValueChange={(value) => setActiveTab(value as 'client' | 'internal')}>
         {/* Sub-navigation Tabs */}
         <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
           <TabsTrigger value="client">Client Revisions</TabsTrigger>
