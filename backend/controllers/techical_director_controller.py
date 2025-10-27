@@ -183,8 +183,17 @@ def td_mail_send():
             'location': project.location or 'N/A'
         }
 
-        items_summary = boq_details.boq_details.get('summary', {}) if boq_details.boq_details else {}
-        items_summary['items'] = boq_details.boq_details.get('items', []) if boq_details.boq_details else []
+        # Handle both old and new data structures
+        boq_json = boq_details.boq_details if boq_details.boq_details else {}
+
+        if 'existing_purchase' in boq_json and 'items' in boq_json['existing_purchase']:
+            items = boq_json['existing_purchase']['items']
+            items_summary = boq_json.get('combined_summary', {})
+        else:
+            items = boq_json.get('items', [])
+            items_summary = boq_json.get('summary', {})
+
+        items_summary['items'] = items
 
         # Initialize email service
         boq_email_service = BOQEmailService()

@@ -8,6 +8,7 @@ from controllers.boq_upload_controller import *
 from controllers.boq_bulk_controller import bulk_upload_boq
 from controllers.boq_revisions import get_revision_tabs, get_projects_by_revision, get_revision_statistics
 from controllers.boq_internal_revisions_controller import *
+from controllers.download_boq_pdf import download_internal_pdf, download_client_pdf
 
 boq_routes = Blueprint('boq_routes', __name__, url_prefix='/api')
 
@@ -136,4 +137,15 @@ def approve_day_extension_route(boq_id, history_id):
 @jwt_required
 def reject_day_extension_route(boq_id, history_id):
     return reject_day_extension(boq_id, history_id)
+
+# PDF Download Routes
+@boq_routes.route('/boq/download/internal/<int:boq_id>', methods=['GET'])
+@jwt_required
+def download_internal_pdf_route(boq_id):
+    return download_internal_pdf()
+
+@boq_routes.route('/boq/download/client/<int:boq_id>', methods=['GET'])
+@jwt_required
+def download_client_pdf_route(boq_id):
+    return download_client_pdf()
 

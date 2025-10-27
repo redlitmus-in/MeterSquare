@@ -601,7 +601,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                         <span className="font-semibold text-red-600">- {formatCurrency(transportAmount)}</span>
                                                       </div>
                                                       <div className="flex justify-between pt-1.5 border-t border-purple-300">
-                                                        <span className="text-gray-800 font-medium">Remaining for Costs:</span>
+                                                        <span className="text-gray-800 font-medium">Balance:</span>
                                                         <span className="font-bold text-green-600">{formatCurrency(clientAmount - miscAmount - overheadProfitAmount - transportAmount)}</span>
                                                       </div>
                                                     </>
@@ -621,19 +621,35 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                   const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
                                                   const materialCost = subItem.material_cost || (subItem.materials?.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0) || 0);
                                                   const labourCost = subItem.labour_cost || (subItem.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0);
-                                                  const internalCost = subItem.internal_cost || (materialCost + labourCost);
                                                   const miscAmount = subItem.misc_amount || (clientAmount * ((subItem.misc_percentage || 10) / 100));
                                                   const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || 5) / 100));
+                                                  const internalCost = subItem.internal_cost || (materialCost + labourCost + miscAmount + transportAmount);
                                                   const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || 25) / 100));
-                                                  const actualProfit = subItem.actual_profit || (clientAmount - internalCost - miscAmount - transportAmount);
+                                                  const actualProfit = subItem.actual_profit || (clientAmount - internalCost);
 
                                                   return (
                                                     <>
                                                       <div className="flex justify-between">
-                                                        <span className="text-gray-700">Internal Cost (Mat + Lab):</span>
-                                                        <span className="font-semibold text-gray-900">{formatCurrency(internalCost)}</span>
+                                                        <span className="text-gray-700">Materials Cost:</span>
+                                                        <span className="font-semibold text-gray-900">{formatCurrency(materialCost)}</span>
                                                       </div>
                                                       <div className="flex justify-between">
+                                                        <span className="text-gray-700">Labour Cost:</span>
+                                                        <span className="font-semibold text-gray-900">{formatCurrency(labourCost)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between">
+                                                        <span className="text-gray-700">Misc ({subItem.misc_percentage || 10}%):</span>
+                                                        <span className="font-semibold text-gray-900">{formatCurrency(miscAmount)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between">
+                                                        <span className="text-gray-700">Transport ({subItem.transport_percentage || 5}%):</span>
+                                                        <span className="font-semibold text-gray-900">{formatCurrency(transportAmount)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between pt-1.5 border-t border-gray-300">
+                                                        <span className="text-gray-800 font-bold">Internal Cost (Total):</span>
+                                                        <span className="font-bold text-red-600">{formatCurrency(internalCost)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between mt-2">
                                                         <span className="text-gray-700">Planned Profit (O&P):</span>
                                                         <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
                                                       </div>
@@ -671,7 +687,10 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                           const internalCost = item.internal_cost || item.sub_items?.reduce((sum: number, si: any) => {
                                             const materialCost = si.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || m.quantity * m.unit_price), 0) || 0;
                                             const labourCost = si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0;
-                                            return sum + materialCost + labourCost;
+                                            const subClientAmount = (si.quantity || 0) * (si.rate || 0);
+                                            const miscAmount = subClientAmount * ((si.misc_percentage || 10) / 100);
+                                            const transportAmount = subClientAmount * ((si.transport_percentage || 5) / 100);
+                                            return sum + materialCost + labourCost + miscAmount + transportAmount;
                                           }, 0) || 0;
                                           const projectMargin = item.project_margin || (clientCost - internalCost);
                                           const marginPercentage = clientCost > 0 ? ((projectMargin / clientCost) * 100) : 0;
@@ -683,7 +702,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                 <span className="text-blue-700 font-bold text-base">{formatCurrency(clientCost)}</span>
                                               </div>
                                               <div className="flex justify-between items-center py-1">
-                                                <span className="text-gray-700 font-medium">Internal Cost (Mat + Lab):</span>
+                                                <span className="text-gray-700 font-medium">Internal Cost (Total):</span>
                                                 <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
                                               </div>
                                               <div className="flex justify-between items-center pt-2 border-t-2 border-blue-400">
@@ -843,7 +862,10 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                           const internalCost = item.internal_cost || item.sub_items?.reduce((sum: number, si: any) => {
                                             const materialCost = si.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || m.quantity * m.unit_price), 0) || 0;
                                             const labourCost = si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0;
-                                            return sum + materialCost + labourCost;
+                                            const subClientAmount = (si.quantity || 0) * (si.rate || 0);
+                                            const miscAmount = subClientAmount * ((si.misc_percentage || 10) / 100);
+                                            const transportAmount = subClientAmount * ((si.transport_percentage || 5) / 100);
+                                            return sum + materialCost + labourCost + miscAmount + transportAmount;
                                           }, 0) || 0;
                                           const projectMargin = item.project_margin || (clientCost - internalCost);
                                           const marginPercentage = clientCost > 0 ? ((projectMargin / clientCost) * 100) : 0;
@@ -855,7 +877,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                 <span className="text-blue-700 font-bold text-base">{formatCurrency(clientCost)}</span>
                                               </div>
                                               <div className="flex justify-between items-center py-1">
-                                                <span className="text-gray-700 font-medium">Internal Cost (Mat + Lab):</span>
+                                                <span className="text-gray-700 font-medium">Internal Cost (Total):</span>
                                                 <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
                                               </div>
                                               <div className="flex justify-between items-center pt-2 border-t-2 border-blue-400">
@@ -1124,7 +1146,27 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 return sum + (item.labour?.reduce((lSum, l) => lSum + (l.total_cost || 0), 0) || 0);
                               }, 0);
 
-                              const totalInternalCost = totalMaterialCost + totalLabourCost;
+                              const totalMiscCost = allItems.reduce((sum, item) => {
+                                if (item.sub_items && item.sub_items.length > 0) {
+                                  return sum + item.sub_items.reduce((siSum: number, si: any) => {
+                                    const clientAmt = (si.quantity || 0) * (si.rate || 0);
+                                    return siSum + (clientAmt * ((si.misc_percentage || 10) / 100));
+                                  }, 0);
+                                }
+                                return sum;
+                              }, 0);
+
+                              const totalTransportCost = allItems.reduce((sum, item) => {
+                                if (item.sub_items && item.sub_items.length > 0) {
+                                  return sum + item.sub_items.reduce((siSum: number, si: any) => {
+                                    const clientAmt = (si.quantity || 0) * (si.rate || 0);
+                                    return siSum + (clientAmt * ((si.transport_percentage || 5) / 100));
+                                  }, 0);
+                                }
+                                return sum;
+                              }, 0);
+
+                              const totalInternalCost = totalMaterialCost + totalLabourCost + totalMiscCost + totalTransportCost;
                               const projectMargin = totalClientAmount - totalInternalCost;
                               const marginPercentage = totalClientAmount > 0 ? ((projectMargin / totalClientAmount) * 100) : 0;
 
@@ -1183,6 +1225,14 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                         <div className="flex justify-between">
                                           <span>Labour:</span>
                                           <span className="font-medium">{formatCurrency(totalLabourCost)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span>Miscellaneous:</span>
+                                          <span className="font-medium">{formatCurrency(totalMiscCost)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span>Transport:</span>
+                                          <span className="font-medium">{formatCurrency(totalTransportCost)}</span>
                                         </div>
                                       </div>
                                       <div className="flex justify-between items-center pt-3 border-t-2 border-blue-300">

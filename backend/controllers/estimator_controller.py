@@ -361,8 +361,17 @@ def send_boq_to_project_manager():
         }
 
         # Prepare items summary from BOQ details JSON
-        items_summary = boq_details.boq_details.get('summary', {})
-        items_summary['items'] = boq_details.boq_details.get('items', [])
+        boq_json = boq_details.boq_details
+
+        # Handle both old and new data structures
+        if 'existing_purchase' in boq_json and 'items' in boq_json['existing_purchase']:
+            items = boq_json['existing_purchase']['items']
+            items_summary = boq_json.get('combined_summary', {})
+        else:
+            items = boq_json.get('items', [])
+            items_summary = boq_json.get('summary', {})
+
+        items_summary['items'] = items
 
         # Initialize email service
         boq_email_service = BOQEmailService()
@@ -581,8 +590,17 @@ def send_boq_to_technical_director():
         }
 
         # Prepare items summary from BOQ details JSON
-        items_summary = boq_details.boq_details.get('summary', {})
-        items_summary['items'] = boq_details.boq_details.get('items', [])
+        boq_json = boq_details.boq_details
+
+        # Handle both old and new data structures
+        if 'existing_purchase' in boq_json and 'items' in boq_json['existing_purchase']:
+            items = boq_json['existing_purchase']['items']
+            items_summary = boq_json.get('combined_summary', {})
+        else:
+            items = boq_json.get('items', [])
+            items_summary = boq_json.get('summary', {})
+
+        items_summary['items'] = items
 
         # Initialize email service
         boq_email_service = BOQEmailService()

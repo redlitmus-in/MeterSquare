@@ -989,14 +989,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     const overheadProfitAmount = clientAmount * (subItem.overhead_profit_percentage / 100);
     const miscAmount = clientAmount * (subItem.misc_percentage / 100);
 
-    // 3. Calculate Internal Cost (Materials + Labour)
+    // 3. Calculate Internal Cost (Materials + Labour + Misc + Transport)
     const materialCost = subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0);
     const labourCost = subItem.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0);
-    const internalCost = materialCost + labourCost;
+    const internalCost = materialCost + labourCost + miscAmount + transportAmount;
 
     // 4. Calculate Profits
     const plannedProfit = overheadProfitAmount; // This is the profit we planned for (25% typically)
-    const actualProfit = clientAmount - internalCost - miscAmount - transportAmount; // Actual profit after all costs
+    const actualProfit = clientAmount - internalCost; // Actual profit after all costs (materials, labour, misc, transport)
 
     // 5. Remaining budget for materials/labour (for reference)
     const remainingForCosts = clientAmount - transportAmount - overheadProfitAmount - miscAmount;
@@ -1049,19 +1049,19 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     // No VAT - selling price is same as after discount
     const sellingPrice = afterDiscount;
 
-    // Calculate project margin (excluding planned profit)
-    const projectMargin = totalClientCost - totalInternalCost - totalMiscAmount - totalTransportAmount;
+    // Calculate project margin (this is essentially the O&P amount, since internal cost now includes all other costs)
+    const projectMargin = totalClientCost - totalInternalCost;
 
     return {
       // New calculation results
       totalClientCost, // Total amount client pays
-      totalInternalCost, // Total materials + labour cost
+      totalInternalCost, // Total internal cost (materials + labour + misc + transport)
       totalPlannedProfit, // Sum of all sub-item planned profits (from O&P %)
       totalActualProfit, // Sum of all sub-item actual profits
       totalMiscAmount, // Total miscellaneous from all sub-items
       totalTransportAmount, // Total transport from all sub-items
       totalOverheadProfitAmount, // Total O&P from all sub-items
-      projectMargin, // Client cost - Internal cost - Misc - Transport (excluding planned profit)
+      projectMargin, // Client cost - Internal cost (which now includes all costs except O&P)
 
       // For backward compatibility and display
       itemTotal: totalClientCost, // Total from all sub-items
@@ -2828,19 +2828,31 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               <span className="font-semibold text-gray-800">{subItemCalc.clientAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
                                             <div className="flex justify-between text-gray-600">
-                                              <span>Internal Cost (Materials + Labour):</span>
-                                              <span className="font-semibold text-gray-800">{subItemCalc.internalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                              <span>Materials Cost:</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.materialCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                            </div>
+                                            <div className="flex justify-between text-gray-600">
+                                              <span>Labour Cost:</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.labourCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
                                             <div className="flex justify-between text-gray-600">
                                               <span>Misc ({subItem.misc_percentage}%):</span>
                                               <span className="font-semibold text-gray-800">{subItemCalc.miscAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
                                             <div className="flex justify-between text-gray-600">
+                                              <span>Overhead & Profit ({subItem.overhead_profit_percentage}%):</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.overheadProfitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                            </div>
+                                            <div className="flex justify-between text-gray-600">
                                               <span>Transport ({subItem.transport_percentage}%):</span>
                                               <span className="font-semibold text-gray-800">{subItemCalc.transportAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
+                                            <div className="flex justify-between text-gray-600 mt-2 pt-2 border-t border-gray-300">
+                                              <span className="font-bold">Internal Cost (Total):</span>
+                                              <span className="font-bold text-red-600">{subItemCalc.internalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                            </div>
                                             <div className="flex justify-between text-gray-600">
-                                              <span>Remaining for Costs:</span>
+                                              <span>Balance:</span>
                                               <span className="font-semibold text-gray-800">{subItemCalc.remainingForCosts.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
                                           </div>
