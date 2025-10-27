@@ -15,7 +15,9 @@ from controllers.buyer_controller import (
     update_purchase_order,
     update_purchase_notes,
     td_approve_vendor,
-    td_reject_vendor
+    td_reject_vendor,
+    preview_vendor_email,
+    send_vendor_email
 )
 from controllers.auth_controller import jwt_required
 
@@ -135,3 +137,17 @@ def td_approve_vendor_route(cr_id):
 def td_reject_vendor_route(cr_id):
     """TD rejects vendor selection for purchase"""
     return td_reject_vendor(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/preview-vendor-email', methods=['GET'])
+@jwt_required
+def preview_vendor_email_route(cr_id):
+    """Preview vendor purchase order email"""
+    return preview_vendor_email(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/send-vendor-email', methods=['POST'])
+@jwt_required
+def send_vendor_email_route(cr_id):
+    """Send purchase order email to vendor"""
+    return send_vendor_email(cr_id)

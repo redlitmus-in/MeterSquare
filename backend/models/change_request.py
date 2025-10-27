@@ -122,6 +122,9 @@ class ChangeRequest(db.Model):
     vendor_approved_by_td_name = db.Column(db.String(255), nullable=True)
     vendor_approval_date = db.Column(db.DateTime, nullable=True)
     vendor_rejection_reason = db.Column(db.Text, nullable=True)
+    vendor_email_sent = db.Column(db.Boolean, default=False)  # Track if PO email sent to vendor
+    vendor_email_sent_date = db.Column(db.DateTime, nullable=True)
+    vendor_email_sent_by_user_id = db.Column(db.Integer, nullable=True)
 
     # Rejection
     rejection_reason = db.Column(db.Text, nullable=True)

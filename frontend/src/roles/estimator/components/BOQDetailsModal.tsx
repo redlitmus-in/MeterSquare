@@ -281,7 +281,10 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                     <p className="mt-6 text-gray-600 text-sm font-medium">Loading BOQ details...</p>
                   </div>
                 ) : activeTab === 'history' ? (
-                  <BOQHistoryTimeline boqId={displayData?.boq_id || boq?.boq_id} />
+                  <BOQHistoryTimeline
+                    boqId={displayData?.boq_id || boq?.boq_id}
+                    onDataChange={fetchBOQDetails}
+                  />
                 ) : boqData ? (
                   <>
                     {/* Project Information */}
@@ -327,6 +330,55 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                         </div>
                       </div>
                     </div>
+
+                    {/* Project Timeline */}
+                    {(boqData.project_details?.start_date || boqData.project_details?.end_date || boqData.project_details?.duration_days) && (
+                      <div className="bg-gradient-to-r from-blue-50 to-blue-100/30 rounded-lg p-5 mb-6 border border-blue-200">
+                        <h3 className="text-base font-bold text-blue-900 mb-4 flex items-center gap-2">
+                          <div className="p-1.5 bg-white rounded-lg shadow-sm">
+                            <Clock className="w-4 h-4 text-blue-600" />
+                          </div>
+                          Project Timeline
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          {boqData.project_details?.start_date && (
+                            <div className="bg-white/60 rounded-lg p-3 border border-blue-200">
+                              <span className="text-xs text-blue-700 font-medium block mb-1">Start Date</span>
+                              <p className="font-semibold text-gray-900 flex items-center gap-1">
+                                <Calendar className="w-4 h-4 text-blue-500" />
+                                {new Date(boqData.project_details.start_date).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric'
+                                })}
+                              </p>
+                            </div>
+                          )}
+                          {boqData.project_details?.end_date && (
+                            <div className="bg-white/60 rounded-lg p-3 border border-blue-200">
+                              <span className="text-xs text-blue-700 font-medium block mb-1">End Date</span>
+                              <p className="font-semibold text-gray-900 flex items-center gap-1">
+                                <Calendar className="w-4 h-4 text-blue-500" />
+                                {new Date(boqData.project_details.end_date).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric'
+                                })}
+                              </p>
+                            </div>
+                          )}
+                          {boqData.project_details?.duration_days !== undefined && boqData.project_details?.duration_days !== null && (
+                            <div className="bg-white/60 rounded-lg p-3 border border-blue-200">
+                              <span className="text-xs text-blue-700 font-medium block mb-1">Duration</span>
+                              <p className="font-semibold text-gray-900 flex items-center gap-1">
+                                <Clock className="w-4 h-4 text-blue-500" />
+                                {boqData.project_details.duration_days} days
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Preliminaries & Approval Works */}
                     {boqData.preliminaries && (boqData.preliminaries.items?.length > 0 || boqData.preliminaries.notes) && (

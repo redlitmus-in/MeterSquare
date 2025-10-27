@@ -33,6 +33,43 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
   const [additionalDays, setAdditionalDays] = useState<number>(1);
   const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasPendingRequest, setHasPendingRequest] = useState(false);
+  const [pendingRequestCount, setPendingRequestCount] = useState(0);
+  const [checkingPending, setCheckingPending] = useState(false);
+
+  // Check for existing pending requests when modal opens
+  useEffect(() => {
+    if (isOpen && boqId) {
+      checkPendingRequests();
+    }
+  }, [isOpen, boqId]);
+
+  const checkPendingRequests = async () => {
+    try {
+      setCheckingPending(true);
+      const token = localStorage.getItem('access_token') || localStorage.getItem('token');
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
+
+      const response = await fetch(`${apiUrl}/boq/${boqId}/pending-day-extensions`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setHasPendingRequest(data.count > 0);
+        setPendingRequestCount(data.count);
+      }
+    } catch (error) {
+      console.error('Error checking pending requests:', error);
+    } finally {
+      setCheckingPending(false);
+    }
+  };
 
   // Calculate new end date based on additional days
   const calculateNewEndDate = () => {
@@ -57,6 +94,12 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
   };
 
   const handleSubmit = async () => {
+    // Check if there are pending requests
+    if (hasPendingRequest) {
+      toast.error(`Cannot create new request. You have ${pendingRequestCount} pending request${pendingRequestCount > 1 ? 's' : ''} awaiting TD approval.`);
+      return;
+    }
+
     // Validation
     if (additionalDays <= 0) {
       toast.error('Additional days must be greater than 0');
@@ -68,14 +111,23 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
       return;
     }
 
+    // Check if token exists
+    const token = localStorage.getItem('access_token') || localStorage.getItem('token');
+    if (!token) {
+      toast.error('Authentication token not found. Please login again.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/boq/${boqId}/request-day-extension`, {
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
+      const response = await fetch(`${apiUrl}/boq/${boqId}/request-day-extension`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           additional_days: additionalDays,
@@ -96,11 +148,18 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
           onSuccess();
         }
       } else {
-        toast.error(data.error || 'Failed to submit day extension request');
+        // Handle specific error messages
+        if (response.status === 401) {
+          toast.error('Unauthorized. Please login again.');
+        } else if (response.status === 403) {
+          toast.error('You do not have permission to perform this action.');
+        } else {
+          toast.error(data.error || data.message || 'Failed to submit day extension request');
+        }
       }
     } catch (error) {
       console.error('Error submitting day extension request:', error);
-      toast.error('Failed to submit request');
+      toast.error('Network error. Please check your connection and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -109,61 +168,82 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[9999] p-2 sm:p-4">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full"
+        className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[95vh] flex flex-col"
       >
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-4 rounded-t-2xl">
+        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-3 rounded-t-xl flex-shrink-0">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
-                <CalendarIcon className="w-6 h-6 text-white" />
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+                <CalendarIcon className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-white">Request Day Extension</h2>
-                <p className="text-sm text-blue-100 mt-0.5">{projectName}</p>
+                <h2 className="text-base font-bold text-white">Request Day Extension</h2>
+                <p className="text-xs text-blue-100">{projectName}</p>
               </div>
             </div>
             <button
+              type="button"
               onClick={onClose}
-              className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+              title="Close"
+              aria-label="Close modal"
             >
-              <XMarkIcon className="w-6 h-6 text-white" />
+              <XMarkIcon className="w-5 h-5 text-white" />
             </button>
           </div>
         </div>
 
+        {/* Pending Request Warning */}
+        {hasPendingRequest && (
+          <div className="bg-orange-50 border-l-4 border-orange-500 p-4 mx-4 mt-4 rounded-lg">
+            <div className="flex items-start">
+              <InformationCircleIcon className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" />
+              <div className="ml-3">
+                <h3 className="text-sm font-bold text-orange-900">Pending Request Exists</h3>
+                <p className="text-sm text-orange-700 mt-1">
+                  You have <span className="font-bold">{pendingRequestCount} pending day extension request{pendingRequestCount > 1 ? 's' : ''}</span> awaiting Technical Director approval.
+                </p>
+                <p className="text-xs text-orange-600 mt-2">
+                  You cannot submit a new request until the pending request{pendingRequestCount > 1 ? 's are' : ' is'} approved or rejected.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Content */}
-        <div className="p-6 space-y-6">
+        <div className="p-4 space-y-4 overflow-y-auto flex-1">
           {/* Current Project Info */}
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-            <h3 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
-              <InformationCircleIcon className="w-5 h-5" />
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <h3 className="text-xs font-bold text-blue-900 mb-2 flex items-center gap-1.5">
+              <InformationCircleIcon className="w-4 h-4" />
               Current Project Timeline
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-2">
               <div>
-                <p className="text-xs text-blue-700 mb-1">Duration</p>
-                <p className="text-lg font-bold text-blue-900">{currentDuration} days</p>
+                <p className="text-xs text-blue-700 mb-0.5">Duration</p>
+                <p className="text-sm font-bold text-blue-900">{currentDuration} days</p>
               </div>
               <div>
-                <p className="text-xs text-blue-700 mb-1">Start Date</p>
-                <p className="text-sm font-semibold text-blue-900">{formatDate(startDate)}</p>
+                <p className="text-xs text-blue-700 mb-0.5">Start Date</p>
+                <p className="text-xs font-semibold text-blue-900">{formatDate(startDate)}</p>
               </div>
               <div>
-                <p className="text-xs text-blue-700 mb-1">Current End Date</p>
-                <p className="text-sm font-semibold text-blue-900">{formatDate(endDate)}</p>
+                <p className="text-xs text-blue-700 mb-0.5">Current End Date</p>
+                <p className="text-xs font-semibold text-blue-900">{formatDate(endDate)}</p>
               </div>
             </div>
           </div>
 
           {/* Additional Days Input */}
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <label className="block text-xs font-semibold text-gray-700 mb-1.5">
               Additional Days Requested *
             </label>
             <div className="relative">
@@ -172,27 +252,27 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
                 min="1"
                 value={additionalDays}
                 onChange={(e) => setAdditionalDays(parseInt(e.target.value) || 1)}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-sm"
                 placeholder="Enter number of additional days"
               />
-              <PlusIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <PlusIcon className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             </div>
-            <p className="text-xs text-gray-500 mt-1.5">
+            <p className="text-xs text-gray-500 mt-1">
               New total duration will be: <span className="font-bold text-blue-600">{currentDuration + additionalDays} days</span>
             </p>
           </div>
 
           {/* New End Date Preview */}
           {endDate && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <ClockIcon className="w-5 h-5 text-green-600" />
-                <p className="text-sm font-bold text-green-900">New End Date (Preview)</p>
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <ClockIcon className="w-4 h-4 text-green-600" />
+                <p className="text-xs font-bold text-green-900">New End Date (Preview)</p>
               </div>
-              <p className="text-lg font-bold text-green-700">
+              <p className="text-base font-bold text-green-700">
                 {calculateNewEndDate()}
               </p>
-              <p className="text-xs text-green-600 mt-1">
+              <p className="text-xs text-green-600 mt-0.5">
                 +{additionalDays} day{additionalDays !== 1 ? 's' : ''} from current end date
               </p>
             </div>
@@ -200,18 +280,18 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
 
           {/* Reason Input */}
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <label className="block text-xs font-semibold text-gray-700 mb-1.5">
               Reason for Extension *
             </label>
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              rows={4}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all resize-none"
+              rows={3}
+              className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all resize-none text-sm"
               placeholder="Please provide a detailed reason for requesting additional days (e.g., weather delays, unforeseen site conditions, design changes, etc.)"
               maxLength={500}
             />
-            <div className="flex items-center justify-between mt-1.5">
+            <div className="flex items-center justify-between mt-1">
               <p className="text-xs text-gray-500">
                 Be specific about the reasons for the delay
               </p>
@@ -222,7 +302,7 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
           </div>
 
           {/* Info Box */}
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2.5">
             <p className="text-xs text-yellow-800">
               <span className="font-bold">Note:</span> This request will be sent to the Technical Director for approval.
               The TD may approve, reject, or modify the number of days requested.
@@ -231,27 +311,40 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="bg-gray-50 px-6 py-4 rounded-b-2xl flex items-center justify-end gap-3">
+        <div className="bg-gray-50 px-4 py-3 rounded-b-xl flex items-center justify-end gap-2 flex-shrink-0 border-t border-gray-200">
           <button
+            type="button"
             onClick={onClose}
             disabled={isSubmitting}
-            className="px-5 py-2.5 text-gray-700 bg-white border-2 border-gray-300 rounded-lg font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50"
+            className="px-4 py-2 text-sm text-gray-700 bg-white border-2 border-gray-300 rounded-lg font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleSubmit}
-            disabled={isSubmitting || !reason.trim() || additionalDays <= 0}
-            className="px-6 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg font-semibold hover:from-blue-600 hover:to-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-md"
+            disabled={isSubmitting || !reason.trim() || additionalDays <= 0 || hasPendingRequest}
+            className="px-4 py-2 text-sm bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg font-semibold hover:from-blue-600 hover:to-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-md"
+            title={hasPendingRequest ? 'Cannot submit - pending request exists' : 'Submit day extension request'}
           >
-            {isSubmitting ? (
+            {checkingPending ? (
               <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Checking...
+              </>
+            ) : isSubmitting ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 Submitting...
+              </>
+            ) : hasPendingRequest ? (
+              <>
+                <XMarkIcon className="w-4 h-4" />
+                Request Pending
               </>
             ) : (
               <>
-                <CalendarIcon className="w-5 h-5" />
+                <CalendarIcon className="w-4 h-4" />
                 Send Request
               </>
             )}

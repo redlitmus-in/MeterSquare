@@ -1741,3 +1741,265 @@ class BOQEmailService:
         BOQ Management System
         """
         return self.send_email(to_email, subject, body)
+
+    def generate_vendor_purchase_order_email(self, vendor_data, purchase_data, buyer_data, project_data):
+        """
+        Generate professional purchase order email for Vendor
+
+        Args:
+            vendor_data: Dictionary containing vendor information
+            purchase_data: Dictionary containing purchase order details
+            buyer_data: Dictionary containing buyer contact information
+            project_data: Dictionary containing project information
+
+        Returns:
+            str: HTML formatted email content
+        """
+        vendor_name = vendor_data.get('company_name', 'Valued Vendor')
+        vendor_contact = vendor_data.get('contact_person_name', '')
+
+        cr_id = purchase_data.get('cr_id', 'N/A')
+        project_name = project_data.get('project_name', 'N/A')
+        client = project_data.get('client', 'N/A')
+        location = project_data.get('location', 'N/A')
+
+        buyer_name = buyer_data.get('buyer_name', 'Procurement Team')
+        buyer_email = buyer_data.get('buyer_email', 'N/A')
+        buyer_phone = buyer_data.get('buyer_phone', 'N/A')
+
+        materials = purchase_data.get('materials', [])
+        total_cost = purchase_data.get('total_cost', 0)
+
+        # Convert logo to base64 for inline embedding
+        logo_data_uri = LOGO_URL  # Default to URL
+        try:
+            import base64
+            logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logo.png')
+            if os.path.exists(logo_path):
+                with open(logo_path, 'rb') as f:
+                    logo_bytes = f.read()
+                    logo_base64 = base64.b64encode(logo_bytes).decode('utf-8')
+                    logo_data_uri = f"data:image/png;base64,{logo_base64}"
+                    log.info(f"Logo converted to base64 for email embedding")
+        except Exception as e:
+            log.warning(f"Could not convert logo to base64, using URL fallback: {e}")
+
+        # Build materials table
+        materials_table_rows = ""
+        for idx, material in enumerate(materials, 1):
+            material_name = material.get('material_name', 'N/A')
+            quantity = material.get('quantity', 0)
+            unit = material.get('unit', 'unit')
+            unit_price = material.get('unit_price', 0)
+            total_price = material.get('total_price', 0)
+
+            # Alternate row background color
+            bg_color = '#f0f9ff' if idx % 2 == 0 else '#ffffff'
+
+            materials_table_rows += f"""
+                <tr style="background-color: {bg_color}; border-bottom: 1px solid #3b82f6;">
+                    <td style="padding: 12px 10px; color: #000000; font-size: 13px;">{idx}</td>
+                    <td style="padding: 12px 10px; color: #000000; font-size: 13px;"><strong>{material_name}</strong></td>
+                    <td style="padding: 12px 10px; color: #000000; font-size: 13px;">{quantity} {unit}</td>
+                    <td style="padding: 12px 10px; color: #000000; font-size: 13px;">AED {unit_price:,.2f}</td>
+                    <td style="padding: 12px 10px; color: #000000; font-size: 13px;"><strong>AED {total_price:,.2f}</strong></td>
+                </tr>
+            """
+
+        email_body = f"""
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f0f9ff; padding: 20px; font-family: Arial, Helvetica, sans-serif;">
+            <tr>
+                <td align="center">
+                    <table width="650" cellpadding="0" cellspacing="0" border="0" style="background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 5px 15px rgba(59, 130, 246, 0.2); border: 2px solid #3b82f6;">
+                        <!-- Header with Logo -->
+                        <tr>
+                            <td style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); padding: 30px 25px; text-align: center;">
+                                <img src="{logo_data_uri}" alt="MeterSquare Logo" style="max-width: 180px; height: auto; margin: 0 auto 20px; display: block;">
+                                <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px;">PURCHASE ORDER</h1>
+                                <h2 style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; font-weight: normal;">Material Request for Project</h2>
+                            </td>
+                        </tr>
+
+                        <!-- Content -->
+                        <tr>
+                            <td style="padding: 30px; background: #ffffff;">
+                                <p style="color: #000000; font-size: 14px; line-height: 1.8; margin: 0 0 20px 0;">
+                                    Dear <strong>{vendor_contact if vendor_contact else vendor_name}</strong>,
+                                </p>
+
+                                <p style="color: #000000; font-size: 14px; line-height: 1.8; margin: 0 0 20px 0;">
+                                    We are pleased to place a purchase order with <strong>{vendor_name}</strong> for the materials
+                                    listed below. This order is for our ongoing project and requires your prompt attention.
+                                </p>
+
+                                <div style="height: 2px; background: linear-gradient(90deg, transparent, #3b82f6, transparent); margin: 25px 0;"></div>
+
+                                <!-- Purchase Order Information -->
+                                <h2 style="color: #000000; font-size: 20px; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Purchase Order Details</h2>
+                                <table width="100%" cellpadding="10" cellspacing="0" border="0" style="background: #f0f9ff; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
+                                    <tr>
+                                        <td style="color: #000000; font-size: 14px; font-weight: bold; width: 30%;">PO Number:</td>
+                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">CR-{cr_id}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Project Name:</td>
+                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{project_name}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Client:</td>
+                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{client}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Location:</td>
+                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{location}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Total Items:</td>
+                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{len(materials)}</td>
+                                    </tr>
+                                </table>
+
+                                <!-- Materials Table -->
+                                <h2 style="color: #000000; font-size: 20px; margin: 30px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Materials Required</h2>
+                                <table width="100%" cellpadding="12" cellspacing="0" border="0" style="border: 2px solid #3b82f6; border-radius: 8px; overflow: hidden; margin: 20px 0;">
+                                    <thead>
+                                        <tr style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);">
+                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">S.No</th>
+                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Material Name</th>
+                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Quantity</th>
+                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Unit Price</th>
+                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Total Price</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {materials_table_rows}
+                                    </tbody>
+                                </table>
+
+                                <!-- Total Cost -->
+                                <table width="100%" cellpadding="20" cellspacing="0" border="0" style="background: linear-gradient(135deg, #f0f9ff 0%, #dbeafe 100%); border: 1px solid #bfdbfe; border-radius: 10px; margin: 25px 0;">
+                                    <tr>
+                                        <td style="text-align: right;">
+                                            <span style="color: #000000; font-size: 16px; font-weight: bold;">Total Order Value:</span>
+                                            <span style="color: #16a34a; font-size: 24px; font-weight: bold; margin-left: 10px;">AED {total_cost:,.2f}</span>
+                                        </td>
+                                    </tr>
+                                </table>
+
+                                <div style="height: 2px; background: linear-gradient(90deg, transparent, #3b82f6, transparent); margin: 25px 0;"></div>
+
+                                <!-- Buyer Contact Information -->
+                                <h2 style="color: #000000; font-size: 20px; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Contact Person</h2>
+                                <table width="100%" cellpadding="10" cellspacing="0" border="0" style="background: #f0f9ff; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
+                                    <tr>
+                                        <td style="color: #000000; font-size: 14px; font-weight: bold; width: 30%;">Buyer Name:</td>
+                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{buyer_name}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Email:</td>
+                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{buyer_email}</td>
+                                    </tr>
+                                    {f'<tr><td style="color: #000000; font-size: 14px; font-weight: bold;">Phone:</td><td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{buyer_phone}</td></tr>' if buyer_phone != 'N/A' else ''}
+                                </table>
+
+                                <!-- Important Instructions -->
+                                <table width="100%" cellpadding="15" cellspacing="0" border="0" style="background-color: #dbeafe; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
+                                    <tr>
+                                        <td>
+                                            <p style="color: #000000; font-size: 14px; font-weight: bold; margin: 0 0 10px 0;">Important Instructions:</p>
+                                            <ul style="color: #000000; font-size: 14px; margin: 10px 0; padding-left: 20px; line-height: 1.8;">
+                                                <li>Please confirm receipt of this purchase order</li>
+                                                <li>Provide delivery timeline and availability confirmation</li>
+                                                <li>Ensure all materials meet the specified quality standards</li>
+                                                <li>Include all necessary certifications and documentation</li>
+                                                <li>Contact the buyer for any clarifications or concerns</li>
+                                            </ul>
+                                        </td>
+                                    </tr>
+                                </table>
+
+                                <!-- Delivery Requirements -->
+                                <table width="100%" cellpadding="15" cellspacing="0" border="0" style="background-color: #f0f9ff; border: 1px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
+                                    <tr>
+                                        <td>
+                                            <p style="color: #000000; font-size: 14px; font-weight: bold; margin: 0 0 10px 0;">Delivery Requirements:</p>
+                                            <ul style="color: #000000; font-size: 14px; margin: 10px 0; padding-left: 20px; line-height: 1.8;">
+                                                <li>Materials should be delivered to the project site: <strong>{location}</strong></li>
+                                                <li>Please coordinate delivery schedule with the buyer</li>
+                                                <li>Proper packaging and labeling is required</li>
+                                                <li>Invoice should reference PO Number: <strong>CR-{cr_id}</strong></li>
+                                            </ul>
+                                        </td>
+                                    </tr>
+                                </table>
+
+                                <!-- Signature -->
+                                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #3b82f6;">
+                                    <tr>
+                                        <td>
+                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;"><strong style="color: #3b82f6; font-size: 16px;">Best Regards,</strong></p>
+                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;">{buyer_name}</p>
+                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;">Procurement Department</p>
+                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;">MeterSquare ERP System</p>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+
+                        <!-- Footer -->
+                        <tr>
+                            <td style="background: linear-gradient(135deg, #f0f9ff 0%, #dbeafe 100%); padding: 25px; text-align: center; border-top: 2px solid #3b82f6;">
+                                <p style="color: #000000; font-size: 13px; font-weight: bold; margin: 5px 0;">MeterSquare ERP - Construction Management System</p>
+                                <p style="color: #000000; font-size: 13px; margin: 5px 0;">For any queries regarding this purchase order, please contact {buyer_email}</p>
+                                <p style="color: #000000; font-size: 13px; margin: 5px 0;">© 2025 MeterSquare. All rights reserved.</p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+        """
+
+        return wrap_email_content(email_body)
+
+    def send_vendor_purchase_order(self, vendor_email, vendor_data, purchase_data, buyer_data, project_data):
+        """
+        Send purchase order email to Vendor with embedded logo
+
+        Args:
+            vendor_email: Vendor's email address
+            vendor_data: Dictionary containing vendor information
+            purchase_data: Dictionary containing purchase order details
+            buyer_data: Dictionary containing buyer contact information
+            project_data: Dictionary containing project information
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            # Generate email content with embedded logo
+            email_html = self.generate_vendor_purchase_order_email(
+                vendor_data, purchase_data, buyer_data, project_data
+            )
+
+            # Create subject
+            project_name = project_data.get('project_name', 'Project')
+            cr_id = purchase_data.get('cr_id', 'N/A')
+            subject = f"Purchase Order CR-{cr_id} - {project_name}"
+
+            # Send email (logo is embedded in HTML as base64)
+            success = self.send_email(vendor_email, subject, email_html)
+
+            if success:
+                log.info(f"Purchase order email sent successfully to vendor {vendor_email}")
+            else:
+                log.error(f"Failed to send purchase order email to vendor {vendor_email}")
+
+            return success
+
+        except Exception as e:
+            log.error(f"Error sending purchase order to vendor: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False

@@ -19,7 +19,8 @@ import {
   LayoutGrid,
   Table as TableIcon,
   Store,
-  Edit
+  Edit,
+  Mail
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -28,6 +29,7 @@ import { useAutoSync } from '@/hooks/useAutoSync';
 import { buyerService, Purchase, PurchaseListResponse } from '../services/buyerService';
 import PurchaseDetailsModal from '../components/PurchaseDetailsModal';
 import VendorSelectionModal from '../components/VendorSelectionModal';
+import VendorEmailModal from '../components/VendorEmailModal';
 
 const PurchaseOrders: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'ongoing' | 'pending_approval' | 'completed'>('ongoing');
@@ -37,6 +39,7 @@ const PurchaseOrders: React.FC = () => {
   const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isVendorSelectionModalOpen, setIsVendorSelectionModalOpen] = useState(false);
+  const [isVendorEmailModalOpen, setIsVendorEmailModalOpen] = useState(false);
   const [completingPurchaseId, setCompletingPurchaseId] = useState<number | null>(null);
 
   // Fetch pending purchases - Auto-refresh every 2 seconds
@@ -126,6 +129,11 @@ const PurchaseOrders: React.FC = () => {
   const handleSelectVendor = (purchase: Purchase) => {
     setSelectedPurchase(purchase);
     setIsVendorSelectionModalOpen(true);
+  };
+
+  const handleSendEmailToVendor = (purchase: Purchase) => {
+    setSelectedPurchase(purchase);
+    setIsVendorEmailModalOpen(true);
   };
 
   const handleMarkAsComplete = async (crId: number) => {
@@ -406,6 +414,25 @@ const PurchaseOrders: React.FC = () => {
                         </Button>
                       )}
 
+                      {/* Send Email to Vendor - Only show if vendor is approved by TD */}
+                      {purchase.status === 'pending' && purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (
+                        purchase.vendor_email_sent ? (
+                          <div className="w-full h-7 bg-green-50 border border-green-200 rounded flex items-center justify-center text-xs font-medium text-green-700 px-2 py-1">
+                            <CheckCircle className="w-3 h-3 mr-1" />
+                            Sent to Vendor
+                          </div>
+                        ) : (
+                          <Button
+                            onClick={() => handleSendEmailToVendor(purchase)}
+                            size="sm"
+                            className="w-full h-7 text-xs bg-purple-600 hover:bg-purple-700 text-white px-2 py-1"
+                          >
+                            <Mail className="w-3 h-3 mr-1" />
+                            Send Email to Vendor
+                          </Button>
+                        )
+                      )}
+
                       {/* Second Row: View and Edit */}
                       <div className="grid grid-cols-2 gap-1.5">
                         <Button
@@ -589,6 +616,22 @@ const PurchaseOrders: React.FC = () => {
             setSelectedPurchase(null);
           }}
           onVendorSelected={() => {
+            refetchPending();
+            refetchCompleted();
+          }}
+        />
+      )}
+
+      {/* Vendor Email Modal */}
+      {selectedPurchase && (
+        <VendorEmailModal
+          purchase={selectedPurchase}
+          isOpen={isVendorEmailModalOpen}
+          onClose={() => {
+            setIsVendorEmailModalOpen(false);
+            setSelectedPurchase(null);
+          }}
+          onEmailSent={() => {
             refetchPending();
             refetchCompleted();
           }}

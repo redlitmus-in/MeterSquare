@@ -29,6 +29,7 @@ import BOQHistoryTimeline from '@/roles/estimator/components/BOQHistoryTimeline'
 import BOQRevisionHistory from '@/roles/estimator/components/BOQRevisionHistory';
 import TDRevisionComparisonPage from '@/roles/technical-director/components/TDRevisionComparisonPage';
 import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
+import DayExtensionApprovalModal from '@/roles/technical-director/components/DayExtensionApprovalModal';
 import {
   exportBOQToExcelInternal,
   exportBOQToExcelClient,
@@ -142,6 +143,13 @@ interface EstimationItem {
   emailSent?: boolean;
   projectId?: number;
   pmAssigned?: boolean;
+  // Project timeline fields
+  startDate?: string;
+  endDate?: string;
+  durationDays?: number;
+  // Day extension status
+  hasPendingDayExtension?: boolean;
+  pendingDayExtensionCount?: number;
 }
 
 const ProjectApprovals: React.FC = () => {
@@ -175,6 +183,12 @@ const ProjectApprovals: React.FC = () => {
   const [selectedProjectPM, setSelectedProjectPM] = useState<any>(null);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [isRevisionApproval, setIsRevisionApproval] = useState(false);
+
+  // Day Extension States
+  const [pendingDayExtensions, setPendingDayExtensions] = useState<any[]>([]);
+  const [showDayExtensionModal, setShowDayExtensionModal] = useState(false);
+  const [selectedDayExtension, setSelectedDayExtension] = useState<any>(null);
+  const [loadingDayExtensions, setLoadingDayExtensions] = useState(false);
 
   // Dynamic Revision Tabs States
   const [revisionTabs, setRevisionTabs] = useState<Array<{
@@ -212,6 +226,16 @@ const ProjectApprovals: React.FC = () => {
     // Cleanup interval on unmount
     return () => clearInterval(intervalId);
   }, []); // Empty dependency array - run only once on mount
+
+  // Load day extensions only when 'assigned' tab is active and BOQs are loaded
+  useEffect(() => {
+    if (filterStatus === 'assigned' && boqs.length > 0) {
+      loadPendingDayExtensions();
+    } else if (filterStatus !== 'assigned') {
+      // Clear extensions when leaving assigned tab to free memory
+      setPendingDayExtensions([]);
+    }
+  }, [filterStatus, boqs]); // Load when switching to assigned tab or when BOQs update
 
   // Load revision tabs when revisions filter is active
   useEffect(() => {
@@ -293,6 +317,74 @@ const ProjectApprovals: React.FC = () => {
       setRevisionProjects([]);
     } finally {
       setLoadingRevisionProjects(false);
+    }
+  };
+
+  // Load Pending Day Extension Requests - Simply extract from BOQ data (no history API calls)
+  const loadPendingDayExtensions = () => {
+    try {
+      // Simply map from the BOQs that have pending extensions
+      const extensions = boqs
+        .filter((boq: any) => boq.has_pending_day_extension)
+        .map((boq: any) => ({
+          boq_id: boq.boq_id,
+          project_name: boq.project_name,
+          count: boq.pending_day_extension_count || 1
+        }));
+
+      setPendingDayExtensions(extensions);
+    } catch (error) {
+      console.error('Error loading pending day extensions:', error);
+      setPendingDayExtensions([]);
+    }
+  };
+
+  // Fetch day extension details only when user clicks to view
+  const handleOpenDayExtensionModal = async (boqId: number) => {
+    try {
+      setLoadingDayExtensions(true);
+      const token = localStorage.getItem('access_token') || localStorage.getItem('token');
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
+
+      console.log(`Fetching day extensions for BOQ ${boqId}...`);
+
+      const response = await fetch(`${apiUrl}/boq/${boqId}/pending-day-extensions`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+      console.log('Day extension API response:', data);
+
+      if (response.ok && data.success) {
+        if (data.data && data.data.length > 0) {
+          // Sort by request date (most recent first)
+          const extensions = data.data.sort((a: any, b: any) => {
+            const dateA = new Date(a.request_date || 0).getTime();
+            const dateB = new Date(b.request_date || 0).getTime();
+            return dateB - dateA;
+          });
+
+          console.log(`Found ${extensions.length} pending extension(s)`);
+          // Set all extensions instead of just the first one
+          setSelectedDayExtension(extensions);
+          setShowDayExtensionModal(true);
+        } else {
+          console.log('No pending extensions found');
+          toast.info('No pending day extension requests for this project');
+        }
+      } else {
+        console.error('API error:', data);
+        toast.error(data.error || 'Failed to load day extension requests');
+      }
+    } catch (error) {
+      console.error('Error fetching day extension details:', error);
+      toast.error('Failed to load day extension requests');
+    } finally {
+      setLoadingDayExtensions(false);
     }
   };
 
@@ -400,6 +492,13 @@ const ProjectApprovals: React.FC = () => {
       preliminaries: boq.preliminaries || {},
       totalVatAmount: boq.total_vat_amount || boq.totalVatAmount || 0,
       overallVatPercentage: boq.overall_vat_percentage || boq.overallVatPercentage || 0,
+      // Project timeline fields
+      startDate: boq.start_date || undefined,
+      endDate: boq.end_date || undefined,
+      durationDays: boq.duration_days || undefined,
+      // Day extension status
+      hasPendingDayExtension: boq.has_pending_day_extension || false,
+      pendingDayExtensionCount: boq.pending_day_extension_count || 0,
       // Support both old format (items) and new format (existing_purchase/new_purchase)
       existingItems: (boq.existing_purchase?.items || boq.items)?.map((item: any, idx: number) => {
         // Helper to clean wrapped values - returns number or 0
@@ -1487,8 +1586,52 @@ const ProjectApprovals: React.FC = () => {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.1 * index }}
-              className="bg-white rounded-xl shadow-md border border-gray-100 hover:shadow-xl transition-all"
+              className="bg-white rounded-xl shadow-md border border-gray-100 hover:shadow-xl transition-all relative"
             >
+              {/* Floating Request Indicator - Show only in 'assigned' tab */}
+              {filterStatus === 'assigned' && (() => {
+                const hasRequests = estimation.hasPendingDayExtension;
+                const requestCount = estimation.pendingDayExtensionCount || 0;
+
+                return (
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ delay: 0.3, type: 'spring', stiffness: 200 }}
+                    className="absolute -top-2 -right-2 z-10"
+                  >
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDayExtensionModal(estimation.id)}
+                        className={`rounded-full p-2 shadow-sm hover:shadow-md transition-all cursor-pointer group hover:scale-105 ${
+                          hasRequests
+                            ? 'bg-blue-500 text-white animate-pulse'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}
+                        title={hasRequests ? `${requestCount} pending day extension request${requestCount > 1 ? 's' : ''}` : 'No pending day extension requests'}
+                      >
+                        <ClockIcon className="w-5 h-5" />
+                      </button>
+                      {hasRequests && (
+                        <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-300 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                        </span>
+                      )}
+                      {/* Tooltip on hover */}
+                      <div className="absolute top-full right-0 mt-2 bg-gray-900 text-white text-xs rounded-lg py-2 px-3 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-[100]">
+                        {hasRequests
+                          ? `${requestCount} Day Extension Request${requestCount > 1 ? 's' : ''}`
+                          : 'No Pending Requests'
+                        }
+                        <div className="absolute -top-1 right-3 w-2 h-2 bg-gray-900 transform rotate-45"></div>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })()}
+
               <div className="p-6">
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
@@ -1525,8 +1668,19 @@ const ProjectApprovals: React.FC = () => {
                       </div>
                       <div className="flex items-center gap-1">
                         <CalendarIcon className="w-4 h-4" />
-                        <span>{estimation.submittedDate}</span>
+                        <span>Created: {estimation.submittedDate}</span>
                       </div>
+                      {estimation.endDate && (
+                        <div className="flex items-center gap-1 text-blue-600 font-medium">
+                          <ClockIcon className="w-4 h-4" />
+                          <span>End: {new Date(estimation.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        </div>
+                      )}
+                      {estimation.durationDays && (
+                        <div className="flex items-center gap-1 bg-blue-100 px-2 py-0.5 rounded-full">
+                          <span className="text-blue-700 font-semibold text-xs">{estimation.durationDays} days</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-5 gap-4">
@@ -4006,6 +4160,25 @@ const ProjectApprovals: React.FC = () => {
               </div>
             </motion.div>
           </div>
+        )}
+
+        {/* Day Extension Approval Modal */}
+        {selectedDayExtension && Array.isArray(selectedDayExtension) && (
+          <DayExtensionApprovalModal
+            isOpen={showDayExtensionModal}
+            onClose={() => {
+              setShowDayExtensionModal(false);
+              setSelectedDayExtension(null);
+            }}
+            onSuccess={(actionType) => {
+              // Reload BOQ list to get updated flags
+              loadBOQs();
+              // Close modal and clear selection
+              setShowDayExtensionModal(false);
+              setSelectedDayExtension(null);
+            }}
+            extensionRequests={selectedDayExtension}
+          />
         )}
       </div>
     </div>

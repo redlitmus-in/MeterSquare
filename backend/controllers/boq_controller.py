@@ -1422,7 +1422,10 @@ def get_boq(boq_id):
                 "location": project.location if project else None,
                 "floor": project.floor_name if project else None,
                 "hours": project.working_hours if project else None,
-                "status": project.status if project else None
+                "status": project.status if project else None,
+                "start_date": project.start_date.isoformat() if project and project.start_date else None,
+                "end_date": project.end_date.isoformat() if project and project.end_date else None,
+                "duration_days": project.duration_days if project else None
             },
             "existing_purchase": {
                 "items": existing_purchase_items,
@@ -1581,6 +1584,30 @@ def get_all_boq():
             elif boq.status in ['new_purchase_create', 'sent_for_review', 'new_purchase_approved', 'new_purchase_rejected', 'approved']:
                 display_status = 'Client_Confirmed'
 
+            # Check for pending day extension requests
+            has_pending_day_extension = False
+            pending_day_extension_count = 0
+            if project and project.user_id:  # Only check if PM is assigned
+                pending_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).all()
+                for hist in pending_history:
+                    if hist.action and isinstance(hist.action, list):
+                        for action in hist.action:
+                            action_type = action.get('type', '').lower()
+                            action_status = action.get('status', '').lower()
+                            if (action_type == 'day_extension_requested' and
+                                action_status in ['pending_td_approval', 'edited_by_td']):
+                                has_pending_day_extension = True
+                                pending_day_extension_count += 1
+
+            # Calculate end_date if not stored
+            end_date = None
+            if project:
+                if project.end_date:
+                    end_date = project.end_date.isoformat()
+                elif project.start_date and project.duration_days:
+                    from datetime import timedelta
+                    end_date = (project.start_date + timedelta(days=project.duration_days)).isoformat()
+
             boq_summary = {
                 "boq_id": boq.boq_id,
                 "boq_name": boq.boq_name,
@@ -1602,7 +1629,14 @@ def get_all_boq():
                 "selling_price": boq_detail.total_cost,
                 "estimatedSellingPrice": boq_detail.total_cost,
                 "created_at": boq.created_at.isoformat() if boq.created_at else None,
-                "created_by": boq.created_by
+                "created_by": boq.created_by,
+                # Project timeline fields
+                "start_date": project.start_date.isoformat() if project and project.start_date else None,
+                "end_date": end_date,
+                "duration_days": project.duration_days if project else None,
+                # Day extension status
+                "has_pending_day_extension": has_pending_day_extension,
+                "pending_day_extension_count": pending_day_extension_count
             }
 
             # Add items from JSON - handle both old and new formats
@@ -3706,53 +3740,30 @@ def request_day_extension(boq_id):
             "status": "pending_td_approval"
         }
 
-        # Get or create BOQ History entry
-        existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+        # Save day extension request to BOQ (NOT history!)
+        boq.has_pending_day_extension = True
+        boq.pending_extension_days = additional_days
+        boq.pending_extension_reason = reason
+        boq.pending_extension_requested_by = user_name
+        boq.pending_extension_requested_at = datetime.utcnow()
+        boq.pending_extension_status = 'pending_td_approval'
+        boq.pending_extension_edited_days = None
 
-        if existing_history:
-            # Handle existing actions
-            if existing_history.action is None:
-                current_actions = []
-            elif isinstance(existing_history.action, list):
-                current_actions = existing_history.action
-            elif isinstance(existing_history.action, dict):
-                current_actions = [existing_history.action]
-            else:
-                current_actions = []
-        else:
-            current_actions = []
-
-        # Append new action
-        current_actions.append(day_extension_action)
-        log.info(f"Appending day_extension_requested action to BOQ {boq_id} history")
-
-        if existing_history:
-            # Update existing history
-            existing_history.action = current_actions
-            flag_modified(existing_history, "action")
-            existing_history.action_by = user_name
-            existing_history.sender = user_name
-            existing_history.receiver = "Technical Director"
-            existing_history.comments = f"Day extension requested: +{additional_days} days"
-            existing_history.action_date = datetime.utcnow()
-            existing_history.last_modified_by = user_name
-            existing_history.last_modified_at = datetime.utcnow()
-        else:
-            # Create new history entry
-            boq_history = BOQHistory(
-                boq_id=boq_id,
-                action=current_actions,
-                action_by=user_name,
-                boq_status=boq.status,
-                sender=user_name,
-                receiver="Technical Director",
-                comments=f"Day extension requested: +{additional_days} days",
-                sender_role=user_role,
-                receiver_role='technical_director',
-                action_date=datetime.utcnow(),
-                created_by=user_name
-            )
-            db.session.add(boq_history)
+        # Create history entry for audit purposes only
+        boq_history = BOQHistory(
+            boq_id=boq_id,
+            action=[day_extension_action],
+            action_by=user_name,
+            boq_status=boq.status,
+            sender=user_name,
+            receiver="Technical Director",
+            comments=f"Day extension requested: +{additional_days} days",
+            sender_role=user_role,
+            receiver_role='technical_director',
+            action_date=datetime.utcnow(),
+            created_by=user_name
+        )
+        db.session.add(boq_history)
 
         db.session.commit()
 
@@ -3783,7 +3794,107 @@ def request_day_extension(boq_id):
         return jsonify({"error": str(e)}), 500
 
 
-def approve_day_extension(boq_id, history_id):
+def edit_day_extension(boq_id, history_id):
+    """
+    TD edits day extension request (modifies days but doesn't approve yet)
+    POST /api/boq/<boq_id>/edit-day-extension/<history_id>
+
+    Request body:
+    {
+        "edited_days": 3,  # TD's modified days
+        "comments": "Reducing from 5 to 3 days"
+    }
+    """
+    try:
+        from datetime import timedelta
+        from sqlalchemy.orm.attributes import flag_modified
+
+        # Get current user
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({"error": "User not authenticated"}), 401
+
+        user_id = current_user.get('user_id')
+        user_name = current_user.get('full_name') or current_user.get('username') or 'User'
+        user_role = current_user.get('role_name', 'user').lower()
+
+        # Only TD can edit
+        if user_role not in ['technicaldirector', 'technical_director']:
+            return jsonify({"error": "Only Technical Director can edit day extensions"}), 403
+
+        # Get request data
+        data = request.get_json()
+        edited_days = data.get('edited_days')
+        td_comments = data.get('comments', '').strip()
+
+        # Validation
+        if not edited_days or edited_days <= 0:
+            return jsonify({"error": "Edited days must be greater than 0"}), 400
+
+        # Get BOQ
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Get Project
+        project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Check if BOQ has a pending extension request
+        if not boq.has_pending_day_extension:
+            return jsonify({"error": "No pending day extension request for this BOQ"}), 404
+
+        # Check if already approved or rejected
+        if boq.pending_extension_status not in ['pending_td_approval', 'edited_by_td']:
+            return jsonify({"error": f"Request already {boq.pending_extension_status}"}), 400
+
+        # Get original request data from BOQ
+        original_requested_days = boq.pending_extension_days or 0
+        original_duration = project.duration_days or 0
+
+        # Calculate what the new duration would be (for preview only, not saved yet)
+        preview_duration = original_duration + edited_days
+        preview_end_date = None
+
+        if project.start_date:
+            preview_end_date = project.start_date + timedelta(days=preview_duration)
+
+        # Update BOQ with edited days
+        boq.pending_extension_edited_days = edited_days
+        boq.pending_extension_status = 'edited_by_td'
+
+        db.session.commit()
+
+        log.info(f"Day extension edited by {user_name} for BOQ {boq_id}: {original_requested_days} days -> {edited_days} days")
+
+        return jsonify({
+            "success": True,
+            "message": f"Day extension edited to {edited_days} days. Please review and approve.",
+            "original_requested_days": original_requested_days,
+            "edited_days": edited_days,
+            "original_duration": original_duration,
+            "preview_duration": preview_duration,
+            "preview_end_date": preview_end_date.isoformat() if preview_end_date else None,
+            "td_comments": td_comments,
+            "status": "edited_by_td"
+        }), 200
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        log.error(f"Database error editing day extension: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error editing day extension: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+def approve_day_extension(boq_id, history_id=None):
     """
     TD approves day extension request (can modify the number of days)
     POST /api/boq/<boq_id>/approve-day-extension/<history_id>
@@ -3830,29 +3941,21 @@ def approve_day_extension(boq_id, history_id):
         if not project:
             return jsonify({"error": "Project not found"}), 404
 
-        # Get BOQ History to find the original request
-        history = BOQHistory.query.filter_by(boq_history_id=history_id, boq_id=boq_id).first()
-        if not history:
-            return jsonify({"error": "Day extension request not found"}), 404
-
-        # Find the specific day_extension_requested action
-        original_request = None
-        if isinstance(history.action, list):
-            for action in history.action:
-                if isinstance(action, dict) and action.get('type') == 'day_extension_requested':
-                    original_request = action
-                    break
-
-        if not original_request:
-            return jsonify({"error": "Original day extension request not found"}), 404
+        # Check if BOQ has a pending extension request
+        if not boq.has_pending_day_extension:
+            return jsonify({"error": "No pending day extension request for this BOQ"}), 404
 
         # Check if already approved or rejected
-        if original_request.get('status') != 'pending_td_approval':
-            return jsonify({"error": f"Request already {original_request.get('status')}"}), 400
+        if boq.pending_extension_status not in ['pending_td_approval', 'edited_by_td']:
+            return jsonify({"error": f"Request already {boq.pending_extension_status}"}), 400
 
-        # Get original request data
-        original_requested_days = original_request.get('requested_additional_days', 0)
-        original_duration = original_request.get('original_duration_days', 0)
+        # Get original request data from BOQ
+        original_requested_days = boq.pending_extension_days or 0
+        original_duration = project.duration_days or 0
+
+        # If request was edited, use edited days; otherwise use provided approved_days
+        if boq.pending_extension_status == 'edited_by_td' and not approved_days:
+            approved_days = boq.pending_extension_edited_days or original_requested_days
 
         # Calculate new totals
         final_duration = original_duration + approved_days
@@ -3863,12 +3966,11 @@ def approve_day_extension(boq_id, history_id):
         if project.start_date:
             final_end_date = project.start_date + timedelta(days=final_duration)
 
-        # Update the original request status
-        original_request['status'] = 'approved'
-        original_request['approved_by_td'] = user_name
-        original_request['approved_at'] = datetime.utcnow().isoformat()
+        # Update BOQ to mark as approved and clear pending status
+        boq.has_pending_day_extension = False
+        boq.pending_extension_status = 'approved'
 
-        # Update Project
+        # Update Project with approved days
         project.duration_days = final_duration
         if final_end_date:
             project.end_date = final_end_date
@@ -3990,20 +4092,27 @@ def reject_day_extension(boq_id, history_id):
         if not history:
             return jsonify({"error": "Day extension request not found"}), 404
 
-        # Find the specific day_extension_requested action
+        # Find the specific day_extension_requested action in THIS history record
         original_request = None
+        action_index = -1
+
         if isinstance(history.action, list):
-            for action in history.action:
+            for idx, action in enumerate(history.action):
                 if isinstance(action, dict) and action.get('type') == 'day_extension_requested':
                     original_request = action
+                    action_index = idx
                     break
+        elif isinstance(history.action, dict) and history.action.get('type') == 'day_extension_requested':
+            original_request = history.action
+            action_index = 0
 
-        if not original_request:
-            return jsonify({"error": "Original day extension request not found"}), 404
+        if not original_request or action_index < 0:
+            return jsonify({"error": "Original day extension request not found in this history record"}), 404
 
         # Check if already approved or rejected
-        if original_request.get('status') != 'pending_td_approval':
-            return jsonify({"error": f"Request already {original_request.get('status')}"}), 400
+        current_status = original_request.get('status', '')
+        if current_status not in ['pending_td_approval', 'edited_by_td']:
+            return jsonify({"error": f"Request already {current_status}"}), 400
 
         # Get original request data
         requested_days = original_request.get('requested_additional_days', 0)
@@ -4064,6 +4173,83 @@ def reject_day_extension(boq_id, history_id):
     except Exception as e:
         db.session.rollback()
         log.error(f"Error rejecting day extension: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+def get_pending_day_extensions(boq_id):
+    """
+    Get pending day extension requests for a specific BOQ
+    GET /api/boq/<boq_id>/pending-day-extensions
+
+    Returns pending extension request from BOQ table
+    """
+    try:
+        from datetime import timedelta
+
+        # Get current user
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({"error": "User not authenticated"}), 401
+
+        user_role = current_user.get('role_name', 'user').lower()
+
+        # Only TD can view pending extensions
+        if user_role not in ['technicaldirector', 'technical_director']:
+            return jsonify({"error": "Only Technical Director can view pending day extensions"}), 403
+
+        # Get BOQ with pending extension
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Get Project
+        project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        pending_extensions = []
+
+        # Check if BOQ has pending extension
+        if boq.has_pending_day_extension and boq.pending_extension_status in ['pending_td_approval', 'edited_by_td']:
+            original_duration = project.duration_days or 0
+            new_duration = original_duration + (boq.pending_extension_edited_days or boq.pending_extension_days or 0)
+
+            # Calculate new end date
+            new_end_date = None
+            if project.start_date:
+                new_end_date = project.start_date + timedelta(days=new_duration)
+
+            extension_data = {
+                "boq_id": boq_id,
+                "history_id": boq_id,  # Use boq_id as identifier
+                "action_index": 0,
+                "project_name": project.project_name,
+                "requested_by": boq.pending_extension_requested_by or 'Unknown',
+                "original_duration": original_duration,
+                "requested_days": boq.pending_extension_days or 0,
+                "edited_days": boq.pending_extension_edited_days,
+                "actual_days": boq.pending_extension_edited_days or boq.pending_extension_days or 0,
+                "new_duration": new_duration,
+                "original_end_date": project.end_date.isoformat() if project.end_date else None,
+                "new_end_date": new_end_date.isoformat() if new_end_date else None,
+                "reason": boq.pending_extension_reason or 'No reason provided',
+                "request_date": boq.pending_extension_requested_at.isoformat() if boq.pending_extension_requested_at else None,
+                "status": boq.pending_extension_status,
+                "is_edited": boq.pending_extension_status == 'edited_by_td'
+            }
+
+            pending_extensions.append(extension_data)
+
+        return jsonify({
+            "success": True,
+            "count": len(pending_extensions),
+            "data": pending_extensions
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error getting pending day extensions for BOQ {boq_id}: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500

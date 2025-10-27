@@ -21,6 +21,15 @@ class BOQ(db.Model):
     is_deleted = db.Column(db.Boolean, default=False)
     email_sent = db.Column(db.Boolean, default=False)
 
+    # Day Extension Tracking Fields
+    has_pending_day_extension = db.Column(db.Boolean, default=False)
+    pending_extension_days = db.Column(db.Integer, nullable=True)  # Days requested
+    pending_extension_reason = db.Column(db.Text, nullable=True)  # Reason for extension
+    pending_extension_requested_by = db.Column(db.String(255), nullable=True)  # Who requested
+    pending_extension_requested_at = db.Column(db.DateTime, nullable=True)  # When requested
+    pending_extension_status = db.Column(db.String(50), nullable=True)  # pending_td_approval, edited_by_td, approved, rejected
+    pending_extension_edited_days = db.Column(db.Integer, nullable=True)  # TD edited days
+
     project = db.relationship("Project", backref=db.backref("boqs", lazy=True))
 
 

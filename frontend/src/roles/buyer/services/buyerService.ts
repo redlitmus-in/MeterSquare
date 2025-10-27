@@ -37,6 +37,7 @@ export interface Purchase {
   vendor_id?: number | null;
   vendor_name?: string | null;
   vendor_selection_pending_td_approval?: boolean;
+  vendor_email_sent?: boolean;
 }
 
 export interface SelectVendorRequest {
@@ -73,6 +74,24 @@ export interface UpdatePurchaseOrderResponse {
   success: boolean;
   message: string;
   purchase?: Purchase;
+  error?: string;
+}
+
+export interface PreviewVendorEmailResponse {
+  success: boolean;
+  email_preview: string;
+  vendor_email: string;
+  vendor_name: string;
+  error?: string;
+}
+
+export interface SendVendorEmailRequest {
+  vendor_email: string;
+}
+
+export interface SendVendorEmailResponse {
+  success: boolean;
+  message: string;
   error?: string;
 }
 
@@ -284,6 +303,58 @@ class BuyerService {
         throw new Error('You do not have permission to edit this purchase order');
       }
       throw new Error(error.response?.data?.error || 'This feature requires backend implementation. Please contact support.');
+    }
+  }
+
+  // Preview vendor email
+  async previewVendorEmail(crId: number): Promise<PreviewVendorEmailResponse> {
+    try {
+      const response = await axios.get<PreviewVendorEmailResponse>(
+        `${API_URL}/buyer/purchase/${crId}/preview-vendor-email`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to preview vendor email');
+    } catch (error: any) {
+      console.error('Error previewing vendor email:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to preview vendor email');
+    }
+  }
+
+  // Send email to vendor
+  async sendVendorEmail(crId: number, data: SendVendorEmailRequest): Promise<SendVendorEmailResponse> {
+    try {
+      const response = await axios.post<SendVendorEmailResponse>(
+        `${API_URL}/buyer/purchase/${crId}/send-vendor-email`,
+        { vendor_email: data.vendor_email },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to send email to vendor');
+    } catch (error: any) {
+      console.error('Error sending vendor email:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      if (error.response?.status === 403) {
+        throw new Error('You do not have permission to send this email');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to send email to vendor');
     }
   }
 }

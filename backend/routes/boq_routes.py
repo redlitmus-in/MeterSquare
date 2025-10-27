@@ -128,6 +128,16 @@ def get_all_internal_revision_route():
 def request_day_extension_route(boq_id):
     return request_day_extension(boq_id)
 
+@boq_routes.route('/boq/<int:boq_id>/pending-day-extensions', methods=['GET'])
+@jwt_required
+def get_pending_day_extensions_route(boq_id):
+    return get_pending_day_extensions(boq_id)
+
+@boq_routes.route('/boq/<int:boq_id>/edit-day-extension/<int:history_id>', methods=['POST'])
+@jwt_required
+def edit_day_extension_route(boq_id, history_id):
+    return edit_day_extension(boq_id, history_id)
+
 @boq_routes.route('/boq/<int:boq_id>/approve-day-extension/<int:history_id>', methods=['POST'])
 @jwt_required
 def approve_day_extension_route(boq_id, history_id):

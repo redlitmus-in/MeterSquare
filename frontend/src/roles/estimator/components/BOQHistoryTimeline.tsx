@@ -20,9 +20,11 @@ import {
 } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
 import { toast } from 'sonner';
+import DayExtensionApprovalModal from '@/roles/technical-director/components/DayExtensionApprovalModal';
 
 interface BOQHistoryTimelineProps {
   boqId: number;
+  onDataChange?: () => void; // Callback to notify parent when data changes (e.g., after approval)
 }
 
 interface BackendHistoryAction {
@@ -52,6 +54,15 @@ interface BackendHistoryAction {
   vendor_name?: string;
   purchase_notes?: string;
   vendor_selection_status?: string;
+  // Day Extension fields
+  original_duration?: number;
+  requested_days?: number;
+  approved_days?: number;
+  new_duration?: number;
+  original_end_date?: string;
+  new_end_date?: string;
+  extension_reason?: string;
+  extension_status?: string;
 }
 
 interface BackendHistoryRecord {
@@ -93,12 +104,28 @@ interface HistoryAction {
   materials_count?: number;
   vendor_name?: string;
   purchase_notes?: string;
+  // Day Extension fields
+  original_duration?: number;
+  requested_days?: number;
+  approved_days?: number;
+  new_duration?: number;
+  original_end_date?: string;
+  new_end_date?: string;
+  extension_reason?: string;
+  extension_status?: string;
 }
 
-const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
+const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataChange }) => {
   const [history, setHistory] = useState<HistoryAction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filterType, setFilterType] = useState<string>('all');
+  const [showExtensionModal, setShowExtensionModal] = useState(false);
+  const [selectedExtension, setSelectedExtension] = useState<any>(null);
+
+  // Get current user role from localStorage
+  const userStr = localStorage.getItem('user');
+  const userRole = userStr ? JSON.parse(userStr)?.role_id?.toLowerCase() : '';
+  const isTD = userRole === 'technical_director' || userRole === 'technical director' || userRole === 'technicaldir' || userRole === 'td';
 
   useEffect(() => {
     loadHistory();
@@ -144,7 +171,16 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
                 item_name: actionItem.item_name,
                 materials_count: actionItem.materials_count,
                 vendor_name: actionItem.vendor_name,
-                purchase_notes: actionItem.purchase_notes
+                purchase_notes: actionItem.purchase_notes,
+                // Day Extension fields
+                original_duration: actionItem.original_duration,
+                requested_days: actionItem.requested_days,
+                approved_days: actionItem.approved_days,
+                new_duration: actionItem.new_duration,
+                original_end_date: actionItem.original_end_date,
+                new_end_date: actionItem.new_end_date,
+                extension_reason: actionItem.extension_reason,
+                extension_status: actionItem.extension_status
               });
             });
           } else {
@@ -641,6 +677,109 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
                       </div>
                     </div>
                   )}
+
+                  {/* Day Extension Details */}
+                  {action.action_type?.toUpperCase().includes('DAY_EXTENSION') && (
+                    <div className={`border rounded-lg p-3 mt-2 ${
+                      action.action_type === 'DAY_EXTENSION_REQUESTED' ? 'bg-orange-50 border-orange-200' :
+                      action.action_type === 'DAY_EXTENSION_APPROVED' ? 'bg-green-50 border-green-200' :
+                      'bg-red-50 border-red-200'
+                    }`}>
+                      <div className="space-y-2">
+                        {/* Extension Reason */}
+                        {action.extension_reason && (
+                          <div className="bg-white/60 rounded p-2">
+                            <p className="text-xs font-semibold text-gray-700 mb-1">Reason:</p>
+                            <p className="text-xs text-gray-600 whitespace-pre-wrap">{action.extension_reason}</p>
+                          </div>
+                        )}
+
+                        {/* Timeline Details */}
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          {action.original_duration !== undefined && (
+                            <div className="bg-white/60 rounded p-2">
+                              <p className="text-gray-600 mb-0.5">Original Duration</p>
+                              <p className="font-bold text-gray-900">{action.original_duration} days</p>
+                            </div>
+                          )}
+                          {action.requested_days !== undefined && (
+                            <div className="bg-white/60 rounded p-2">
+                              <p className="text-gray-600 mb-0.5">
+                                {action.action_type === 'DAY_EXTENSION_APPROVED' && action.approved_days ? 'Approved Days' : 'Requested Days'}
+                              </p>
+                              <p className="font-bold text-orange-700">
+                                +{action.action_type === 'DAY_EXTENSION_APPROVED' && action.approved_days ? action.approved_days : action.requested_days} days
+                              </p>
+                            </div>
+                          )}
+                          {action.original_end_date && (
+                            <div className="bg-white/60 rounded p-2">
+                              <p className="text-gray-600 mb-0.5">Original End Date</p>
+                              <p className="font-semibold text-gray-900 text-xs">
+                                {new Date(action.original_end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </p>
+                            </div>
+                          )}
+                          {action.new_end_date && (
+                            <div className="bg-white/60 rounded p-2">
+                              <p className="text-gray-600 mb-0.5">New End Date</p>
+                              <p className="font-semibold text-green-700 text-xs">
+                                {new Date(action.new_end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Status Badge and Action Buttons */}
+                        <div className="flex items-center justify-between">
+                          {action.extension_status && (
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              action.extension_status === 'pending_td_approval' ? 'bg-orange-100 text-orange-700' :
+                              action.extension_status === 'approved' ? 'bg-green-100 text-green-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {action.extension_status.replace(/_/g, ' ').toUpperCase()}
+                            </span>
+                          )}
+
+                          {/* Approve Button for TD - Only show for pending requests */}
+                          {isTD && action.action_type === 'DAY_EXTENSION_REQUESTED' && action.extension_status === 'pending_td_approval' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedExtension({
+                                  boq_id: boqId,
+                                  history_id: action.action_id,
+                                  project_name: action.project_name || 'Project',
+                                  requested_by: action.action_by,
+                                  original_duration: action.original_duration || 0,
+                                  requested_days: action.requested_days || 0,
+                                  new_duration: action.new_duration || 0,
+                                  original_end_date: action.original_end_date || '',
+                                  new_end_date: action.new_end_date || '',
+                                  reason: action.extension_reason || '',
+                                  request_date: action.action_at
+                                });
+                                setShowExtensionModal(true);
+                              }}
+                              className="px-3 py-1.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-semibold transition-all shadow-sm flex items-center gap-1.5 text-xs"
+                            >
+                              <Clock className="w-3.5 h-3.5" />
+                              Review Request
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Rejection Reason */}
+                        {action.action_type === 'DAY_EXTENSION_REJECTED' && action.rejection_reason && (
+                          <div className="bg-white/60 rounded p-2">
+                            <p className="text-xs font-semibold text-red-700 mb-1">Rejection Reason:</p>
+                            <p className="text-xs text-red-600">{action.rejection_reason}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -652,6 +791,24 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId }) => {
         <div className="text-center py-8">
           <p className="text-gray-500 text-sm">No {filterType.replace('_', ' ').toLowerCase()} actions found</p>
         </div>
+      )}
+
+      {/* Day Extension Approval Modal */}
+      {selectedExtension && (
+        <DayExtensionApprovalModal
+          isOpen={showExtensionModal}
+          onClose={() => {
+            setShowExtensionModal(false);
+            setSelectedExtension(null);
+          }}
+          onSuccess={() => {
+            loadHistory(); // Reload history after approval/rejection
+            if (onDataChange) {
+              onDataChange(); // Notify parent to refresh BOQ details
+            }
+          }}
+          extensionRequest={selectedExtension}
+        />
       )}
     </div>
   );

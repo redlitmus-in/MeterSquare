@@ -490,7 +490,8 @@ def get_buyer_pending_purchases():
                 "created_at": cr.created_at.isoformat() if cr.created_at else None,
                 "vendor_id": cr.selected_vendor_id,
                 "vendor_name": cr.selected_vendor_name,
-                "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval
+                "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
+                "vendor_email_sent": cr.vendor_email_sent or False
             })
         return jsonify({
             "success": True,
@@ -1259,3 +1260,288 @@ def td_reject_vendor(cr_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to reject vendor: {str(e)}"}), 500
+
+
+def preview_vendor_email(cr_id):
+    """Preview vendor purchase order email"""
+    try:
+        current_user = g.user
+        buyer_id = current_user['user_id']
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Verify it's assigned to this buyer or completed by this buyer
+        if cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
+            return jsonify({"error": "You don't have access to this purchase"}), 403
+
+        # Check if vendor is selected
+        if not cr.selected_vendor_id:
+            return jsonify({"error": "No vendor selected for this purchase"}), 400
+
+        # Get vendor details
+        from models.vendor import Vendor
+        vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
+        if not vendor:
+            return jsonify({"error": "Vendor not found"}), 404
+
+        # Get project details
+        project = Project.query.get(cr.project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Get BOQ details
+        boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Get buyer details
+        buyer = User.query.filter_by(user_id=buyer_id).first()
+
+        # Process materials
+        sub_items_data = cr.sub_items_data or cr.materials_data or []
+        cr_total = 0
+        materials_list = []
+
+        if cr.sub_items_data:
+            for sub_item in sub_items_data:
+                if isinstance(sub_item, dict):
+                    sub_materials = sub_item.get('materials', [])
+                    if sub_materials:
+                        for material in sub_materials:
+                            material_total = float(material.get('total_price', 0) or 0)
+                            cr_total += material_total
+                            materials_list.append({
+                                "material_name": material.get('material_name', ''),
+                                "quantity": material.get('quantity', 0),
+                                "unit": material.get('unit', ''),
+                                "unit_price": material.get('unit_price', 0),
+                                "total_price": material_total
+                            })
+                    else:
+                        sub_total = float(sub_item.get('total_price', 0) or 0)
+                        cr_total += sub_total
+                        materials_list.append({
+                            "material_name": sub_item.get('material_name', ''),
+                            "sub_item_name": sub_item.get('sub_item_name', ''),
+                            "quantity": sub_item.get('quantity', 0),
+                            "unit": sub_item.get('unit', ''),
+                            "unit_price": sub_item.get('unit_price', 0),
+                            "total_price": sub_total
+                        })
+        else:
+            for material in sub_items_data:
+                material_total = float(material.get('total_price', 0) or 0)
+                cr_total += material_total
+                materials_list.append({
+                    "material_name": material.get('material_name', ''),
+                    "sub_item_name": material.get('sub_item_name', ''),
+                    "quantity": material.get('quantity', 0),
+                    "unit": material.get('unit', ''),
+                    "unit_price": material.get('unit_price', 0),
+                    "total_price": material_total
+                })
+
+        # Prepare data for email template
+        vendor_data = {
+            'company_name': vendor.company_name,
+            'contact_person_name': vendor.contact_person_name,
+            'email': vendor.email
+        }
+
+        purchase_data = {
+            'cr_id': cr.cr_id,
+            'materials': materials_list,
+            'total_cost': round(cr_total, 2)
+        }
+
+        buyer_data = {
+            'buyer_name': buyer.full_name if buyer else 'Procurement Team',
+            'buyer_email': buyer.email if buyer else '',
+            'buyer_phone': buyer.phone if buyer and buyer.phone else 'N/A'
+        }
+
+        project_data = {
+            'project_name': project.project_name,
+            'client': project.client or 'N/A',
+            'location': project.location or 'N/A'
+        }
+
+        # Generate email preview
+        from utils.boq_email_service import BOQEmailService
+        email_service = BOQEmailService()
+        email_html = email_service.generate_vendor_purchase_order_email(
+            vendor_data, purchase_data, buyer_data, project_data
+        )
+
+        return jsonify({
+            "success": True,
+            "email_preview": email_html,
+            "vendor_email": vendor.email,
+            "vendor_name": vendor.company_name
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error generating email preview: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to generate email preview: {str(e)}"}), 500
+
+
+def send_vendor_email(cr_id):
+    """Send purchase order email to vendor"""
+    try:
+        current_user = g.user
+        buyer_id = current_user['user_id']
+
+        data = request.get_json()
+        vendor_email = data.get('vendor_email')
+
+        if not vendor_email:
+            return jsonify({"error": "Vendor email is required"}), 400
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(
+            cr_id=cr_id,
+            is_deleted=False
+        ).first()
+
+        if not cr:
+            return jsonify({"error": "Purchase not found"}), 404
+
+        # Verify it's assigned to this buyer
+        if cr.assigned_to_buyer_user_id != buyer_id:
+            return jsonify({"error": "This purchase is not assigned to you"}), 403
+
+        # Verify vendor is selected and approved
+        if not cr.selected_vendor_id:
+            return jsonify({"error": "No vendor selected for this purchase"}), 400
+
+        if cr.vendor_selection_status != 'approved':
+            return jsonify({"error": "Vendor selection must be approved by TD before sending email"}), 400
+
+        # Get vendor details
+        from models.vendor import Vendor
+        vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
+        if not vendor:
+            return jsonify({"error": "Vendor not found"}), 404
+
+        # Get project details
+        project = Project.query.get(cr.project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Get BOQ details
+        boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Get buyer details
+        buyer = User.query.filter_by(user_id=buyer_id).first()
+
+        # Process materials
+        sub_items_data = cr.sub_items_data or cr.materials_data or []
+        cr_total = 0
+        materials_list = []
+
+        if cr.sub_items_data:
+            for sub_item in sub_items_data:
+                if isinstance(sub_item, dict):
+                    sub_materials = sub_item.get('materials', [])
+                    if sub_materials:
+                        for material in sub_materials:
+                            material_total = float(material.get('total_price', 0) or 0)
+                            cr_total += material_total
+                            materials_list.append({
+                                "material_name": material.get('material_name', ''),
+                                "quantity": material.get('quantity', 0),
+                                "unit": material.get('unit', ''),
+                                "unit_price": material.get('unit_price', 0),
+                                "total_price": material_total
+                            })
+                    else:
+                        sub_total = float(sub_item.get('total_price', 0) or 0)
+                        cr_total += sub_total
+                        materials_list.append({
+                            "material_name": sub_item.get('material_name', ''),
+                            "sub_item_name": sub_item.get('sub_item_name', ''),
+                            "quantity": sub_item.get('quantity', 0),
+                            "unit": sub_item.get('unit', ''),
+                            "unit_price": sub_item.get('unit_price', 0),
+                            "total_price": sub_total
+                        })
+        else:
+            for material in sub_items_data:
+                material_total = float(material.get('total_price', 0) or 0)
+                cr_total += material_total
+                materials_list.append({
+                    "material_name": material.get('material_name', ''),
+                    "sub_item_name": material.get('sub_item_name', ''),
+                    "quantity": material.get('quantity', 0),
+                    "unit": material.get('unit', ''),
+                    "unit_price": material.get('unit_price', 0),
+                    "total_price": material_total
+                })
+
+        # Prepare data for email template
+        vendor_data = {
+            'company_name': vendor.company_name,
+            'contact_person_name': vendor.contact_person_name,
+            'email': vendor_email
+        }
+
+        purchase_data = {
+            'cr_id': cr.cr_id,
+            'materials': materials_list,
+            'total_cost': round(cr_total, 2)
+        }
+
+        buyer_data = {
+            'buyer_name': buyer.full_name if buyer else 'Procurement Team',
+            'buyer_email': buyer.email if buyer else '',
+            'buyer_phone': buyer.phone if buyer and buyer.phone else 'N/A'
+        }
+
+        project_data = {
+            'project_name': project.project_name,
+            'client': project.client or 'N/A',
+            'location': project.location or 'N/A'
+        }
+
+        # Send email to vendor
+        from utils.boq_email_service import BOQEmailService
+        email_service = BOQEmailService()
+        email_sent = email_service.send_vendor_purchase_order(
+            vendor_email, vendor_data, purchase_data, buyer_data, project_data
+        )
+
+        if email_sent:
+            # Mark email as sent
+            cr.vendor_email_sent = True
+            cr.vendor_email_sent_date = datetime.utcnow()
+            cr.vendor_email_sent_by_user_id = buyer_id
+            cr.updated_at = datetime.utcnow()
+            db.session.commit()
+
+            log.info(f"Purchase order email sent to vendor {vendor_email} for CR-{cr_id}")
+            return jsonify({
+                "success": True,
+                "message": "Purchase order email sent to vendor successfully"
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Failed to send email to vendor"
+            }), 500
+
+    except Exception as e:
+        log.error(f"Error sending vendor email: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to send vendor email: {str(e)}"}), 500
