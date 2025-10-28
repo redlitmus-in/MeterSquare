@@ -49,10 +49,19 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
   const [action, setAction] = useState<'approve' | 'alter' | 'reject' | null>(null);
   const [localRequests, setLocalRequests] = useState<ExtensionRequest[]>(extensionRequests);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [editReason, setEditReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Get current extension request from local state
   const extensionRequest = localRequests[currentIndex] || localRequests[0];
+
+  // Debug logging
+  React.useEffect(() => {
+    if (extensionRequest) {
+      console.log('Current extension request:', extensionRequest);
+      console.log('BOQ ID:', extensionRequest.boq_id);
+    }
+  }, [extensionRequest]);
 
   // Use edited_days if request was edited, otherwise use requested_days
   const initialDays = extensionRequest?.is_edited && extensionRequest.edited_days
@@ -80,6 +89,7 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
   const navigateRequest = (direction: 'prev' | 'next') => {
     setAction(null);
     setRejectionReason('');
+    setEditReason('');
     if (direction === 'prev') {
       setCurrentIndex(prev => Math.max(0, prev - 1));
     } else {
@@ -129,7 +139,7 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
       let body = {};
 
       if (action === 'approve') {
-        endpoint = `${apiUrl}/boq/${extensionRequest.boq_id}/approve-day-extension/${extensionRequest.history_id}`;
+        endpoint = `${apiUrl}/boq/${extensionRequest.boq_id}/approve_day_extension`;
         // Use edited_days if request was edited, otherwise use requested_days
         const daysToApprove = extensionRequest.is_edited
           ? (extensionRequest.edited_days || extensionRequest.actual_days || extensionRequest.requested_days)
@@ -142,13 +152,13 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
         console.log(`Approving with ${daysToApprove} days (edited: ${extensionRequest.is_edited}, edited_days: ${extensionRequest.edited_days})`);
       } else if (action === 'alter') {
         // Use edit endpoint instead of approve
-        endpoint = `${apiUrl}/boq/${extensionRequest.boq_id}/edit-day-extension/${extensionRequest.history_id}`;
+        endpoint = `${apiUrl}/boq/${extensionRequest.boq_id}/edit_day_extension`;
         body = {
           edited_days: alteredDays,
-          comments: `TD modified from ${extensionRequest.requested_days} to ${alteredDays} days`
+          reason: editReason.trim() || `TD modified from ${extensionRequest.requested_days} to ${alteredDays} days`
         };
       } else if (action === 'reject') {
-        endpoint = `${apiUrl}/boq/${extensionRequest.boq_id}/reject-day-extension/${extensionRequest.history_id}`;
+        endpoint = `${apiUrl}/boq/${extensionRequest.boq_id}/reject_day_extension`;
         body = {
           rejection_reason: rejectionReason.trim()
         };
@@ -428,19 +438,37 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
 
           {/* Edit Days Input */}
           {action === 'alter' && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                Edit Extension Days *
-              </label>
-              <input
-                type="number"
-                min="1"
-                value={alteredDays}
-                onChange={(e) => setAlteredDays(parseInt(e.target.value) || 1)}
-                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-sm"
-                placeholder="Enter new number of days"
-              />
-              <div className="mt-2 bg-white rounded-lg p-2">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                  Edit Extension Days *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={alteredDays}
+                  onChange={(e) => setAlteredDays(parseInt(e.target.value) || 1)}
+                  className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-sm"
+                  placeholder="Enter new number of days"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                  Reason for Edit (Optional)
+                </label>
+                <textarea
+                  value={editReason}
+                  onChange={(e) => setEditReason(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all resize-none text-sm"
+                  placeholder="Explain why you're editing the extension days..."
+                  maxLength={300}
+                />
+                <p className="text-xs text-gray-500 mt-1">{editReason.length}/300</p>
+              </div>
+
+              <div className="bg-white rounded-lg p-2">
                 <p className="text-xs text-gray-600">Original Request: <span className="font-semibold">{extensionRequest.requested_days} days</span></p>
                 <p className="text-xs text-gray-600 mt-1">New Request: <span className="font-semibold text-blue-700">{alteredDays} days</span></p>
                 <p className="text-xs text-gray-600 mt-1">New End Date Preview:</p>
@@ -525,6 +553,7 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
               onClick={() => {
                 setAction(null);
                 setRejectionReason('');
+                setEditReason('');
                 // Reset to current value (edited or original)
                 const currentDays = extensionRequest.is_edited && extensionRequest.edited_days
                   ? extensionRequest.edited_days

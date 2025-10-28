@@ -32,6 +32,11 @@ class Project(db.Model):
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     last_modified_by = db.Column(db.String(255), nullable=True)
      
+    # # Day Extension Tracking Fields
+    extension_reason = db.Column(db.Text, nullable=True)  # Reason for extension
+    extension_status = db.Column(db.String(50), nullable=True)  # pending_td_approval, edited_by_td, approved, rejected
+    extension_days = db.Column(db.Integer, nullable=True)  # TD edited days
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -68,5 +73,8 @@ class Project(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by,
             "last_modified_at": self.last_modified_at.isoformat() if self.last_modified_at else None,
-            'last_modified_by': self.last_modified_by
+            'last_modified_by': self.last_modified_by,
+            'extension_reason': self.extension_reason,
+            'extension_status': self.extension_status,
+            'extension_days': self.extension_days
         }
