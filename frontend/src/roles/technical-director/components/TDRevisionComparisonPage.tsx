@@ -90,19 +90,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
     const status = boq.status?.toLowerCase() || '';
 
     if (activeTab === 'client') {
-      // Client Revisions tab: Show ONLY BOQs that have client_rejection_reason (client actually rejected it)
-      const hasClientRejectionReason = boq.client_rejection_reason !== null && boq.client_rejection_reason !== undefined && boq.client_rejection_reason !== '';
-
-      // Also check if status is client-related
-      const isClientRejected = (status === 'client_rejected');
-      const isClientRevisionRejected = (status === 'client_revision_rejected');
-      const isClientRevisionAccepted = (status === 'client_revision_accepted');
-      const isSentToClient = (status === 'sent_for_confirmation');
-      const isClientConfirmed = (status === 'client_confirmed');
-      const isClientCancelled = (status === 'client_cancelled');
-
-      // Show only if it has client_rejection_reason OR is in a client-related status
-      return hasClientRejectionReason || isSentToClient || isClientConfirmed || isClientCancelled || isClientRejected || isClientRevisionRejected || isClientRevisionAccepted;
+      // Client Revisions tab: Show ALL BOQs with revision_number > 0
+      return (boq.revision_number || 0) > 0;
     } else {
       // Internal Revisions tab: Show pending approval or with revisions (original logic)
       const hasRevisions = (boq.revision_number || 0) > 0;

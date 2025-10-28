@@ -970,11 +970,11 @@ const ProjectApprovals: React.FC = () => {
       // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
       return est.status === 'pending' && !est.pmAssigned;
     } else if (filterStatus === 'revisions') {
-      // Revisions: Show ONLY pending_revision (waiting for TD approval)
-      // revision_approved moves to the approved tab
-      const isRevisionStatus = (est.status === 'pending_revision') && !est.pmAssigned;
+      // Revisions: Show ALL BOQs with revision_number != 0
+      const hasRevisions = (est as any).revision_number != null && (est as any).revision_number !== 0;
 
-      if (!isRevisionStatus) return false;
+      // Must have revision_number not equal to 0
+      if (!hasRevisions) return false;
 
       // Filter by revision number if specific revision is selected
       if (selectedRevisionNumber !== 'all') {

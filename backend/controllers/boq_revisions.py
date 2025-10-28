@@ -32,13 +32,9 @@ def get_revision_tabs():
             BOQ.revision_number,
             func.count(BOQ.boq_id).label('project_count')
         ).filter(
-            # Include revision_number >= 0 to catch legacy BOQs
-            or_(BOQ.revision_number > 0, BOQ.revision_number == 0, BOQ.revision_number.is_(None)),
-            func.lower(BOQ.status).in_([
-                'under_revision',
-                'pending_revision',
-                'revision_approved'
-            ]),
+            # ONLY include revision_number > 0 (exclude 0 and NULL)
+            BOQ.revision_number > 0,
+            # Show ALL statuses (don't filter by status - show all BOQs with client revisions)
             BOQ.is_deleted == False
         ).group_by(
             BOQ.revision_number
@@ -48,12 +44,7 @@ def get_revision_tabs():
 
         tabs = []
         for row in result:
-            # Handle NULL revision_number (legacy data)
-            revision_num = row.revision_number if row.revision_number is not None else 0
-
-            # For revision_number = 0, these are BOQs in revision state but not yet approved as revisions
-            # Show them so they're visible to users (legacy behavior)
-            # Once TD approves them, they'll become Rev 1
+            revision_num = row.revision_number
 
             # Determine alert level based on revision number
             alert_level = 'normal'
@@ -82,47 +73,26 @@ def get_projects_by_revision(revision_number):
     """
     try:
         if revision_number == 'all':
-            # Get all projects in any revision state (match frontend logic - NO sent_for_confirmation)
-            # Use LOWER() for case-insensitive comparison
+            # Get all projects with revision_number > 0 (ALL statuses)
             boqs = BOQ.query.filter(
-                or_(BOQ.revision_number >= 0, BOQ.revision_number.is_(None)),
-                func.lower(BOQ.status).in_([
-                    'under_revision',
-                    'pending_revision',
-                    'revision_approved'
-                ]),
+                BOQ.revision_number > 0,
+                # Show ALL statuses - don't filter by status
                 BOQ.is_deleted == False
             ).order_by(
                 BOQ.revision_number.desc(),
                 BOQ.last_modified_at.desc()
             ).all()
         else:
-            # Get projects for specific revision number (including 0 for legacy BOQs)
+            # Get projects for specific revision number (ALL statuses)
             revision_num = int(revision_number)
-            if revision_num == 0:
-                # For revision 0, get BOQs with revision_number = 0 or NULL in revision states
-                # Use LOWER() for case-insensitive comparison
-                boqs = BOQ.query.filter(
-                    or_(BOQ.revision_number == 0, BOQ.revision_number.is_(None)),
-                    func.lower(BOQ.status).in_([
-                        'under_revision',
-                        'pending_revision',
-                        'revision_approved'
-                    ]),
-                    BOQ.is_deleted == False
-                ).order_by(
-                    BOQ.last_modified_at.desc()
-                ).all()
+            if revision_num <= 0:
+                # Don't show any BOQs for revision_number <= 0
+                boqs = []
             else:
-                # For actual revisions (>= 1), only show those still in revision states
-                # Use LOWER() for case-insensitive comparison
+                # For revisions > 0, show ALL statuses
                 boqs = BOQ.query.filter(
                     BOQ.revision_number == revision_num,
-                    func.lower(BOQ.status).in_([
-                        'under_revision',
-                        'pending_revision',
-                        'revision_approved'
-                    ]),
+                    # Show ALL statuses - don't filter by status
                     BOQ.is_deleted == False
                 ).order_by(
                     BOQ.last_modified_at.desc()

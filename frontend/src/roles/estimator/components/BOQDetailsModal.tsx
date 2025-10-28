@@ -270,6 +270,28 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                       <span className="sm:hidden">History</span>
                     </div>
                   </button>
+                  {/* Show Client Revisions tab when revision_number is not 0 (i.e., has client revisions) */}
+                  {(displayData?.revision_number != null && displayData.revision_number !== 0) && (
+                    <button
+                      onClick={() => setActiveTab('revisions')}
+                      className={`px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 transition-all ${
+                        activeTab === 'revisions'
+                          ? 'border-blue-600 text-blue-600'
+                          : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1 sm:gap-2">
+                        <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
+                        <span className="hidden sm:inline">Client Revisions</span>
+                        <span className="sm:hidden">Revisions</span>
+                        {displayData.revision_number > 0 && (
+                          <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-bold">
+                            {displayData.revision_number}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -284,6 +306,10 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                   <BOQHistoryTimeline
                     boqId={displayData?.boq_id || boq?.boq_id}
                     onDataChange={fetchBOQDetails}
+                  />
+                ) : activeTab === 'revisions' ? (
+                  <BOQRevisionHistory
+                    boqId={displayData?.boq_id || boq?.boq_id}
                   />
                 ) : boqData ? (
                   <>

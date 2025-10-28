@@ -288,11 +288,20 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
             item_name: item.item_name,
             description: item.description || '',
             work_type: item.work_type || 'contract',
+            quantity: (item as any).quantity || 1,
+            unit: (item as any).unit || 'nos',
+            rate: (item as any).rate || 0,
             overhead_percentage: item.overhead_percentage || 8,
             profit_margin_percentage: item.profit_margin_percentage || 12,
             discount_percentage: (item as any).discount_percentage || 0,
             vat_percentage: (item as any).vat_percentage || 0,
             status: 'Active',
+            // Preserve calculated amounts from API response
+            overhead_amount: (item as any).overhead_amount || 0,
+            profit_margin_amount: (item as any).profit_margin_amount || 0,
+            discount_amount: (item as any).discount_amount || 0,
+            selling_price: (item as any).selling_price || 0,
+            item_total: (item as any).item_total || 0,
             // Preserve sub_items structure if present
             sub_items: (item as any).sub_items?.map((si: any) => ({
               sub_item_id: si.sub_item_id,
@@ -304,6 +313,21 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
               quantity: si.quantity || 1,
               unit: si.unit || 'nos',
               rate: si.rate || si.per_unit_cost || 0,
+              // Preserve calculated amounts from sub_item
+              material_cost: si.material_cost || 0,
+              labour_cost: si.labour_cost || 0,
+              internal_cost: si.internal_cost || 0,
+              misc_amount: si.misc_amount || 0,
+              misc_percentage: si.misc_percentage || 0,
+              transport_amount: si.transport_amount || 0,
+              transport_percentage: si.transport_percentage || 0,
+              overhead_profit_amount: si.overhead_profit_amount || 0,
+              overhead_profit_percentage: si.overhead_profit_percentage || 0,
+              planned_profit: si.planned_profit || 0,
+              actual_profit: si.actual_profit || 0,
+              per_unit_cost: si.per_unit_cost || 0,
+              sub_item_total: si.sub_item_total || 0,
+              base_total: si.base_total || 0,
               materials: (si.materials || []).map((mat: any) => ({
                 material_id: mat.master_material_id || mat.material_id,
                 material_name: mat.material_name,
@@ -363,9 +387,10 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
         });
         setUseMaterialVAT(initialVATMode);
 
-        // Expand first item by default
+        // Expand ALL items by default to show all details
         if (editableBoq.items.length > 0) {
-          setExpandedItems(new Set([0]));
+          const allItemIndexes = editableBoq.items.map((_, index) => index);
+          setExpandedItems(new Set(allItemIndexes));
         }
       }
     } catch (error) {
@@ -722,9 +747,19 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
   };
 
   const calculateItemTotals = (item: any, itemIndex?: number) => {
-    // Calculate from sub_items if they exist, otherwise from item-level materials/labour
+    // If item has selling_price or sub_item_total, use it directly (already calculated)
+    // Otherwise calculate from materials/labour
+
     let materialTotal = 0;
     let labourTotal = 0;
+    let baseTotal = 0;
+    let sellingPrice = 0;
+    let overheadAmount = 0;
+    let profitAmount = 0;
+    let discountAmount = 0;
+    let vatAmount = 0;
+    let miscAmount = 0;
+    let transportAmount = 0;
 
     if (item.sub_items?.length > 0) {
       // New format: Calculate from sub_items
@@ -734,39 +769,60 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       }, 0);
 
       labourTotal = item.sub_items.reduce((sum: number, subItem: any) => {
-        const subLabourTotal = subItem.labour?.reduce((lSum: number, lab: any) => lSum + (lab.total_cost || 0), 0) || 0;
+        const subLabourTotal = subItem.labour?.reduce((lSum: number, lab: any) => lSum + (lab.total_cost || lab.total_amount || 0), 0) || 0;
         return sum + subLabourTotal;
       }, 0);
+
+      // Extract breakdown amounts from BOTH item level AND sub_items level
+      // First try item level (overhead_amount, profit_margin_amount)
+      miscAmount = item.overhead_amount || 0;
+      overheadAmount = item.profit_margin_amount || 0;
+
+      // If not found at item level, sum from sub_items
+      if (!miscAmount) {
+        miscAmount = item.sub_items.reduce((sum: number, subItem: any) => sum + (subItem.misc_amount || 0), 0);
+      }
+      if (!overheadAmount) {
+        overheadAmount = item.sub_items.reduce((sum: number, subItem: any) => sum + (subItem.overhead_profit_amount || 0), 0);
+      }
+
+      // Transport is always at sub_item level
+      transportAmount = item.sub_items.reduce((sum: number, subItem: any) => sum + (subItem.transport_amount || 0), 0);
+
+      // Profit amount from sub_items
+      profitAmount = item.sub_items.reduce((sum: number, subItem: any) => sum + (subItem.planned_profit || 0), 0);
+
+      // IMPORTANT: Use sub_item_total directly if available (it already includes all costs)
+      // Otherwise calculate from quantity × rate
+      sellingPrice = item.sub_items.reduce((sum: number, subItem: any) => {
+        const subItemTotal = subItem.sub_item_total || ((subItem.quantity || 1) * (subItem.rate || 0));
+        return sum + subItemTotal;
+      }, 0);
+
+      // For baseTotal, use material + labour only (for display purposes)
+      baseTotal = materialTotal + labourTotal;
+
+      // Extract discount and VAT from item level
+      discountAmount = item.discount_amount || 0;
+      vatAmount = item.vat_amount || 0;
     } else {
       // Old format: Calculate from item-level materials/labour
-      materialTotal = item.materials.reduce((sum: number, mat: any) => sum + (mat.total_price || 0), 0);
-      labourTotal = item.labour.reduce((sum: number, lab: any) => sum + (lab.total_cost || 0), 0);
-    }
+      materialTotal = item.materials?.reduce((sum: number, mat: any) => sum + (mat.total_price || 0), 0) || 0;
+      labourTotal = item.labour?.reduce((sum: number, lab: any) => sum + (lab.total_cost || 0), 0) || 0;
+      baseTotal = materialTotal + labourTotal;
 
-    const baseTotal = materialTotal + labourTotal;
-    const overheadAmount = baseTotal * (item.overhead_percentage || 0) / 100;
-    const profitAmount = baseTotal * (item.profit_margin_percentage || 0) / 100;
-    const subtotal = baseTotal + overheadAmount + profitAmount;
-    const discountAmount = subtotal * (item.discount_percentage || 0) / 100;
-    const afterDiscount = subtotal - discountAmount;
-
-    // Calculate VAT based on mode
-    let vatAmount = 0;
-    const itemIdx = itemIndex !== undefined ? itemIndex : editedBoq?.items.findIndex(i => i === item) ?? -1;
-
-    if (itemIdx >= 0 && useMaterialVAT[itemIdx]) {
-      // Per-material VAT mode: Calculate VAT for each material separately
-      vatAmount = item.materials.reduce((sum: number, mat: any) => {
-        const materialTotalPrice = mat.total_price || 0;
-        const materialVAT = materialTotalPrice * ((mat.vat_percentage || 0) / 100);
-        return sum + materialVAT;
-      }, 0);
-    } else {
-      // Item-level VAT mode: Apply single VAT to after-discount amount
+      // Calculate selling price with overhead, profit, discount, VAT
+      overheadAmount = baseTotal * (item.overhead_percentage || 0) / 100;
+      profitAmount = baseTotal * (item.profit_margin_percentage || 0) / 100;
+      const subtotal = baseTotal + overheadAmount + profitAmount;
+      discountAmount = subtotal * (item.discount_percentage || 0) / 100;
+      const afterDiscount = subtotal - discountAmount;
       vatAmount = afterDiscount * (item.vat_percentage || 0) / 100;
+      sellingPrice = afterDiscount + vatAmount;
     }
 
-    const sellingPrice = afterDiscount + vatAmount;
+    // Use item.selling_price if explicitly set, otherwise use calculated sellingPrice
+    const finalSellingPrice = item.selling_price || sellingPrice;
 
     return {
       materialTotal,
@@ -776,7 +832,9 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       profitAmount,
       discountAmount,
       vatAmount,
-      sellingPrice
+      miscAmount,
+      transportAmount,
+      sellingPrice: finalSellingPrice
     };
   };
 
@@ -796,10 +854,92 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
         return;
       }
 
-      // Add is_revision flag to the payload if this is a revision edit
+      // Enrich items with calculated values before sending
+      const enrichedItems = editedBoq.items.map((item, index) => {
+        const totals = calculateItemTotals(item, index);
+
+        console.log('=== ITEM CALCULATION DEBUG ===');
+        console.log('Item:', item.item_name);
+        console.log('Materials Total:', totals.materialTotal);
+        console.log('Labour Total:', totals.labourTotal);
+        console.log('Base Total:', totals.baseTotal);
+        console.log('Overhead Amount:', totals.overheadAmount);
+        console.log('Profit Amount:', totals.profitAmount);
+        console.log('Selling Price:', totals.sellingPrice);
+
+        // Enrich sub_items with calculated costs
+        const enrichedSubItems = item.sub_items?.map((subItem: any) => {
+          const subMaterialCost = subItem.materials?.reduce((sum: number, mat: any) =>
+            sum + (mat.total_price || (mat.quantity * mat.unit_price) || 0), 0) || 0;
+          const subLabourCost = subItem.labour?.reduce((sum: number, lab: any) =>
+            sum + (lab.total_cost || lab.total_amount || (lab.hours * lab.rate_per_hour) || 0), 0) || 0;
+          const subBaseTotal = subItem.base_total || ((subItem.quantity || 1) * (subItem.rate || 0));
+
+          return {
+            ...subItem,
+            materials_cost: subMaterialCost,
+            labour_cost: subLabourCost,
+            base_total: subBaseTotal
+          };
+        }) || [];
+
+        return {
+          ...item,
+          sub_items: enrichedSubItems,
+          item_total: totals.baseTotal,
+          overhead_amount: totals.overheadAmount,
+          profit_margin_amount: totals.profitAmount,
+          subtotal: totals.baseTotal + totals.overheadAmount + totals.profitAmount,
+          discount_amount: totals.discountAmount,
+          after_discount: totals.baseTotal + totals.overheadAmount + totals.profitAmount - totals.discountAmount,
+          selling_price: totals.sellingPrice
+        };
+      });
+
+      // Calculate grand totals
+      let totalMaterials = 0;
+      let totalLabour = 0;
+      let totalOverhead = 0;
+      let totalProfit = 0;
+      let totalDiscount = 0;
+      let totalVAT = 0;
+      let grandTotal = 0;
+
+      enrichedItems.forEach((item, index) => {
+        const itemTotals = calculateItemTotals(item, index);
+        totalMaterials += itemTotals.materialTotal;
+        totalLabour += itemTotals.labourTotal;
+        totalOverhead += itemTotals.overheadAmount;
+        totalProfit += itemTotals.profitAmount;
+        totalDiscount += itemTotals.discountAmount;
+        totalVAT += itemTotals.vatAmount;
+        grandTotal += itemTotals.sellingPrice;
+      });
+
+      // Add is_revision flag and complete details to the payload
       const payload = {
         ...editedBoq,
-        is_revision: isRevision
+        items: enrichedItems,
+        is_revision: isRevision,
+        // Include preliminaries from original BOQ
+        preliminaries: originalBoq?.preliminaries || {
+          items: [],
+          cost_details: {
+            quantity: 1,
+            unit: 'nos',
+            rate: 0,
+            amount: 0
+          },
+          notes: ''
+        },
+        // Add discount percentage if any
+        discount_percentage: editedBoq.items.some(item => (item.discount_percentage || 0) > 0)
+          ? editedBoq.items[0].discount_percentage
+          : 0,
+        discount_amount: totalDiscount,
+        // Add overhead and profit percentages from first item (or default)
+        overhead_percentage: enrichedItems.length > 0 ? enrichedItems[0].overhead_percentage : 10,
+        profit_margin_percentage: enrichedItems.length > 0 ? enrichedItems[0].profit_margin_percentage : 15
       };
 
       // Determine which API to call based on BOQ status
@@ -916,10 +1056,43 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                         Total Project Value
                       </label>
                       <div className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 font-semibold">
-                        AED{calculateGrandTotal().toLocaleString()}
+                        AED {calculateGrandTotal().toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </div>
                     </div>
                   </div>
+
+                  {/* Project Details if available */}
+                  {originalBoq?.project_details && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-3">Project Information</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                        {originalBoq.project_details.project_name && (
+                          <div>
+                            <span className="text-gray-500">Project:</span>
+                            <p className="font-medium text-gray-900">{originalBoq.project_details.project_name}</p>
+                          </div>
+                        )}
+                        {originalBoq.project_details.location && (
+                          <div>
+                            <span className="text-gray-500">Location:</span>
+                            <p className="font-medium text-gray-900">{originalBoq.project_details.location}</p>
+                          </div>
+                        )}
+                        {originalBoq.project_details.floor && (
+                          <div>
+                            <span className="text-gray-500">Floor:</span>
+                            <p className="font-medium text-gray-900">{originalBoq.project_details.floor}</p>
+                          </div>
+                        )}
+                        {originalBoq.project_details.hours && (
+                          <div>
+                            <span className="text-gray-500">Hours:</span>
+                            <p className="font-medium text-gray-900">{originalBoq.project_details.hours}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* BOQ Items - Match TD Style */}
@@ -1638,7 +1811,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                 <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${useMaterialVAT[itemIndex] ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
                                   <div>
                                     <label className="block text-xs font-semibold text-green-900 mb-2">
-                                      Overhead (%)
+                                      Miscellaneous (%)
                                     </label>
                                     <div className="flex items-center gap-2">
                                       <input
@@ -1655,7 +1828,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                   </div>
                                   <div>
                                     <label className="block text-xs font-semibold text-green-900 mb-2">
-                                      Profit (%)
+                                      Overhead & Profit (%)
                                     </label>
                                     <div className="flex items-center gap-2">
                                       <input
@@ -1725,12 +1898,16 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                     <span className="font-semibold text-gray-900">AED {totals.labourTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                   </div>
                                   <div className="flex justify-between py-1">
-                                    <span className="text-gray-600">Overhead:</span>
-                                    <span className="font-semibold text-gray-900">AED {totals.overheadAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                    <span className="text-gray-600">Miscellaneous:</span>
+                                    <span className="font-semibold text-gray-900">AED {(totals.miscAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                   </div>
                                   <div className="flex justify-between py-1">
-                                    <span className="text-gray-600">Profit:</span>
-                                    <span className="font-semibold text-gray-900">AED {totals.profitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                    <span className="text-gray-600">Transport:</span>
+                                    <span className="font-semibold text-gray-900">AED {(totals.transportAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                  <div className="flex justify-between py-1">
+                                    <span className="text-gray-600">Overhead & Profit:</span>
+                                    <span className="font-semibold text-gray-900">AED {(totals.overheadAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                   </div>
                                   {(item.discount_percentage || 0) > 0 && (
                                     <div className="flex justify-between py-1">
@@ -1765,21 +1942,98 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                   )}
                 </div>
 
-                {/* Total Summary */}
+                {/* Comprehensive Cost Breakdown */}
                 {editedBoq.items.length > 0 && (
-                  <div className="mt-6 bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-5 border-2 border-green-300 shadow-xl">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-xl shadow-md">
-                          <Calculator className="w-6 h-6 text-green-600" />
-                        </div>
-                        <h3 className="text-lg font-bold text-green-900">Total Project Value</h3>
+                  <>
+                    <div className="mt-6 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-5 border border-blue-200">
+                      <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                        <Calculator className="w-5 h-5 text-blue-600" />
+                        Cost Breakdown
+                      </h3>
+                      <div className="space-y-2 text-sm">
+                        {(() => {
+                          let totalMaterials = 0;
+                          let totalLabour = 0;
+                          let totalMisc = 0;
+                          let totalTransport = 0;
+                          let totalOverhead = 0;
+                          let totalProfit = 0;
+                          let totalDiscount = 0;
+                          let totalVAT = 0;
+                          let grandTotal = 0;
+
+                          editedBoq.items.forEach((item, index) => {
+                            const itemTotals = calculateItemTotals(item, index);
+                            totalMaterials += itemTotals.materialTotal;
+                            totalLabour += itemTotals.labourTotal;
+                            totalMisc += itemTotals.miscAmount || 0;
+                            totalTransport += itemTotals.transportAmount || 0;
+                            totalOverhead += itemTotals.overheadAmount;
+                            totalProfit += itemTotals.profitAmount;
+                            totalDiscount += itemTotals.discountAmount;
+                            totalVAT += itemTotals.vatAmount;
+                            grandTotal += itemTotals.sellingPrice;
+                          });
+
+                          return (
+                            <>
+                              <div className="flex justify-between py-2 border-b border-blue-100">
+                                <span className="text-gray-600">Total Materials Cost:</span>
+                                <span className="font-semibold text-gray-900">AED {totalMaterials.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="flex justify-between py-2 border-b border-blue-100">
+                                <span className="text-gray-600">Total Labour Cost:</span>
+                                <span className="font-semibold text-gray-900">AED {totalLabour.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="flex justify-between py-2 border-b border-blue-100">
+                                <span className="text-gray-600">Base Cost (Materials + Labour):</span>
+                                <span className="font-semibold text-gray-900">AED {(totalMaterials + totalLabour).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="flex justify-between py-2 border-b border-blue-100">
+                                <span className="text-gray-600">Total Miscellaneous:</span>
+                                <span className="font-semibold text-gray-900">AED {totalMisc.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="flex justify-between py-2 border-b border-blue-100">
+                                <span className="text-gray-600">Total Transport:</span>
+                                <span className="font-semibold text-gray-900">AED {totalTransport.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="flex justify-between py-2 border-b border-blue-100">
+                                <span className="text-gray-600">Total Overhead & Profit:</span>
+                                <span className="font-semibold text-gray-900">AED {totalOverhead.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                              </div>
+                              {totalDiscount > 0 && (
+                                <div className="flex justify-between py-2 border-b border-blue-100">
+                                  <span className="text-red-600">Total Discount:</span>
+                                  <span className="font-semibold text-red-600">- AED {totalDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                </div>
+                              )}
+                              {totalVAT > 0 && (
+                                <div className="flex justify-between py-2 border-b border-blue-100">
+                                  <span className="text-green-600">Total VAT:</span>
+                                  <span className="font-semibold text-green-600">+ AED {totalVAT.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
-                      <span className="text-3xl font-bold text-green-900">
-                        AED {calculateGrandTotal().toLocaleString()}
-                      </span>
                     </div>
-                  </div>
+
+                    {/* Total Summary */}
+                    <div className="mt-4 bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-5 border-2 border-green-300 shadow-xl">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-xl shadow-md">
+                            <Calculator className="w-6 h-6 text-green-600" />
+                          </div>
+                          <h3 className="text-lg font-bold text-green-900">Total Project Value</h3>
+                        </div>
+                        <span className="text-3xl font-bold text-green-900">
+                          AED {calculateGrandTotal().toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
               </>

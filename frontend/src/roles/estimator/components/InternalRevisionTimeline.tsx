@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, CheckCircle, XCircle, Edit, Send, Clock, User, TrendingUp, TrendingDown, Mail } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
@@ -71,13 +71,23 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   const [rejectionReason, setRejectionReason] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // Use ref to track ongoing API calls and prevent duplicates
+  const loadingRevisionsRef = useRef<number | null>(null);
+  const isInitialMount = useRef(true);
+
   useEffect(() => {
     loadBOQsWithInternalRevisions();
   }, []);
 
   useEffect(() => {
-    if (selectedBoq) {
+    // Skip if this is triggered by initial BOQ selection from loadBOQsWithInternalRevisions
+    if (selectedBoq && !isInitialMount.current) {
       loadInternalRevisions(selectedBoq.boq_id);
+    }
+    if (isInitialMount.current && selectedBoq) {
+      // On initial mount, load revisions for the first BOQ
+      loadInternalRevisions(selectedBoq.boq_id);
+      isInitialMount.current = false;
     }
   }, [selectedBoq]);
 
@@ -85,9 +95,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   useEffect(() => {
     if (refreshTrigger !== undefined && refreshTrigger > 0) {
       loadBOQsWithInternalRevisions();
-      if (selectedBoq) {
-        loadInternalRevisions(selectedBoq.boq_id);
-      }
+      // Don't call loadInternalRevisions here - it will be triggered by selectedBoq change
     }
   }, [refreshTrigger]);
 
@@ -116,6 +124,12 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   };
 
   const loadInternalRevisions = async (boqId: number) => {
+    // Prevent duplicate calls for the same BOQ
+    if (loadingRevisionsRef.current === boqId) {
+      return;
+    }
+
+    loadingRevisionsRef.current = boqId;
     setIsLoadingRevisions(true);
     try {
       const response = await fetch(`${API_URL}/boq/${boqId}/internal_revisions`, {
@@ -141,6 +155,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       toast.error('Failed to load internal revision history');
     } finally {
       setIsLoadingRevisions(false);
+      loadingRevisionsRef.current = null; // Reset ref after loading completes
     }
   };
 
@@ -224,10 +239,25 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
         setShowApprovalModal(false);
         setApprovalNotes('');
 
-        // Reload data
+        // Reload data and update selectedBoq with fresh status
         await loadBOQsWithInternalRevisions();
         if (selectedBoq) {
           await loadInternalRevisions(selectedBoq.boq_id);
+
+          // Fetch fresh BOQ data to update selectedBoq with new status
+          const response = await fetch(`${API_URL}/boqs/internal_revisions`, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            }
+          });
+          const freshData = await response.json();
+
+          if (freshData.success) {
+            const updatedBoq = freshData.data.find((b: BOQWithInternalRevisions) => b.boq_id === selectedBoq.boq_id);
+            if (updatedBoq) {
+              setSelectedBoq(updatedBoq);
+            }
+          }
         }
       } else {
         toast.error(data.message || 'Failed to approve BOQ');
@@ -271,10 +301,25 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
         setShowRejectionModal(false);
         setRejectionReason('');
 
-        // Reload data
+        // Reload data and update selectedBoq with fresh status
         await loadBOQsWithInternalRevisions();
         if (selectedBoq) {
           await loadInternalRevisions(selectedBoq.boq_id);
+
+          // Fetch fresh BOQ data to update selectedBoq with new status
+          const response = await fetch(`${API_URL}/boqs/internal_revisions`, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            }
+          });
+          const freshData = await response.json();
+
+          if (freshData.success) {
+            const updatedBoq = freshData.data.find((b: BOQWithInternalRevisions) => b.boq_id === selectedBoq.boq_id);
+            if (updatedBoq) {
+              setSelectedBoq(updatedBoq);
+            }
+          }
         }
       } else {
         toast.error(data.message || 'Failed to reject BOQ');
@@ -361,25 +406,12 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     boq.project?.client?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Calculate total from items
+  // Calculate total from items using API response values
   const calculateTotalFromSnapshot = (snapshot: any) => {
     if (!snapshot?.items || snapshot.items.length === 0) return 0;
 
     return snapshot.items.reduce((total: number, item: any) => {
-      const itemTotal = item.sub_items && item.sub_items.length > 0
-        ? item.sub_items.reduce((sum: number, si: any) =>
-            sum + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
-        : (item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) || 0) +
-          (item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0);
-
-      const miscellaneousAmount = (itemTotal * (item.overhead_percentage || 0)) / 100;
-      const overheadProfitAmount = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
-      const subtotal = itemTotal + miscellaneousAmount + overheadProfitAmount;
-      const discountAmount = (subtotal * (item.discount_percentage || 0)) / 100;
-      const afterDiscount = subtotal - discountAmount;
-      const vatAmount = (afterDiscount * (item.vat_percentage || 0)) / 100;
-      const finalTotalPrice = afterDiscount + vatAmount;
-
+      const finalTotalPrice = item.selling_price || item.total_selling_price || 0;
       return total + finalTotalPrice;
     }, 0);
   };
@@ -412,30 +444,44 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           // Find matching previous item
           const prevItem = previousSnapshot?.items?.find((pi: any) => pi.item_name === item.item_name);
 
-          // Calculate item totals
-          const itemTotal = item.sub_items && item.sub_items.length > 0
-            ? item.sub_items.reduce((sum: number, si: any) =>
-                sum + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
-            : (item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) || 0) +
-              (item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0);
-
-          const miscellaneousAmount = (itemTotal * (item.overhead_percentage || 0)) / 100;
-          const overheadProfitAmount = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
-          const subtotal = itemTotal + miscellaneousAmount + overheadProfitAmount;
-          const discountAmount = (subtotal * (item.discount_percentage || 0)) / 100;
+          // Use values directly from API response
+          const itemTotal = item.sub_items_cost || item.base_cost || 0;
+          const miscellaneousAmount = item.overhead_amount || 0;
+          const overheadProfitAmount = item.profit_margin_amount || 0;
+          const subtotal = item.subtotal || 0;
+          const discountAmount = item.discount_amount || 0;
           const afterDiscount = subtotal - discountAmount;
-          const vatAmount = (afterDiscount * (item.vat_percentage || 0)) / 100;
-          const finalTotalPrice = afterDiscount + vatAmount;
+          const vatAmount = item.vat_amount || 0;
+          const finalTotalPrice = item.selling_price || item.total_selling_price || 0;
 
           const isNew = !prevItem;
 
           return (
             <div key={itemIdx} className={`border rounded-lg p-3 ${isNew ? 'bg-yellow-50 border-yellow-300' : 'bg-white border-gray-300'}`}>
               <div className="flex items-start justify-between mb-2">
-                <h5 className="font-semibold text-gray-900 text-sm">
-                  {isNew && <span className="text-xs bg-yellow-200 text-yellow-900 px-2 py-0.5 rounded mr-2">NEW</span>}
-                  {item.item_name}
-                </h5>
+                <div className="flex-1">
+                  <h5 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
+                    {isNew && <span className="text-xs bg-yellow-200 text-yellow-900 px-2 py-0.5 rounded">NEW</span>}
+                    {item.item_name}
+                    {item.work_type && (
+                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-normal">
+                        {item.work_type}
+                      </span>
+                    )}
+                  </h5>
+                  {/* Show main item quantity and unit */}
+                  {item.quantity && item.unit && (
+                    <p className="text-xs text-gray-600 mt-1">
+                      Qty: {item.quantity} {item.unit}
+                      {item.rate && item.rate > 0 && ` × Rate: AED ${item.rate.toFixed(2)}`}
+                      {item.item_total && item.item_total > 0 && (
+                        <span className="ml-2 font-semibold text-blue-700">
+                          = AED {item.item_total.toFixed(2)}
+                        </span>
+                      )}
+                    </p>
+                  )}
+                </div>
               </div>
               {item.description && (
                 <p className="text-xs text-gray-600 mb-2">{item.description}</p>
@@ -451,13 +497,24 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                     return (
                       <div key={subIdx} className="bg-green-50 border border-green-200 rounded p-2">
                         <div className="flex justify-between items-start mb-1">
-                          <div>
+                          <div className="flex-1">
                             <p className="font-semibold text-xs text-gray-900">{subItem.sub_item_name}</p>
                             {subItem.scope && <p className="text-xs text-gray-600">{subItem.scope}</p>}
+                            {/* Show sub-item quantity, unit, and rate */}
+                            <p className="text-xs text-gray-600 mt-1">
+                              Qty: {subItem.quantity} {subItem.unit} × Rate: AED {subItem.rate?.toFixed(2) || '0.00'}
+                            </p>
                           </div>
-                          <div className="text-right text-xs text-gray-600">
-                            {subItem.size && <div>Size: {subItem.size}</div>}
-                            {subItem.location && <div>Loc: {subItem.location}</div>}
+                          <div className="text-right text-xs ml-2">
+                            {subItem.size && <div className="text-gray-600">Size: {subItem.size}</div>}
+                            {subItem.location && <div className="text-gray-600">Loc: {subItem.location}</div>}
+                            {subItem.brand && <div className="text-gray-600">Brand: {subItem.brand}</div>}
+                            {/* Show base total prominently */}
+                            {subItem.base_total !== undefined && (
+                              <div className="font-bold text-blue-900 mt-1 bg-blue-100 px-2 py-0.5 rounded">
+                                Base: AED {subItem.base_total?.toFixed(2)}
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -512,6 +569,22 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                             </div>
                           </div>
                         )}
+
+                        {/* Sub-Item Cost Summary */}
+                        <div className="mt-2 pt-2 border-t border-green-300 space-y-1 bg-white rounded px-2 py-1">
+                          <div className="text-xs text-gray-700 flex justify-between">
+                            <span>Materials Cost:</span>
+                            <span className="font-semibold">AED {(subItem.materials_cost || 0).toFixed(2)}</span>
+                          </div>
+                          <div className="text-xs text-gray-700 flex justify-between">
+                            <span>Labour Cost:</span>
+                            <span className="font-semibold">AED {(subItem.labour_cost || 0).toFixed(2)}</span>
+                          </div>
+                          <div className="text-xs font-bold text-green-900 flex justify-between bg-green-100 rounded px-1 py-0.5">
+                            <span>Sub-Item Total:</span>
+                            <span>AED {((subItem.materials_cost || 0) + (subItem.labour_cost || 0)).toFixed(2)}</span>
+                          </div>
+                        </div>
                       </div>
                     );
                   })}
@@ -571,20 +644,33 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
               )}
 
               {/* Pricing Details */}
-              <div className="mt-2 pt-2 border-t border-gray-200 space-y-1">
-                <div className="text-xs text-gray-600 flex justify-between">
-                  <span>Item Total:</span>
-                  <span className="font-semibold">AED {itemTotal.toFixed(2)}</span>
-                </div>
-                {item.overhead_percentage > 0 && (
+              <div className="mt-3 pt-3 border-t-2 border-gray-300 space-y-1">
+                <p className="text-xs font-bold text-gray-800 mb-2">💰 Main Item Pricing Breakdown:</p>
+
+                {/* Show base_cost (sum of all sub-items) */}
+                {item.has_sub_items && item.sub_items && item.sub_items.length > 0 && (
+                  <div className="text-xs text-gray-600 flex justify-between bg-blue-50 rounded px-2 py-1">
+                    <span>Base Cost (All Sub-Items):</span>
+                    <span className="font-semibold">AED {(item.base_cost || item.sub_items_cost || itemTotal).toFixed(2)}</span>
+                  </div>
+                )}
+
+                {/* For items without sub-items, show direct cost */}
+                {(!item.has_sub_items || !item.sub_items || item.sub_items.length === 0) && (
+                  <div className="text-xs text-gray-600 flex justify-between">
+                    <span>Item Total (Materials + Labour):</span>
+                    <span className="font-semibold">AED {itemTotal.toFixed(2)}</span>
+                  </div>
+                )}
+                {(item.overhead_percentage > 0 || item.overhead_percentage === 0) && (
                   <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.overhead_percentage, prevItem.overhead_percentage) ? 'bg-yellow-200' : ''}`}>
-                    <span>Miscellaneous ({item.overhead_percentage}%):</span>
+                    <span>Miscellaneous ({item.overhead_percentage || 0}%):</span>
                     <span className="font-semibold">AED {miscellaneousAmount.toFixed(2)}</span>
                   </div>
                 )}
-                {item.profit_margin_percentage > 0 && (
-                  <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.profit_margin_percentage, prevItem.profit_margin_percentage) ? 'bg-yellow-200' : ''}`}>
-                    <span>Overhead & Profit ({item.profit_margin_percentage}%):</span>
+                {(item.profit_margin_percentage > 0 || item.profit_margin_percentage === 0) && (
+                  <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${item.discount_percentage > 0 ? 'bg-yellow-100' : ''} ${prevItem && hasChanged(item.profit_margin_percentage, prevItem.profit_margin_percentage) ? 'bg-yellow-200' : ''}`}>
+                    <span>Overhead & Profit ({item.profit_margin_percentage || 0}%):</span>
                     <span className="font-semibold">AED {overheadProfitAmount.toFixed(2)}</span>
                   </div>
                 )}
@@ -593,15 +679,17 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   <span>AED {subtotal.toFixed(2)}</span>
                 </div>
                 {item.discount_percentage > 0 && (
-                  <div className={`text-xs text-red-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.discount_percentage, prevItem.discount_percentage) ? 'bg-yellow-200' : ''}`}>
-                    <span>Discount ({item.discount_percentage}%):</span>
-                    <span className="font-semibold">- AED {discountAmount.toFixed(2)}</span>
-                  </div>
+                  <>
+                    <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.discount_percentage, prevItem.discount_percentage) ? 'bg-yellow-200' : ''}`}>
+                      <span>Discount ({item.discount_percentage}%):</span>
+                      <span className="font-semibold">AED {discountAmount.toFixed(2)}</span>
+                    </div>
+                    <div className="text-xs text-gray-700 flex justify-between">
+                      <span>After Discount:</span>
+                      <span className="font-semibold">AED {afterDiscount.toFixed(2)}</span>
+                    </div>
+                  </>
                 )}
-                <div className="text-xs text-gray-700 flex justify-between">
-                  <span>After Discount:</span>
-                  <span className="font-semibold">AED {afterDiscount.toFixed(2)}</span>
-                </div>
                 {item.vat_percentage > 0 && (
                   <div className={`text-xs text-green-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.vat_percentage, prevItem.vat_percentage) ? 'bg-yellow-200' : ''}`}>
                     <span>VAT ({item.vat_percentage}%):</span>
@@ -855,13 +943,14 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   const isPendingTDApproval = status === 'pendingtdapproval';
                   const isPendingRevision = status === 'pendingrevision';
                   const isClientConfirmed = status === 'clientconfirmed';
+                  const isInternalRevisionPending = status === 'internalrevisionpending';
                   const lastAction = currentRevision?.action_type;
                   const isPendingApproval = status === 'pendingapproval' || status === 'pending';
-                  const isSentToTD = lastAction === 'SENT_TO_TD';
+                  const isSentToTD = lastAction === 'SENT_TO_TD' || isInternalRevisionPending;
 
                   // Statuses where buttons should be hidden (BOQ is in a final or processing state)
                   // Note: isClientRevisionRejected IS included here to hide buttons in Internal Revisions tab
-                  const isInFinalOrProcessingState = isApproved || isUnderRevision || isSentForConfirmation || isPendingTDApproval || isClientConfirmed || isPendingRevision || isClientRevisionRejected;
+                  const isInFinalOrProcessingState = isApproved || isUnderRevision || isSentForConfirmation || isPendingTDApproval || isClientConfirmed || isPendingRevision || isClientRevisionRejected || isRejected;
 
                   // Technical Director: Show Approve/Reject buttons when pending approval
                   if (userRole === 'technical_director' || userRole === 'technical-director') {

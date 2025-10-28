@@ -56,24 +56,9 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
   };
 
   // Filter BOQs for Client Revisions tab:
-  // 1. BOQs with revisions (revision_number > 0)
-  // 2. Approved BOQs waiting to send to client (approved/revision_approved)
-  // 3. BOQs pending TD approval (pending_approval/pending_revision)
-  // 4. BOQs being edited (under_revision)
-  // 5. BOQs with client interactions
+  // Show ALL BOQs with revision_number > 0 (regardless of status)
   const boqsWithRevisions = boqList.filter(boq => {
-    const status = boq.status?.toLowerCase() || '';
-    const hasRevisions = (boq.revision_number || 0) > 0;
-    const isApprovedNotSent = (status === 'approved' || status === 'revision_approved');
-    const isPendingApproval = (status === 'pending_approval' || status === 'pending_revision' || status === 'pending');
-    const isUnderRevision = (status === 'under_revision');
-    const isSentToClient = (status === 'sent_for_confirmation');
-    const isClientRejected = (status === 'client_rejected');
-    const isClientRevisionRejected = (status === 'client_revision_rejected');
-    const isClientConfirmed = (status === 'client_confirmed');
-    const isClientCancelled = (status === 'client_cancelled');
-
-    return hasRevisions || isApprovedNotSent || isPendingApproval || isUnderRevision || isSentToClient || isClientRejected || isClientRevisionRejected || isClientConfirmed || isClientCancelled;
+    return (boq.revision_number || 0) > 0;
   });
 
   // Filter based on search
@@ -575,10 +560,13 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                     <p className="font-semibold text-sm text-gray-900">{subItem.sub_item_name}</p>
                                     {subItem.scope && <p className="text-xs text-gray-600">{subItem.scope}</p>}
                                   </div>
-                                  <div className="text-right text-xs text-gray-600">
-                                    {subItem.size && <div>Size: {subItem.size}</div>}
-                                    {subItem.location && <div>Location: {subItem.location}</div>}
-                                    {subItem.brand && <div>Brand: {subItem.brand}</div>}
+                                  <div className="text-right text-xs">
+                                    {subItem.size && <div className="text-gray-600">Size: {subItem.size}</div>}
+                                    <div className="font-semibold text-gray-900">
+                                      AED {((subItem.materials_cost || 0) + (subItem.labour_cost || 0)).toFixed(2)}
+                                    </div>
+                                    {subItem.location && <div className="text-gray-600">Location: {subItem.location}</div>}
+                                    {subItem.brand && <div className="text-gray-600">Brand: {subItem.brand}</div>}
                                   </div>
                                 </div>
 
@@ -693,21 +681,16 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
                       {/* Additional Details: Overhead, Profit, Discount, VAT */}
                       <div className="mt-3 pt-2 border-t border-gray-200 space-y-1">
-                        {/* Calculate costs with correct labels */}
+                        {/* Use values directly from API response */}
                         {(() => {
-                          const itemTotal = item.sub_items && item.sub_items.length > 0
-                            ? item.sub_items.reduce((sum: number, si: any) =>
-                                sum + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
-                            : (item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) || 0) +
-                              (item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0);
-
-                          const miscellaneousAmount = (itemTotal * (item.overhead_percentage || 0)) / 100;
-                          const overheadProfitAmount = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
-                          const subtotal = itemTotal + miscellaneousAmount + overheadProfitAmount;
-                          const discountAmount = (subtotal * (item.discount_percentage || 0)) / 100;
+                          const itemTotal = item.sub_items_cost || item.base_cost || 0;
+                          const miscellaneousAmount = item.overhead_amount || 0;
+                          const overheadProfitAmount = item.profit_margin_amount || 0;
+                          const subtotal = item.subtotal || 0;
+                          const discountAmount = item.discount_amount || 0;
                           const afterDiscount = subtotal - discountAmount;
-                          const vatAmount = (afterDiscount * (item.vat_percentage || 0)) / 100;
-                          const finalTotalPrice = afterDiscount + vatAmount;
+                          const vatAmount = item.vat_amount || 0;
+                          const finalTotalPrice = item.selling_price || item.total_selling_price || 0;
 
                           return (
                             <>
@@ -715,15 +698,15 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                 <span>Item Total (Qty × Rate):</span>
                                 <span className="font-semibold">AED {itemTotal.toFixed(2)}</span>
                               </div>
-                              {item.overhead_percentage > 0 && (
+                              {(item.overhead_percentage > 0 || item.overhead_percentage === 0) && (
                                 <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.overhead_percentage, prevItem.overhead_percentage) ? 'bg-yellow-200' : ''}`}>
-                                  <span>Miscellaneous ({item.overhead_percentage}%):</span>
+                                  <span>Miscellaneous ({item.overhead_percentage || 0}%):</span>
                                   <span className="font-semibold">AED {miscellaneousAmount.toFixed(2)}</span>
                                 </div>
                               )}
-                              {item.profit_margin_percentage > 0 && (
-                                <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.profit_margin_percentage, prevItem.profit_margin_percentage) ? 'bg-yellow-200' : ''}`}>
-                                  <span>Overhead & Profit ({item.profit_margin_percentage}%):</span>
+                              {(item.profit_margin_percentage > 0 || item.profit_margin_percentage === 0) && (
+                                <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${item.discount_percentage > 0 ? 'bg-yellow-100' : ''} ${prevItem && hasChanged(item.profit_margin_percentage, prevItem.profit_margin_percentage) ? 'bg-yellow-200' : ''}`}>
+                                  <span>Overhead & Profit ({item.profit_margin_percentage || 0}%):</span>
                                   <span className="font-semibold">AED {overheadProfitAmount.toFixed(2)}</span>
                                 </div>
                               )}
@@ -732,15 +715,17 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                 <span>AED {subtotal.toFixed(2)}</span>
                               </div>
                               {item.discount_percentage > 0 && (
-                                <div className={`text-xs text-red-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.discount_percentage, prevItem.discount_percentage) ? 'bg-yellow-200' : ''}`}>
-                                  <span>Discount ({item.discount_percentage}%):</span>
-                                  <span className="font-semibold">- AED {discountAmount.toFixed(2)}</span>
-                                </div>
+                                <>
+                                  <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.discount_percentage, prevItem.discount_percentage) ? 'bg-yellow-200' : ''}`}>
+                                    <span>Discount ({item.discount_percentage}%):</span>
+                                    <span className="font-semibold">AED {discountAmount.toFixed(2)}</span>
+                                  </div>
+                                  <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1">
+                                    <span>After Discount:</span>
+                                    <span className="font-semibold">AED {afterDiscount.toFixed(2)}</span>
+                                  </div>
+                                </>
                               )}
-                              <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1">
-                                <span>After Discount:</span>
-                                <span className="font-semibold">AED {afterDiscount.toFixed(2)}</span>
-                              </div>
                               {item.vat_percentage > 0 && (
                                 <div className={`text-xs text-green-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.vat_percentage, prevItem.vat_percentage) ? 'bg-yellow-200' : ''}`}>
                                   <span>VAT ({item.vat_percentage}%) [ADDITIONAL]:</span>
@@ -1191,21 +1176,16 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
                               {/* Additional Details: Overhead, Profit, Discount, VAT */}
                               <div className="mt-3 pt-2 border-t border-red-200 space-y-1">
-                                {/* Calculate costs with correct labels */}
+                                {/* Use values directly from API response */}
                                 {(() => {
-                                  const itemTotal = item.sub_items && item.sub_items.length > 0
-                                    ? item.sub_items.reduce((sum: number, si: any) =>
-                                        sum + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
-                                    : (item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) || 0) +
-                                      (item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0);
-
-                                  const miscellaneousAmount = (itemTotal * (item.overhead_percentage || 0)) / 100;
-                                  const overheadProfitAmount = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
-                                  const subtotal = itemTotal + miscellaneousAmount + overheadProfitAmount;
-                                  const discountAmount = (subtotal * (item.discount_percentage || 0)) / 100;
+                                  const itemTotal = item.sub_items_cost || item.base_cost || 0;
+                                  const miscellaneousAmount = item.overhead_amount || 0;
+                                  const overheadProfitAmount = item.profit_margin_amount || 0;
+                                  const subtotal = item.subtotal || 0;
+                                  const discountAmount = item.discount_amount || 0;
                                   const afterDiscount = subtotal - discountAmount;
-                                  const vatAmount = (afterDiscount * (item.vat_percentage || 0)) / 100;
-                                  const finalTotalPrice = afterDiscount + vatAmount;
+                                  const vatAmount = item.vat_amount || 0;
+                                  const finalTotalPrice = item.selling_price || item.total_selling_price || 0;
 
                                   return (
                                     <>
@@ -1213,15 +1193,15 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                         <span>Item Total (Qty × Rate):</span>
                                         <span className="font-semibold">AED {itemTotal.toFixed(2)}</span>
                                       </div>
-                                      {item.overhead_percentage > 0 && (
+                                      {(item.overhead_percentage > 0 || item.overhead_percentage === 0) && (
                                         <div className="text-xs text-gray-600 flex justify-between">
-                                          <span>Miscellaneous ({item.overhead_percentage}%):</span>
+                                          <span>Miscellaneous ({item.overhead_percentage || 0}%):</span>
                                           <span className="font-semibold">AED {miscellaneousAmount.toFixed(2)}</span>
                                         </div>
                                       )}
-                                      {item.profit_margin_percentage > 0 && (
-                                        <div className="text-xs text-gray-600 flex justify-between">
-                                          <span>Overhead & Profit ({item.profit_margin_percentage}%):</span>
+                                      {(item.profit_margin_percentage > 0 || item.profit_margin_percentage === 0) && (
+                                        <div className={`text-xs text-gray-600 flex justify-between ${item.discount_percentage > 0 ? 'bg-yellow-100' : ''}`}>
+                                          <span>Overhead & Profit ({item.profit_margin_percentage || 0}%):</span>
                                           <span className="font-semibold">AED {overheadProfitAmount.toFixed(2)}</span>
                                         </div>
                                       )}
@@ -1230,15 +1210,17 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                         <span>AED {subtotal.toFixed(2)}</span>
                                       </div>
                                       {item.discount_percentage > 0 && (
-                                        <div className="text-xs text-red-600 flex justify-between">
-                                          <span>Discount ({item.discount_percentage}%):</span>
-                                          <span className="font-semibold">- AED {discountAmount.toFixed(2)}</span>
-                                        </div>
+                                        <>
+                                          <div className="text-xs text-gray-600 flex justify-between">
+                                            <span>Discount ({item.discount_percentage}%):</span>
+                                            <span className="font-semibold">AED {discountAmount.toFixed(2)}</span>
+                                          </div>
+                                          <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1">
+                                            <span>After Discount:</span>
+                                            <span className="font-semibold">AED {afterDiscount.toFixed(2)}</span>
+                                          </div>
+                                        </>
                                       )}
-                                      <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1">
-                                        <span>After Discount:</span>
-                                        <span className="font-semibold">AED {afterDiscount.toFixed(2)}</span>
-                                      </div>
                                       {item.vat_percentage > 0 && (
                                         <div className="text-xs text-green-600 flex justify-between">
                                           <span>VAT ({item.vat_percentage}%) [ADDITIONAL]:</span>
