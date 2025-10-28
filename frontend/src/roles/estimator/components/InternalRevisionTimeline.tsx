@@ -4,7 +4,7 @@ import { Search, CheckCircle, XCircle, Edit, Send, Clock, User, TrendingUp, Tren
 import { estimatorService } from '../services/estimatorService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import BOQEditModal from './BOQEditModal';
+import BOQCreationForm from '@/components/forms/BOQCreationForm';
 
 interface InternalRevision {
   id: number;
@@ -61,6 +61,8 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   const [showDropdown, setShowDropdown] = useState(false);
   const [expandedRevisionIndices, setExpandedRevisionIndices] = useState<Set<number>>(new Set());
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [originalBOQ, setOriginalBOQ] = useState<any>(null);
+  const [isLoadingOriginalBOQ, setIsLoadingOriginalBOQ] = useState(false);
 
   // Edit and Send to TD states
   const [showEditModal, setShowEditModal] = useState(false);
@@ -166,11 +168,29 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       const data = await response.json();
 
       if (data.success) {
+        // Filter out ORIGINAL_BOQ type revisions from the regular list
+        const regularRevisions = data.data.internal_revisions.filter(
+          (rev: InternalRevision) => rev.action_type !== 'ORIGINAL_BOQ'
+        );
+
         // Sort in descending order (latest first)
-        const sorted = data.data.internal_revisions.sort((a: InternalRevision, b: InternalRevision) =>
+        const sorted = regularRevisions.sort((a: InternalRevision, b: InternalRevision) =>
           b.internal_revision_number - a.internal_revision_number
         );
+        console.log('🔄 Revisions:', sorted.map((r: InternalRevision) =>
+          `Rev ${r.internal_revision_number} (${r.action_type})`
+        ).join(', '));
         setInternalRevisions(sorted);
+
+        // Check if there's an original_boq in the response
+        if (data.data.original_boq) {
+          console.log('✅ Original BOQ found in API response with',
+            data.data.original_boq.boq_details?.items?.length || 0, 'items');
+          setOriginalBOQ(data.data.original_boq);
+        } else {
+          console.log('⚠️ No original BOQ in response');
+        }
+
         // Auto-select the latest revision for comparison
         if (sorted.length > 0) {
           setSelectedRevisionIndex(0);
@@ -185,9 +205,43 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     }
   };
 
-  const handleEditBOQ = (boq: BOQWithInternalRevisions) => {
-    setEditingBOQ(boq);
-    setShowEditModal(true);
+  const handleEditBOQ = async (boq: BOQWithInternalRevisions) => {
+    try {
+      console.log('🔧 Fetching BOQ for editing:', boq.boq_id);
+      // Fetch the latest BOQ data with full details
+      const response = await fetch(`${API_URL}/boq/${boq.boq_id}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+
+      console.log('🔧 Response status:', response.status);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('🔧 Response data:', data);
+
+      // 🔥 The /boq/{boq_id} endpoint returns BOQ data directly (not wrapped in success/data)
+      // Check if response has error field (error response) or boq_id (success response)
+      if (data.error) {
+        console.error('❌ API returned error:', data.error);
+        toast.error(data.error || 'Failed to load BOQ details');
+      } else if (data.boq_id) {
+        console.log('✅ BOQ data loaded successfully');
+        // The data IS the BOQ data itself, no need to unwrap
+        setEditingBOQ(data);
+        setShowEditModal(true);
+      } else {
+        console.error('❌ Unexpected response format:', data);
+        toast.error('Unexpected response format');
+      }
+    } catch (error) {
+      console.error('❌ Error loading BOQ for editing:', error);
+      toast.error('Failed to load BOQ details: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
   };
 
   const handleSendToTD = async (boq: BOQWithInternalRevisions) => {
@@ -229,13 +283,6 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       toast.error('Failed to send BOQ to TD');
     } finally {
       setIsSendingToTD(false);
-    }
-  };
-
-  const handleSaveEdit = async () => {
-    await loadBOQsWithInternalRevisions();
-    if (selectedBoq) {
-      await loadInternalRevisions(selectedBoq.boq_id);
     }
   };
 
@@ -469,6 +516,131 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     return currentValue !== previousValue;
   };
 
+  // Calculate Grand Total from snapshot items (for display purposes)
+  const calculateGrandTotal = (snapshot: any): number => {
+    if (!snapshot?.items || snapshot.items.length === 0) return 0;
+
+    const allItems = snapshot.items || [];
+
+    // Calculate subtotal (sum of all item client amounts)
+    const subtotal = allItems.reduce((sum: number, item: any) => {
+      // Calculate client amount for each item
+      let itemClientAmount = (item.quantity || 0) * (item.rate || 0);
+      if (itemClientAmount === 0 && item.sub_items && item.sub_items.length > 0) {
+        // If rate is 0, calculate from sub-items
+        itemClientAmount = item.sub_items.reduce((siSum: number, si: any) =>
+          siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+        );
+      }
+      return sum + itemClientAmount;
+    }, 0);
+
+    // Get overall BOQ discount
+    let overallDiscount = 0;
+
+    if (snapshot.discount_percentage && snapshot.discount_percentage > 0) {
+      overallDiscount = (subtotal * snapshot.discount_percentage) / 100;
+    } else if (snapshot.discount_amount && snapshot.discount_amount > 0) {
+      overallDiscount = snapshot.discount_amount;
+    }
+
+    const grandTotal = subtotal - overallDiscount;
+    return grandTotal;
+  };
+
+  // Render Grand Total with Discount Impact
+  const renderGrandTotalSection = (snapshot: any) => {
+    if (!snapshot?.items || snapshot.items.length === 0) return null;
+
+    const allItems = snapshot.items || [];
+
+    // Calculate subtotal (sum of all item client amounts)
+    const subtotal = allItems.reduce((sum: number, item: any) => {
+      // Calculate client amount for each item
+      let itemClientAmount = (item.quantity || 0) * (item.rate || 0);
+      if (itemClientAmount === 0 && item.sub_items && item.sub_items.length > 0) {
+        // If rate is 0, calculate from sub-items
+        itemClientAmount = item.sub_items.reduce((siSum: number, si: any) =>
+          siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+        );
+      }
+      return sum + itemClientAmount;
+    }, 0);
+
+    // Get overall BOQ discount
+    let overallDiscount = 0;
+    let overallDiscountPercentage = 0;
+
+    if (snapshot.discount_percentage && snapshot.discount_percentage > 0) {
+      overallDiscountPercentage = snapshot.discount_percentage;
+      overallDiscount = (subtotal * snapshot.discount_percentage) / 100;
+    } else if (snapshot.discount_amount && snapshot.discount_amount > 0) {
+      overallDiscount = snapshot.discount_amount;
+      overallDiscountPercentage = subtotal > 0 ? (overallDiscount / subtotal) * 100 : 0;
+    }
+
+    const grandTotal = subtotal - overallDiscount;
+
+    // Calculate internal cost for profitability analysis
+    const totalInternalCost = allItems.reduce((sum: number, item: any) => {
+      if (item.sub_items && item.sub_items.length > 0) {
+        return sum + item.sub_items.reduce((siSum: number, si: any) => {
+          const materials = si.materials?.reduce((m: number, mat: any) => m + (mat.total_price || mat.quantity * mat.unit_price || 0), 0) || 0;
+          const labour = si.labour?.reduce((l: number, lab: any) => l + (lab.total_cost || lab.hours * lab.rate_per_hour || 0), 0) || 0;
+          const misc = si.misc_amount || (((si.quantity || 0) * (si.rate || 0)) * (si.misc_percentage || 10) / 100);
+          const planned = si.planned_profit || si.overhead_profit_amount || (((si.quantity || 0) * (si.rate || 0)) * (si.overhead_profit_percentage || 25) / 100);
+          const transport = si.transport_amount || (((si.quantity || 0) * (si.rate || 0)) * (si.transport_percentage || 5) / 100);
+          return siSum + materials + labour + misc + planned + transport;
+        }, 0);
+      }
+      return sum + (item.internal_cost || 0);
+    }, 0);
+
+    const actualProfitAfterDiscount = grandTotal - totalInternalCost;
+
+    return (
+      <div className="mt-4 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-4 border-2 border-green-300">
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm font-medium">
+            <span className="text-gray-800">Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
+            <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
+          </div>
+          {overallDiscount > 0 && (
+            <div className="flex justify-between text-sm text-red-600">
+              <span>Overall Discount ({overallDiscountPercentage.toFixed(1)}%):</span>
+              <span className="font-semibold">- AED {overallDiscount.toFixed(2)}</span>
+            </div>
+          )}
+          <div className="flex justify-between pt-2 border-t-2 border-green-400 text-base font-bold">
+            <span className="text-green-900">
+              Grand Total: <span className="text-xs font-normal text-gray-600">(Excluding VAT)</span>
+            </span>
+            <span className="text-green-700">AED {grandTotal.toFixed(2)}</span>
+          </div>
+
+          {/* Discount Impact on Profitability */}
+          {overallDiscount > 0 && totalInternalCost > 0 && (
+            <div className="mt-3 pt-3 border-t border-green-300 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3">
+              <h6 className="text-xs font-bold text-gray-800 mb-2">📊 Discount Impact on Profitability</h6>
+              <div className="space-y-1.5 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Internal Cost:</span>
+                  <span className="font-semibold text-red-600">AED {totalInternalCost.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between pt-1.5 border-t border-gray-300">
+                  <span className="text-gray-700 font-medium">Actual Profit (After Discount):</span>
+                  <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    AED {actualProfitAfterDiscount.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // Render BOQ Items with comparison highlighting
   const renderBOQItemsComparison = (currentSnapshot: any, previousSnapshot: any | null) => {
     if (!currentSnapshot?.items || currentSnapshot.items.length === 0) {
@@ -481,15 +653,25 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           // Find matching previous item
           const prevItem = previousSnapshot?.items?.find((pi: any) => pi.item_name === item.item_name);
 
+          // Calculate client amount - if rate is 0 (like in Original BOQ), calculate from sub-items
+          let clientAmount = (item.quantity || 0) * (item.rate || 0);
+          if (clientAmount === 0 && item.sub_items && item.sub_items.length > 0) {
+            // Sum all sub-items' base_total (quantity × rate for each sub-item)
+            clientAmount = item.sub_items.reduce((sum: number, subItem: any) => {
+              const subItemClientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+              return sum + subItemClientAmount;
+            }, 0);
+          }
+
           // Use values directly from API response
           const itemTotal = item.sub_items_cost || item.base_cost || 0;
-          const miscellaneousAmount = item.overhead_amount || 0;
-          const overheadProfitAmount = item.profit_margin_amount || 0;
-          const subtotal = item.subtotal || 0;
+          const miscellaneousAmount = item.overhead_amount || (clientAmount * ((item.overhead_percentage || 10) / 100));
+          const overheadProfitAmount = item.profit_margin_amount || (clientAmount * ((item.profit_margin_percentage || 15) / 100));
+          const subtotal = item.subtotal || clientAmount;
           const discountAmount = item.discount_amount || 0;
           const afterDiscount = subtotal - discountAmount;
           const vatAmount = item.vat_amount || 0;
-          const finalTotalPrice = item.selling_price || item.total_selling_price || 0;
+          const finalTotalPrice = item.selling_price || item.total_selling_price || (afterDiscount + vatAmount);
 
           const isNew = !prevItem;
 
@@ -1214,14 +1396,34 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                         const totalActualProfit = subtotal - totalInternalCost;
                         const profitMarginPercentage = subtotal > 0 ? (totalActualProfit / subtotal) * 100 : 0;
 
-                        // Overall discount (from items)
+                        // 🔥 Overall discount - Priority 1: Check for overall BOQ-level discount
                         let overallDiscount = 0;
-                        allItems.forEach((item: any) => {
-                          overallDiscount += (item.discount_amount || 0);
-                        });
                         let overallDiscountPercentage = 0;
-                        if (subtotal > 0 && overallDiscount > 0) {
-                          overallDiscountPercentage = (overallDiscount / subtotal) * 100;
+
+                        if (currentSnapshot.discount_percentage && currentSnapshot.discount_percentage > 0) {
+                          overallDiscountPercentage = currentSnapshot.discount_percentage;
+                          overallDiscount = (subtotal * currentSnapshot.discount_percentage) / 100;
+                          console.log('💰 Overall BOQ Discount:', {
+                            percentage: currentSnapshot.discount_percentage,
+                            amount: overallDiscount,
+                            subtotal
+                          });
+                        } else if (currentSnapshot.discount_amount && currentSnapshot.discount_amount > 0) {
+                          overallDiscount = currentSnapshot.discount_amount;
+                          overallDiscountPercentage = subtotal > 0 ? (overallDiscount / subtotal) * 100 : 0;
+                          console.log('💰 Overall BOQ Discount (amount):', {
+                            amount: overallDiscount,
+                            percentage: overallDiscountPercentage,
+                            subtotal
+                          });
+                        } else {
+                          // Priority 2: Calculate item-level discounts
+                          allItems.forEach((item: any) => {
+                            overallDiscount += (item.discount_amount || 0);
+                          });
+                          if (subtotal > 0 && overallDiscount > 0) {
+                            overallDiscountPercentage = (overallDiscount / subtotal) * 100;
+                          }
                         }
 
                         // Grand total
@@ -1530,11 +1732,72 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                 <ModernLoadingSpinners size="md" />
                 <p className="mt-4 text-gray-600">Loading revisions...</p>
               </div>
-            ) : internalRevisions.length > 1 ? (
+            ) : internalRevisions.length > 0 ? (
               <div className="p-4 space-y-3 max-h-[600px] overflow-y-auto">
-                {internalRevisions.slice(1).map((revision, index) => {
+                {/* Show Original BOQ first if it exists */}
+                {originalBOQ && originalBOQ.boq_details && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white border-2 border-blue-300 rounded-lg overflow-hidden"
+                  >
+                    {/* Header for Original BOQ */}
+                    <div className="p-3 border-b bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">📄</span>
+                          <div>
+                            <div className="font-bold text-sm text-blue-900">Original BOQ</div>
+                            <div className="text-xs text-blue-600">Before estimator edits</div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-lg font-bold text-blue-900">
+                            {formatCurrency(originalBOQ.boq_details.total_cost || calculateGrandTotal(originalBOQ.boq_details))}
+                          </div>
+                          <div className="text-xs text-blue-600">
+                            {originalBOQ.boq_details.items?.length || 0} items
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expandable Details for Original BOQ */}
+                    {expandedRevisionIndices.has(-1) && originalBOQ.boq_details.items && (
+                      <div className="p-4 space-y-3 max-h-[500px] overflow-y-auto bg-gradient-to-br from-blue-50 to-blue-100">
+                        <div className="text-xs text-blue-700 mb-2">
+                          <div className="flex justify-between mb-1">
+                            <span>Status: Before Estimator Edits</span>
+                            {originalBOQ.boq_details.discount_percentage > 0 && (
+                              <span>Overall Discount: {originalBOQ.boq_details.discount_percentage}%</span>
+                            )}
+                          </div>
+                        </div>
+                        {renderBOQItemsComparison(originalBOQ.boq_details, null)}
+                        {renderGrandTotalSection(originalBOQ.boq_details)}
+                      </div>
+                    )}
+
+                    {/* Action Button - Show/Hide Details */}
+                    <div className="p-2 bg-blue-50 border-t border-blue-200">
+                      <button
+                        onClick={() => toggleRevisionExpansion(-1)}
+                        className="w-full text-xs px-3 py-2 bg-white border border-blue-300 rounded hover:bg-blue-100 transition-colors font-medium text-blue-900"
+                      >
+                        {expandedRevisionIndices.has(-1) ? '▲ Hide Details' : '▼ Show Details'}
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Show all previous internal revisions (excluding the current one at index 0) */}
+                {(() => {
+                  const prevRevisions = internalRevisions.slice(1).reverse();
+                  return prevRevisions;
+                })().map((revision, displayIndex) => {
+                  const actualIndex = displayIndex + 1; // Index in expandedRevisionIndices
                   const revisionTotal = revision.changes_summary ? calculateTotalFromSnapshot(revision.changes_summary) : 0;
-                  const isExpanded = expandedRevisionIndices.has(index);
+                  const isExpanded = expandedRevisionIndices.has(actualIndex);
                   const change = calculateChange(currentTotal, revisionTotal);
 
                   return (
@@ -1542,7 +1805,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                       key={revision.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.05 }}
+                      transition={{ delay: displayIndex * 0.05 }}
                       className="bg-white border border-gray-200 rounded-lg overflow-hidden"
                     >
                       {/* Header - Always visible */}
@@ -1593,14 +1856,15 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                               })}</span>
                             </div>
                           </div>
-                          {renderBOQItemsComparison(revision.changes_summary, internalRevisions[index + 2]?.changes_summary || null)}
+                          {renderBOQItemsComparison(revision.changes_summary, null)}
+                          {renderGrandTotalSection(revision.changes_summary)}
                         </div>
                       )}
 
                       {/* Action Button - Show/Hide Details */}
                       <div className="p-2 bg-gray-50 border-t border-gray-200">
                         <button
-                          onClick={() => toggleRevisionExpansion(index)}
+                          onClick={() => toggleRevisionExpansion(actualIndex)}
                           className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded hover:bg-gray-100 transition-colors font-medium"
                         >
                           {isExpanded ? '▲ Hide Details' : '▼ Show Details'}
@@ -1632,18 +1896,28 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
         </div>
       )}
 
-      {/* BOQ Edit Modal */}
+      {/* BOQ Edit Modal - Using Latest BOQCreationForm */}
       {editingBOQ && (
-        <BOQEditModal
+        <BOQCreationForm
           isOpen={showEditModal}
           onClose={() => {
             setShowEditModal(false);
             setEditingBOQ(null);
           }}
-          boq={editingBOQ as any}
-          onSave={handleSaveEdit}
-          isRevision={false}
-          isInternalRevision={true}
+          editMode={true}
+          existingBoqData={editingBOQ}
+          isInternalRevisionMode={true}
+          onSubmit={(boqId) => {
+            console.log('Internal revision created:', boqId);
+            toast.success('Internal revision created successfully');
+            setShowEditModal(false);
+            setEditingBOQ(null);
+            // Reload the internal revisions to show the new changes
+            if (selectedBoq) {
+              loadInternalRevisions(selectedBoq.boq_id);
+              loadBOQsWithInternalRevisions();
+            }
+          }}
         />
       )}
 

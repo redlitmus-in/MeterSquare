@@ -15,6 +15,8 @@ from sqlalchemy.orm.attributes import flag_modified
 from datetime import datetime
 import json
 
+log = get_logger()
+
 def get_all_internal_revision():
     """
     Get all BOQs with their internal revisions
@@ -67,6 +69,48 @@ def get_all_internal_revision():
             if len(revisions_list) == 0:
                 continue
 
+            # 🔥 Get the latest internal revision's total_cost for display
+            # Internal revisions are already sorted by internal_revision_number desc
+            latest_revision_total_cost = 0
+            latest_revision_snapshot = None
+
+            if internal_revisions and len(internal_revisions) > 0:
+                # Get the first revision (highest internal_revision_number, excluding ORIGINAL_BOQ)
+                for revision in internal_revisions:
+                    if revision.action_type != 'ORIGINAL_BOQ' and revision.changes_summary:
+                        latest_revision_snapshot = revision.changes_summary
+                        latest_revision_total_cost = revision.changes_summary.get('total_cost', 0)
+                        log.info(f"📊 BOQ {boq.boq_id}: Found latest revision total_cost from field = {latest_revision_total_cost}")
+
+                        # 🔥 If total_cost is 0, try to calculate from items
+                        if latest_revision_total_cost == 0 and latest_revision_snapshot.get('items'):
+                            items = latest_revision_snapshot.get('items', [])
+                            subtotal = 0
+                            for item in items:
+                                item_amount = (item.get('quantity', 0) or 0) * (item.get('rate', 0) or 0)
+                                # If item rate is 0, calculate from sub_items
+                                if item_amount == 0 and item.get('sub_items'):
+                                    for sub_item in item.get('sub_items', []):
+                                        item_amount += (sub_item.get('quantity', 0) or 0) * (sub_item.get('rate', 0) or 0)
+                                subtotal += item_amount
+
+                            # Apply discount
+                            discount_percentage = latest_revision_snapshot.get('discount_percentage', 0) or 0
+                            discount_amount = latest_revision_snapshot.get('discount_amount', 0) or 0
+
+                            if discount_percentage > 0:
+                                discount_amount = (subtotal * discount_percentage) / 100
+
+                            latest_revision_total_cost = subtotal - discount_amount
+                            log.info(f"📊 BOQ {boq.boq_id}: Calculated total_cost from items = {latest_revision_total_cost} (subtotal={subtotal}, discount={discount_amount})")
+
+                        break
+
+                # If no non-original revision found, use boq_details.total_cost
+                if latest_revision_total_cost == 0:
+                    latest_revision_total_cost = boq_details.total_cost if boq_details else 0
+                    log.info(f"📊 BOQ {boq.boq_id}: Using boq_details.total_cost = {latest_revision_total_cost}")
+
             # Build BOQ data with complete information
             boq_data = {
                 "boq_id": boq.boq_id,
@@ -77,8 +121,8 @@ def get_all_internal_revision():
                 "status": boq.status,
                 "revision_number": boq.revision_number,
                 "internal_revision_number": boq.internal_revision_number,
-                "total_cost": boq_details.total_cost if boq_details else 0,
-                "selling_price": boq_details.total_cost if boq_details else 0,
+                "total_cost": latest_revision_total_cost,  # 🔥 Use latest internal revision's total_cost
+                "selling_price": latest_revision_total_cost,  # 🔥 Use latest internal revision's total_cost
                 "created_at": boq.created_at.isoformat() if boq.created_at else None,
                 "internal_revisions": revisions_list,
                 "revision_count": len(revisions_list),
@@ -132,8 +176,10 @@ def get_internal_revisions(boq_id):
         ).order_by(BOQInternalRevision.internal_revision_number.asc()).all()
 
         internal_revisions = []
+        original_boq = None
+
         for rev in revisions:
-            internal_revisions.append({
+            revision_data = {
                 "id": rev.id,
                 "boq_id": rev.boq_id,
                 "internal_revision_number": rev.internal_revision_number,
@@ -147,7 +193,18 @@ def get_internal_revisions(boq_id):
                 "rejection_reason": rev.rejection_reason,
                 "approval_comments": rev.approval_comments,
                 "created_at": rev.created_at.isoformat() if rev.created_at else None
-            })
+            }
+
+            # 🔥 If this is the Original BOQ (revision 0), store it separately
+            if rev.internal_revision_number == 0 and rev.action_type == 'ORIGINAL_BOQ':
+                original_boq = {
+                    "boq_details": rev.changes_summary,
+                    "internal_revision_number": 0,
+                    "action_type": "ORIGINAL_BOQ",
+                    "created_at": rev.created_at.isoformat() if rev.created_at else None
+                }
+
+            internal_revisions.append(revision_data)
 
         return jsonify({
             "success": True,
@@ -157,6 +214,7 @@ def get_internal_revisions(boq_id):
                 "current_internal_revision": current_internal_revision,
                 "has_internal_revisions": boq.has_internal_revisions or bool(internal_revisions),
                 "internal_revisions": internal_revisions,
+                "original_boq": original_boq,  # 🔥 Include original BOQ in response
                 "total_count": len(internal_revisions)
             }
         }), 200
@@ -226,7 +284,42 @@ def update_internal_revision_boq(boq_id):
         # Check if there are any existing internal revisions for this BOQ
         existing_internal_revisions_count = BOQInternalRevision.query.filter_by(boq_id=boq_id).count()
 
-        # Set internal revision number based on existing count
+        # 🔥 If this is the FIRST internal revision, store the "before" state as "Original BOQ" (revision 0)
+        if existing_internal_revisions_count == 0:
+            log.info(f"📝 Creating Original BOQ snapshot (before first edit) for BOQ {boq_id}")
+            # Capture the current BOQ state BEFORE any edits
+            before_changes_snapshot = {
+                "boq_id": boq.boq_id,
+                "boq_name": boq.boq_name,
+                "status": current_status,
+                "revision_number": boq.revision_number,
+                "internal_revision_number": 0,
+                "total_cost": boq_details.total_cost if boq_details else 0,
+                # 🔥 Capture overall discount at BOQ level
+                "discount_percentage": boq_details.boq_details.get("discount_percentage", 0) if boq_details and boq_details.boq_details else 0,
+                "discount_amount": boq_details.boq_details.get("discount_amount", 0) if boq_details and boq_details.boq_details else 0,
+                "items": boq_details.boq_details.get("items", []) if boq_details and boq_details.boq_details else [],
+                "preliminaries": boq_details.boq_details.get("preliminaries", {}) if boq_details and boq_details.boq_details else {},
+                "combined_summary": boq_details.boq_details.get("combined_summary", {}) if boq_details and boq_details.boq_details else {},
+                "existing_purchase": boq_details.boq_details.get("existing_purchase", {}) if boq_details and boq_details.boq_details else {},
+                "new_purchase": boq_details.boq_details.get("new_purchase", {}) if boq_details and boq_details.boq_details else {},
+            }
+
+            original_boq_revision = BOQInternalRevision(
+                boq_id=boq_id,
+                internal_revision_number=0,  # Original BOQ is revision 0
+                action_type='ORIGINAL_BOQ',
+                actor_role='system',
+                actor_name='System',
+                actor_user_id=None,
+                status_before=current_status,
+                status_after=current_status,
+                changes_summary=before_changes_snapshot  # Store the "before" state
+            )
+            db.session.add(original_boq_revision)
+            log.info(f"✅ Original BOQ revision stored with {len(before_changes_snapshot.get('items', []))} items")
+
+        # Set internal revision number based on existing count (add 1 for the new edit)
         new_internal_rev = existing_internal_revisions_count + 1
         boq.internal_revision_number = new_internal_rev
         boq.has_internal_revisions = True
@@ -242,6 +335,9 @@ def update_internal_revision_boq(boq_id):
             "total_items": total_items,
             "total_materials": total_materials,
             "total_labour": total_labour,
+            # 🔥 Store overall discount from payload
+            "discount_percentage": discount_percentage,
+            "discount_amount": discount_amount,
             "preliminaries": data.get("preliminaries", {}),
             "items": data.get("items", []),  # Store items AS-IS from payload
             "combined_summary": combined_summary,  # Store the complete summary as-is
@@ -261,6 +357,9 @@ def update_internal_revision_boq(boq_id):
             "items": data.get("items", []),  # Store items at root level for get_boq compatibility
             "preliminaries": data.get("preliminaries", {}),
             "combined_summary": combined_summary,  # Store complete summary as-is
+            # 🔥 Store overall discount at BOQ level
+            "discount_percentage": discount_percentage,
+            "discount_amount": discount_amount,
             "existing_purchase": data.get("existing_purchase", {}),
             "new_purchase": data.get("new_purchase", {})
         }

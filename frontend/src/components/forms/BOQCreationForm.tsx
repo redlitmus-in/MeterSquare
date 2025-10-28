@@ -110,6 +110,7 @@ interface BOQCreationFormProps {
   existingBoqId?: number; // BOQ ID to add items to
   editMode?: boolean; // For editing existing BOQ
   existingBoqData?: any; // Existing BOQ data for edit mode
+  isInternalRevisionMode?: boolean; // For Internal Revisions tab - always use /update_internal_boq endpoint
   isRevision?: boolean; // For creating revision
 }
 
@@ -190,6 +191,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   existingBoqId,
   editMode = false,
   existingBoqData,
+  isInternalRevisionMode = false,
   isRevision = false
 }) => {
   const [boqName, setBoqName] = useState('');
@@ -1479,14 +1481,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           })
         };
 
-        // Determine which API endpoint to use based on BOQ status
+        // Determine which API endpoint to use
+        // Priority 1: If isInternalRevisionMode prop is set (from Internal Revisions tab)
+        // Priority 2: If BOQ status is 'rejected' (from regular estimator workflow)
+        // Otherwise: Use regular update endpoint
         const boqStatus = existingBoqData.status?.toLowerCase();
-        const apiEndpoint = boqStatus === 'rejected'
+        const useInternalRevisionEndpoint = isInternalRevisionMode || boqStatus === 'rejected';
+        const apiEndpoint = useInternalRevisionEndpoint
           ? `${API_URL}/update_internal_boq/${existingBoqData.boq_id}`
           : `${API_URL}/boq/update_boq/${existingBoqData.boq_id}`;
 
         console.log('=== BOQCreationForm Edit Mode ===');
         console.log('BOQ Status:', existingBoqData.status, '(lowercase:', boqStatus, ')');
+        console.log('Is Internal Revision Mode:', isInternalRevisionMode);
+        console.log('Use Internal Revision Endpoint:', useInternalRevisionEndpoint);
         console.log('API Endpoint:', apiEndpoint);
 
         const response = await fetch(apiEndpoint, {
