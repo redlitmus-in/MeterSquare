@@ -57,9 +57,16 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
   // Filter BOQs for Client Revisions tab:
   // Show ALL BOQs with revision_number > 0 (regardless of status)
-  const boqsWithRevisions = boqList.filter(boq => {
-    return (boq.revision_number || 0) > 0;
-  });
+  // Sort by most recent first (created_at descending)
+  const boqsWithRevisions = boqList
+    .filter(boq => {
+      return (boq.revision_number || 0) > 0;
+    })
+    .sort((a, b) => {
+      const dateA = new Date(a.created_at || a.updated_at || 0).getTime();
+      const dateB = new Date(b.created_at || b.updated_at || 0).getTime();
+      return dateB - dateA; // Most recent first
+    });
 
   // Filter based on search
   const filteredBOQs = boqsWithRevisions.filter(boq =>
@@ -315,67 +322,8 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
           <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200">
         <h3 className="text-lg font-bold text-gray-900 mb-4">Select Project to View Revisions</h3>
 
-        {/* Recent Projects - Always visible (4-5 most recent) */}
-        {!selectedBoq && boqsWithRevisions.length > 0 && (
-          <div className="mb-4 space-y-2">
-            <p className="text-sm font-semibold text-gray-700 mb-3">Recent Projects:</p>
-            <div className="space-y-2">
-              {boqsWithRevisions.slice(0, 5).map((boq) => (
-                <button
-                  key={boq.boq_id}
-                  onClick={() => {
-                    setSelectedBoq(boq);
-                    setSearchTerm('');
-                    setShowDropdown(false);
-                  }}
-                  className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border border-gray-200 rounded-lg"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <div className="font-semibold text-gray-900">{boq.title}</div>
-                        {/* Status Badge */}
-                        {(() => {
-                          const status = boq.status?.toLowerCase() || '';
-                          if (status === 'approved' || status === 'revision_approved') {
-                            return (
-                              <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-medium">
-                                ✓ Ready
-                              </span>
-                            );
-                          } else if (status === 'pending_approval' || status === 'pending_revision' || status === 'pending') {
-                            return (
-                              <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-medium">
-                                ⏳ Pending
-                              </span>
-                            );
-                          }
-                          return null;
-                        })()}
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        {boq.project?.name} • {boq.project?.client}
-                      </div>
-                    </div>
-                    <div className="text-right ml-4">
-                      <div className={`text-sm font-semibold px-2 py-1 rounded inline-block ${
-                        getDisplayRevisionNumber(boq) >= 7 ? 'bg-red-100 text-red-700' :
-                        getDisplayRevisionNumber(boq) >= 4 ? 'bg-orange-100 text-orange-700' :
-                        getDisplayRevisionNumber(boq) >= 1 ? 'bg-blue-100 text-blue-700' :
-                        'bg-gray-100 text-gray-700'
-                      }`}>
-                        Rev {getDisplayRevisionNumber(boq)}
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Search/Select Dropdown */}
-        <div className="relative" ref={dropdownRef}>
+        {/* Search/Select Dropdown - Now at TOP */}
+        <div className="relative mb-4" ref={dropdownRef}>
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
             <Search className="h-5 w-5 text-gray-400" />
           </div>
@@ -461,6 +409,65 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
           )}
         </div>
 
+        {/* Recent Projects - Always visible (4-5 most recent) */}
+        {!selectedBoq && boqsWithRevisions.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <p className="text-sm font-semibold text-gray-700 mb-3">Recent Projects:</p>
+            <div className="space-y-2">
+              {boqsWithRevisions.slice(0, 5).map((boq) => (
+                <button
+                  key={boq.boq_id}
+                  onClick={() => {
+                    setSelectedBoq(boq);
+                    setSearchTerm('');
+                    setShowDropdown(false);
+                  }}
+                  className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border border-gray-200 rounded-lg"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="font-semibold text-gray-900">{boq.title}</div>
+                        {/* Status Badge */}
+                        {(() => {
+                          const status = boq.status?.toLowerCase() || '';
+                          if (status === 'approved' || status === 'revision_approved') {
+                            return (
+                              <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-medium">
+                                ✓ Ready
+                              </span>
+                            );
+                          } else if (status === 'pending_approval' || status === 'pending_revision' || status === 'pending') {
+                            return (
+                              <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-medium">
+                                ⏳ Pending
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        {boq.project?.name} • {boq.project?.client}
+                      </div>
+                    </div>
+                    <div className="text-right ml-4">
+                      <div className={`text-sm font-semibold px-2 py-1 rounded inline-block ${
+                        getDisplayRevisionNumber(boq) >= 7 ? 'bg-red-100 text-red-700' :
+                        getDisplayRevisionNumber(boq) >= 4 ? 'bg-orange-100 text-orange-700' :
+                        getDisplayRevisionNumber(boq) >= 1 ? 'bg-blue-100 text-blue-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        Rev {getDisplayRevisionNumber(boq)}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Selected Project Info */}
         {selectedBoq && !searchTerm && (
           <div className="mt-4 p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg border border-blue-200">
@@ -539,16 +546,47 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                   const prevItem = prevRevision ? findPreviousItem(item.item_name, prevRevision) : null;
 
                   return (
-                    <div key={index} className="bg-white border border-gray-200 rounded-lg p-4">
-                      <h5 className="font-semibold text-gray-900 mb-2">{item.item_name}</h5>
-                      {item.description && (
-                        <p className="text-sm text-gray-600 mb-3">{item.description}</p>
-                      )}
+                    <div key={index} className="border-2 rounded-lg overflow-hidden mb-4 bg-white border-blue-300">
+                      {/* Item Header - More Prominent */}
+                      <div className="px-4 py-3 bg-blue-50 border-b-2 border-blue-300">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <h4 className="font-bold text-gray-900 text-base flex items-center gap-2">
+                              🔷 {item.item_name}
+                              {item.work_type && (
+                                <span className="text-xs bg-purple-200 text-purple-800 px-2 py-1 rounded font-semibold">
+                                  {item.work_type}
+                                </span>
+                              )}
+                            </h4>
+                            {/* Show main item quantity and unit */}
+                            {item.quantity && item.unit && (
+                              <p className="text-sm text-gray-700 mt-1 font-medium">
+                                Qty: {item.quantity} {item.unit}
+                                {item.rate && item.rate > 0 && ` × Rate: AED ${item.rate.toFixed(2)}`}
+                                {item.item_total && item.item_total > 0 && (
+                                  <span className="ml-2 font-bold text-blue-800">
+                                    = AED {item.item_total.toFixed(2)}
+                                  </span>
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Item Body */}
+                      <div className="p-4">
+                        {item.description && (
+                          <p className="text-sm text-gray-700 mb-3 bg-gray-50 p-2 rounded border-l-4 border-gray-400">{item.description}</p>
+                        )}
 
                       {/* Sub Items */}
                       {item.sub_items && item.sub_items.length > 0 && (
-                        <div className="mb-3 space-y-2">
-                          <p className="text-xs font-semibold text-gray-700 mb-2">📋 Sub Items:</p>
+                        <div className="mb-4 space-y-3">
+                          <h5 className="text-sm font-bold text-indigo-900 mb-3 pb-2 border-b-2 border-indigo-200 bg-indigo-50 px-3 py-2 rounded-t">
+                            📋 Sub Items ({item.sub_items.length})
+                          </h5>
                           {item.sub_items.map((subItem: any, subIdx: number) => {
                             // Find previous sub-item for comparison
                             const prevSubItem = prevItem?.sub_items?.find((ps: any) => ps.sub_item_name === subItem.sub_item_name);
@@ -572,52 +610,95 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
                                 {/* Sub Item Materials */}
                                 {subItem.materials && subItem.materials.length > 0 && (
-                                  <div className="mb-2">
-                                    <p className="text-xs font-semibold text-gray-700 mb-1">📦 Materials:</p>
-                                    <div className="space-y-1">
-                                      {subItem.materials.map((mat: any, matIdx: number) => {
-                                        const prevMat = prevSubItem?.materials?.find((pm: any) => pm.material_name === mat.material_name);
-                                        const quantityChanged = prevMat ? hasChanged(mat.quantity, prevMat.quantity) : !prevMat;
-                                        const priceChanged = prevMat ? hasChanged(mat.quantity * mat.unit_price, prevMat.quantity * prevMat.unit_price) : !prevMat;
-                                        const isNew = !prevMat;
+                                  <div className="mb-3 bg-red-50/20 rounded-lg p-3 border border-red-300 hover:border-red-400 transition-all duration-200">
+                                    <h5 className="text-xs font-bold text-blue-900 mb-2 flex items-center gap-2">
+                                      📦 Raw Materials
+                                    </h5>
+                                    <div className="bg-white rounded border border-blue-200 overflow-hidden">
+                                      <table className="w-full text-xs">
+                                        <thead className="bg-blue-100 border-b border-blue-200">
+                                          <tr>
+                                            <th className="text-left py-1.5 px-2 font-semibold text-blue-900">Material</th>
+                                            <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Qty</th>
+                                            <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Unit</th>
+                                            <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Rate</th>
+                                            <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Total</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {subItem.materials.map((mat: any, matIdx: number) => {
+                                            const prevMat = prevSubItem?.materials?.find((pm: any) => pm.material_name === mat.material_name);
+                                            const quantityChanged = prevMat ? hasChanged(mat.quantity, prevMat.quantity) : !prevMat;
+                                            const priceChanged = prevMat ? hasChanged(mat.quantity * mat.unit_price, prevMat.quantity * prevMat.unit_price) : !prevMat;
+                                            const isNew = !prevMat;
+                                            const materialTotal = mat.total_price || (mat.quantity * mat.unit_price);
 
-                                        return (
-                                          <div key={matIdx} className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${isNew ? 'bg-yellow-100' : 'bg-white'}`}>
-                                            <span className={quantityChanged ? 'bg-yellow-200 px-1 rounded' : ''}>
-                                              {mat.material_name} ({mat.quantity} {mat.unit})
-                                            </span>
-                                            <span className={`font-semibold ${priceChanged ? 'bg-yellow-200 px-1 rounded' : ''}`}>
-                                              AED {(mat.quantity * mat.unit_price).toFixed(2)}
-                                            </span>
-                                          </div>
-                                        );
-                                      })}
+                                            return (
+                                              <tr key={matIdx} className={`border-b border-blue-100 ${isNew ? 'bg-yellow-100' : matIdx % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
+                                                <td className={`py-1.5 px-2 text-gray-900 ${quantityChanged ? 'bg-yellow-200' : ''}`}>
+                                                  {mat.material_name}
+                                                  {mat.description && <div className="text-xs text-gray-500">{mat.description}</div>}
+                                                </td>
+                                                <td className={`py-1.5 px-2 text-center text-gray-700 ${quantityChanged ? 'bg-yellow-200' : ''}`}>{mat.quantity}</td>
+                                                <td className="py-1.5 px-2 text-center text-gray-700 uppercase">{mat.unit}</td>
+                                                <td className="py-1.5 px-2 text-right text-gray-700">AED {mat.unit_price?.toFixed(2) || '0.00'}</td>
+                                                <td className={`py-1.5 px-2 text-right font-semibold text-blue-700 ${priceChanged ? 'bg-yellow-200' : ''}`}>AED {materialTotal.toFixed(2)}</td>
+                                              </tr>
+                                            );
+                                          })}
+                                          <tr className="bg-blue-200 border-t-2 border-blue-400">
+                                            <td colSpan={4} className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">Materials Total:</td>
+                                            <td className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">
+                                              AED {subItem.materials.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0).toFixed(2)}
+                                            </td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
                                     </div>
                                   </div>
                                 )}
 
                                 {/* Sub Item Labour */}
                                 {subItem.labour && subItem.labour.length > 0 && (
-                                  <div>
-                                    <p className="text-xs font-semibold text-gray-700 mb-1">👷 Labour:</p>
-                                    <div className="space-y-1">
-                                      {subItem.labour.map((lab: any, labIdx: number) => {
-                                        const prevLab = prevSubItem?.labour?.find((pl: any) => pl.labour_role === lab.labour_role);
-                                        const hoursChanged = prevLab ? hasChanged(lab.hours, prevLab.hours) : !prevLab;
-                                        const costChanged = prevLab ? hasChanged(lab.hours * lab.rate_per_hour, prevLab.hours * prevLab.rate_per_hour) : !prevLab;
-                                        const isNew = !prevLab;
+                                  <div className="mb-3 bg-red-50/20 rounded-lg p-3 border border-red-300 hover:border-red-400 transition-all duration-200">
+                                    <h5 className="text-xs font-bold text-orange-900 mb-2 flex items-center gap-2">
+                                      👷 Labour
+                                    </h5>
+                                    <div className="bg-white rounded border border-orange-200 overflow-hidden">
+                                      <table className="w-full text-xs">
+                                        <thead className="bg-orange-100 border-b border-orange-200">
+                                          <tr>
+                                            <th className="text-left py-1.5 px-2 font-semibold text-orange-900">Role</th>
+                                            <th className="text-center py-1.5 px-2 font-semibold text-orange-900">Hours</th>
+                                            <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Rate/hr</th>
+                                            <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Total</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {subItem.labour.map((lab: any, labIdx: number) => {
+                                            const prevLab = prevSubItem?.labour?.find((pl: any) => pl.labour_role === lab.labour_role);
+                                            const hoursChanged = prevLab ? hasChanged(lab.hours, prevLab.hours) : !prevLab;
+                                            const costChanged = prevLab ? hasChanged(lab.hours * lab.rate_per_hour, prevLab.hours * prevLab.rate_per_hour) : !prevLab;
+                                            const isNew = !prevLab;
+                                            const labourTotal = lab.total_cost || (lab.hours * lab.rate_per_hour);
 
-                                        return (
-                                          <div key={labIdx} className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${isNew ? 'bg-yellow-100' : 'bg-white'}`}>
-                                            <span className={hoursChanged ? 'bg-yellow-200 px-1 rounded' : ''}>
-                                              {lab.labour_role} ({lab.hours}h @ AED {lab.rate_per_hour}/h)
-                                            </span>
-                                            <span className={`font-semibold ${costChanged ? 'bg-yellow-200 px-1 rounded' : ''}`}>
-                                              AED {(lab.hours * lab.rate_per_hour).toFixed(2)}
-                                            </span>
-                                          </div>
-                                        );
-                                      })}
+                                            return (
+                                              <tr key={labIdx} className={`border-b border-orange-100 ${isNew ? 'bg-yellow-100' : labIdx % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
+                                                <td className={`py-1.5 px-2 text-gray-900 ${hoursChanged ? 'bg-yellow-200' : ''}`}>{lab.labour_role}</td>
+                                                <td className={`py-1.5 px-2 text-center text-gray-700 ${hoursChanged ? 'bg-yellow-200' : ''}`}>{lab.hours} hrs</td>
+                                                <td className="py-1.5 px-2 text-right text-gray-700">AED {lab.rate_per_hour?.toFixed(2) || '0.00'}</td>
+                                                <td className={`py-1.5 px-2 text-right font-semibold text-orange-700 ${costChanged ? 'bg-yellow-200' : ''}`}>AED {labourTotal.toFixed(2)}</td>
+                                              </tr>
+                                            );
+                                          })}
+                                          <tr className="bg-orange-200 border-t-2 border-orange-400">
+                                            <td colSpan={3} className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">Labour Total:</td>
+                                            <td className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">
+                                              AED {subItem.labour.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0).toFixed(2)}
+                                            </td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
                                     </div>
                                   </div>
                                 )}
@@ -740,9 +821,149 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                           );
                         })()}
                       </div>
+                      </div>
                     </div>
                   );
                 })}
+
+                {/* Grand Total with Discount Impact */}
+                {currentRevisionData.boq_details?.items && currentRevisionData.boq_details.items.length > 0 && (
+                  <div className="mt-6 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-5 border-2 border-green-300 mx-4 mb-4">
+                    <div className="space-y-3">
+                      {(() => {
+                        const allItems = currentRevisionData.boq_details.items || [];
+
+                        // Calculate subtotal (sum of all sub-item client amounts)
+                        const subtotal = allItems.reduce((sum: number, item: any) => {
+                          if (item.sub_items && item.sub_items.length > 0) {
+                            return sum + item.sub_items.reduce((siSum: number, si: any) =>
+                              siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+                            );
+                          }
+                          return sum + (item.client_cost || 0);
+                        }, 0);
+
+                        // Calculate total internal cost
+                        const totalInternalCost = allItems.reduce((sum: number, item: any) => {
+                          if (item.sub_items && item.sub_items.length > 0) {
+                            return sum + item.sub_items.reduce((siSum: number, si: any) => {
+                              const matCost = si.materials?.reduce((m: number, mat: any) => m + (mat.total_price || mat.quantity * mat.unit_price), 0) || 0;
+                              const labCost = si.labour?.reduce((l: number, lab: any) => l + (lab.total_cost || lab.hours * lab.rate_per_hour), 0) || 0;
+                              const clientAmt = (si.quantity || 0) * (si.rate || 0);
+                              const miscAmt = clientAmt * ((si.misc_percentage || 10) / 100);
+                              const opAmt = clientAmt * ((si.overhead_profit_percentage || 25) / 100);
+                              const transportAmt = clientAmt * ((si.transport_percentage || 5) / 100);
+                              return siSum + matCost + labCost + miscAmt + opAmt + transportAmt;
+                            }, 0);
+                          }
+                          return sum + (item.internal_cost || 0);
+                        }, 0);
+
+                        // Calculate profits
+                        const totalActualProfit = subtotal - totalInternalCost;
+                        const profitMarginPercentage = subtotal > 0 ? (totalActualProfit / subtotal) * 100 : 0;
+
+                        // Overall discount (from items)
+                        let overallDiscount = 0;
+                        allItems.forEach((item: any) => {
+                          overallDiscount += (item.discount_amount || 0);
+                        });
+                        let overallDiscountPercentage = 0;
+                        if (subtotal > 0 && overallDiscount > 0) {
+                          overallDiscountPercentage = (overallDiscount / subtotal) * 100;
+                        }
+
+                        // Grand total
+                        const grandTotal = subtotal - overallDiscount;
+
+                        // Calculate profit after discount
+                        const actualProfitAfterDiscount = grandTotal - totalInternalCost;
+                        const profitMarginAfterDiscount = grandTotal > 0 ? (actualProfitAfterDiscount / grandTotal) * 100 : 0;
+
+                        return (
+                          <>
+                            <div className="flex justify-between text-base font-medium">
+                              <span className="text-gray-800">Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
+                              <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
+                            </div>
+                            {overallDiscount > 0 && (
+                              <>
+                                <div className="flex justify-between text-sm text-red-600">
+                                  <span>Discount ({overallDiscountPercentage.toFixed(1)}%):</span>
+                                  <span className="font-semibold">- AED {overallDiscount.toFixed(2)}</span>
+                                </div>
+                              </>
+                            )}
+                            <div className="flex justify-between pt-3 border-t-2 border-green-400 text-lg font-bold">
+                              <span className="text-green-900">
+                                Grand Total: <span className="text-xs font-normal text-gray-600">(Excluding VAT)</span>
+                              </span>
+                              <span className="text-green-700">AED {grandTotal.toFixed(2)}</span>
+                            </div>
+
+                            {/* Show discount impact on profitability */}
+                            {overallDiscount > 0 && (
+                              <div className="mt-4 pt-4 border-t border-green-300 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3">
+                                <h6 className="text-xs font-bold text-gray-800 mb-3 flex items-center gap-2">
+                                  📊 Discount Impact on Profitability
+                                </h6>
+                                <div className="space-y-2 text-xs">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-gray-600">Client Cost:</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-gray-500 line-through">
+                                        AED {subtotal.toFixed(2)}
+                                      </span>
+                                      <span className="text-blue-700 font-bold">
+                                        → AED {grandTotal.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-gray-600">Internal Cost:</span>
+                                    <span className="font-semibold text-red-600">
+                                      AED {totalInternalCost.toFixed(2)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between items-center pt-2 border-t border-gray-300">
+                                    <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-gray-500 line-through">
+                                        AED {totalActualProfit.toFixed(2)}
+                                      </span>
+                                      <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                                        → AED {actualProfitAfterDiscount.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-between items-center bg-white/60 rounded px-2 py-1">
+                                    <span className="text-gray-700 font-medium">Profit Margin:</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-gray-500 text-xs">
+                                        {profitMarginPercentage.toFixed(1)}%
+                                      </span>
+                                      <span className={`font-bold ${profitMarginAfterDiscount >= 15 ? 'text-emerald-700' : profitMarginAfterDiscount >= 10 ? 'text-orange-600' : 'text-red-600'}`}>
+                                        → {profitMarginAfterDiscount.toFixed(1)}%
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {profitMarginAfterDiscount < 15 && (
+                                    <div className="mt-2 p-2 bg-orange-100 border border-orange-300 rounded text-orange-800 flex items-start gap-2">
+                                      ⚠️
+                                      <span className="text-xs">
+                                        <strong>Warning:</strong> Profit margin is below recommended 15%. This discount significantly reduces profitability.
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="p-8 text-center text-gray-500">No data available</div>

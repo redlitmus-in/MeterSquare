@@ -58,6 +58,9 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   const [isLoadingRevisions, setIsLoadingRevisions] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRevisionIndex, setSelectedRevisionIndex] = useState<number | null>(null);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [expandedRevisionIndices, setExpandedRevisionIndices] = useState<Set<number>>(new Set());
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Edit and Send to TD states
   const [showEditModal, setShowEditModal] = useState(false);
@@ -78,6 +81,23 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   useEffect(() => {
     loadBOQsWithInternalRevisions();
   }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+
+    if (showDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showDropdown]);
 
   useEffect(() => {
     // Skip if this is triggered by initial BOQ selection from loadBOQsWithInternalRevisions
@@ -110,9 +130,15 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       const data = await response.json();
 
       if (data.success) {
-        setBOQs(data.data);
-        if (data.data.length > 0 && !selectedBoq) {
-          setSelectedBoq(data.data[0]);
+        // Sort by most recent first (created_at or updated_at descending)
+        const sortedBOQs = [...data.data].sort((a, b) => {
+          const dateA = new Date(a.created_at || a.updated_at || 0).getTime();
+          const dateB = new Date(b.created_at || b.updated_at || 0).getTime();
+          return dateB - dateA; // Most recent first
+        });
+        setBOQs(sortedBOQs);
+        if (sortedBOQs.length > 0 && !selectedBoq) {
+          setSelectedBoq(sortedBOQs[0]);
         }
       }
     } catch (error) {
@@ -406,6 +432,17 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     boq.project?.client?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Toggle expansion for a revision
+  const toggleRevisionExpansion = (index: number) => {
+    const newExpanded = new Set(expandedRevisionIndices);
+    if (newExpanded.has(index)) {
+      newExpanded.delete(index);
+    } else {
+      newExpanded.add(index);
+    }
+    setExpandedRevisionIndices(newExpanded);
+  };
+
   // Calculate total from items using API response values
   const calculateTotalFromSnapshot = (snapshot: any) => {
     if (!snapshot?.items || snapshot.items.length === 0) return 0;
@@ -457,40 +494,48 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           const isNew = !prevItem;
 
           return (
-            <div key={itemIdx} className={`border rounded-lg p-3 ${isNew ? 'bg-yellow-50 border-yellow-300' : 'bg-white border-gray-300'}`}>
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex-1">
-                  <h5 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
-                    {isNew && <span className="text-xs bg-yellow-200 text-yellow-900 px-2 py-0.5 rounded">NEW</span>}
-                    {item.item_name}
-                    {item.work_type && (
-                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-normal">
-                        {item.work_type}
-                      </span>
-                    )}
-                  </h5>
-                  {/* Show main item quantity and unit */}
-                  {item.quantity && item.unit && (
-                    <p className="text-xs text-gray-600 mt-1">
-                      Qty: {item.quantity} {item.unit}
-                      {item.rate && item.rate > 0 && ` × Rate: AED ${item.rate.toFixed(2)}`}
-                      {item.item_total && item.item_total > 0 && (
-                        <span className="ml-2 font-semibold text-blue-700">
-                          = AED {item.item_total.toFixed(2)}
+            <div key={itemIdx} className={`border-2 rounded-lg overflow-hidden mb-4 ${isNew ? 'bg-yellow-50 border-yellow-400' : 'bg-white border-blue-300'}`}>
+              {/* Item Header - More Prominent */}
+              <div className={`px-4 py-3 ${isNew ? 'bg-yellow-100 border-b-2 border-yellow-400' : 'bg-blue-50 border-b-2 border-blue-300'}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <h4 className="font-bold text-gray-900 text-base flex items-center gap-2">
+                      {isNew && <span className="text-xs bg-yellow-300 text-yellow-900 px-2 py-1 rounded font-bold">NEW</span>}
+                      🔷 {item.item_name}
+                      {item.work_type && (
+                        <span className="text-xs bg-purple-200 text-purple-800 px-2 py-1 rounded font-semibold">
+                          {item.work_type}
                         </span>
                       )}
-                    </p>
-                  )}
+                    </h4>
+                    {/* Show main item quantity and unit */}
+                    {item.quantity && item.unit && (
+                      <p className="text-sm text-gray-700 mt-1 font-medium">
+                        Qty: {item.quantity} {item.unit}
+                        {item.rate && item.rate > 0 && ` × Rate: AED ${item.rate.toFixed(2)}`}
+                        {item.item_total && item.item_total > 0 && (
+                          <span className="ml-2 font-bold text-blue-800">
+                            = AED {item.item_total.toFixed(2)}
+                          </span>
+                        )}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
-              {item.description && (
-                <p className="text-xs text-gray-600 mb-2">{item.description}</p>
-              )}
+
+              {/* Item Body */}
+              <div className="p-4">
+                {item.description && (
+                  <p className="text-sm text-gray-700 mb-3 bg-gray-50 p-2 rounded border-l-4 border-gray-400">{item.description}</p>
+                )}
 
               {/* Sub Items */}
               {item.sub_items && item.sub_items.length > 0 && (
-                <div className="mb-2 space-y-2">
-                  <p className="text-xs font-semibold text-gray-700 mb-1">📋 Sub Items:</p>
+                <div className="mb-4 space-y-3">
+                  <h5 className="text-sm font-bold text-indigo-900 mb-3 pb-2 border-b-2 border-indigo-200 bg-indigo-50 px-3 py-2 rounded-t">
+                    📋 Sub Items ({item.sub_items.length})
+                  </h5>
                   {item.sub_items.map((subItem: any, subIdx: number) => {
                     const prevSubItem = prevItem?.sub_items?.find((ps: any) => ps.sub_item_name === subItem.sub_item_name);
 
@@ -520,69 +565,197 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
                         {/* Sub Item Materials */}
                         {subItem.materials && subItem.materials.length > 0 && (
-                          <div className="mb-1">
-                            <p className="text-xs font-semibold text-gray-700 mb-1">📦 Materials:</p>
-                            <div className="space-y-1">
-                              {subItem.materials.map((mat: any, matIdx: number) => {
-                                const prevMat = prevSubItem?.materials?.find((pm: any) => pm.material_name === mat.material_name);
-                                const quantityChanged = prevMat ? hasChanged(mat.quantity, prevMat.quantity) : !prevMat;
-                                const priceChanged = prevMat ? hasChanged(mat.quantity * mat.unit_price, prevMat.quantity * prevMat.unit_price) : !prevMat;
-                                const isNewMat = !prevMat;
+                          <div className="mb-3 bg-red-50/20 rounded-lg p-3 border border-red-300 hover:border-red-400 transition-all duration-200">
+                            <h5 className="text-xs font-bold text-blue-900 mb-2 flex items-center gap-2">
+                              📦 Raw Materials
+                            </h5>
+                            <div className="bg-white rounded border border-blue-200 overflow-hidden">
+                              <table className="w-full text-xs">
+                                <thead className="bg-blue-100 border-b border-blue-200">
+                                  <tr>
+                                    <th className="text-left py-1.5 px-2 font-semibold text-blue-900">Material</th>
+                                    <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Qty</th>
+                                    <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Unit</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Rate</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {subItem.materials.map((mat: any, matIdx: number) => {
+                                    const prevMat = prevSubItem?.materials?.find((pm: any) => pm.material_name === mat.material_name);
+                                    const quantityChanged = prevMat ? hasChanged(mat.quantity, prevMat.quantity) : !prevMat;
+                                    const priceChanged = prevMat ? hasChanged(mat.quantity * mat.unit_price, prevMat.quantity * prevMat.unit_price) : !prevMat;
+                                    const isNewMat = !prevMat;
+                                    const materialTotal = mat.total_price || (mat.quantity * mat.unit_price);
 
-                                return (
-                                  <div key={matIdx} className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${isNewMat ? 'bg-yellow-100' : 'bg-white'}`}>
-                                    <span className={quantityChanged ? 'bg-yellow-200 px-1 rounded' : ''}>
-                                      {mat.material_name} ({mat.quantity} {mat.unit})
-                                    </span>
-                                    <span className={`font-semibold ${priceChanged ? 'bg-yellow-200 px-1 rounded' : ''}`}>
-                                      AED {(mat.quantity * mat.unit_price).toFixed(2)}
-                                    </span>
-                                  </div>
-                                );
-                              })}
+                                    return (
+                                      <tr key={matIdx} className={`border-b border-blue-100 ${isNewMat ? 'bg-yellow-100' : matIdx % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
+                                        <td className={`py-1.5 px-2 text-gray-900 ${quantityChanged ? 'bg-yellow-200' : ''}`}>
+                                          {mat.material_name}
+                                          {mat.description && <div className="text-xs text-gray-500">{mat.description}</div>}
+                                        </td>
+                                        <td className={`py-1.5 px-2 text-center text-gray-700 ${quantityChanged ? 'bg-yellow-200' : ''}`}>{mat.quantity}</td>
+                                        <td className="py-1.5 px-2 text-center text-gray-700 uppercase">{mat.unit}</td>
+                                        <td className="py-1.5 px-2 text-right text-gray-700">AED {mat.unit_price?.toFixed(2) || '0.00'}</td>
+                                        <td className={`py-1.5 px-2 text-right font-semibold text-blue-700 ${priceChanged ? 'bg-yellow-200' : ''}`}>AED {materialTotal.toFixed(2)}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                  <tr className="bg-blue-200 border-t-2 border-blue-400">
+                                    <td colSpan={4} className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">Materials Total:</td>
+                                    <td className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">
+                                      AED {subItem.materials.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0).toFixed(2)}
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
                             </div>
                           </div>
                         )}
 
                         {/* Sub Item Labour */}
                         {subItem.labour && subItem.labour.length > 0 && (
-                          <div>
-                            <p className="text-xs font-semibold text-gray-700 mb-1">👷 Labour:</p>
-                            <div className="space-y-1">
-                              {subItem.labour.map((lab: any, labIdx: number) => {
-                                const prevLab = prevSubItem?.labour?.find((pl: any) => pl.labour_role === lab.labour_role);
-                                const hoursChanged = prevLab ? hasChanged(lab.hours, prevLab.hours) : !prevLab;
-                                const costChanged = prevLab ? hasChanged(lab.hours * lab.rate_per_hour, prevLab.hours * prevLab.rate_per_hour) : !prevLab;
-                                const isNewLab = !prevLab;
+                          <div className="mb-3 bg-red-50/20 rounded-lg p-3 border border-red-300 hover:border-red-400 transition-all duration-200">
+                            <h5 className="text-xs font-bold text-orange-900 mb-2 flex items-center gap-2">
+                              👷 Labour
+                            </h5>
+                            <div className="bg-white rounded border border-orange-200 overflow-hidden">
+                              <table className="w-full text-xs">
+                                <thead className="bg-orange-100 border-b border-orange-200">
+                                  <tr>
+                                    <th className="text-left py-1.5 px-2 font-semibold text-orange-900">Role</th>
+                                    <th className="text-center py-1.5 px-2 font-semibold text-orange-900">Hours</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Rate/hr</th>
+                                    <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {subItem.labour.map((lab: any, labIdx: number) => {
+                                    const prevLab = prevSubItem?.labour?.find((pl: any) => pl.labour_role === lab.labour_role);
+                                    const hoursChanged = prevLab ? hasChanged(lab.hours, prevLab.hours) : !prevLab;
+                                    const costChanged = prevLab ? hasChanged(lab.hours * lab.rate_per_hour, prevLab.hours * prevLab.rate_per_hour) : !prevLab;
+                                    const isNewLab = !prevLab;
+                                    const labourTotal = lab.total_cost || (lab.hours * lab.rate_per_hour);
 
-                                return (
-                                  <div key={labIdx} className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${isNewLab ? 'bg-yellow-100' : 'bg-white'}`}>
-                                    <span className={hoursChanged ? 'bg-yellow-200 px-1 rounded' : ''}>
-                                      {lab.labour_role} ({lab.hours}h @ AED {lab.rate_per_hour}/h)
-                                    </span>
-                                    <span className={`font-semibold ${costChanged ? 'bg-yellow-200 px-1 rounded' : ''}`}>
-                                      AED {(lab.hours * lab.rate_per_hour).toFixed(2)}
-                                    </span>
-                                  </div>
-                                );
-                              })}
+                                    return (
+                                      <tr key={labIdx} className={`border-b border-orange-100 ${isNewLab ? 'bg-yellow-100' : labIdx % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
+                                        <td className={`py-1.5 px-2 text-gray-900 ${hoursChanged ? 'bg-yellow-200' : ''}`}>{lab.labour_role}</td>
+                                        <td className={`py-1.5 px-2 text-center text-gray-700 ${hoursChanged ? 'bg-yellow-200' : ''}`}>{lab.hours} hrs</td>
+                                        <td className="py-1.5 px-2 text-right text-gray-700">AED {lab.rate_per_hour?.toFixed(2) || '0.00'}</td>
+                                        <td className={`py-1.5 px-2 text-right font-semibold text-orange-700 ${costChanged ? 'bg-yellow-200' : ''}`}>AED {labourTotal.toFixed(2)}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                  <tr className="bg-orange-200 border-t-2 border-orange-400">
+                                    <td colSpan={3} className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">Labour Total:</td>
+                                    <td className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">
+                                      AED {subItem.labour.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0).toFixed(2)}
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
                             </div>
                           </div>
                         )}
 
-                        {/* Sub-Item Cost Summary */}
-                        <div className="mt-2 pt-2 border-t border-green-300 space-y-1 bg-white rounded px-2 py-1">
-                          <div className="text-xs text-gray-700 flex justify-between">
-                            <span>Materials Cost:</span>
-                            <span className="font-semibold">AED {(subItem.materials_cost || 0).toFixed(2)}</span>
+                        {/* Cost Breakdown Percentages (Per-Sub-Item) */}
+                        <div className="bg-purple-50/50 rounded-lg p-3 border border-purple-300 mt-3">
+                          <h5 className="text-xs font-bold text-purple-900 mb-2 flex items-center gap-2">
+                            💵 Cost Breakdown Percentages
+                          </h5>
+                          <div className="space-y-1.5 text-xs">
+                            {(() => {
+                              const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                              const miscPercentage = subItem.misc_percentage || 10;
+                              const miscAmount = subItem.misc_amount || (clientAmount * (miscPercentage / 100));
+                              const overheadProfitPercentage = subItem.overhead_profit_percentage || 25;
+                              const overheadProfitAmount = subItem.overhead_profit_amount || (clientAmount * (overheadProfitPercentage / 100));
+                              const transportPercentage = subItem.transport_percentage || 5;
+                              const transportAmount = subItem.transport_amount || (clientAmount * (transportPercentage / 100));
+
+                              return (
+                                <>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Client Amount (Qty × Rate):</span>
+                                    <span className="font-semibold text-gray-900">AED {clientAmount.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Miscellaneous ({miscPercentage}%):</span>
+                                    <span className="font-semibold text-red-600">- AED {miscAmount.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Overhead & Profit ({overheadProfitPercentage}%):</span>
+                                    <span className="font-semibold text-red-600">- AED {overheadProfitAmount.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Transport ({transportPercentage}%):</span>
+                                    <span className="font-semibold text-red-600">- AED {transportAmount.toFixed(2)}</span>
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
-                          <div className="text-xs text-gray-700 flex justify-between">
-                            <span>Labour Cost:</span>
-                            <span className="font-semibold">AED {(subItem.labour_cost || 0).toFixed(2)}</span>
-                          </div>
-                          <div className="text-xs font-bold text-green-900 flex justify-between bg-green-100 rounded px-1 py-0.5">
-                            <span>Sub-Item Total:</span>
-                            <span>AED {((subItem.materials_cost || 0) + (subItem.labour_cost || 0)).toFixed(2)}</span>
+                        </div>
+
+                        {/* Profit Analysis (Per-Sub-Item) */}
+                        <div className="bg-green-50/50 rounded-lg p-3 border border-green-300 mt-3">
+                          <h5 className="text-xs font-bold text-green-900 mb-2 flex items-center gap-2">
+                            💰 Profit Analysis
+                          </h5>
+                          <div className="space-y-1.5 text-xs">
+                            {(() => {
+                              const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                              const materialCost = subItem.material_cost || (subItem.materials?.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0) || 0);
+                              const labourCost = subItem.labour_cost || (subItem.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0);
+                              const miscAmount = subItem.misc_amount || (clientAmount * ((subItem.misc_percentage || 10) / 100));
+                              const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || 5) / 100));
+                              const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || 25) / 100));
+                              const internalCost = subItem.internal_cost || (materialCost + labourCost + miscAmount + plannedProfit + transportAmount);
+                              const actualProfit = subItem.actual_profit || (clientAmount - internalCost);
+
+                              return (
+                                <>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Client Amount:</span>
+                                    <span className="font-semibold text-gray-900">AED {clientAmount.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Materials Cost:</span>
+                                    <span className="font-semibold text-gray-900">AED {materialCost.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Labour Cost:</span>
+                                    <span className="font-semibold text-gray-900">AED {labourCost.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Misc ({subItem.misc_percentage || 10}%):</span>
+                                    <span className="font-semibold text-gray-900">AED {miscAmount.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Overhead & Profit ({subItem.overhead_profit_percentage || 25}%):</span>
+                                    <span className="font-semibold text-gray-900">AED {plannedProfit.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-700">Transport ({subItem.transport_percentage || 5}%):</span>
+                                    <span className="font-semibold text-gray-900">AED {transportAmount.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between pt-1.5 border-t border-gray-300">
+                                    <span className="text-gray-800 font-bold">Internal Cost (Total):</span>
+                                    <span className="font-bold text-red-600">AED {internalCost.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between pt-1.5 mt-1.5 border-t border-green-300">
+                                    <span className="text-gray-700 font-medium">Planned Profit:</span>
+                                    <span className="font-semibold text-blue-600">AED {plannedProfit.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-800 font-medium">Actual Profit:</span>
+                                    <span className={`font-bold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
+                                      AED {actualProfit.toFixed(2)}
+                                    </span>
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -593,52 +766,96 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
               {/* Direct Materials (for items without sub_items) */}
               {(!item.sub_items || item.sub_items.length === 0) && item.materials && item.materials.length > 0 && (
-                <div className="mb-2">
-                  <p className="text-xs font-semibold text-gray-700 mb-1">📦 Materials:</p>
-                  <div className="space-y-1">
-                    {item.materials.map((mat: any, matIdx: number) => {
-                      const prevMat = prevItem?.materials?.find((pm: any) => pm.material_name === mat.material_name);
-                      const quantityChanged = prevMat ? hasChanged(mat.quantity, prevMat.quantity) : !prevMat;
-                      const priceChanged = prevMat ? hasChanged(mat.total_price, prevMat.total_price) : !prevMat;
-                      const isNewMat = !prevMat;
+                <div className="mb-4 bg-red-50/20 rounded-lg p-4 border border-red-300 hover:border-red-400 transition-all duration-200">
+                  <h4 className="text-sm font-bold text-purple-900 mb-3 flex items-center gap-2">
+                    <div className="p-1.5 bg-white rounded shadow-sm">
+                      📦
+                    </div>
+                    Raw Materials
+                  </h4>
+                  <div className="bg-white rounded-lg border border-purple-200 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-purple-100 border-b border-purple-200">
+                        <tr>
+                          <th className="text-left py-2 px-3 font-semibold text-purple-900">Material Name</th>
+                          <th className="text-center py-2 px-3 font-semibold text-purple-900">Quantity</th>
+                          <th className="text-center py-2 px-3 font-semibold text-purple-900">Unit</th>
+                          <th className="text-right py-2 px-3 font-semibold text-purple-900">Rate</th>
+                          <th className="text-right py-2 px-3 font-semibold text-purple-900">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {item.materials.map((mat: any, matIdx: number) => {
+                          const prevMat = prevItem?.materials?.find((pm: any) => pm.material_name === mat.material_name);
+                          const quantityChanged = prevMat ? hasChanged(mat.quantity, prevMat.quantity) : !prevMat;
+                          const priceChanged = prevMat ? hasChanged(mat.total_price, prevMat.total_price) : !prevMat;
+                          const isNewMat = !prevMat;
 
-                      return (
-                        <div key={matIdx} className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${isNewMat ? 'bg-yellow-100' : 'bg-blue-50'}`}>
-                          <span className={quantityChanged ? 'bg-yellow-200 px-1 rounded' : ''}>
-                            {mat.material_name} ({mat.quantity} {mat.unit})
-                          </span>
-                          <span className={`font-semibold ${priceChanged ? 'bg-yellow-200 px-1 rounded' : ''}`}>
-                            AED {mat.total_price}
-                          </span>
-                        </div>
-                      );
-                    })}
+                          return (
+                            <tr key={matIdx} className={`border-b border-purple-100 ${isNewMat ? 'bg-yellow-100' : matIdx % 2 === 0 ? 'bg-purple-50/30' : 'bg-white'}`}>
+                              <td className={`py-2.5 px-3 text-gray-900 ${quantityChanged ? 'bg-yellow-200' : ''}`}>{mat.material_name}</td>
+                              <td className={`py-2.5 px-3 text-center text-gray-700 ${quantityChanged ? 'bg-yellow-200' : ''}`}>{mat.quantity}</td>
+                              <td className="py-2.5 px-3 text-center text-gray-700 uppercase">{mat.unit}</td>
+                              <td className="py-2.5 px-3 text-right text-gray-700">AED {mat.unit_price?.toFixed(2) || '0.00'}</td>
+                              <td className={`py-2.5 px-3 text-right font-semibold text-purple-700 ${priceChanged ? 'bg-yellow-200' : ''}`}>AED {mat.total_price?.toFixed(2) || '0.00'}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr className="bg-purple-200 border-t-2 border-purple-400">
+                          <td colSpan={4} className="py-2.5 px-3 font-bold text-purple-900 text-right">Total Materials:</td>
+                          <td className="py-2.5 px-3 font-bold text-purple-900 text-right">
+                            AED {item.materials.reduce((sum: any, m: any) => sum + (m.total_price || 0), 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
 
               {/* Direct Labour (for items without sub_items) */}
               {(!item.sub_items || item.sub_items.length === 0) && item.labour && item.labour.length > 0 && (
-                <div className="mb-2">
-                  <p className="text-xs font-semibold text-gray-700 mb-1">👷 Labour:</p>
-                  <div className="space-y-1">
-                    {item.labour.map((lab: any, labIdx: number) => {
-                      const prevLab = prevItem?.labour?.find((pl: any) => pl.labour_role === lab.labour_role);
-                      const hoursChanged = prevLab ? hasChanged(lab.hours, prevLab.hours) : !prevLab;
-                      const costChanged = prevLab ? hasChanged(lab.total_cost, prevLab.total_cost) : !prevLab;
-                      const isNewLab = !prevLab;
+                <div className="mb-4 bg-red-50/20 rounded-lg p-4 border border-red-300 hover:border-red-400 transition-all duration-200">
+                  <h4 className="text-sm font-bold text-orange-900 mb-3 flex items-center gap-2">
+                    <div className="p-1.5 bg-white rounded shadow-sm">
+                      👷
+                    </div>
+                    Labour Breakdown
+                  </h4>
+                  <div className="bg-white rounded-lg border border-orange-200 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-orange-100 border-b border-orange-200">
+                        <tr>
+                          <th className="text-left py-2 px-3 font-semibold text-orange-900">Labour Role</th>
+                          <th className="text-center py-2 px-3 font-semibold text-orange-900">Working Hours</th>
+                          <th className="text-right py-2 px-3 font-semibold text-orange-900">Rate/Hour</th>
+                          <th className="text-right py-2 px-3 font-semibold text-orange-900">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {item.labour.map((lab: any, labIdx: number) => {
+                          const prevLab = prevItem?.labour?.find((pl: any) => pl.labour_role === lab.labour_role);
+                          const hoursChanged = prevLab ? hasChanged(lab.hours, prevLab.hours) : !prevLab;
+                          const costChanged = prevLab ? hasChanged(lab.total_cost, prevLab.total_cost) : !prevLab;
+                          const isNewLab = !prevLab;
 
-                      return (
-                        <div key={labIdx} className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${isNewLab ? 'bg-yellow-100' : 'bg-blue-50'}`}>
-                          <span className={hoursChanged ? 'bg-yellow-200 px-1 rounded' : ''}>
-                            {lab.labour_role} ({lab.hours}h)
-                          </span>
-                          <span className={`font-semibold ${costChanged ? 'bg-yellow-200 px-1 rounded' : ''}`}>
-                            AED {lab.total_cost}
-                          </span>
-                        </div>
-                      );
-                    })}
+                          return (
+                            <tr key={labIdx} className={`border-b border-orange-100 ${isNewLab ? 'bg-yellow-100' : labIdx % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
+                              <td className={`py-2.5 px-3 text-gray-900 ${hoursChanged ? 'bg-yellow-200' : ''}`}>{lab.labour_role}</td>
+                              <td className={`py-2.5 px-3 text-center text-gray-700 ${hoursChanged ? 'bg-yellow-200' : ''}`}>{lab.hours} hrs</td>
+                              <td className="py-2.5 px-3 text-right text-gray-700">AED {lab.rate_per_hour?.toFixed(2) || '0.00'}</td>
+                              <td className={`py-2.5 px-3 text-right font-semibold text-orange-700 ${costChanged ? 'bg-yellow-200' : ''}`}>AED {lab.total_cost?.toFixed(2) || '0.00'}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr className="bg-orange-200 border-t-2 border-orange-400">
+                          <td colSpan={3} className="py-2.5 px-3 font-bold text-orange-900 text-right">Total Labour:</td>
+                          <td className="py-2.5 px-3 font-bold text-orange-900 text-right">
+                            AED {item.labour.reduce((sum: any, l: any) => sum + (l.total_cost || 0), 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -701,6 +918,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   <span>AED {finalTotalPrice.toFixed(2)}</span>
                 </div>
               </div>
+              </div>
             </div>
           );
         })}
@@ -724,10 +942,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     <div className="space-y-6">
       {/* Header with BOQ Selection */}
       <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200">
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Internal Revisions History</h3>
-        <p className="text-sm text-gray-600 mb-4">
-          View all internal approval cycles (PM edits, TD rejections) before sending to client
-        </p>
+        <h3 className="text-lg font-bold text-gray-900 mb-4">Select Project to View Internal Revisions</h3>
 
         {/* Recent Projects - Always visible (4-5 most recent) */}
         {!selectedBoq && boqs.length > 0 && (
@@ -742,21 +957,25 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                     onClick={() => {
                       setSelectedBoq(boq);
                       setSearchTerm('');
+                      setShowDropdown(false);
                       setSelectedRevisionIndex(null);
                     }}
                     className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border border-gray-200 rounded-lg"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
-                        <div className="font-semibold text-gray-900">{boq.boq_name}</div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="font-semibold text-gray-900">{boq.boq_name}</div>
+                          {/* Status Badge */}
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusBadge.color}`}>
+                            {statusBadge.label}
+                          </span>
+                        </div>
                         <div className="text-sm text-gray-600">
                           {boq.project?.name} • {boq.project?.client}
                         </div>
                       </div>
-                      <div className="text-right ml-4 space-y-1">
-                        <div className={`text-xs font-semibold px-2 py-1 rounded inline-block ${statusBadge.color}`}>
-                          {statusBadge.label}
-                        </div>
+                      <div className="text-right ml-4">
                         <div className="text-sm font-semibold px-2 py-1 rounded inline-block bg-blue-100 text-blue-700">
                           Internal Rev: {boq.internal_revision_number}
                         </div>
@@ -769,54 +988,80 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           </div>
         )}
 
-        {/* Search BOQs */}
-        <div className="relative mb-4">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+        {/* Search/Select Dropdown */}
+        <div className="relative" ref={dropdownRef}>
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
             <Search className="h-5 w-5 text-gray-400" />
           </div>
           <input
             type="text"
-            placeholder="Search BOQs..."
+            placeholder={selectedBoq ? selectedBoq.boq_name : "🔍 Click to select project or search..."}
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setShowDropdown(true);
+            }}
+            onFocus={() => setShowDropdown(true)}
+            onClick={() => setShowDropdown(true)}
+            className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer"
           />
+
+          {/* Dropdown Results - Show on focus or when typing */}
+          {showDropdown && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="absolute z-20 w-full mt-2 bg-white border border-gray-300 rounded-lg shadow-xl max-h-80 overflow-y-auto"
+            >
+              {boqs.length > 0 ? (
+                (searchTerm ? filteredBOQs : boqs.slice(0, 20)).map((boq) => {
+                  const statusBadge = getStatusBadge(boq.status);
+                  return (
+                    <button
+                      key={boq.boq_id}
+                      onClick={() => {
+                        setSelectedBoq(boq);
+                        setSearchTerm('');
+                        setShowDropdown(false);
+                        setSelectedRevisionIndex(null);
+                      }}
+                      className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border-b border-gray-100 last:border-0"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="font-semibold text-gray-900">{boq.boq_name}</div>
+                            {/* Status Badge */}
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusBadge.color}`}>
+                              {statusBadge.label}
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            {boq.project?.name} • {boq.project?.client}
+                          </div>
+                        </div>
+                        <div className="text-right ml-4">
+                          <div className="text-sm font-semibold px-2 py-1 rounded inline-block bg-blue-100 text-blue-700">
+                            Internal Rev: {boq.internal_revision_number}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">{formatCurrency(boq.total_cost)}</div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="px-4 py-8 text-center text-gray-500">
+                  <p className="font-medium">No projects with internal revisions found</p>
+                  <p className="text-sm mt-1">Try searching or check other tabs</p>
+                </div>
+              )}
+            </motion.div>
+          )}
         </div>
 
-        {/* BOQ Dropdown - Only shows when searching */}
-        {searchTerm && (
-          isLoadingBOQs ? (
-            <div className="flex justify-center py-8">
-              <ModernLoadingSpinners size="sm" />
-            </div>
-          ) : filteredBOQs.length > 0 ? (
-            <select
-              value={selectedBoq?.boq_id || ''}
-              onChange={(e) => {
-                const boq = boqs.find(b => b.boq_id === parseInt(e.target.value));
-                setSelectedBoq(boq || null);
-                setSelectedRevisionIndex(null);
-              }}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
-            >
-              {filteredBOQs.map((boq) => {
-                const statusBadge = getStatusBadge(boq.status);
-                return (
-                  <option key={boq.boq_id} value={boq.boq_id}>
-                    {boq.boq_name} - {statusBadge.label} - Internal Rev: {boq.internal_revision_number}
-                  </option>
-                );
-              })}
-            </select>
-          ) : (
-            <div className="text-center py-8 text-gray-500 mb-4">
-              <p className="font-medium">No BOQs found matching "{searchTerm}"</p>
-            </div>
-          )
-        )}
-
         {/* Selected BOQ Info */}
-        {selectedBoq && (
+        {selectedBoq && !searchTerm && (
           <div className="mt-4 p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg border border-blue-200">
             <div className="flex items-center justify-between">
               <div>
@@ -931,6 +1176,145 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   <h4 className="font-semibold text-gray-900 mb-2">Items</h4>
                   {renderBOQItemsComparison(currentSnapshot, previousSnapshot)}
                 </div>
+
+                {/* Grand Total with Discount Impact */}
+                {currentSnapshot?.items && currentSnapshot.items.length > 0 && (
+                  <div className="mt-6 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-5 border-2 border-green-300">
+                    <div className="space-y-3">
+                      {(() => {
+                        const allItems = currentSnapshot.items || [];
+
+                        // Calculate subtotal (sum of all sub-item client amounts)
+                        const subtotal = allItems.reduce((sum: number, item: any) => {
+                          if (item.sub_items && item.sub_items.length > 0) {
+                            return sum + item.sub_items.reduce((siSum: number, si: any) =>
+                              siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+                            );
+                          }
+                          return sum + (item.client_cost || 0);
+                        }, 0);
+
+                        // Calculate total internal cost
+                        const totalInternalCost = allItems.reduce((sum: number, item: any) => {
+                          if (item.sub_items && item.sub_items.length > 0) {
+                            return sum + item.sub_items.reduce((siSum: number, si: any) => {
+                              const matCost = si.materials?.reduce((m: number, mat: any) => m + (mat.total_price || mat.quantity * mat.unit_price), 0) || 0;
+                              const labCost = si.labour?.reduce((l: number, lab: any) => l + (lab.total_cost || lab.hours * lab.rate_per_hour), 0) || 0;
+                              const clientAmt = (si.quantity || 0) * (si.rate || 0);
+                              const miscAmt = clientAmt * ((si.misc_percentage || 10) / 100);
+                              const opAmt = clientAmt * ((si.overhead_profit_percentage || 25) / 100);
+                              const transportAmt = clientAmt * ((si.transport_percentage || 5) / 100);
+                              return siSum + matCost + labCost + miscAmt + opAmt + transportAmt;
+                            }, 0);
+                          }
+                          return sum + (item.internal_cost || 0);
+                        }, 0);
+
+                        // Calculate profits
+                        const totalActualProfit = subtotal - totalInternalCost;
+                        const profitMarginPercentage = subtotal > 0 ? (totalActualProfit / subtotal) * 100 : 0;
+
+                        // Overall discount (from items)
+                        let overallDiscount = 0;
+                        allItems.forEach((item: any) => {
+                          overallDiscount += (item.discount_amount || 0);
+                        });
+                        let overallDiscountPercentage = 0;
+                        if (subtotal > 0 && overallDiscount > 0) {
+                          overallDiscountPercentage = (overallDiscount / subtotal) * 100;
+                        }
+
+                        // Grand total
+                        const grandTotal = subtotal - overallDiscount;
+
+                        // Calculate profit after discount
+                        const actualProfitAfterDiscount = grandTotal - totalInternalCost;
+                        const profitMarginAfterDiscount = grandTotal > 0 ? (actualProfitAfterDiscount / grandTotal) * 100 : 0;
+
+                        return (
+                          <>
+                            <div className="flex justify-between text-base font-medium">
+                              <span className="text-gray-800">Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
+                              <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
+                            </div>
+                            {overallDiscount > 0 && (
+                              <>
+                                <div className="flex justify-between text-sm text-red-600">
+                                  <span>Discount ({overallDiscountPercentage.toFixed(1)}%):</span>
+                                  <span className="font-semibold">- AED {overallDiscount.toFixed(2)}</span>
+                                </div>
+                              </>
+                            )}
+                            <div className="flex justify-between pt-3 border-t-2 border-green-400 text-lg font-bold">
+                              <span className="text-green-900">
+                                Grand Total: <span className="text-xs font-normal text-gray-600">(Excluding VAT)</span>
+                              </span>
+                              <span className="text-green-700">AED {grandTotal.toFixed(2)}</span>
+                            </div>
+
+                            {/* Show discount impact on profitability */}
+                            {overallDiscount > 0 && (
+                              <div className="mt-4 pt-4 border-t border-green-300 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3">
+                                <h6 className="text-xs font-bold text-gray-800 mb-3 flex items-center gap-2">
+                                  📊 Discount Impact on Profitability
+                                </h6>
+                                <div className="space-y-2 text-xs">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-gray-600">Client Cost:</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-gray-500 line-through">
+                                        AED {subtotal.toFixed(2)}
+                                      </span>
+                                      <span className="text-blue-700 font-bold">
+                                        → AED {grandTotal.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-gray-600">Internal Cost:</span>
+                                    <span className="font-semibold text-red-600">
+                                      AED {totalInternalCost.toFixed(2)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between items-center pt-2 border-t border-gray-300">
+                                    <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-gray-500 line-through">
+                                        AED {totalActualProfit.toFixed(2)}
+                                      </span>
+                                      <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                                        → AED {actualProfitAfterDiscount.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-between items-center bg-white/60 rounded px-2 py-1">
+                                    <span className="text-gray-700 font-medium">Profit Margin:</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-gray-500 text-xs">
+                                        {profitMarginPercentage.toFixed(1)}%
+                                      </span>
+                                      <span className={`font-bold ${profitMarginAfterDiscount >= 15 ? 'text-emerald-700' : profitMarginAfterDiscount >= 10 ? 'text-orange-600' : 'text-red-600'}`}>
+                                        → {profitMarginAfterDiscount.toFixed(1)}%
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {profitMarginAfterDiscount < 15 && (
+                                    <div className="mt-2 p-2 bg-orange-100 border border-orange-300 rounded text-orange-800 flex items-start gap-2">
+                                      ⚠️
+                                      <span className="text-xs">
+                                        <strong>Warning:</strong> Profit margin is below recommended 15%. This discount significantly reduces profitability.
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
 
                 {/* Action Buttons - Different buttons for different roles */}
                 {(() => {
@@ -1137,7 +1521,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
             {/* Header */}
             <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-4 border-b border-purple-200">
               <h3 className="text-lg font-bold text-purple-900">📝 Previous Internal Revisions</h3>
-              <p className="text-sm text-purple-700">Select to compare</p>
+              <p className="text-sm text-purple-700">Click to view details</p>
             </div>
 
             {/* Content */}
@@ -1148,51 +1532,81 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
               </div>
             ) : internalRevisions.length > 1 ? (
               <div className="p-4 space-y-3 max-h-[600px] overflow-y-auto">
-                {internalRevisions.map((revision, index) => {
-                  const isSelected = index === selectedRevisionIndex;
+                {internalRevisions.slice(1).map((revision, index) => {
                   const revisionTotal = revision.changes_summary ? calculateTotalFromSnapshot(revision.changes_summary) : 0;
+                  const isExpanded = expandedRevisionIndices.has(index);
+                  const change = calculateChange(currentTotal, revisionTotal);
 
                   return (
-                    <motion.button
+                    <motion.div
                       key={revision.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.05 }}
-                      onClick={() => setSelectedRevisionIndex(index)}
-                      className={`w-full text-left border rounded-lg p-3 transition-all ${
-                        isSelected
-                          ? 'border-blue-500 bg-blue-50 shadow-md'
-                          : 'border-gray-200 bg-white hover:bg-gray-50'
-                      }`}
+                      className="bg-white border border-gray-200 rounded-lg overflow-hidden"
                     >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          {getActionIcon(revision.action_type)}
-                          <div>
-                            <div className="font-bold text-gray-900 text-sm">
-                              Internal Rev {revision.internal_revision_number}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              {getActionLabel(revision.action_type)}
+                      {/* Header - Always visible */}
+                      <div className="bg-gradient-to-r from-gray-50 to-gray-100 p-3 border-b border-gray-200">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {getActionIcon(revision.action_type)}
+                            <div>
+                              <div className="font-bold text-gray-900 text-sm">
+                                Internal Rev {revision.internal_revision_number}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {getActionLabel(revision.action_type)}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-sm font-bold text-gray-900">
-                            {formatCurrency(revisionTotal)}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {new Date(revision.created_at).toLocaleDateString('en-US', {
-                              month: 'short',
-                              day: 'numeric'
-                            })}
+                          <div className="text-right">
+                            <div className="text-lg font-bold text-gray-900">
+                              {formatCurrency(revisionTotal)}
+                            </div>
+                            {change.percentage !== 0 && (
+                              <div className={`flex items-center gap-1 text-xs font-semibold ${
+                                change.percentage > 0 ? 'text-red-600' : 'text-green-600'
+                              }`}>
+                                {change.percentage > 0 ? (
+                                  <TrendingUp className="w-3 h-3" />
+                                ) : (
+                                  <TrendingDown className="w-3 h-3" />
+                                )}
+                                {change.percentage > 0 ? '+' : ''}{change.percentage}%
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
-                      <div className="text-xs text-gray-600">
-                        By: {revision.actor_name}
+
+                      {/* Expandable Details */}
+                      {isExpanded && revision.changes_summary?.items && (
+                        <div className="p-4 bg-gradient-to-br from-purple-50 to-purple-100 space-y-3 max-h-[500px] overflow-y-auto">
+                          <div className="text-xs text-gray-600 mb-2">
+                            <div className="flex justify-between mb-1">
+                              <span>By: {revision.actor_name} ({revision.actor_role})</span>
+                              <span>{new Date(revision.created_at).toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}</span>
+                            </div>
+                          </div>
+                          {renderBOQItemsComparison(revision.changes_summary, internalRevisions[index + 2]?.changes_summary || null)}
+                        </div>
+                      )}
+
+                      {/* Action Button - Show/Hide Details */}
+                      <div className="p-2 bg-gray-50 border-t border-gray-200">
+                        <button
+                          onClick={() => toggleRevisionExpansion(index)}
+                          className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded hover:bg-gray-100 transition-colors font-medium"
+                        >
+                          {isExpanded ? '▲ Hide Details' : '▼ Show Details'}
+                        </button>
                       </div>
-                    </motion.button>
+                    </motion.div>
                   );
                 })}
               </div>

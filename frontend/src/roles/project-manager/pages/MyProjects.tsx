@@ -22,7 +22,6 @@ import { projectManagerService } from '../services/projectManagerService';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
-import BOQEditModal from '@/roles/estimator/components/BOQEditModal';
 import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
@@ -519,8 +518,9 @@ const MyProjects: React.FC = () => {
 
   const handleEditBOQ = (project: Project) => {
     setSelectedProject(project);
-    setShowEditBOQModal(true);
     setShowBOQModal(false);
+    setShowEditBOQModal(true);
+    // BOQCreationForm will fetch full BOQ details using the boq_id from existingBoqData
   };
 
   const filteredProjects = projects.filter(project => {
@@ -2983,33 +2983,14 @@ const MyProjects: React.FC = () => {
         </div>
       )}
 
-      {/* Edit BOQ Modal */}
-      <BOQEditModal
+      {/* Edit BOQ Modal - Now using latest BOQCreationForm */}
+      <BOQCreationForm
         isOpen={showEditBOQModal}
         onClose={() => {
           setShowEditBOQModal(false);
           setShowBOQModal(true);
         }}
-        boq={selectedProject ? {
-          boq_id: selectedProject.boq_id,
-          boq_name: selectedProject.boq_name || '',
-          project_id: selectedProject.project_id,
-          project_name: selectedProject.project_name,
-          client_name: selectedProject.client || '',
-          location: selectedProject.location || '',
-          area: selectedProject.area || '',
-          status: selectedProject.boq_status || 'pending',
-          total_cost: selectedProject.boq_details?.total_cost || 0,
-          total_items: selectedProject.boq_details?.total_items || 0,
-          total_materials_cost: selectedProject.boq_details?.total_materials || 0,
-          total_labour_cost: selectedProject.boq_details?.total_labour || 0,
-          overhead_percentage: selectedProject.boq_details?.overhead_percentage || 10,
-          profit_margin_percentage: selectedProject.boq_details?.profit_margin_percentage || 15,
-          items: selectedProject.boqItems || selectedProject.boq_details?.boq_details || [],
-          created_at: selectedProject.created_at || '',
-          updated_at: selectedProject.updated_at || '',
-        } : null}
-        onSave={async () => {
+        onSubmit={async (data: any) => {
           setShowEditBOQModal(false);
           toast.success('BOQ updated successfully');
 
@@ -3024,6 +3005,20 @@ const MyProjects: React.FC = () => {
           // Reopen view modal with fresh data
           setShowBOQModal(true);
         }}
+        selectedProject={selectedProject ? {
+          project_id: selectedProject.project_id,
+          project_name: selectedProject.project_name,
+          client_name: selectedProject.client || '',
+          location: selectedProject.location || '',
+          area: selectedProject.area || '',
+        } : null}
+        existingBoqData={selectedProject && selectedProject.boq_id ? {
+          boq_id: selectedProject.boq_id,
+          boq_name: selectedProject.boq_name || '',
+          project_id: selectedProject.project_id,
+          // Don't pass items - let the form fetch full details via getBOQById
+        } : undefined}
+        hideTemplate={true}
       />
 
       {/* Edit Site Engineer Modal */}
