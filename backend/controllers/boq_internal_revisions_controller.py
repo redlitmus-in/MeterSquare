@@ -15,8 +15,6 @@ from sqlalchemy.orm.attributes import flag_modified
 from datetime import datetime
 import json
 
-log = get_logger()
-
 def get_all_internal_revision():
     """
     Get all BOQs with their internal revisions
@@ -114,7 +112,7 @@ def get_all_internal_revision():
 
 def get_internal_revisions(boq_id):
     """
-    Get all internal revisions for a BOQ (excluding the current one)
+    Get all internal revisions for a BOQ (excluding the current one if applicable)
 
     GET /api/boq/<boq_id>/internal_revisions
     """
@@ -126,15 +124,13 @@ def get_internal_revisions(boq_id):
 
         current_internal_revision = boq.internal_revision_number or 0
 
-        # Get all internal revisions for this BOQ (excluding current)
-        # Only show truly "previous" revisions
+        # ✅ Fix: Fetch all internal revisions linked to this BOQ (not filtered by < current)
+        # Because BOQInternalRevision stores history snapshots, not only numeric sequence comparisons
         revisions = BOQInternalRevision.query.filter(
             BOQInternalRevision.boq_id == boq_id,
-            BOQInternalRevision.is_deleted == False,
-            BOQInternalRevision.internal_revision_number < current_internal_revision
+            BOQInternalRevision.is_deleted == False
         ).order_by(BOQInternalRevision.internal_revision_number.asc()).all()
 
-        # Format data
         internal_revisions = []
         for rev in revisions:
             internal_revisions.append({
@@ -159,15 +155,16 @@ def get_internal_revisions(boq_id):
                 "boq_id": boq_id,
                 "boq_name": boq.boq_name,
                 "current_internal_revision": current_internal_revision,
-                "has_internal_revisions": boq.has_internal_revisions or False,
+                "has_internal_revisions": boq.has_internal_revisions or bool(internal_revisions),
                 "internal_revisions": internal_revisions,
                 "total_count": len(internal_revisions)
             }
         }), 200
 
     except Exception as e:
-        log.error(f"Error fetching internal revisions: {str(e)}")
+        log.error(f"Error fetching internal revisions for BOQ {boq_id}: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
+
 
 def update_internal_revision_boq(boq_id):
     """
