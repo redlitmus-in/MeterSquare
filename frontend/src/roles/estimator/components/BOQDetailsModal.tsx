@@ -17,7 +17,9 @@ import {
   Edit,
   Eye,
   Clock,
-  TrendingUp
+  TrendingUp,
+  HelpCircle,
+  Info
 } from 'lucide-react';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
 import { estimatorService } from '../services/estimatorService';
@@ -27,6 +29,7 @@ import BOQHistoryTimeline from './BOQHistoryTimeline';
 import BOQRevisionHistory from './BOQRevisionHistory';
 import BOQComparisonView from './BOQComparisonView';
 import ModernLoadingSpinners from '../../../components/ui/ModernLoadingSpinners';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 
 interface BOQDetailsModalProps {
   isOpen: boolean;
@@ -678,10 +681,6 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                         <span className="text-gray-700">Transport ({transportPercentage}%):</span>
                                                         <span className="font-semibold text-red-600">- {formatCurrency(transportAmount)}</span>
                                                       </div>
-                                                      <div className="flex justify-between pt-1.5 border-t border-purple-300">
-                                                        <span className="text-gray-800 font-medium">Balance:</span>
-                                                        <span className="font-bold text-green-600">{formatCurrency(clientAmount - miscAmount - overheadProfitAmount - transportAmount)}</span>
-                                                      </div>
                                                     </>
                                                   );
                                                 })()}
@@ -690,10 +689,63 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
 
                                             {/* Profit Analysis (Per-Sub-Item) */}
                                             <div className="bg-green-50/50 rounded-lg p-3 border border-green-300 mt-3">
-                                              <h5 className="text-xs font-bold text-green-900 mb-2 flex items-center gap-2">
-                                                <TrendingUp className="w-3.5 h-3.5" />
-                                                Profit Analysis
-                                              </h5>
+                                              <div className="flex items-center justify-between mb-2">
+                                                <h5 className="text-xs font-bold text-green-900 flex items-center gap-2">
+                                                  <Info className="w-3.5 h-3.5" />
+                                                  Profit Analysis
+                                                </h5>
+                                                <Popover>
+                                                  <PopoverTrigger asChild>
+                                                    <button className="p-1 hover:bg-green-200 rounded-full transition-colors" title="View Calculation Formulas">
+                                                      <HelpCircle className="w-3.5 h-3.5 text-green-700" />
+                                                    </button>
+                                                  </PopoverTrigger>
+                                                  <PopoverContent className="w-96 bg-white">
+                                                    <div className="space-y-3">
+                                                      <h6 className="font-bold text-sm text-gray-900 border-b pb-2">BOQ Calculation Formulas</h6>
+                                                      <div className="space-y-2 text-xs">
+                                                        <div className="bg-blue-50 p-2 rounded">
+                                                          <strong className="text-blue-900">Client Amount:</strong>
+                                                          <p className="text-gray-700 mt-1">= Quantity × Rate</p>
+                                                        </div>
+                                                        <div className="bg-orange-50 p-2 rounded">
+                                                          <strong className="text-orange-900">Materials Cost:</strong>
+                                                          <p className="text-gray-700 mt-1">= Sum of all material costs</p>
+                                                        </div>
+                                                        <div className="bg-purple-50 p-2 rounded">
+                                                          <strong className="text-purple-900">Labour Cost:</strong>
+                                                          <p className="text-gray-700 mt-1">= Sum of all labour costs</p>
+                                                        </div>
+                                                        <div className="bg-yellow-50 p-2 rounded">
+                                                          <strong className="text-yellow-900">Misc:</strong>
+                                                          <p className="text-gray-700 mt-1">= Client Amount × (Misc % / 100)</p>
+                                                        </div>
+                                                        <div className="bg-indigo-50 p-2 rounded">
+                                                          <strong className="text-indigo-900">Overhead & Profit:</strong>
+                                                          <p className="text-gray-700 mt-1">= Client Amount × (O&P % / 100)</p>
+                                                        </div>
+                                                        <div className="bg-teal-50 p-2 rounded">
+                                                          <strong className="text-teal-900">Transport:</strong>
+                                                          <p className="text-gray-700 mt-1">= Client Amount × (Transport % / 100)</p>
+                                                        </div>
+                                                        <div className="bg-red-50 p-2 rounded border-2 border-red-200">
+                                                          <strong className="text-red-900">Internal Cost (Total):</strong>
+                                                          <p className="text-gray-700 mt-1">= Materials + Labour + Misc + O&P + Transport</p>
+                                                        </div>
+                                                        <div className="bg-green-50 p-2 rounded border-2 border-green-200">
+                                                          <strong className="text-green-900">Planned Profit:</strong>
+                                                          <p className="text-gray-700 mt-1">= Overhead & Profit amount</p>
+                                                        </div>
+                                                        <div className="bg-emerald-50 p-2 rounded border-2 border-emerald-200">
+                                                          <strong className="text-emerald-900">Actual Profit:</strong>
+                                                          <p className="text-gray-700 mt-1">= Client Amount - Internal Cost (Total)</p>
+                                                          <p className="text-gray-500 text-xs mt-0.5 italic">Shows actual profit after all costs including O&P</p>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  </PopoverContent>
+                                                </Popover>
+                                              </div>
                                               <div className="space-y-1.5 text-xs">
                                                 {(() => {
                                                   const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
@@ -707,6 +759,10 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
 
                                                   return (
                                                     <>
+                                                      <div className="flex justify-between">
+                                                        <span className="text-gray-700">Client Amount:</span>
+                                                        <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
+                                                      </div>
                                                       <div className="flex justify-between">
                                                         <span className="text-gray-700">Materials Cost:</span>
                                                         <span className="font-semibold text-gray-900">{formatCurrency(materialCost)}</span>
@@ -731,7 +787,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                         <span className="text-gray-800 font-bold">Internal Cost (Total):</span>
                                                         <span className="font-bold text-red-600">{formatCurrency(internalCost)}</span>
                                                       </div>
-                                                      <div className="flex justify-between pt-1.5 border-t border-green-300">
+                                                      <div className="flex justify-between pt-1.5 mt-1.5 border-t border-green-300">
                                                         <span className="text-gray-700 font-medium">Planned Profit:</span>
                                                         <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
                                                       </div>
@@ -1261,6 +1317,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                               const marginPercentage = totalClientAmount > 0 ? ((projectMargin / totalClientAmount) * 100) : 0;
 
                               // Calculate actual profit (sum of all actual profits)
+                              // Formula: Client Amount - Internal Cost Total (includes O&P)
                               const totalActualProfit = allItems.reduce((sum, item) => {
                                 if (item.sub_items && item.sub_items.length > 0) {
                                   return sum + item.sub_items.reduce((siSum: number, si: any) => {
@@ -1270,7 +1327,9 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                     const miscAmt = clientAmt * ((si.misc_percentage || 10) / 100);
                                     const opAmt = clientAmt * ((si.overhead_profit_percentage || 25) / 100);
                                     const transportAmt = clientAmt * ((si.transport_percentage || 5) / 100);
-                                    return siSum + (clientAmt - matCost - labCost - miscAmt - opAmt - transportAmt);
+                                    const internalCost = matCost + labCost + miscAmt + opAmt + transportAmt;
+                                    // Actual Profit = Client Amount - Internal Cost Total
+                                    return siSum + (clientAmt - internalCost);
                                   }, 0);
                                 }
                                 return sum;
@@ -1367,7 +1426,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                             })()}
                           </div>
 
-                          {/* Grand Total */}
+                          {/* Grand Total with Discount Impact */}
                           <div className="mt-6 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-5 border-2 border-green-300">
                             <div className="space-y-3">
                               {(() => {
@@ -1382,6 +1441,26 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                   }
                                   return sum + (item.client_cost || 0);
                                 }, 0);
+
+                                // Calculate total internal cost
+                                const totalInternalCost = allItems.reduce((sum, item) => {
+                                  if (item.sub_items && item.sub_items.length > 0) {
+                                    return sum + item.sub_items.reduce((siSum: number, si: any) => {
+                                      const matCost = si.materials?.reduce((m: number, mat: any) => m + (mat.total_price || mat.quantity * mat.unit_price), 0) || 0;
+                                      const labCost = si.labour?.reduce((l: number, lab: any) => l + (lab.total_cost || lab.hours * lab.rate_per_hour), 0) || 0;
+                                      const clientAmt = (si.quantity || 0) * (si.rate || 0);
+                                      const miscAmt = clientAmt * ((si.misc_percentage || 10) / 100);
+                                      const opAmt = clientAmt * ((si.overhead_profit_percentage || 25) / 100);
+                                      const transportAmt = clientAmt * ((si.transport_percentage || 5) / 100);
+                                      return siSum + matCost + labCost + miscAmt + opAmt + transportAmt;
+                                    }, 0);
+                                  }
+                                  return sum + (item.internal_cost || 0);
+                                }, 0);
+
+                                // Calculate profits
+                                const totalActualProfit = subtotal - totalInternalCost;
+                                const profitMarginPercentage = subtotal > 0 ? (totalActualProfit / subtotal) * 100 : 0;
 
                                 // Overall discount (BOQ-level from overall discount input OR sum of item discounts)
                                 let overallDiscount = boqData.discount_amount || 0;
@@ -1401,10 +1480,14 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 // Grand total
                                 const grandTotal = subtotal - overallDiscount;
 
+                                // Calculate profit after discount
+                                const actualProfitAfterDiscount = grandTotal - totalInternalCost;
+                                const profitMarginAfterDiscount = grandTotal > 0 ? (actualProfitAfterDiscount / grandTotal) * 100 : 0;
+
                                 return (
                                   <>
                                     <div className="flex justify-between text-base font-medium">
-                                      <span className="text-gray-800">Subtotal:</span>
+                                      <span className="text-gray-800">Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
                                       <span className="font-semibold">{formatCurrency(subtotal)}</span>
                                     </div>
                                     {overallDiscount > 0 && (
@@ -1412,10 +1495,6 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                         <div className="flex justify-between text-sm text-red-600">
                                           <span>Discount ({overallDiscountPercentage.toFixed(1)}%):</span>
                                           <span className="font-semibold">- {formatCurrency(overallDiscount)}</span>
-                                        </div>
-                                        <div className="flex justify-between text-sm font-medium">
-                                          <span className="text-gray-700">After Discount:</span>
-                                          <span className="font-semibold">{formatCurrency(grandTotal)}</span>
                                         </div>
                                       </>
                                     )}
@@ -1425,6 +1504,65 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                       </span>
                                       <span className="text-green-700">{formatCurrency(grandTotal)}</span>
                                     </div>
+
+                                    {/* Show discount impact on profitability */}
+                                    {overallDiscount > 0 && (
+                                      <div className="mt-4 pt-4 border-t border-green-300 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3">
+                                        <h6 className="text-xs font-bold text-gray-800 mb-3 flex items-center gap-2">
+                                          <TrendingUp className="w-3.5 h-3.5" />
+                                          Discount Impact on Profitability
+                                        </h6>
+                                        <div className="space-y-2 text-xs">
+                                          <div className="flex justify-between items-center">
+                                            <span className="text-gray-600">Client Cost:</span>
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-gray-500 line-through">
+                                                {formatCurrency(subtotal)}
+                                              </span>
+                                              <span className="text-blue-700 font-bold">
+                                                → {formatCurrency(grandTotal)}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          <div className="flex justify-between items-center">
+                                            <span className="text-gray-600">Internal Cost:</span>
+                                            <span className="font-semibold text-red-600">
+                                              {formatCurrency(totalInternalCost)}
+                                            </span>
+                                          </div>
+                                          <div className="flex justify-between items-center pt-2 border-t border-gray-300">
+                                            <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-gray-500 line-through">
+                                                {formatCurrency(totalActualProfit)}
+                                              </span>
+                                              <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                                                → {formatCurrency(actualProfitAfterDiscount)}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          <div className="flex justify-between items-center bg-white/60 rounded px-2 py-1">
+                                            <span className="text-gray-700 font-medium">Profit Margin:</span>
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-gray-500 text-xs">
+                                                {profitMarginPercentage.toFixed(1)}%
+                                              </span>
+                                              <span className={`font-bold ${profitMarginAfterDiscount >= 15 ? 'text-emerald-700' : profitMarginAfterDiscount >= 10 ? 'text-orange-600' : 'text-red-600'}`}>
+                                                → {profitMarginAfterDiscount.toFixed(1)}%
+                                              </span>
+                                            </div>
+                                          </div>
+                                          {profitMarginAfterDiscount < 15 && (
+                                            <div className="mt-2 p-2 bg-orange-100 border border-orange-300 rounded text-orange-800 flex items-start gap-2">
+                                              <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                              <span className="text-xs">
+                                                <strong>Warning:</strong> Profit margin is below recommended 15%. This discount significantly reduces profitability.
+                                              </span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
                                   </>
                                 );
                               })()}

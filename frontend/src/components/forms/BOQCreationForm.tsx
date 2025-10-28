@@ -16,12 +16,15 @@ import {
   Loader2,
   Search,
   PlusCircle,
-  Info
+  Info,
+  HelpCircle,
+  TrendingUp
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { ProjectOption, BOQMaterial, BOQLabour, BOQCreatePayload, WorkType } from '@/roles/estimator/types';
 import { ModernSelect } from '@/components/ui/modern-select';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 
 // Backend-aligned interfaces
 interface SubItemForm {
@@ -996,7 +999,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
     // 4. Calculate Profits
     const plannedProfit = overheadProfitAmount; // This is the profit we planned for (25% typically)
-    const actualProfit = clientAmount - internalCost; // Actual profit after all costs (should be 0 or near 0 in ideal case)
+    const actualProfit = clientAmount - internalCost; // Actual profit after all costs including O&P
 
     // 5. Remaining budget for materials/labour (for reference)
     const remainingForCosts = clientAmount - transportAmount - overheadProfitAmount - miscAmount;
@@ -2793,36 +2796,67 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     const subItemCalc = calculateSubItemCost(subItem);
                                     return (
                                       <div className="mt-4 p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg border-2 border-green-300">
-                                        <h5 className="text-xs font-bold text-green-900 mb-3 flex items-center gap-2">
-                                          <Info className="w-4 h-4" />
-                                          Profit Analysis (Top-Down Calculation)
-                                        </h5>
+                                        <div className="flex items-center justify-between mb-3">
+                                          <h5 className="text-xs font-bold text-green-900 flex items-center gap-2">
+                                            <Info className="w-4 h-4" />
+                                            Profit Analysis (Top-Down Calculation)
+                                          </h5>
+                                          <Popover>
+                                            <PopoverTrigger asChild>
+                                              <button className="p-1 hover:bg-green-200 rounded-full transition-colors" title="View Calculation Formulas">
+                                                <HelpCircle className="w-4 h-4 text-green-700" />
+                                              </button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-96 bg-white">
+                                              <div className="space-y-3">
+                                                <h6 className="font-bold text-sm text-gray-900 border-b pb-2">BOQ Calculation Formulas</h6>
+                                                <div className="space-y-2 text-xs">
+                                                  <div className="bg-blue-50 p-2 rounded">
+                                                    <strong className="text-blue-900">Client Amount:</strong>
+                                                    <p className="text-gray-700 mt-1">= Quantity × Rate</p>
+                                                  </div>
+                                                  <div className="bg-orange-50 p-2 rounded">
+                                                    <strong className="text-orange-900">Materials Cost:</strong>
+                                                    <p className="text-gray-700 mt-1">= Sum of all material costs</p>
+                                                  </div>
+                                                  <div className="bg-purple-50 p-2 rounded">
+                                                    <strong className="text-purple-900">Labour Cost:</strong>
+                                                    <p className="text-gray-700 mt-1">= Sum of all labour costs</p>
+                                                  </div>
+                                                  <div className="bg-yellow-50 p-2 rounded">
+                                                    <strong className="text-yellow-900">Misc:</strong>
+                                                    <p className="text-gray-700 mt-1">= Client Amount × (Misc % / 100)</p>
+                                                  </div>
+                                                  <div className="bg-indigo-50 p-2 rounded">
+                                                    <strong className="text-indigo-900">Overhead & Profit:</strong>
+                                                    <p className="text-gray-700 mt-1">= Client Amount × (O&P % / 100)</p>
+                                                  </div>
+                                                  <div className="bg-teal-50 p-2 rounded">
+                                                    <strong className="text-teal-900">Transport:</strong>
+                                                    <p className="text-gray-700 mt-1">= Client Amount × (Transport % / 100)</p>
+                                                  </div>
+                                                  <div className="bg-red-50 p-2 rounded border-2 border-red-200">
+                                                    <strong className="text-red-900">Internal Cost (Total):</strong>
+                                                    <p className="text-gray-700 mt-1">= Materials + Labour + Misc + O&P + Transport</p>
+                                                  </div>
+                                                  <div className="bg-green-50 p-2 rounded border-2 border-green-200">
+                                                    <strong className="text-green-900">Planned Profit:</strong>
+                                                    <p className="text-gray-700 mt-1">= Overhead & Profit amount</p>
+                                                  </div>
+                                                  <div className="bg-emerald-50 p-2 rounded border-2 border-emerald-200">
+                                                    <strong className="text-emerald-900">Actual Profit:</strong>
+                                                    <p className="text-gray-700 mt-1">= Client Amount - Internal Cost (Total)</p>
+                                                    <p className="text-gray-500 text-xs mt-0.5 italic">Shows actual profit after all costs including O&P</p>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </PopoverContent>
+                                          </Popover>
+                                        </div>
 
                                         <div className="space-y-2 text-xs">
-                                          {/* Planned Profit */}
-                                          <div className="flex justify-between items-center p-2 bg-white/60 rounded">
-                                            <div>
-                                              <span className="font-medium text-gray-700">Planned Profit</span>
-                                              <span className="ml-2 text-gray-500 italic">(from {subItem.overhead_profit_percentage}% O&P)</span>
-                                            </div>
-                                            <span className="font-bold text-green-700">
-                                              {subItemCalc.plannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
-                                            </span>
-                                          </div>
-
-                                          {/* Actual Profit */}
-                                          <div className="flex justify-between items-center p-2 bg-white/60 rounded">
-                                            <div>
-                                              <span className="font-medium text-gray-700">Actual Profit</span>
-                                              <span className="ml-2 text-gray-500 italic">(Client Rate - All Costs)</span>
-                                            </div>
-                                            <span className={`font-bold ${subItemCalc.actualProfit >= subItemCalc.plannedProfit ? 'text-emerald-700' : 'text-red-600'}`}>
-                                              {subItemCalc.actualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
-                                            </span>
-                                          </div>
-
                                           {/* Breakdown */}
-                                          <div className="mt-3 pt-3 border-t border-green-200 space-y-1.5">
+                                          <div className="space-y-1.5">
                                             <div className="flex justify-between text-gray-600">
                                               <span>Client Amount:</span>
                                               <span className="font-semibold text-gray-800">{subItemCalc.clientAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
@@ -2851,10 +2885,28 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               <span className="font-bold">Internal Cost (Total):</span>
                                               <span className="font-bold text-red-600">{subItemCalc.internalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
-                                            <div className="flex justify-between text-gray-600">
-                                              <span>Balance:</span>
-                                              <span className="font-semibold text-gray-800">{subItemCalc.remainingForCosts.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                          </div>
+
+                                          {/* Planned Profit - Moved below Internal Cost */}
+                                          <div className="flex justify-between items-center p-2 bg-white/60 rounded mt-3 pt-3 border-t border-green-200">
+                                            <div>
+                                              <span className="font-medium text-gray-700">Planned Profit</span>
+                                              <span className="ml-2 text-gray-500 italic">(from {subItem.overhead_profit_percentage}% O&P)</span>
                                             </div>
+                                            <span className="font-bold text-green-700">
+                                              {subItemCalc.plannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                            </span>
+                                          </div>
+
+                                          {/* Actual Profit - Moved below Planned Profit */}
+                                          <div className="flex justify-between items-center p-2 bg-white/60 rounded">
+                                            <div>
+                                              <span className="font-medium text-gray-700">Actual Profit</span>
+                                              <span className="ml-2 text-gray-500 italic">(Client - Internal Cost Total)</span>
+                                            </div>
+                                            <span className={`font-bold ${subItemCalc.actualProfit >= subItemCalc.plannedProfit ? 'text-emerald-700' : 'text-red-600'}`}>
+                                              {subItemCalc.actualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                            </span>
                                           </div>
 
                                           {/* Alert if actual < planned */}
@@ -2882,21 +2934,88 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                         {/* Cost Analysis Section - Per Item (Like PDF) */}
                         {(() => {
                           const costs = calculateItemCost(item);
+
+                          // Calculate this item's share of the overall discount
+                          const totalClientCostAllItems = items.reduce((total, i) => {
+                            const c = calculateItemCost(i);
+                            return total + c.totalClientCost;
+                          }, 0);
+
+                          const itemDiscountShare = overallDiscount > 0 && totalClientCostAllItems > 0
+                            ? (costs.totalClientCost / totalClientCostAllItems) * overallDiscount
+                            : 0;
+
+                          const itemDiscountAmount = costs.totalClientCost * (itemDiscountShare / 100);
+                          const clientCostAfterDiscount = costs.totalClientCost - itemDiscountAmount;
+                          const actualProfitAfterDiscount = clientCostAfterDiscount - costs.totalInternalCost;
+
                           return (
                             <div className="mt-4 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border-2 border-amber-300 shadow-lg">
-                              <div className="flex items-center gap-2 mb-3">
-                                <div className="p-1.5 bg-white rounded shadow-sm">
-                                  <Calculator className="w-4 h-4 text-amber-600" />
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="p-1.5 bg-white rounded shadow-sm">
+                                    <Calculator className="w-4 h-4 text-amber-600" />
+                                  </div>
+                                  <h5 className="text-sm font-bold text-amber-900">Cost Analysis</h5>
                                 </div>
-                                <h5 className="text-sm font-bold text-amber-900">Cost Analysis</h5>
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <button className="p-1 hover:bg-amber-200 rounded-full transition-colors" title="View Calculation Formulas">
+                                      <HelpCircle className="w-4 h-4 text-amber-700" />
+                                    </button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-96 bg-white">
+                                    <div className="space-y-3">
+                                      <h6 className="font-bold text-sm text-gray-900 border-b pb-2">Cost Analysis Formulas</h6>
+                                      <div className="space-y-2 text-xs">
+                                        <div className="bg-blue-50 p-2 rounded">
+                                          <strong className="text-blue-900">Client Cost (Total):</strong>
+                                          <p className="text-gray-700 mt-1">= Sum of all sub-items (Quantity × Rate)</p>
+                                        </div>
+                                        <div className="bg-red-50 p-2 rounded border-2 border-red-200">
+                                          <strong className="text-red-900">Internal Cost (Total):</strong>
+                                          <p className="text-gray-700 mt-1">= Materials + Labour + Misc + O&P + Transport</p>
+                                          <p className="text-gray-500 text-xs mt-0.5 italic">Includes ALL operational costs and planned profit</p>
+                                        </div>
+                                        <div className="bg-green-50 p-2 rounded">
+                                          <strong className="text-green-900">Project Margin:</strong>
+                                          <p className="text-gray-700 mt-1">= Client Cost - Internal Cost</p>
+                                          <p className="text-gray-500 text-xs mt-0.5 italic">Should be near zero in a well-planned BOQ</p>
+                                        </div>
+                                        <div className="bg-indigo-50 p-2 rounded border-2 border-indigo-200">
+                                          <strong className="text-indigo-900">Planned Profit:</strong>
+                                          <p className="text-gray-700 mt-1">= Total O&P amount</p>
+                                          <p className="text-gray-500 text-xs mt-0.5 italic">Target profit from Overhead & Profit %</p>
+                                        </div>
+                                        <div className="bg-emerald-50 p-2 rounded border-2 border-emerald-200">
+                                          <strong className="text-emerald-900">Actual Profit:</strong>
+                                          <p className="text-gray-700 mt-1">= Client Cost - Internal Cost (Total)</p>
+                                          <p className="text-gray-500 text-xs mt-0.5 italic">Real profit after all operational costs including O&P</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
                               </div>
                               <div className="bg-white rounded-lg p-4 space-y-3">
                                 <div className="flex justify-between items-center py-2 border-b border-gray-200">
-                                  <span className="text-sm font-semibold text-gray-700">Client Cost</span>
+                                  <span className="text-sm font-semibold text-gray-700">
+                                    Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}
+                                  </span>
                                   <span className="text-lg font-bold text-blue-700">
                                     {costs.totalClientCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
                                   </span>
                                 </div>
+
+                                {overallDiscount > 0 && (
+                                  <div className="flex justify-between items-center py-1 bg-blue-50 rounded px-2 -mt-1">
+                                    <span className="text-xs font-medium text-blue-700">After {itemDiscountShare.toFixed(1)}% Discount:</span>
+                                    <span className="text-sm font-bold text-blue-900">
+                                      {clientCostAfterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                    </span>
+                                  </div>
+                                )}
+
                                 <div className="flex justify-between items-center py-2 border-b border-gray-200">
                                   <span className="text-sm font-semibold text-gray-700">Internal Cost</span>
                                   <span className="text-lg font-bold text-red-600">
@@ -2933,9 +3052,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     <span>{costs.totalPlannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
                                   </div>
                                   <div className="flex justify-between font-semibold text-emerald-700">
-                                    <span>Total Actual Profit:</span>
+                                    <span>Total Actual Profit {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
                                     <span>{costs.totalActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
                                   </div>
+
+                                  {overallDiscount > 0 && (
+                                    <div className="flex justify-between font-semibold text-indigo-700 bg-indigo-50 rounded px-2 py-1">
+                                      <span>Actual Profit (After Discount):</span>
+                                      <span className={actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}>
+                                        {actualProfitAfterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -2964,8 +3092,25 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 return total + costs.totalClientCost;
               }, 0);
 
+              const totalInternalCost = items.reduce((total, item) => {
+                const costs = calculateItemCost(item);
+                return total + costs.totalInternalCost;
+              }, 0);
+
+              const totalActualProfit = subtotal - totalInternalCost;
+              const profitMarginPercentage = subtotal > 0 ? (totalActualProfit / subtotal) * 100 : 0;
+
+              // Calculate suggested discount: Keep at least 15% profit margin
+              const minProfitMargin = 15; // 15% minimum recommended profit
+              const maxSafeDiscount = Math.max(0, profitMarginPercentage - minProfitMargin);
+              const suggestedDiscount = Math.min(maxSafeDiscount, 10); // Cap at 10% max
+
               const discountAmount = subtotal * (overallDiscount / 100);
               const grandTotal = subtotal - discountAmount;
+
+              // Calculate profit after discount
+              const actualProfitAfterDiscount = grandTotal - totalInternalCost;
+              const profitMarginAfterDiscount = grandTotal > 0 ? (actualProfitAfterDiscount / grandTotal) * 100 : 0;
 
               return (
                 <div className="mt-6 bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-6 border-2 border-green-300 shadow-xl">
@@ -2978,37 +3123,56 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
                   <div className="bg-white rounded-xl p-4 space-y-3">
                     <div className="flex justify-between items-center">
-                      <span className="text-gray-700 font-medium">Subtotal (All Items):</span>
+                      <span className="text-gray-700 font-medium">Client Cost (Before Discount):</span>
                       <span className="text-xl font-semibold text-gray-900">
                         AED {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
 
-                    {/* Overall Discount Input */}
-                    <div className="flex justify-between items-center py-2 border-t border-gray-200">
-                      <div className="flex items-center gap-3">
-                        <span className="text-gray-700 font-medium">Overall Discount:</span>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            value={overallDiscount === 0 ? '' : overallDiscount}
-                            onChange={(e) => {
-                              const value = e.target.value === '' ? 0 : Number(e.target.value);
-                              setOverallDiscount(Math.max(0, Math.min(100, value)));
-                            }}
-                            className="w-20 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                            min="0"
-                            max="100"
-                            step="0.1"
-                            disabled={isSubmitting}
-                            placeholder="0"
-                          />
-                          <span className="text-sm text-gray-600">%</span>
+                    {/* Overall Discount Input with Suggestion */}
+                    <div className="py-2 border-t border-gray-200">
+                      <div className="flex justify-between items-center mb-2">
+                        <div className="flex items-center gap-3">
+                          <span className="text-gray-700 font-medium">Overall Discount:</span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              value={overallDiscount === 0 ? '' : overallDiscount}
+                              onChange={(e) => {
+                                const value = e.target.value === '' ? 0 : Number(e.target.value);
+                                setOverallDiscount(Math.max(0, Math.min(100, value)));
+                              }}
+                              className="w-20 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                              min="0"
+                              max="100"
+                              step="0.1"
+                              disabled={isSubmitting}
+                              placeholder="0"
+                            />
+                            <span className="text-sm text-gray-600">%</span>
+                          </div>
                         </div>
+                        <span className="text-lg font-semibold text-red-600">
+                          - AED {discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
                       </div>
-                      <span className="text-lg font-semibold text-red-600">
-                        - AED {discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </span>
+
+                      {/* Suggested Discount */}
+                      {suggestedDiscount > 0 && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <Info className="w-3.5 h-3.5 text-blue-600" />
+                          <span className="text-gray-600">Suggested safe discount:</span>
+                          <button
+                            type="button"
+                            onClick={() => setOverallDiscount(Math.floor(suggestedDiscount * 10) / 10)}
+                            className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 font-semibold transition-colors"
+                            disabled={isSubmitting}
+                          >
+                            {(Math.floor(suggestedDiscount * 10) / 10).toFixed(1)}%
+                          </button>
+                          <span className="text-gray-500 italic">(maintains {minProfitMargin}% profit margin)</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex justify-between items-center pt-3 border-t-2 border-green-300">
@@ -3019,6 +3183,65 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                         AED {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
+
+                    {/* Show impact of discount on profit */}
+                    {overallDiscount > 0 && (
+                      <div className="mt-4 pt-4 border-t border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3">
+                        <h6 className="text-xs font-bold text-gray-800 mb-3 flex items-center gap-2">
+                          <TrendingUp className="w-3.5 h-3.5" />
+                          Discount Impact on Profitability
+                        </h6>
+                        <div className="space-y-2 text-xs">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600">Client Cost:</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500 line-through">
+                                {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                              </span>
+                              <span className="text-blue-700 font-bold">
+                                → {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600">Internal Cost:</span>
+                            <span className="font-semibold text-red-600">
+                              {totalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center pt-2 border-t border-gray-300">
+                            <span className="text-gray-700 font-medium">Actual Profit:</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500 line-through">
+                                {totalActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                              </span>
+                              <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                                → {actualProfitAfterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex justify-between items-center bg-white/60 rounded px-2 py-1">
+                            <span className="text-gray-700 font-medium">Profit Margin:</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500 text-xs">
+                                {profitMarginPercentage.toFixed(1)}%
+                              </span>
+                              <span className={`font-bold ${profitMarginAfterDiscount >= 15 ? 'text-emerald-700' : profitMarginAfterDiscount >= 10 ? 'text-orange-600' : 'text-red-600'}`}>
+                                → {profitMarginAfterDiscount.toFixed(1)}%
+                              </span>
+                            </div>
+                          </div>
+                          {profitMarginAfterDiscount < 15 && (
+                            <div className="mt-2 p-2 bg-orange-100 border border-orange-300 rounded text-orange-800 flex items-start gap-2">
+                              <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                              <span className="text-xs">
+                                <strong>Warning:</strong> Profit margin is below recommended 15%. Consider reducing the discount.
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
