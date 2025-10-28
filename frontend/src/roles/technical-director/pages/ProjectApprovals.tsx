@@ -20,7 +20,7 @@ import {
   Squares2X2Icon,
   TrashIcon
 } from '@heroicons/react/24/outline';
-import { FileText } from 'lucide-react';
+import { FileText, TrendingUp, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { tdService } from '@/roles/technical-director/services/tdService';
@@ -3330,12 +3330,19 @@ const ProjectApprovals: React.FC = () => {
                               {(item as any).sub_items.map((subItem: any, sIdx: number) => {
                                 const subMaterialTotal = (subItem.materials || []).reduce((sum: number, m: any) => sum + (m.total_price || m.amount || 0), 0);
                                 const subLabourTotal = (subItem.labour || []).reduce((sum: number, l: any) => sum + (l.total_cost || l.amount || 0), 0);
+                                const subItemClientCost = (subItem.quantity || 0) * (subItem.rate || 0);
 
                                 return (
                                   <div key={sIdx} className="bg-green-50/50 rounded-lg p-3 border border-green-200">
-                                    <h5 className="font-semibold text-green-900 text-sm mb-2">
-                                      Sub Item {sIdx + 1}: {subItem.sub_item_name || subItem.scope}
-                                    </h5>
+                                    <div className="flex justify-between items-start mb-2">
+                                      <h5 className="font-semibold text-green-900 text-sm">
+                                        Sub Item {sIdx + 1}: {subItem.sub_item_name || subItem.scope}
+                                      </h5>
+                                      <div className="text-right">
+                                        <div className="text-xs text-gray-600">Client Amount</div>
+                                        <div className="font-bold text-green-700">AED{formatCurrency(subItemClientCost)}</div>
+                                      </div>
+                                    </div>
                                     {subItem.scope && (
                                       <p className="text-xs text-gray-600 mb-2"><strong>Scope:</strong> {subItem.scope}</p>
                                     )}
@@ -3344,6 +3351,7 @@ const ProjectApprovals: React.FC = () => {
                                       {subItem.location && <div><span className="font-medium">Location:</span> {subItem.location}</div>}
                                       {subItem.brand && <div><span className="font-medium">Brand:</span> {subItem.brand}</div>}
                                       <div><span className="font-medium">Qty:</span> {subItem.quantity} {subItem.unit}</div>
+                                      {subItem.rate && <div><span className="font-medium">Rate:</span> AED{formatCurrency(subItem.rate)}/{subItem.unit}</div>}
                                     </div>
 
                                     {/* Sub-item Materials */}
@@ -3457,11 +3465,14 @@ const ProjectApprovals: React.FC = () => {
                               const transportAmt = clientAmt * ((si.transport_percentage || 5) / 100);
                               const opAmt = clientAmt * ((si.overhead_profit_percentage || 25) / 100);
 
+                              const internalCost = matCost + labCost + miscAmt + opAmt + transportAmt;
+
                               totalClientAmount += clientAmt;
                               totalPlannedProfit += opAmt;
                               totalMiscCost += miscAmt;
                               totalTransportCost += transportAmt;
-                              totalActualProfit += (clientAmt - matCost - labCost - miscAmt - opAmt - transportAmt);
+                              // CORRECTED: Actual Profit = Client Amount - Internal Cost Total
+                              totalActualProfit += (clientAmt - internalCost);
                             });
                           }
                         });
@@ -3483,6 +3494,11 @@ const ProjectApprovals: React.FC = () => {
                         const profitVariancePercentage = totalPlannedProfit > 0 ? ((profitVariance / totalPlannedProfit) * 100) : 0;
                         const discountPercentage = totalClientAmount > 0 ? ((totalDiscount / totalClientAmount) * 100) : overallDiscountPct;
                         const grandTotalAfterDiscount = totalClientAmount - totalDiscount;
+
+                        // Calculate profit after discount
+                        const actualProfitAfterDiscount = grandTotalAfterDiscount - totalInternalCost;
+                        const profitMarginPercentage = totalClientAmount > 0 ? (totalActualProfit / totalClientAmount) * 100 : 0;
+                        const profitMarginAfterDiscount = grandTotalAfterDiscount > 0 ? (actualProfitAfterDiscount / grandTotalAfterDiscount) * 100 : 0;
 
                         return (
                           <>
@@ -3577,6 +3593,65 @@ const ProjectApprovals: React.FC = () => {
                                   </span>
                                   <span className="text-green-700">AED{formatCurrency(grandTotalAfterDiscount)}</span>
                                 </div>
+
+                                {/* Show discount impact on profitability */}
+                                {totalDiscount > 0 && (
+                                  <div className="mt-3 pt-3 border-t border-green-300 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3">
+                                    <h6 className="text-xs font-bold text-gray-800 mb-3 flex items-center gap-2">
+                                      <TrendingUp className="w-3.5 h-3.5" />
+                                      Discount Impact on Profitability
+                                    </h6>
+                                    <div className="space-y-2 text-xs">
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-gray-600">Client Cost:</span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-gray-500 line-through">
+                                            AED{formatCurrency(totalClientAmount)}
+                                          </span>
+                                          <span className="text-blue-700 font-bold">
+                                            → AED{formatCurrency(grandTotalAfterDiscount)}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-gray-600">Internal Cost:</span>
+                                        <span className="font-semibold text-red-600">
+                                          AED{formatCurrency(totalInternalCost)}
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between items-center pt-2 border-t border-gray-300">
+                                        <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-gray-500 line-through">
+                                            AED{formatCurrency(totalActualProfit)}
+                                          </span>
+                                          <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                                            → AED{formatCurrency(actualProfitAfterDiscount)}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-between items-center bg-white/60 rounded px-2 py-1">
+                                        <span className="text-gray-700 font-medium">Profit Margin:</span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-gray-500 text-xs">
+                                            {profitMarginPercentage.toFixed(1)}%
+                                          </span>
+                                          <span className={`font-bold ${profitMarginAfterDiscount >= 15 ? 'text-emerald-700' : profitMarginAfterDiscount >= 10 ? 'text-orange-600' : 'text-red-600'}`}>
+                                            → {profitMarginAfterDiscount.toFixed(1)}%
+                                          </span>
+                                        </div>
+                                      </div>
+                                      {profitMarginAfterDiscount < 15 && (
+                                        <div className="mt-2 p-2 bg-orange-100 border border-orange-300 rounded text-orange-800 flex items-start gap-2">
+                                          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                          <span className="text-xs">
+                                            <strong>Warning:</strong> Profit margin is below recommended 15%. This discount significantly reduces profitability.
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </>
