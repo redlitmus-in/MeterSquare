@@ -77,6 +77,9 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # Add materials from CR
                 for mat in materials_data:
+                    # Use CR-level justification if material doesn't have its own
+                    material_justification = mat.get('justification') or cr.justification or ''
+
                     cr_sub_item['materials'].append({
                         'master_material_id': mat.get('master_material_id'),
                         'material_name': mat.get('material_name'),
@@ -86,7 +89,7 @@ def get_boq_planned_vs_actual(boq_id):
                         'total_price': mat.get('total_price', 0),
                         'is_from_change_request': True,
                         'change_request_id': cr.cr_id,
-                        'justification': mat.get('justification', cr.justification),
+                        'justification': material_justification,
                         # Mark planned as 0 = unplanned spending
                         'planned_quantity': 0,
                         'planned_unit_price': 0,
@@ -344,10 +347,12 @@ def get_boq_planned_vs_actual(boq_id):
 
                     if actual_quantity > 0:
                         if is_from_change_request:
-                            # Special handling for CR materials
-                            variance_reason = f" - {planned_mat.get('justification')}"
-                            if planned_mat.get('justification'):
-                                variance_reason += f" - {planned_mat.get('justification')}"
+                            # Special handling for CR materials - show justification in variance_reason
+                            justification_preview = planned_mat.get('justification', '')
+                            if justification_preview:
+                                variance_reason = justification_preview
+                            else:
+                                variance_reason = "Unplanned item from Change Request"
                         elif total_variance > 0:
                             variance_reason = f"Cost overrun: AED{float(total_variance):.2f} over budget"
                             if price_variance > 0:
@@ -367,6 +372,16 @@ def get_boq_planned_vs_actual(boq_id):
                     cr_id = planned_mat.get('change_request_id') if is_from_change_request else None
                     if actual_mat and not cr_id:
                         cr_id = getattr(actual_mat, 'change_request_id', None)
+
+                    # Get justification - fetch from CR if needed
+                    justification_text = None
+                    if is_from_change_request:
+                        justification_text = planned_mat.get('justification')
+                        # If empty or None, try to fetch from ChangeRequest table
+                        if not justification_text and cr_id:
+                            cr_record = next((cr for cr in change_requests if cr.cr_id == cr_id), None)
+                            if cr_record:
+                                justification_text = cr_record.justification
 
                     materials_comparison.append({
                         "material_name": material_name,
@@ -397,6 +412,7 @@ def get_boq_planned_vs_actual(boq_id):
                         "status": material_status,
                         "variance_reason": variance_reason,
                         "variance_response": variance_response,
+                        "justification": justification_text,
                         "is_from_change_request": is_from_change_request,
                         "change_request_id": cr_id,
                         "source": "change_request" if is_from_change_request else "original_boq"
@@ -734,6 +750,8 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # Aggregate to item level (planned)
                 planned_base += sub_item_base_total
+                planned_materials_total += sub_item_materials_cost
+                planned_labour_total += sub_item_labour_cost
                 planned_miscellaneous += sub_planned_misc
                 planned_overhead += sub_planned_overhead
                 planned_profit += sub_planned_profit
@@ -742,6 +760,8 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # Aggregate to item level (actual) - using actual internal costs
                 actual_base += sub_item_base_total  # Client rate stays the same
+                actual_materials_total += sub_actual_materials_cost
+                actual_labour_total += sub_actual_labour_cost
                 actual_miscellaneous += sub_actual_misc  # Misc % stays the same
                 actual_overhead += sub_actual_overhead  # Overhead % stays the same
                 actual_profit += sub_actual_profit  # Profit varies based on actual spending
@@ -981,6 +1001,7 @@ def get_boq_planned_vs_actual(boq_id):
             comparison['items'].append(item_comparison)
 
         # Calculate overall summary
+        total_base_cost = sum(float(item['planned']['base_cost']) for item in comparison['items'])  # Selling price to client
         total_planned = sum(float(item['planned']['total']) for item in comparison['items'])
         total_actual = sum(float(item['actual']['total']) for item in comparison['items'])
         total_planned_miscellaneous = sum(float(item['planned']['miscellaneous_amount']) for item in comparison['items'])
@@ -1013,11 +1034,11 @@ def get_boq_planned_vs_actual(boq_id):
         # Calculate net loss (costs that exceeded all buffers)
         total_loss_beyond_buffers = total_extra_costs - total_misc_consumed - total_overhead_consumed - total_profit_consumed
 
-        # Adjust actual profit to account for losses beyond buffers
-        # If there are losses beyond buffers, reduce the actual profit further (can go negative)
-        adjusted_actual_profit = total_actual_profit - float(total_loss_beyond_buffers)
+        # Calculate actual profit using formula: Base Cost (Selling Price) - Total Actual Spending
+        actual_project_profit = total_base_cost - total_actual
 
         comparison['summary'] = {
+            "base_cost": float(total_base_cost),  # Add base cost to summary
             "planned_total": float(total_planned),
             "actual_total": float(total_actual),
             "variance": float(abs(total_actual - total_planned)),  # Always positive number
@@ -1030,13 +1051,13 @@ def get_boq_planned_vs_actual(boq_id):
             "total_actual_overhead": float(total_actual_overhead),
             "overhead_variance": float(abs(total_actual_overhead - total_planned_overhead)),
             "total_planned_profit": float(total_planned_profit),
-            "total_actual_profit": float(adjusted_actual_profit),  # Use adjusted profit
-            "profit_variance": float(abs(adjusted_actual_profit - total_planned_profit)),
-            "profit_status": "loss" if adjusted_actual_profit < 0 else ("reduced" if adjusted_actual_profit < total_planned_profit else "maintained" if adjusted_actual_profit == total_planned_profit else "increased"),
+            "total_actual_profit": float(actual_project_profit),  # Use simple formula: Planned - Actual
+            "profit_variance": float(abs(actual_project_profit - total_planned_profit)),
+            "profit_status": "loss" if actual_project_profit < 0 else ("reduced" if actual_project_profit < total_planned_profit else "maintained" if actual_project_profit == total_planned_profit else "increased"),
             "total_planned_transport": float(total_planned_transport),
             "total_actual_transport": float(total_actual_transport),
             "transport_variance": float(abs(total_actual_transport - total_planned_transport)),
-            "total_buffers": float(total_actual_miscellaneous + total_actual_overhead + adjusted_actual_profit + total_actual_transport),
+            "total_buffers": float(total_actual_miscellaneous + total_actual_overhead + actual_project_profit + total_actual_transport),
             "planned_buffers": float(total_planned_miscellaneous + total_planned_overhead + total_planned_profit + total_planned_transport),
             "total_extra_costs": float(total_extra_costs),
             "total_miscellaneous_consumed": float(total_misc_consumed),

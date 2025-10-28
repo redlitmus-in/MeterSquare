@@ -126,7 +126,7 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataCh
 
   // Get current user role from localStorage
   const userStr = localStorage.getItem('user');
-  const userRole = userStr ? JSON.parse(userStr)?.role_id?.toLowerCase() : '';
+  const userRole = userStr ? String(JSON.parse(userStr)?.role_id || '').toLowerCase() : '';
   const isTD = userRole === 'technical_director' || userRole === 'technical director' || userRole === 'technicaldir' || userRole === 'td';
 
   useEffect(() => {
