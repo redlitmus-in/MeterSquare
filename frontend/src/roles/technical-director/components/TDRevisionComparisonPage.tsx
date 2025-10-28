@@ -171,11 +171,40 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
   const loadRevisionData = async (boq: BOQ) => {
     setIsLoading(true);
     try {
-      const result = await estimatorService.getBOQDetailsHistory(boq.boq_id!);
+      // 🔥 Fetch FULL detailed BOQ from /boq/{boq_id} endpoint (like Internal Revisions does)
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+      const token = localStorage.getItem('access_token');
 
-      if (result.success && result.data) {
-        const current = result.data.current_version;
-        let historyList = result.data.history || [];
+      const response = await fetch(`${API_URL}/boq/${boq.boq_id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const boqData = await response.json();
+
+      if (boqData && boqData.boq_id) {
+        console.log('📊 TD: Loaded detailed BOQ data:', boqData);
+
+        // Set current version with full details
+        const current = {
+          boq_detail_id: boqData.boq_id,
+          boq_id: boqData.boq_id,
+          version: 'current',
+          boq_details: {
+            items: boqData.existing_purchase?.items || [],
+            discount_percentage: boqData.discount_percentage || 0,
+            discount_amount: boqData.discount_amount || 0,
+            total_cost: boqData.total_cost || 0,
+            profit_analysis: boqData.profit_analysis || null
+          },
+          total_cost: boqData.total_cost || 0,
+          created_at: boqData.created_at
+        };
+
+        // Now fetch history for previous revisions
+        const result = await estimatorService.getBOQDetailsHistory(boq.boq_id!);
+        let historyList = result.success && result.data ? (result.data.history || []) : [];
 
         console.log('📊 BOQ History Data:', {
           currentRevision: boq.revision_number,
@@ -265,6 +294,98 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
 
       return total + finalTotalPrice;
     }, 0);
+  };
+
+  // Calculate Grand Total with discount from snapshot
+  const calculateGrandTotal = (snapshot: any): number => {
+    if (!snapshot?.items || snapshot.items.length === 0) return 0;
+
+    const allItems = snapshot.items || [];
+
+    // Calculate subtotal (sum of all item client amounts)
+    const subtotal = allItems.reduce((sum: number, item: any) => {
+      // Calculate client amount for each item
+      let itemClientAmount = (item.quantity || 0) * (item.rate || 0);
+      if (itemClientAmount === 0 && item.sub_items && item.sub_items.length > 0) {
+        // If rate is 0, calculate from sub-items
+        itemClientAmount = item.sub_items.reduce((siSum: number, si: any) =>
+          siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+        );
+      }
+      return sum + itemClientAmount;
+    }, 0);
+
+    // Get overall BOQ discount
+    let overallDiscount = 0;
+
+    if (snapshot.discount_percentage && snapshot.discount_percentage > 0) {
+      overallDiscount = (subtotal * snapshot.discount_percentage) / 100;
+    } else if (snapshot.discount_amount && snapshot.discount_amount > 0) {
+      overallDiscount = snapshot.discount_amount;
+    }
+
+    const grandTotal = subtotal - overallDiscount;
+    return grandTotal;
+  };
+
+  // Render Grand Total Section with Discount Impact
+  const renderGrandTotalSection = (snapshot: any) => {
+    if (!snapshot?.items || snapshot.items.length === 0) return null;
+
+    const allItems = snapshot.items || [];
+
+    // Calculate subtotal
+    const subtotal = allItems.reduce((sum: number, item: any) => {
+      let itemClientAmount = (item.quantity || 0) * (item.rate || 0);
+      if (itemClientAmount === 0 && item.sub_items && item.sub_items.length > 0) {
+        itemClientAmount = item.sub_items.reduce((siSum: number, si: any) =>
+          siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+        );
+      }
+      return sum + itemClientAmount;
+    }, 0);
+
+    // Get overall BOQ discount
+    let overallDiscount = 0;
+    let overallDiscountPercentage = 0;
+
+    if (snapshot.discount_percentage && snapshot.discount_percentage > 0) {
+      overallDiscountPercentage = snapshot.discount_percentage;
+      overallDiscount = (subtotal * snapshot.discount_percentage) / 100;
+    } else if (snapshot.discount_amount && snapshot.discount_amount > 0) {
+      overallDiscount = snapshot.discount_amount;
+      overallDiscountPercentage = subtotal > 0 ? (overallDiscount / subtotal) * 100 : 0;
+    }
+
+    const grandTotal = subtotal - overallDiscount;
+
+    return (
+      <div className="mt-4 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-4 border-2 border-green-300">
+        <h4 className="font-bold text-green-900 mb-3 text-sm">📊 Grand Total Summary</h4>
+
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-800">Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
+            <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
+          </div>
+
+          {overallDiscount > 0 && (
+            <>
+              <div className="flex justify-between text-sm text-red-700">
+                <span>Overall Discount ({overallDiscountPercentage.toFixed(1)}%):</span>
+                <span className="font-semibold">- AED {overallDiscount.toFixed(2)}</span>
+              </div>
+              <div className="h-px bg-green-300"></div>
+            </>
+          )}
+
+          <div className="flex justify-between text-base font-bold text-green-900 bg-green-200 rounded px-3 py-2">
+            <span>Grand Total:</span>
+            <span>AED {grandTotal.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -878,20 +999,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                     return sum + (subtotal - discount);
                   }, 0) || 0;
 
-                  const totalDiscount = currentRevisionData.boq_details?.items?.reduce((sum: number, item: any) => {
-                    const itemTotal = item.sub_items && item.sub_items.length > 0
-                      ? item.sub_items.reduce((s: number, si: any) => s + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
-                      : (item.materials?.reduce((s: number, m: any) => s + (m.total_price || 0), 0) || 0) +
-                        (item.labour?.reduce((s: number, l: any) => s + (l.total_cost || 0), 0) || 0);
-
-                    const misc = (itemTotal * (item.overhead_percentage || 0)) / 100;
-                    const overhead = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
-                    const subtotal = itemTotal + misc + overhead;
-                    const discount = (subtotal * (item.discount_percentage || 0)) / 100;
-
-                    return sum + discount;
-                  }, 0) || 0;
-
+                  // Calculate client cost before discount
                   const clientCostBeforeDiscount = currentRevisionData.boq_details?.items?.reduce((sum: number, item: any) => {
                     const itemTotal = item.sub_items && item.sub_items.length > 0
                       ? item.sub_items.reduce((s: number, si: any) => s + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
@@ -904,9 +1012,43 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                     return sum + itemTotal + misc + overhead;
                   }, 0) || 0;
 
-                  const discountPercentage = clientCostBeforeDiscount > 0
-                    ? (totalDiscount / clientCostBeforeDiscount) * 100
-                    : 0;
+                  // Overall discount - Priority 1: Check for overall BOQ-level discount
+                  let totalDiscount = 0;
+                  let discountPercentage = 0;
+
+                  if (currentRevisionData.boq_details?.discount_percentage && currentRevisionData.boq_details.discount_percentage > 0) {
+                    // Priority 1: Overall BOQ discount percentage
+                    discountPercentage = currentRevisionData.boq_details.discount_percentage;
+                    totalDiscount = (clientCostBeforeDiscount * currentRevisionData.boq_details.discount_percentage) / 100;
+                    console.log('💰 Overall BOQ Discount (TD Current):', {
+                      percentage: currentRevisionData.boq_details.discount_percentage,
+                      amount: totalDiscount,
+                      subtotal: clientCostBeforeDiscount
+                    });
+                  } else if (currentRevisionData.boq_details?.discount_amount && currentRevisionData.boq_details.discount_amount > 0) {
+                    // Priority 2: Overall BOQ discount amount
+                    totalDiscount = currentRevisionData.boq_details.discount_amount;
+                    discountPercentage = clientCostBeforeDiscount > 0 ? (totalDiscount / clientCostBeforeDiscount) * 100 : 0;
+                  } else {
+                    // Priority 3: Fall back to item-level discounts
+                    totalDiscount = currentRevisionData.boq_details?.items?.reduce((sum: number, item: any) => {
+                      const itemTotal = item.sub_items && item.sub_items.length > 0
+                        ? item.sub_items.reduce((s: number, si: any) => s + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
+                        : (item.materials?.reduce((s: number, m: any) => s + (m.total_price || 0), 0) || 0) +
+                          (item.labour?.reduce((s: number, l: any) => s + (l.total_cost || 0), 0) || 0);
+
+                      const misc = (itemTotal * (item.overhead_percentage || 0)) / 100;
+                      const overhead = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
+                      const subtotal = itemTotal + misc + overhead;
+                      const discount = (subtotal * (item.discount_percentage || 0)) / 100;
+
+                      return sum + discount;
+                    }, 0) || 0;
+
+                    if (clientCostBeforeDiscount > 0 && totalDiscount > 0) {
+                      discountPercentage = (totalDiscount / clientCostBeforeDiscount) * 100;
+                    }
+                  }
 
                   const internalCost = currentRevisionData.boq_details?.profit_analysis?.internal_cost || 0;
                   const profitBeforeDiscount = clientCostBeforeDiscount - internalCost;
@@ -1157,8 +1299,13 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                           </div>
                           <div className="text-right">
                             <div className="text-lg font-bold text-gray-900">
-                              {formatCurrency(calculateTotalFromItems(revision))}
+                              {formatCurrency(revision.boq_details?.total_cost || calculateGrandTotal(revision.boq_details))}
                             </div>
+                            {revision.boq_details?.discount_percentage > 0 && (
+                              <div className="text-xs text-red-600 font-semibold">
+                                Discount: {revision.boq_details.discount_percentage}%
+                              </div>
+                            )}
                             {change.percentage !== 0 && (
                               <div className={`flex items-center gap-1 text-xs font-semibold ${
                                 change.percentage > 0 ? 'text-red-600' : 'text-green-600'
@@ -1205,54 +1352,84 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                                         </div>
                                       </div>
 
-                                      {/* Sub Item Materials - Compact Table */}
+                                      {/* Sub Item Materials - Detailed Table */}
                                       {subItem.materials && subItem.materials.length > 0 && (
-                                        <div className="mb-2">
-                                          <p className="text-xs font-bold text-gray-800 mb-1">📦 Materials</p>
-                                          <div className="bg-white rounded border border-red-200 overflow-hidden">
+                                        <div className="mb-3 bg-red-50/20 rounded-lg p-3 border border-red-300">
+                                          <h5 className="text-xs font-bold text-blue-900 mb-2 flex items-center gap-2">
+                                            📦 Raw Materials
+                                          </h5>
+                                          <div className="bg-white rounded border border-blue-200 overflow-hidden">
                                             <table className="w-full text-xs">
-                                              <thead className="bg-red-100 border-b border-red-200">
+                                              <thead className="bg-blue-100 border-b border-blue-200">
                                                 <tr>
-                                                  <th className="text-left py-1 px-1.5 font-semibold text-red-900">Material</th>
-                                                  <th className="text-center py-1 px-1.5 font-semibold text-red-900">Qty</th>
-                                                  <th className="text-right py-1 px-1.5 font-semibold text-red-900">Total</th>
+                                                  <th className="text-left py-1.5 px-2 font-semibold text-blue-900">Material</th>
+                                                  <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Qty</th>
+                                                  <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Unit</th>
+                                                  <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Rate</th>
+                                                  <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Total</th>
                                                 </tr>
                                               </thead>
-                                              <tbody className="divide-y divide-gray-200">
-                                                {subItem.materials.map((mat: any, matIdx: number) => (
-                                                  <tr key={matIdx} className="hover:bg-red-50">
-                                                    <td className="py-1 px-1.5 text-gray-700">{mat.material_name}</td>
-                                                    <td className="py-1 px-1.5 text-center text-gray-600">{mat.quantity} {mat.unit}</td>
-                                                    <td className="py-1 px-1.5 text-right font-semibold">AED {(mat.quantity * mat.unit_price).toFixed(2)}</td>
-                                                  </tr>
-                                                ))}
+                                              <tbody>
+                                                {subItem.materials.map((mat: any, matIdx: number) => {
+                                                  const materialTotal = mat.total_price || (mat.quantity * mat.unit_price);
+                                                  return (
+                                                    <tr key={matIdx} className={`border-b border-blue-100 ${matIdx % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
+                                                      <td className="py-1.5 px-2 text-gray-900">
+                                                        {mat.material_name}
+                                                        {mat.description && <div className="text-xs text-gray-500">{mat.description}</div>}
+                                                      </td>
+                                                      <td className="py-1.5 px-2 text-center text-gray-700">{mat.quantity}</td>
+                                                      <td className="py-1.5 px-2 text-center text-gray-700 uppercase">{mat.unit}</td>
+                                                      <td className="py-1.5 px-2 text-right text-gray-700">AED {mat.unit_price?.toFixed(2) || '0.00'}</td>
+                                                      <td className="py-1.5 px-2 text-right font-semibold text-blue-700">AED {materialTotal.toFixed(2)}</td>
+                                                    </tr>
+                                                  );
+                                                })}
+                                                <tr className="bg-blue-200 border-t-2 border-blue-400">
+                                                  <td colSpan={4} className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">Materials Total:</td>
+                                                  <td className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">
+                                                    AED {subItem.materials.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0).toFixed(2)}
+                                                  </td>
+                                                </tr>
                                               </tbody>
                                             </table>
                                           </div>
                                         </div>
                                       )}
 
-                                      {/* Sub Item Labour - Compact Table */}
+                                      {/* Sub Item Labour - Detailed Table */}
                                       {subItem.labour && subItem.labour.length > 0 && (
-                                        <div>
-                                          <p className="text-xs font-bold text-gray-800 mb-1">👷 Labour</p>
-                                          <div className="bg-white rounded border border-red-200 overflow-hidden">
+                                        <div className="bg-orange-50/20 rounded-lg p-3 border border-orange-300">
+                                          <h5 className="text-xs font-bold text-orange-900 mb-2 flex items-center gap-2">
+                                            👷 Labour
+                                          </h5>
+                                          <div className="bg-white rounded border border-orange-200 overflow-hidden">
                                             <table className="w-full text-xs">
-                                              <thead className="bg-red-100 border-b border-red-200">
+                                              <thead className="bg-orange-100 border-b border-orange-200">
                                                 <tr>
-                                                  <th className="text-left py-1 px-1.5 font-semibold text-red-900">Role</th>
-                                                  <th className="text-center py-1 px-1.5 font-semibold text-red-900">Hours</th>
-                                                  <th className="text-right py-1 px-1.5 font-semibold text-red-900">Total</th>
+                                                  <th className="text-left py-1.5 px-2 font-semibold text-orange-900">Role</th>
+                                                  <th className="text-center py-1.5 px-2 font-semibold text-orange-900">Hours</th>
+                                                  <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Rate/hr</th>
+                                                  <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Total</th>
                                                 </tr>
                                               </thead>
-                                              <tbody className="divide-y divide-gray-200">
+                                              <tbody>
                                                 {subItem.labour.map((lab: any, labIdx: number) => (
-                                                  <tr key={labIdx} className="hover:bg-red-50">
-                                                    <td className="py-1 px-1.5 text-gray-700">{lab.labour_role}</td>
-                                                    <td className="py-1 px-1.5 text-center text-gray-600">{lab.hours}h</td>
-                                                    <td className="py-1 px-1.5 text-right font-semibold">AED {(lab.hours * lab.rate_per_hour).toFixed(2)}</td>
+                                                  <tr key={labIdx} className={`border-b border-orange-100 ${labIdx % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
+                                                    <td className="py-1.5 px-2 text-gray-900">{lab.labour_role}</td>
+                                                    <td className="py-1.5 px-2 text-center text-gray-700">{lab.hours} hrs</td>
+                                                    <td className="py-1.5 px-2 text-right text-gray-700">AED {lab.rate_per_hour?.toFixed(2) || '0.00'}</td>
+                                                    <td className="py-1.5 px-2 text-right font-semibold text-orange-700">
+                                                      AED {(lab.total_cost || (lab.hours * lab.rate_per_hour)).toFixed(2)}
+                                                    </td>
                                                   </tr>
                                                 ))}
+                                                <tr className="bg-orange-200 border-t-2 border-orange-400">
+                                                  <td colSpan={3} className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">Labour Total:</td>
+                                                  <td className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">
+                                                    AED {subItem.labour.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0).toFixed(2)}
+                                                  </td>
+                                                </tr>
                                               </tbody>
                                             </table>
                                           </div>
@@ -1383,6 +1560,9 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                               </div>
                             </div>
                           ))}
+
+                          {/* Grand Total Section */}
+                          {renderGrandTotalSection(revision.boq_details)}
                         </div>
                       )}
 

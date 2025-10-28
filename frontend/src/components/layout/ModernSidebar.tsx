@@ -932,7 +932,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                     </div>
 
                     <Link
-                      to="/profile"
+                      to={buildRolePath(user?.role_id || '', 'profile')}
                       onClick={() => {
                         setUserDropdownOpen(false);
                         setSidebarOpen(false);

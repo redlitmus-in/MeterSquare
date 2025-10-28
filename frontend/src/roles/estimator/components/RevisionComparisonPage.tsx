@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, TrendingUp, TrendingDown, Send, Mail, Edit, Eye, ArrowRight, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Send, Mail, Edit, Eye, ArrowRight, CheckCircle, Clock, XCircle, Calculator, Info } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
 import { toast } from 'sonner';
 import { BOQ } from '../types';
@@ -179,11 +179,39 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
   const loadRevisionData = async (boq: BOQ) => {
     setIsLoading(true);
     try {
-      const result = await estimatorService.getBOQDetailsHistory(boq.boq_id!);
+      // 🔥 Fetch FULL detailed BOQ from /boq/{boq_id} endpoint (like Internal Revisions does)
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+      const token = localStorage.getItem('access_token');
 
-      if (result.success && result.data) {
-        const current = result.data.current_version;
-        let historyList = result.data.history || [];
+      const response = await fetch(`${API_URL}/boq/${boq.boq_id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const boqData = await response.json();
+
+      if (boqData && boqData.boq_id) {
+        console.log('📊 Loaded detailed BOQ data:', boqData);
+
+        // Set current version with full details
+        const current = {
+          boq_detail_id: boqData.boq_id,
+          boq_id: boqData.boq_id,
+          version: 'current',
+          boq_details: {
+            items: boqData.existing_purchase?.items || [],
+            discount_percentage: boqData.discount_percentage || 0,
+            discount_amount: boqData.discount_amount || 0,
+            total_cost: boqData.total_cost || 0
+          },
+          total_cost: boqData.total_cost || 0,
+          created_at: boqData.created_at
+        };
+
+        // Now fetch history for previous revisions
+        const result = await estimatorService.getBOQDetailsHistory(boq.boq_id!);
+        let historyList = result.success && result.data ? (result.data.history || []) : [];
 
         console.log('📊 BOQ History Data:', {
           currentRevision: boq.revision_number,
@@ -305,6 +333,98 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
       return total + finalTotalPrice;
     }, 0);
+  };
+
+  // Calculate Grand Total with discount from snapshot
+  const calculateGrandTotal = (snapshot: any): number => {
+    if (!snapshot?.items || snapshot.items.length === 0) return 0;
+
+    const allItems = snapshot.items || [];
+
+    // Calculate subtotal (sum of all item client amounts)
+    const subtotal = allItems.reduce((sum: number, item: any) => {
+      // Calculate client amount for each item
+      let itemClientAmount = (item.quantity || 0) * (item.rate || 0);
+      if (itemClientAmount === 0 && item.sub_items && item.sub_items.length > 0) {
+        // If rate is 0, calculate from sub-items
+        itemClientAmount = item.sub_items.reduce((siSum: number, si: any) =>
+          siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+        );
+      }
+      return sum + itemClientAmount;
+    }, 0);
+
+    // Get overall BOQ discount
+    let overallDiscount = 0;
+
+    if (snapshot.discount_percentage && snapshot.discount_percentage > 0) {
+      overallDiscount = (subtotal * snapshot.discount_percentage) / 100;
+    } else if (snapshot.discount_amount && snapshot.discount_amount > 0) {
+      overallDiscount = snapshot.discount_amount;
+    }
+
+    const grandTotal = subtotal - overallDiscount;
+    return grandTotal;
+  };
+
+  // Render Grand Total Section with Discount Impact
+  const renderGrandTotalSection = (snapshot: any) => {
+    if (!snapshot?.items || snapshot.items.length === 0) return null;
+
+    const allItems = snapshot.items || [];
+
+    // Calculate subtotal
+    const subtotal = allItems.reduce((sum: number, item: any) => {
+      let itemClientAmount = (item.quantity || 0) * (item.rate || 0);
+      if (itemClientAmount === 0 && item.sub_items && item.sub_items.length > 0) {
+        itemClientAmount = item.sub_items.reduce((siSum: number, si: any) =>
+          siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+        );
+      }
+      return sum + itemClientAmount;
+    }, 0);
+
+    // Get overall BOQ discount
+    let overallDiscount = 0;
+    let overallDiscountPercentage = 0;
+
+    if (snapshot.discount_percentage && snapshot.discount_percentage > 0) {
+      overallDiscountPercentage = snapshot.discount_percentage;
+      overallDiscount = (subtotal * snapshot.discount_percentage) / 100;
+    } else if (snapshot.discount_amount && snapshot.discount_amount > 0) {
+      overallDiscount = snapshot.discount_amount;
+      overallDiscountPercentage = subtotal > 0 ? (overallDiscount / subtotal) * 100 : 0;
+    }
+
+    const grandTotal = subtotal - overallDiscount;
+
+    return (
+      <div className="mt-4 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-4 border-2 border-green-300">
+        <h4 className="font-bold text-green-900 mb-3 text-sm">📊 Grand Total Summary</h4>
+
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-800">Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
+            <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
+          </div>
+
+          {overallDiscount > 0 && (
+            <>
+              <div className="flex justify-between text-sm text-red-700">
+                <span>Overall Discount ({overallDiscountPercentage.toFixed(1)}%):</span>
+                <span className="font-semibold">- AED {overallDiscount.toFixed(2)}</span>
+              </div>
+              <div className="h-px bg-green-300"></div>
+            </>
+          )}
+
+          <div className="flex justify-between text-base font-bold text-green-900 bg-green-200 rounded px-3 py-2">
+            <span>Grand Total:</span>
+            <span>AED {grandTotal.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -702,6 +822,109 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                     </div>
                                   </div>
                                 )}
+
+                                {/* Cost Breakdown Percentages (Per-Sub-Item) - EXACT COPY from BOQDetailsModal */}
+                                <div className="bg-purple-50/50 rounded-lg p-3 border border-purple-300 mt-3">
+                                  <h5 className="text-xs font-bold text-purple-900 mb-2 flex items-center gap-2">
+                                    <Calculator className="w-3.5 h-3.5" />
+                                    Cost Breakdown Percentages
+                                  </h5>
+                                  <div className="space-y-1.5 text-xs">
+                                    {(() => {
+                                      const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                      const miscPercentage = subItem.misc_percentage || 10;
+                                      const miscAmount = subItem.misc_amount || (clientAmount * (miscPercentage / 100));
+                                      const overheadProfitPercentage = subItem.overhead_profit_percentage || 25;
+                                      const overheadProfitAmount = subItem.overhead_profit_amount || (clientAmount * (overheadProfitPercentage / 100));
+                                      const transportPercentage = subItem.transport_percentage || 5;
+                                      const transportAmount = subItem.transport_amount || (clientAmount * (transportPercentage / 100));
+
+                                      return (
+                                        <>
+                                          <div className="flex justify-between">
+                                            <span className="text-gray-700">Client Amount (Qty × Rate):</span>
+                                            <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-gray-700">Miscellaneous ({miscPercentage}%):</span>
+                                            <span className="font-semibold text-red-600">- {formatCurrency(miscAmount)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-gray-700">Overhead & Profit ({overheadProfitPercentage}%):</span>
+                                            <span className="font-semibold text-red-600">- {formatCurrency(overheadProfitAmount)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-gray-700">Transport ({transportPercentage}%):</span>
+                                            <span className="font-semibold text-red-600">- {formatCurrency(transportAmount)}</span>
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                </div>
+
+                                {/* Profit Analysis (Per-Sub-Item) - EXACT COPY from BOQDetailsModal */}
+                                <div className="bg-green-50/50 rounded-lg p-3 border border-green-300 mt-3">
+                                  <h5 className="text-xs font-bold text-green-900 mb-2 flex items-center gap-2">
+                                    <Info className="w-3.5 h-3.5" />
+                                    Profit Analysis
+                                  </h5>
+                                  <div className="space-y-1.5 text-xs">
+                                    {(() => {
+                                      const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                      const materialCost = subItem.material_cost || (subItem.materials?.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0) || 0);
+                                      const labourCost = subItem.labour_cost || (subItem.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0);
+                                      const miscAmount = subItem.misc_amount || (clientAmount * ((subItem.misc_percentage || 10) / 100));
+                                      const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || 5) / 100));
+                                      const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || 25) / 100));
+                                      const internalCost = subItem.internal_cost || (materialCost + labourCost + miscAmount + plannedProfit + transportAmount);
+                                      const actualProfit = subItem.actual_profit || (clientAmount - internalCost);
+
+                                      return (
+                                        <>
+                                          <div className="flex justify-between">
+                                            <span className="text-gray-700">Client Amount:</span>
+                                            <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-gray-700">Materials Cost:</span>
+                                            <span className="font-semibold text-gray-900">{formatCurrency(materialCost)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-gray-700">Labour Cost:</span>
+                                            <span className="font-semibold text-gray-900">{formatCurrency(labourCost)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-gray-700">Misc ({subItem.misc_percentage || 10}%):</span>
+                                            <span className="font-semibold text-gray-900">{formatCurrency(miscAmount)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-gray-700">Overhead & Profit ({subItem.overhead_profit_percentage || 25}%):</span>
+                                            <span className="font-semibold text-gray-900">{formatCurrency(plannedProfit)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-gray-700">Transport ({subItem.transport_percentage || 5}%):</span>
+                                            <span className="font-semibold text-gray-900">{formatCurrency(transportAmount)}</span>
+                                          </div>
+                                          <div className="flex justify-between pt-1.5 border-t border-gray-300">
+                                            <span className="text-gray-800 font-bold">Internal Cost (Total):</span>
+                                            <span className="font-bold text-red-600">{formatCurrency(internalCost)}</span>
+                                          </div>
+                                          <div className="flex justify-between pt-1.5 mt-1.5 border-t border-green-300">
+                                            <span className="text-gray-700 font-medium">Planned Profit:</span>
+                                            <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-gray-800 font-medium">Actual Profit:</span>
+                                            <span className={`font-bold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
+                                              {formatCurrency(actualProfit)}
+                                            </span>
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                </div>
                               </div>
                             );
                           })}
@@ -760,66 +983,52 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                         </div>
                       )}
 
-                      {/* Additional Details: Overhead, Profit, Discount, VAT */}
-                      <div className="mt-3 pt-2 border-t border-gray-200 space-y-1">
-                        {/* Use values directly from API response */}
-                        {(() => {
-                          const itemTotal = item.sub_items_cost || item.base_cost || 0;
-                          const miscellaneousAmount = item.overhead_amount || 0;
-                          const overheadProfitAmount = item.profit_margin_amount || 0;
-                          const subtotal = item.subtotal || 0;
-                          const discountAmount = item.discount_amount || 0;
-                          const afterDiscount = subtotal - discountAmount;
-                          const vatAmount = item.vat_amount || 0;
-                          const finalTotalPrice = item.selling_price || item.total_selling_price || 0;
+                      {/* Cost Analysis (Item-Level) - EXACT COPY from BOQDetailsModal */}
+                      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-300 shadow-sm">
+                        <h5 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
+                          <Calculator className="w-4 h-4" />
+                          Cost Analysis
+                        </h5>
+                        <div className="space-y-2 text-sm">
+                          {(() => {
+                            const clientCost = item.client_cost || item.sub_items?.reduce((sum: number, si: any) => sum + ((si.quantity || 0) * (si.rate || 0)), 0) || 0;
+                            const internalCost = item.internal_cost || item.sub_items?.reduce((sum: number, si: any) => {
+                              const materialCost = si.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || m.quantity * m.unit_price), 0) || 0;
+                              const labourCost = si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0;
+                              const subClientAmount = (si.quantity || 0) * (si.rate || 0);
+                              const miscAmount = subClientAmount * ((si.misc_percentage || 10) / 100);
+                              const overheadProfitAmount = subClientAmount * ((si.overhead_profit_percentage || 25) / 100);
+                              const transportAmount = subClientAmount * ((si.transport_percentage || 5) / 100);
+                              return sum + materialCost + labourCost + miscAmount + overheadProfitAmount + transportAmount;
+                            }, 0) || 0;
+                            const projectMargin = item.project_margin || (clientCost - internalCost);
+                            const marginPercentage = clientCost > 0 ? ((projectMargin / clientCost) * 100) : 0;
 
-                          return (
-                            <>
-                              <div className="text-xs text-gray-600 flex justify-between rounded px-2 py-1">
-                                <span>Item Total (Qty × Rate):</span>
-                                <span className="font-semibold">AED {itemTotal.toFixed(2)}</span>
-                              </div>
-                              {(item.overhead_percentage > 0 || item.overhead_percentage === 0) && (
-                                <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.overhead_percentage, prevItem.overhead_percentage) ? 'bg-yellow-200' : ''}`}>
-                                  <span>Miscellaneous ({item.overhead_percentage || 0}%):</span>
-                                  <span className="font-semibold">AED {miscellaneousAmount.toFixed(2)}</span>
+                            return (
+                              <>
+                                <div className="flex justify-between items-center py-1">
+                                  <span className="text-gray-700 font-medium">Client Cost (Total):</span>
+                                  <span className="text-blue-700 font-bold text-base">{formatCurrency(clientCost)}</span>
                                 </div>
-                              )}
-                              {(item.profit_margin_percentage > 0 || item.profit_margin_percentage === 0) && (
-                                <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${item.discount_percentage > 0 ? 'bg-yellow-100' : ''} ${prevItem && hasChanged(item.profit_margin_percentage, prevItem.profit_margin_percentage) ? 'bg-yellow-200' : ''}`}>
-                                  <span>Overhead & Profit ({item.profit_margin_percentage || 0}%):</span>
-                                  <span className="font-semibold">AED {overheadProfitAmount.toFixed(2)}</span>
+                                <div className="flex justify-between items-center py-1">
+                                  <span className="text-gray-700 font-medium">Internal Cost (Total):</span>
+                                  <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
                                 </div>
-                              )}
-                              <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1 bg-gray-100 font-semibold">
-                                <span>Subtotal:</span>
-                                <span>AED {subtotal.toFixed(2)}</span>
-                              </div>
-                              {item.discount_percentage > 0 && (
-                                <>
-                                  <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.discount_percentage, prevItem.discount_percentage) ? 'bg-yellow-200' : ''}`}>
-                                    <span>Discount ({item.discount_percentage}%):</span>
-                                    <span className="font-semibold">AED {discountAmount.toFixed(2)}</span>
+                                <div className="flex justify-between items-center pt-2 border-t-2 border-blue-400">
+                                  <span className="text-gray-900 font-bold">Project Margin:</span>
+                                  <div className="text-right">
+                                    <div className={`font-bold text-lg ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                      {formatCurrency(projectMargin)}
+                                    </div>
+                                    <div className={`text-xs font-semibold ${marginPercentage >= 20 ? 'text-green-600' : marginPercentage >= 10 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                      ({marginPercentage.toFixed(1)}% margin)
+                                    </div>
                                   </div>
-                                  <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1">
-                                    <span>After Discount:</span>
-                                    <span className="font-semibold">AED {afterDiscount.toFixed(2)}</span>
-                                  </div>
-                                </>
-                              )}
-                              {item.vat_percentage > 0 && (
-                                <div className={`text-xs text-green-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.vat_percentage, prevItem.vat_percentage) ? 'bg-yellow-200' : ''}`}>
-                                  <span>VAT ({item.vat_percentage}%) [ADDITIONAL]:</span>
-                                  <span className="font-semibold">+ AED {vatAmount.toFixed(2)}</span>
                                 </div>
-                              )}
-                              <div className={`text-sm font-bold text-gray-900 flex justify-between bg-green-50 rounded px-2 py-1 mt-2 ${prevItem && hasChanged(finalTotalPrice, prevItem.selling_price || 0) ? 'bg-yellow-200' : ''}`}>
-                                <span>Final Total Price:</span>
-                                <span>AED {finalTotalPrice.toFixed(2)}</span>
-                              </div>
-                            </>
-                          );
-                        })()}
+                              </>
+                            );
+                          })()}
+                        </div>
                       </div>
                       </div>
                     </div>
@@ -863,14 +1072,31 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                         const totalActualProfit = subtotal - totalInternalCost;
                         const profitMarginPercentage = subtotal > 0 ? (totalActualProfit / subtotal) * 100 : 0;
 
-                        // Overall discount (from items)
+                        // Overall discount - Priority 1: Check for overall BOQ-level discount
                         let overallDiscount = 0;
-                        allItems.forEach((item: any) => {
-                          overallDiscount += (item.discount_amount || 0);
-                        });
                         let overallDiscountPercentage = 0;
-                        if (subtotal > 0 && overallDiscount > 0) {
-                          overallDiscountPercentage = (overallDiscount / subtotal) * 100;
+
+                        if (currentRevisionData.boq_details.discount_percentage && currentRevisionData.boq_details.discount_percentage > 0) {
+                          // Priority 1: Overall BOQ discount percentage
+                          overallDiscountPercentage = currentRevisionData.boq_details.discount_percentage;
+                          overallDiscount = (subtotal * currentRevisionData.boq_details.discount_percentage) / 100;
+                          console.log('💰 Overall BOQ Discount (Current):', {
+                            percentage: currentRevisionData.boq_details.discount_percentage,
+                            amount: overallDiscount,
+                            subtotal
+                          });
+                        } else if (currentRevisionData.boq_details.discount_amount && currentRevisionData.boq_details.discount_amount > 0) {
+                          // Priority 2: Overall BOQ discount amount
+                          overallDiscount = currentRevisionData.boq_details.discount_amount;
+                          overallDiscountPercentage = subtotal > 0 ? (overallDiscount / subtotal) * 100 : 0;
+                        } else {
+                          // Priority 3: Fall back to item-level discounts
+                          allItems.forEach((item: any) => {
+                            overallDiscount += (item.discount_amount || 0);
+                          });
+                          if (subtotal > 0 && overallDiscount > 0) {
+                            overallDiscountPercentage = (overallDiscount / subtotal) * 100;
+                          }
                         }
 
                         // Grand total
@@ -1285,8 +1511,13 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                           </div>
                           <div className="text-right">
                             <div className="text-lg font-bold text-gray-900">
-                              {formatCurrency(calculateTotalFromItems(revision))}
+                              {formatCurrency(revision.boq_details?.total_cost || calculateGrandTotal(revision.boq_details))}
                             </div>
+                            {revision.boq_details?.discount_percentage > 0 && (
+                              <div className="text-xs text-red-600 font-semibold">
+                                Discount: {revision.boq_details.discount_percentage}%
+                              </div>
+                            )}
                             {change.percentage !== 0 && (
                               <div className={`flex items-center gap-1 text-xs font-semibold ${
                                 change.percentage > 0 ? 'text-red-600' : 'text-green-600'
@@ -1306,158 +1537,367 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                       {/* Expandable Details - Full Details with Soft Red Background */}
                       {isExpanded && revision.boq_details?.items && (
                         <div className="p-4 bg-gradient-to-br from-red-50 to-red-100 space-y-3 max-h-[500px] overflow-y-auto">
-                          {revision.boq_details.items.map((item: any, itemIdx: number) => (
-                            <div key={itemIdx} className="bg-white rounded-lg p-4 shadow-sm border border-red-200">
-                              <h5 className="font-semibold text-gray-900 mb-2 text-sm">{item.item_name}</h5>
-                              {item.description && (
-                                <p className="text-xs text-gray-600 mb-3">{item.description}</p>
-                              )}
+                          {revision.boq_details.items.map((item: any, itemIdx: number) => {
+                            // Calculate client amount - if rate is 0, calculate from sub-items
+                            let clientAmount = (item.quantity || 0) * (item.rate || 0);
+                            if (clientAmount === 0 && item.sub_items && item.sub_items.length > 0) {
+                              clientAmount = item.sub_items.reduce((sum: number, subItem: any) => {
+                                const subItemClientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                return sum + subItemClientAmount;
+                              }, 0);
+                            }
 
-                              {/* Sub Items */}
-                              {item.sub_items && item.sub_items.length > 0 && (
-                                <div className="mb-3 space-y-2">
-                                  <p className="text-xs font-semibold text-gray-700 mb-2">📋 Sub Items:</p>
-                                  {item.sub_items.map((subItem: any, subIdx: number) => (
-                                    <div key={subIdx} className="bg-red-100 border border-red-300 rounded-lg p-2">
-                                      <div className="flex justify-between items-start mb-2">
-                                        <div>
-                                          <p className="font-semibold text-xs text-gray-900">{subItem.sub_item_name}</p>
-                                          {subItem.scope && <p className="text-xs text-gray-600">{subItem.scope}</p>}
-                                        </div>
-                                        <div className="text-right text-xs text-gray-600">
-                                          {subItem.size && <div>Size: {subItem.size}</div>}
-                                          {subItem.location && <div>Loc: {subItem.location}</div>}
-                                          {subItem.brand && <div>Brand: {subItem.brand}</div>}
-                                        </div>
-                                      </div>
+                            const miscellaneousAmount = item.overhead_amount || (clientAmount * ((item.overhead_percentage || 10) / 100));
+                            const overheadProfitAmount = item.profit_margin_amount || (clientAmount * ((item.profit_margin_percentage || 15) / 100));
+                            const subtotal = item.subtotal || clientAmount;
 
-                                      {/* Sub Item Materials */}
-                                      {subItem.materials && subItem.materials.length > 0 && (
-                                        <div className="mb-2">
-                                          <p className="text-xs font-semibold text-gray-700 mb-1">📦 Materials:</p>
-                                          <div className="space-y-1">
-                                            {subItem.materials.map((mat: any, matIdx: number) => (
-                                              <div key={matIdx} className="text-xs text-gray-600 flex justify-between bg-white rounded px-2 py-1">
-                                                <span>{mat.material_name} ({mat.quantity} {mat.unit})</span>
-                                                <span className="font-semibold">AED {(mat.quantity * mat.unit_price).toFixed(2)}</span>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-
-                                      {/* Sub Item Labour */}
-                                      {subItem.labour && subItem.labour.length > 0 && (
-                                        <div>
-                                          <p className="text-xs font-semibold text-gray-700 mb-1">👷 Labour:</p>
-                                          <div className="space-y-1">
-                                            {subItem.labour.map((lab: any, labIdx: number) => (
-                                              <div key={labIdx} className="text-xs text-gray-600 flex justify-between bg-white rounded px-2 py-1">
-                                                <span>{lab.labour_role} ({lab.hours}h)</span>
-                                                <span className="font-semibold">AED {(lab.hours * lab.rate_per_hour).toFixed(2)}</span>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
+                            return (
+                              <div key={itemIdx} className="border-2 rounded-lg overflow-hidden mb-4 bg-white border-red-300">
+                                {/* Item Header */}
+                                <div className="px-4 py-3 bg-red-50 border-b-2 border-red-300">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex-1">
+                                      <h4 className="font-bold text-gray-900 text-base flex items-center gap-2">
+                                        🔷 {item.item_name}
+                                        {item.work_type && (
+                                          <span className="text-xs bg-purple-200 text-purple-800 px-2 py-1 rounded font-semibold">
+                                            {item.work_type}
+                                          </span>
+                                        )}
+                                      </h4>
+                                      {item.quantity && item.unit && (
+                                        <p className="text-sm text-gray-700 mt-1 font-medium">
+                                          Qty: {item.quantity} {item.unit}
+                                          {item.rate && item.rate > 0 && ` × Rate: AED ${item.rate.toFixed(2)}`}
+                                          {item.item_total && item.item_total > 0 && (
+                                            <span className="ml-2 font-bold text-blue-800">
+                                              = AED {item.item_total.toFixed(2)}
+                                            </span>
+                                          )}
+                                        </p>
                                       )}
                                     </div>
-                                  ))}
-                                </div>
-                              )}
-
-                              {/* Direct Materials (for items without sub_items) */}
-                              {(!item.sub_items || item.sub_items.length === 0) && item.materials && item.materials.length > 0 && (
-                                <div className="mb-3">
-                                  <p className="text-xs font-semibold text-gray-700 mb-1">📦 Materials:</p>
-                                  <div className="space-y-1">
-                                    {item.materials.map((mat: any, matIdx: number) => (
-                                      <div key={matIdx} className="text-xs text-gray-600 flex justify-between bg-red-50 p-2 rounded">
-                                        <span>{mat.material_name} ({mat.quantity} {mat.unit})</span>
-                                        <span className="font-semibold">AED {mat.total_price}</span>
-                                      </div>
-                                    ))}
                                   </div>
                                 </div>
-                              )}
 
-                              {/* Direct Labour (for items without sub_items) */}
-                              {(!item.sub_items || item.sub_items.length === 0) && item.labour && item.labour.length > 0 && (
-                                <div className="mb-3">
-                                  <p className="text-xs font-semibold text-gray-700 mb-1">👷 Labour:</p>
-                                  <div className="space-y-1">
-                                    {item.labour.map((lab: any, labIdx: number) => (
-                                      <div key={labIdx} className="text-xs text-gray-600 flex justify-between bg-red-50 p-2 rounded">
-                                        <span>{lab.labour_role} ({lab.hours}h)</span>
-                                        <span className="font-semibold">AED {lab.total_cost}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+                                {/* Item Body */}
+                                <div className="p-4">
+                                  {item.description && (
+                                    <p className="text-sm text-gray-700 mb-3 bg-gray-50 p-2 rounded border-l-4 border-gray-400">{item.description}</p>
+                                  )}
 
-                              {/* Additional Details: Overhead, Profit, Discount, VAT */}
-                              <div className="mt-3 pt-2 border-t border-red-200 space-y-1">
-                                {/* Use values directly from API response */}
-                                {(() => {
-                                  const itemTotal = item.sub_items_cost || item.base_cost || 0;
-                                  const miscellaneousAmount = item.overhead_amount || 0;
-                                  const overheadProfitAmount = item.profit_margin_amount || 0;
-                                  const subtotal = item.subtotal || 0;
-                                  const discountAmount = item.discount_amount || 0;
-                                  const afterDiscount = subtotal - discountAmount;
-                                  const vatAmount = item.vat_amount || 0;
-                                  const finalTotalPrice = item.selling_price || item.total_selling_price || 0;
+                                  {/* Sub Items */}
+                                  {item.sub_items && item.sub_items.length > 0 && (
+                                    <div className="mb-4 space-y-3">
+                                      <h5 className="text-sm font-bold text-indigo-900 mb-3 pb-2 border-b-2 border-indigo-200 bg-indigo-50 px-3 py-2 rounded-t">
+                                        📋 Sub Items ({item.sub_items.length})
+                                      </h5>
+                                      {item.sub_items.map((subItem: any, subIdx: number) => (
+                                        <div key={subIdx} className="bg-green-50 border border-green-200 rounded p-2">
+                                          <div className="flex justify-between items-start mb-1">
+                                            <div className="flex-1">
+                                              <p className="font-semibold text-xs text-gray-900">{subItem.sub_item_name}</p>
+                                              {subItem.scope && <p className="text-xs text-gray-600">{subItem.scope}</p>}
+                                              <p className="text-xs text-gray-600 mt-1">
+                                                Qty: {subItem.quantity} {subItem.unit} × Rate: AED {subItem.rate?.toFixed(2) || '0.00'}
+                                              </p>
+                                            </div>
+                                            <div className="text-right text-xs ml-2">
+                                              {subItem.size && <div className="text-gray-600">Size: {subItem.size}</div>}
+                                              {subItem.location && <div className="text-gray-600">Loc: {subItem.location}</div>}
+                                              {subItem.brand && <div className="text-gray-600">Brand: {subItem.brand}</div>}
+                                              {subItem.base_total !== undefined && (
+                                                <div className="font-bold text-blue-900 mt-1 bg-blue-100 px-2 py-0.5 rounded">
+                                                  Base: AED {subItem.base_total?.toFixed(2)}
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
 
-                                  return (
-                                    <>
-                                      <div className="text-xs text-gray-600 flex justify-between rounded px-2 py-1">
-                                        <span>Item Total (Qty × Rate):</span>
-                                        <span className="font-semibold">AED {itemTotal.toFixed(2)}</span>
-                                      </div>
-                                      {(item.overhead_percentage > 0 || item.overhead_percentage === 0) && (
-                                        <div className="text-xs text-gray-600 flex justify-between">
-                                          <span>Miscellaneous ({item.overhead_percentage || 0}%):</span>
-                                          <span className="font-semibold">AED {miscellaneousAmount.toFixed(2)}</span>
+                                          {/* Sub Item Materials */}
+                                          {subItem.materials && subItem.materials.length > 0 && (
+                                            <div className="mb-3 bg-red-50/20 rounded-lg p-3 border border-red-300">
+                                              <h5 className="text-xs font-bold text-blue-900 mb-2 flex items-center gap-2">
+                                                📦 Raw Materials
+                                              </h5>
+                                              <div className="bg-white rounded border border-blue-200 overflow-hidden">
+                                                <table className="w-full text-xs">
+                                                  <thead className="bg-blue-100 border-b border-blue-200">
+                                                    <tr>
+                                                      <th className="text-left py-1.5 px-2 font-semibold text-blue-900">Material</th>
+                                                      <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Qty</th>
+                                                      <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Unit</th>
+                                                      <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Rate</th>
+                                                      <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Total</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody>
+                                                    {subItem.materials.map((mat: any, matIdx: number) => {
+                                                      const materialTotal = mat.total_price || (mat.quantity * mat.unit_price);
+                                                      return (
+                                                        <tr key={matIdx} className={`border-b border-blue-100 ${matIdx % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
+                                                          <td className="py-1.5 px-2 text-gray-900">
+                                                            {mat.material_name}
+                                                            {mat.description && <div className="text-xs text-gray-500">{mat.description}</div>}
+                                                          </td>
+                                                          <td className="py-1.5 px-2 text-center text-gray-700">{mat.quantity}</td>
+                                                          <td className="py-1.5 px-2 text-center text-gray-700 uppercase">{mat.unit}</td>
+                                                          <td className="py-1.5 px-2 text-right text-gray-700">AED {mat.unit_price?.toFixed(2) || '0.00'}</td>
+                                                          <td className="py-1.5 px-2 text-right font-semibold text-blue-700">AED {materialTotal.toFixed(2)}</td>
+                                                        </tr>
+                                                      );
+                                                    })}
+                                                    <tr className="bg-blue-200 border-t-2 border-blue-400">
+                                                      <td colSpan={4} className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">Materials Total:</td>
+                                                      <td className="py-1.5 px-2 font-bold text-blue-900 text-right text-xs">
+                                                        AED {subItem.materials.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0).toFixed(2)}
+                                                      </td>
+                                                    </tr>
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            </div>
+                                          )}
+
+                                          {/* Sub Item Labour */}
+                                          {subItem.labour && subItem.labour.length > 0 && (
+                                            <div className="bg-orange-50/20 rounded-lg p-3 border border-orange-300">
+                                              <h5 className="text-xs font-bold text-orange-900 mb-2 flex items-center gap-2">
+                                                👷 Labour
+                                              </h5>
+                                              <div className="bg-white rounded border border-orange-200 overflow-hidden">
+                                                <table className="w-full text-xs">
+                                                  <thead className="bg-orange-100 border-b border-orange-200">
+                                                    <tr>
+                                                      <th className="text-left py-1.5 px-2 font-semibold text-orange-900">Role</th>
+                                                      <th className="text-center py-1.5 px-2 font-semibold text-orange-900">Hours</th>
+                                                      <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Rate/hr</th>
+                                                      <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Total</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody>
+                                                    {subItem.labour.map((lab: any, labIdx: number) => (
+                                                      <tr key={labIdx} className={`border-b border-orange-100 ${labIdx % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
+                                                        <td className="py-1.5 px-2 text-gray-900">{lab.labour_role}</td>
+                                                        <td className="py-1.5 px-2 text-center text-gray-700">{lab.hours} hrs</td>
+                                                        <td className="py-1.5 px-2 text-right text-gray-700">AED {lab.rate_per_hour?.toFixed(2) || '0.00'}</td>
+                                                        <td className="py-1.5 px-2 text-right font-semibold text-orange-700">
+                                                          AED {(lab.total_cost || (lab.hours * lab.rate_per_hour)).toFixed(2)}
+                                                        </td>
+                                                      </tr>
+                                                    ))}
+                                                    <tr className="bg-orange-200 border-t-2 border-orange-400">
+                                                      <td colSpan={3} className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">Labour Total:</td>
+                                                      <td className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">
+                                                        AED {subItem.labour.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0).toFixed(2)}
+                                                      </td>
+                                                    </tr>
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            </div>
+                                          )}
+
+                                          {/* Cost Breakdown Percentages (Per-Sub-Item) - EXACT COPY from BOQDetailsModal */}
+                                          <div className="bg-purple-50/50 rounded-lg p-3 border border-purple-300 mt-3">
+                                            <h5 className="text-xs font-bold text-purple-900 mb-2 flex items-center gap-2">
+                                              <Calculator className="w-3.5 h-3.5" />
+                                              Cost Breakdown Percentages
+                                            </h5>
+                                            <div className="space-y-1.5 text-xs">
+                                              {(() => {
+                                                const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                                const miscPercentage = subItem.misc_percentage || 10;
+                                                const miscAmount = subItem.misc_amount || (clientAmount * (miscPercentage / 100));
+                                                const overheadProfitPercentage = subItem.overhead_profit_percentage || 25;
+                                                const overheadProfitAmount = subItem.overhead_profit_amount || (clientAmount * (overheadProfitPercentage / 100));
+                                                const transportPercentage = subItem.transport_percentage || 5;
+                                                const transportAmount = subItem.transport_amount || (clientAmount * (transportPercentage / 100));
+
+                                                return (
+                                                  <>
+                                                    <div className="flex justify-between">
+                                                      <span className="text-gray-700">Client Amount (Qty × Rate):</span>
+                                                      <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                      <span className="text-gray-700">Miscellaneous ({miscPercentage}%):</span>
+                                                      <span className="font-semibold text-red-600">- {formatCurrency(miscAmount)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                      <span className="text-gray-700">Overhead & Profit ({overheadProfitPercentage}%):</span>
+                                                      <span className="font-semibold text-red-600">- {formatCurrency(overheadProfitAmount)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                      <span className="text-gray-700">Transport ({transportPercentage}%):</span>
+                                                      <span className="font-semibold text-red-600">- {formatCurrency(transportAmount)}</span>
+                                                    </div>
+                                                  </>
+                                                );
+                                              })()}
+                                            </div>
+                                          </div>
+
+                                          {/* Profit Analysis (Per-Sub-Item) - EXACT COPY from BOQDetailsModal */}
+                                          <div className="bg-green-50/50 rounded-lg p-3 border border-green-300 mt-3">
+                                            <h5 className="text-xs font-bold text-green-900 mb-2 flex items-center gap-2">
+                                              <Info className="w-3.5 h-3.5" />
+                                              Profit Analysis
+                                            </h5>
+                                            <div className="space-y-1.5 text-xs">
+                                              {(() => {
+                                                const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                                const materialCost = subItem.material_cost || (subItem.materials?.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0) || 0);
+                                                const labourCost = subItem.labour_cost || (subItem.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0);
+                                                const miscAmount = subItem.misc_amount || (clientAmount * ((subItem.misc_percentage || 10) / 100));
+                                                const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || 5) / 100));
+                                                const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || 25) / 100));
+                                                const internalCost = subItem.internal_cost || (materialCost + labourCost + miscAmount + plannedProfit + transportAmount);
+                                                const actualProfit = subItem.actual_profit || (clientAmount - internalCost);
+
+                                                return (
+                                                  <>
+                                                    <div className="flex justify-between">
+                                                      <span className="text-gray-700">Client Amount:</span>
+                                                      <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                      <span className="text-gray-700">Materials Cost:</span>
+                                                      <span className="font-semibold text-gray-900">{formatCurrency(materialCost)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                      <span className="text-gray-700">Labour Cost:</span>
+                                                      <span className="font-semibold text-gray-900">{formatCurrency(labourCost)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                      <span className="text-gray-700">Misc ({subItem.misc_percentage || 10}%):</span>
+                                                      <span className="font-semibold text-gray-900">{formatCurrency(miscAmount)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                      <span className="text-gray-700">Overhead & Profit ({subItem.overhead_profit_percentage || 25}%):</span>
+                                                      <span className="font-semibold text-gray-900">{formatCurrency(plannedProfit)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                      <span className="text-gray-700">Transport ({subItem.transport_percentage || 5}%):</span>
+                                                      <span className="font-semibold text-gray-900">{formatCurrency(transportAmount)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between pt-1.5 border-t border-gray-300">
+                                                      <span className="text-gray-800 font-bold">Internal Cost (Total):</span>
+                                                      <span className="font-bold text-red-600">{formatCurrency(internalCost)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between pt-1.5 mt-1.5 border-t border-green-300">
+                                                      <span className="text-gray-700 font-medium">Planned Profit:</span>
+                                                      <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                      <span className="text-gray-800 font-medium">Actual Profit:</span>
+                                                      <span className={`font-bold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
+                                                        {formatCurrency(actualProfit)}
+                                                      </span>
+                                                    </div>
+                                                  </>
+                                                );
+                                              })()}
+                                            </div>
+                                          </div>
                                         </div>
-                                      )}
-                                      {(item.profit_margin_percentage > 0 || item.profit_margin_percentage === 0) && (
-                                        <div className={`text-xs text-gray-600 flex justify-between ${item.discount_percentage > 0 ? 'bg-yellow-100' : ''}`}>
-                                          <span>Overhead & Profit ({item.profit_margin_percentage || 0}%):</span>
-                                          <span className="font-semibold">AED {overheadProfitAmount.toFixed(2)}</span>
-                                        </div>
-                                      )}
-                                      <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1 bg-gray-100 font-semibold">
-                                        <span>Subtotal:</span>
-                                        <span>AED {subtotal.toFixed(2)}</span>
-                                      </div>
-                                      {item.discount_percentage > 0 && (
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {/* Item-Level Cost Summary & Profit Analysis */}
+                                  <div className="mt-3 pt-2 border-t-2 border-gray-300 bg-gray-50 rounded p-3 space-y-1">
+                                    {(() => {
+                                      // Calculate from sub_items (NEW format)
+                                      let itemClientAmount = 0;
+                                      let itemInternalCost = 0;
+                                      let itemMiscAmount = 0;
+                                      let itemOpAmount = 0;
+                                      let itemTransportAmount = 0;
+
+                                      if (item.sub_items && item.sub_items.length > 0) {
+                                        item.sub_items.forEach((si: any) => {
+                                          const siClientAmt = (si.quantity || 0) * (si.rate || 0);
+                                          itemClientAmount += siClientAmt;
+
+                                          const matCost = si.materials?.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0) || 0;
+                                          const labCost = si.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0;
+
+                                          const miscPct = si.misc_percentage || 10;
+                                          const opPct = si.overhead_profit_percentage || 25;
+                                          const transportPct = si.transport_percentage || 5;
+
+                                          itemMiscAmount += (siClientAmt * miscPct) / 100;
+                                          itemOpAmount += (siClientAmt * opPct) / 100;
+                                          itemTransportAmount += (siClientAmt * transportPct) / 100;
+
+                                          itemInternalCost += matCost + labCost + (siClientAmt * miscPct / 100) + (siClientAmt * transportPct / 100);
+                                        });
+                                      } else {
+                                        // Fallback for items without sub_items (old format)
+                                        itemClientAmount = clientAmount;
+                                        itemInternalCost = item.internal_cost || 0;
+                                        itemMiscAmount = miscellaneousAmount;
+                                        itemOpAmount = overheadProfitAmount;
+                                      }
+
+                                      const itemActualProfit = itemClientAmount - itemInternalCost;
+                                      const itemProfitMargin = itemClientAmount > 0 ? ((itemActualProfit / itemClientAmount) * 100) : 0;
+
+                                      return (
                                         <>
-                                          <div className="text-xs text-gray-600 flex justify-between">
-                                            <span>Discount ({item.discount_percentage}%):</span>
-                                            <span className="font-semibold">AED {discountAmount.toFixed(2)}</span>
+                                          <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1 bg-blue-50 font-semibold">
+                                            <span>💰 Client Amount (Total):</span>
+                                            <span>AED {itemClientAmount.toFixed(2)}</span>
                                           </div>
-                                          <div className="text-xs text-gray-700 flex justify-between rounded px-2 py-1">
-                                            <span>After Discount:</span>
-                                            <span className="font-semibold">AED {afterDiscount.toFixed(2)}</span>
+                                          <div className="text-xs text-gray-600 flex justify-between rounded px-2 py-1">
+                                            <span>🔧 Internal Cost (Mat + Lab + Misc + Transport):</span>
+                                            <span className="font-semibold">AED {itemInternalCost.toFixed(2)}</span>
                                           </div>
+                                          {itemMiscAmount > 0 && (
+                                            <div className="text-xs text-gray-500 flex justify-between rounded px-2 py-1 pl-6">
+                                              <span>↳ Miscellaneous (~10%):</span>
+                                              <span>AED {itemMiscAmount.toFixed(2)}</span>
+                                            </div>
+                                          )}
+                                          {itemTransportAmount > 0 && (
+                                            <div className="text-xs text-gray-500 flex justify-between rounded px-2 py-1 pl-6">
+                                              <span>↳ Transport (~5%):</span>
+                                              <span>AED {itemTransportAmount.toFixed(2)}</span>
+                                            </div>
+                                          )}
+                                          {itemOpAmount > 0 && (
+                                            <div className="text-xs text-purple-600 flex justify-between rounded px-2 py-1 bg-purple-50">
+                                              <span>📊 Overhead & Profit (~25%):</span>
+                                              <span className="font-semibold">AED {itemOpAmount.toFixed(2)}</span>
+                                            </div>
+                                          )}
+                                          <div className={`text-sm font-bold flex justify-between rounded px-2 py-1 mt-2 ${
+                                            itemActualProfit >= itemOpAmount ? 'bg-green-100 text-green-900' : 'bg-yellow-100 text-yellow-900'
+                                          }`}>
+                                            <span>💎 Actual Profit:</span>
+                                            <span>AED {itemActualProfit.toFixed(2)} ({itemProfitMargin.toFixed(1)}%)</span>
+                                          </div>
+                                          {itemOpAmount > 0 && (
+                                            <div className="text-xs px-2 py-1">
+                                              {itemActualProfit >= itemOpAmount ? (
+                                                <span className="text-green-700">✅ Profit target met or exceeded</span>
+                                              ) : (
+                                                <span className="text-yellow-700">⚠️ Below planned O&P (AED {(itemOpAmount - itemActualProfit).toFixed(2)} less)</span>
+                                              )}
+                                            </div>
+                                          )}
                                         </>
-                                      )}
-                                      {item.vat_percentage > 0 && (
-                                        <div className="text-xs text-green-600 flex justify-between">
-                                          <span>VAT ({item.vat_percentage}%) [ADDITIONAL]:</span>
-                                          <span className="font-semibold">+ AED {vatAmount.toFixed(2)}</span>
-                                        </div>
-                                      )}
-                                      <div className="text-sm font-bold text-gray-900 flex justify-between bg-red-50 rounded px-2 py-1 mt-2">
-                                        <span>Final Total Price:</span>
-                                        <span>AED {finalTotalPrice.toFixed(2)}</span>
-                                      </div>
-                                    </>
-                                  );
-                                })()}
+                                      );
+                                    })()}
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
+
+                          {/* Grand Total Section */}
+                          {renderGrandTotalSection(revision.boq_details)}
                         </div>
                       )}
 
