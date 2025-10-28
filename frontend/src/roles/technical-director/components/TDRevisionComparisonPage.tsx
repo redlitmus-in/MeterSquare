@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Search, TrendingUp, TrendingDown, CheckCircle, XCircle, Eye, Clock } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, CheckCircle, XCircle, Eye, Clock, Calculator, Info } from 'lucide-react';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -757,6 +757,109 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                                   </div>
                                 </div>
                               )}
+
+                              {/* Cost Breakdown Percentages (Per-Sub-Item) - EXACT COPY from BOQDetailsModal */}
+                              <div className="bg-purple-50/50 rounded-lg p-3 border border-purple-300 mt-3">
+                                <h5 className="text-xs font-bold text-purple-900 mb-2 flex items-center gap-2">
+                                  <Calculator className="w-3.5 h-3.5" />
+                                  Cost Breakdown Percentages
+                                </h5>
+                                <div className="space-y-1.5 text-xs">
+                                  {(() => {
+                                    const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                    const miscPercentage = subItem.misc_percentage || 10;
+                                    const miscAmount = subItem.misc_amount || (clientAmount * (miscPercentage / 100));
+                                    const overheadProfitPercentage = subItem.overhead_profit_percentage || 25;
+                                    const overheadProfitAmount = subItem.overhead_profit_amount || (clientAmount * (overheadProfitPercentage / 100));
+                                    const transportPercentage = subItem.transport_percentage || 5;
+                                    const transportAmount = subItem.transport_amount || (clientAmount * (transportPercentage / 100));
+
+                                    return (
+                                      <>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-700">Client Amount (Qty × Rate):</span>
+                                          <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-700">Miscellaneous ({miscPercentage}%):</span>
+                                          <span className="font-semibold text-red-600">- {formatCurrency(miscAmount)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-700">Overhead & Profit ({overheadProfitPercentage}%):</span>
+                                          <span className="font-semibold text-red-600">- {formatCurrency(overheadProfitAmount)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-700">Transport ({transportPercentage}%):</span>
+                                          <span className="font-semibold text-red-600">- {formatCurrency(transportAmount)}</span>
+                                        </div>
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+
+                              {/* Profit Analysis (Per-Sub-Item) - EXACT COPY from BOQDetailsModal */}
+                              <div className="bg-green-50/50 rounded-lg p-3 border border-green-300 mt-3">
+                                <h5 className="text-xs font-bold text-green-900 mb-2 flex items-center gap-2">
+                                  <Info className="w-3.5 h-3.5" />
+                                  Profit Analysis
+                                </h5>
+                                <div className="space-y-1.5 text-xs">
+                                  {(() => {
+                                    const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                    const materialCost = subItem.material_cost || (subItem.materials?.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0) || 0);
+                                    const labourCost = subItem.labour_cost || (subItem.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0);
+                                    const miscAmount = subItem.misc_amount || (clientAmount * ((subItem.misc_percentage || 10) / 100));
+                                    const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || 5) / 100));
+                                    const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || 25) / 100));
+                                    const internalCost = subItem.internal_cost || (materialCost + labourCost + miscAmount + plannedProfit + transportAmount);
+                                    const actualProfit = subItem.actual_profit || (clientAmount - internalCost);
+
+                                    return (
+                                      <>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-700">Client Amount:</span>
+                                          <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-700">Materials Cost:</span>
+                                          <span className="font-semibold text-gray-900">{formatCurrency(materialCost)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-700">Labour Cost:</span>
+                                          <span className="font-semibold text-gray-900">{formatCurrency(labourCost)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-700">Misc ({subItem.misc_percentage || 10}%):</span>
+                                          <span className="font-semibold text-gray-900">{formatCurrency(miscAmount)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-700">Overhead & Profit ({subItem.overhead_profit_percentage || 25}%):</span>
+                                          <span className="font-semibold text-gray-900">{formatCurrency(plannedProfit)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-700">Transport ({subItem.transport_percentage || 5}%):</span>
+                                          <span className="font-semibold text-gray-900">{formatCurrency(transportAmount)}</span>
+                                        </div>
+                                        <div className="flex justify-between pt-1.5 border-t border-gray-300">
+                                          <span className="text-gray-800 font-bold">Internal Cost (Total):</span>
+                                          <span className="font-bold text-red-600">{formatCurrency(internalCost)}</span>
+                                        </div>
+                                        <div className="flex justify-between pt-1.5 mt-1.5 border-t border-green-300">
+                                          <span className="text-gray-700 font-medium">Planned Profit:</span>
+                                          <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-gray-800 font-medium">Actual Profit:</span>
+                                          <span className={`font-bold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
+                                            {formatCurrency(actualProfit)}
+                                          </span>
+                                        </div>
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
                             </div>
                           );
                         })}
@@ -1435,6 +1538,109 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                                           </div>
                                         </div>
                                       )}
+
+                                      {/* Cost Breakdown Percentages (Per-Sub-Item) - EXACT COPY from BOQDetailsModal */}
+                                      <div className="bg-purple-50/50 rounded-lg p-3 border border-purple-300 mt-3">
+                                        <h5 className="text-xs font-bold text-purple-900 mb-2 flex items-center gap-2">
+                                          <Calculator className="w-3.5 h-3.5" />
+                                          Cost Breakdown Percentages
+                                        </h5>
+                                        <div className="space-y-1.5 text-xs">
+                                          {(() => {
+                                            const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                            const miscPercentage = subItem.misc_percentage || 10;
+                                            const miscAmount = subItem.misc_amount || (clientAmount * (miscPercentage / 100));
+                                            const overheadProfitPercentage = subItem.overhead_profit_percentage || 25;
+                                            const overheadProfitAmount = subItem.overhead_profit_amount || (clientAmount * (overheadProfitPercentage / 100));
+                                            const transportPercentage = subItem.transport_percentage || 5;
+                                            const transportAmount = subItem.transport_amount || (clientAmount * (transportPercentage / 100));
+
+                                            return (
+                                              <>
+                                                <div className="flex justify-between">
+                                                  <span className="text-gray-700">Client Amount (Qty × Rate):</span>
+                                                  <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span className="text-gray-700">Miscellaneous ({miscPercentage}%):</span>
+                                                  <span className="font-semibold text-red-600">- {formatCurrency(miscAmount)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span className="text-gray-700">Overhead & Profit ({overheadProfitPercentage}%):</span>
+                                                  <span className="font-semibold text-red-600">- {formatCurrency(overheadProfitAmount)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span className="text-gray-700">Transport ({transportPercentage}%):</span>
+                                                  <span className="font-semibold text-red-600">- {formatCurrency(transportAmount)}</span>
+                                                </div>
+                                              </>
+                                            );
+                                          })()}
+                                        </div>
+                                      </div>
+
+                                      {/* Profit Analysis (Per-Sub-Item) - EXACT COPY from BOQDetailsModal */}
+                                      <div className="bg-green-50/50 rounded-lg p-3 border border-green-300 mt-3">
+                                        <h5 className="text-xs font-bold text-green-900 mb-2 flex items-center gap-2">
+                                          <Info className="w-3.5 h-3.5" />
+                                          Profit Analysis
+                                        </h5>
+                                        <div className="space-y-1.5 text-xs">
+                                          {(() => {
+                                            const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                            const materialCost = subItem.material_cost || (subItem.materials?.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0) || 0);
+                                            const labourCost = subItem.labour_cost || (subItem.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0);
+                                            const miscAmount = subItem.misc_amount || (clientAmount * ((subItem.misc_percentage || 10) / 100));
+                                            const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || 5) / 100));
+                                            const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || 25) / 100));
+                                            const internalCost = subItem.internal_cost || (materialCost + labourCost + miscAmount + plannedProfit + transportAmount);
+                                            const actualProfit = subItem.actual_profit || (clientAmount - internalCost);
+
+                                            return (
+                                              <>
+                                                <div className="flex justify-between">
+                                                  <span className="text-gray-700">Client Amount:</span>
+                                                  <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span className="text-gray-700">Materials Cost:</span>
+                                                  <span className="font-semibold text-gray-900">{formatCurrency(materialCost)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span className="text-gray-700">Labour Cost:</span>
+                                                  <span className="font-semibold text-gray-900">{formatCurrency(labourCost)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span className="text-gray-700">Misc ({subItem.misc_percentage || 10}%):</span>
+                                                  <span className="font-semibold text-gray-900">{formatCurrency(miscAmount)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span className="text-gray-700">Overhead & Profit ({subItem.overhead_profit_percentage || 25}%):</span>
+                                                  <span className="font-semibold text-gray-900">{formatCurrency(plannedProfit)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span className="text-gray-700">Transport ({subItem.transport_percentage || 5}%):</span>
+                                                  <span className="font-semibold text-gray-900">{formatCurrency(transportAmount)}</span>
+                                                </div>
+                                                <div className="flex justify-between pt-1.5 border-t border-gray-300">
+                                                  <span className="text-gray-800 font-bold">Internal Cost (Total):</span>
+                                                  <span className="font-bold text-red-600">{formatCurrency(internalCost)}</span>
+                                                </div>
+                                                <div className="flex justify-between pt-1.5 mt-1.5 border-t border-green-300">
+                                                  <span className="text-gray-700 font-medium">Planned Profit:</span>
+                                                  <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span className="text-gray-800 font-medium">Actual Profit:</span>
+                                                  <span className={`font-bold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
+                                                    {formatCurrency(actualProfit)}
+                                                  </span>
+                                                </div>
+                                              </>
+                                            );
+                                          })()}
+                                        </div>
+                                      </div>
                                     </div>
                                   ))}
                                 </div>

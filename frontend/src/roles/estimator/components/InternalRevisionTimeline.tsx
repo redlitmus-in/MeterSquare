@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, CheckCircle, XCircle, Edit, Send, Clock, User, TrendingUp, TrendingDown, Mail } from 'lucide-react';
+import { Search, CheckCircle, XCircle, Edit, Send, Clock, User, TrendingUp, TrendingDown, Mail, Calculator } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -1042,62 +1042,51 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                 </div>
               )}
 
-              {/* Pricing Details */}
-              <div className="mt-3 pt-3 border-t-2 border-gray-300 space-y-1">
-                <p className="text-xs font-bold text-gray-800 mb-2">💰 Main Item Pricing Breakdown:</p>
+              {/* Cost Analysis (Item-Level) - EXACT COPY from BOQDetailsModal */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-300 shadow-sm">
+                <h5 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
+                  <Calculator className="w-4 h-4" />
+                  Cost Analysis
+                </h5>
+                <div className="space-y-2 text-sm">
+                  {(() => {
+                    const clientCost = item.client_cost || item.sub_items?.reduce((sum: number, si: any) => sum + ((si.quantity || 0) * (si.rate || 0)), 0) || 0;
+                    const internalCost = item.internal_cost || item.sub_items?.reduce((sum: number, si: any) => {
+                      const materialCost = si.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || m.quantity * m.unit_price), 0) || 0;
+                      const labourCost = si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0;
+                      const subClientAmount = (si.quantity || 0) * (si.rate || 0);
+                      const miscAmount = subClientAmount * ((si.misc_percentage || 10) / 100);
+                      const overheadProfitAmount = subClientAmount * ((si.overhead_profit_percentage || 25) / 100);
+                      const transportAmount = subClientAmount * ((si.transport_percentage || 5) / 100);
+                      return sum + materialCost + labourCost + miscAmount + overheadProfitAmount + transportAmount;
+                    }, 0) || 0;
+                    const projectMargin = item.project_margin || (clientCost - internalCost);
+                    const marginPercentage = clientCost > 0 ? ((projectMargin / clientCost) * 100) : 0;
 
-                {/* Show base_cost (sum of all sub-items) */}
-                {item.has_sub_items && item.sub_items && item.sub_items.length > 0 && (
-                  <div className="text-xs text-gray-600 flex justify-between bg-blue-50 rounded px-2 py-1">
-                    <span>Base Cost (All Sub-Items):</span>
-                    <span className="font-semibold">AED {(item.base_cost || item.sub_items_cost || itemTotal).toFixed(2)}</span>
-                  </div>
-                )}
-
-                {/* For items without sub-items, show direct cost */}
-                {(!item.has_sub_items || !item.sub_items || item.sub_items.length === 0) && (
-                  <div className="text-xs text-gray-600 flex justify-between">
-                    <span>Item Total (Materials + Labour):</span>
-                    <span className="font-semibold">AED {itemTotal.toFixed(2)}</span>
-                  </div>
-                )}
-                {(item.overhead_percentage > 0 || item.overhead_percentage === 0) && (
-                  <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.overhead_percentage, prevItem.overhead_percentage) ? 'bg-yellow-200' : ''}`}>
-                    <span>Miscellaneous ({item.overhead_percentage || 0}%):</span>
-                    <span className="font-semibold">AED {miscellaneousAmount.toFixed(2)}</span>
-                  </div>
-                )}
-                {(item.profit_margin_percentage > 0 || item.profit_margin_percentage === 0) && (
-                  <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${item.discount_percentage > 0 ? 'bg-yellow-100' : ''} ${prevItem && hasChanged(item.profit_margin_percentage, prevItem.profit_margin_percentage) ? 'bg-yellow-200' : ''}`}>
-                    <span>Overhead & Profit ({item.profit_margin_percentage || 0}%):</span>
-                    <span className="font-semibold">AED {overheadProfitAmount.toFixed(2)}</span>
-                  </div>
-                )}
-                <div className="text-xs text-gray-700 flex justify-between bg-gray-100 rounded px-2 py-1 font-semibold">
-                  <span>Subtotal:</span>
-                  <span>AED {subtotal.toFixed(2)}</span>
-                </div>
-                {item.discount_percentage > 0 && (
-                  <>
-                    <div className={`text-xs text-gray-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.discount_percentage, prevItem.discount_percentage) ? 'bg-yellow-200' : ''}`}>
-                      <span>Discount ({item.discount_percentage}%):</span>
-                      <span className="font-semibold">AED {discountAmount.toFixed(2)}</span>
-                    </div>
-                    <div className="text-xs text-gray-700 flex justify-between">
-                      <span>After Discount:</span>
-                      <span className="font-semibold">AED {afterDiscount.toFixed(2)}</span>
-                    </div>
-                  </>
-                )}
-                {item.vat_percentage > 0 && (
-                  <div className={`text-xs text-green-600 flex justify-between rounded px-2 py-1 ${prevItem && hasChanged(item.vat_percentage, prevItem.vat_percentage) ? 'bg-yellow-200' : ''}`}>
-                    <span>VAT ({item.vat_percentage}%):</span>
-                    <span className="font-semibold">+ AED {vatAmount.toFixed(2)}</span>
-                  </div>
-                )}
-                <div className="text-sm font-bold text-gray-900 flex justify-between bg-green-50 rounded px-2 py-1 mt-1">
-                  <span>Final Price:</span>
-                  <span>AED {finalTotalPrice.toFixed(2)}</span>
+                    return (
+                      <>
+                        <div className="flex justify-between items-center py-1">
+                          <span className="text-gray-700 font-medium">Client Cost (Total):</span>
+                          <span className="text-blue-700 font-bold text-base">{formatCurrency(clientCost)}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1">
+                          <span className="text-gray-700 font-medium">Internal Cost (Total):</span>
+                          <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
+                        </div>
+                        <div className="flex justify-between items-center pt-2 border-t-2 border-blue-400">
+                          <span className="text-gray-900 font-bold">Project Margin:</span>
+                          <div className="text-right">
+                            <div className={`font-bold text-lg ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {formatCurrency(projectMargin)}
+                            </div>
+                            <div className={`text-xs font-semibold ${marginPercentage >= 20 ? 'text-green-600' : marginPercentage >= 10 ? 'text-yellow-600' : 'text-red-600'}`}>
+                              ({marginPercentage.toFixed(1)}% margin)
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
               </div>
