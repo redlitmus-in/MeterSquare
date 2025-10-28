@@ -255,31 +255,6 @@ class ModernBOQPDFGenerator:
             ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ('LEFTPADDING', (0, 0), (-1, -1), 8),
             ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-        # Project details in modern card style - Create separate paragraphs for each field
-        info_style = ParagraphStyle(
-            'InfoField',
-            parent=self.styles['Normal'],
-            leftIndent=10,
-            rightIndent=10,
-            spaceBefore=5,
-            spaceAfter=5
-        )
-
-        info_paras = [
-            Paragraph(f'<b><font color="#1F4788">Project Name:</font></b><br/><font size="11">{project.project_name or "N/A"}</font>', info_style),
-            Paragraph(f'<b><font color="#1F4788">Client Name:</font></b><br/><font size="11">{project.client or "N/A"}</font>', info_style),
-            Paragraph(f'<b><font color="#1F4788">Location:</font></b><br/><font size="11">{project.location or "N/A"}</font>', info_style),
-            Paragraph(f'<b><font color="#1F4788">Quotation Date:</font></b><br/><font size="11">{date.today().strftime("%B %d, %Y")}</font>', info_style),
-        ]
-
-        info_card = Table([[p] for p in info_paras], colWidths=[6.7*inch])
-        info_card.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F9FAFB')),
-            ('BOX', (0, 0), (-1, -1), 1.5, colors.HexColor('#E5E7EB')),
-            ('TOPPADDING', (0, 0), (-1, -1), 15),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
-            ('LEFTPADDING', (0, 0), (-1, -1), 15),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 15),
         ]))
         elements.append(info_table)
         elements.append(Spacer(1, 8))
@@ -506,19 +481,27 @@ class ModernBOQPDFGenerator:
 
                     qty = sub_item.get('quantity', 0)
                     unit = sub_item.get('unit', 'nos')
+                    rate = sub_item.get('rate', 0)
 
-                    # Calculate client rate (distributed with markup)
+                    # Calculate client amount (Qty × Rate)
+                    client_amount = qty * rate
+
+                    # Calculate costs
                     materials_cost = sum([m.get('total_price', 0) for m in sub_item.get('materials', [])])
                     labour_cost = sum([l.get('total_cost', 0) for l in sub_item.get('labour', [])])
-                    base_cost = materials_cost + labour_cost
 
-                    # Get markup from parent item
-                    misc_pct = item.get('miscellaneous_percentage', 0)
-                    overhead_pct = item.get('overhead_percentage', item.get('profit_margin_percentage', 0))
+                    # Get percentages - all calculated from CLIENT AMOUNT (matching frontend)
+                    misc_pct = sub_item.get('misc_percentage', 10)
+                    overhead_pct = sub_item.get('overhead_profit_percentage', 25)
+                    transport_pct = sub_item.get('transport_percentage', 5)
 
-                    markup = base_cost * ((misc_pct + overhead_pct) / 100)
-                    total_with_markup = base_cost + markup
-                    rate = total_with_markup / qty if qty > 0 else 0
+                    # Calculate amounts based on CLIENT AMOUNT
+                    misc_amt = client_amount * (misc_pct / 100)
+                    overhead_amt = client_amount * (overhead_pct / 100)
+                    transport_amt = client_amount * (transport_pct / 100)
+
+                    # Planned profit = Overhead & Profit amount
+                    planned_profit = overhead_amt
 
                     # Main sub-item row
                     item_style = ParagraphStyle('ItemText', parent=self.styles['Normal'],
@@ -533,7 +516,7 @@ class ModernBOQPDFGenerator:
                         f"{qty:.0f}",
                         unit,
                         f"{rate:,.2f} AED",
-                        f"{total_with_markup:,.2f} AED"
+                        f"{client_amount:,.2f} AED"
                     ])
 
                     # Materials row
@@ -546,7 +529,7 @@ class ModernBOQPDFGenerator:
                         '',
                         '',
                         '',
-                        f"{materials_cost:,.2f} AED",
+                        '',
                         f"{materials_cost:,.2f} AED"
                     ])
 
@@ -560,22 +543,22 @@ class ModernBOQPDFGenerator:
                         '',
                         '',
                         '',
-                        f"{labour_cost:,.2f} AED",
+                        '',
                         f"{labour_cost:,.2f} AED"
                     ])
 
                     # Planned Profit row
                     profit_style = ParagraphStyle('ProfitText', parent=self.styles['Normal'],
-                                                  fontSize=8, textColor=colors.HexColor('#4CAF50'),
+                                                  fontSize=8, textColor=colors.HexColor('#1976D2'),
                                                   fontName='Helvetica-Bold')
                     table_data.append([
                         '',
-                        Paragraph('Planned Profit', profit_style),
+                        Paragraph('<font color="#1976D2">Planned Profit</font>', profit_style),
                         '',
                         '',
                         '',
                         '',
-                        Paragraph(f'<font color="#4CAF50">{markup:,.2f} AED</font>', profit_style)
+                        Paragraph(f'<font color="#1976D2">{planned_profit:,.2f} AED</font>', profit_style)
                     ])
             else:
                 # Single item without sub-items
@@ -783,50 +766,66 @@ class ModernBOQPDFGenerator:
             elements.append(lab_table)
             elements.append(Spacer(1, 5))
 
-        # Cost breakdown
+        # Cost breakdown - matching frontend calculations
         materials_cost = sum([m.get('total_price', 0) for m in materials])
         labour_cost = sum([l.get('total_cost', 0) for l in labour])
-        base_cost = materials_cost + labour_cost
 
-        # Get percentages from parent item
-        misc_pct = parent_item.get('miscellaneous_percentage', 0)
-        overhead_pct = parent_item.get('overhead_percentage', parent_item.get('profit_margin_percentage', 0))
-        transport_pct = parent_item.get('transport_percentage', 0)
-
-        misc_amt = base_cost * (misc_pct / 100)
-        overhead_amt = base_cost * (overhead_pct / 100)
-        transport_amt = base_cost * (transport_pct / 100)
-
-        internal_cost = base_cost + misc_amt + overhead_amt + transport_amt
+        # Get client amount (Qty × Rate)
+        client_qty = sub_item.get('quantity', 0)
         client_rate = sub_item.get('rate', 0)
-        client_total = sub_item.get('quantity', 0) * client_rate
-        planned_profit = overhead_amt
-        actual_profit = client_total - internal_cost
+        client_amount = client_qty * client_rate
 
-        # Cost breakdown table
+        # Get percentages - all calculated from CLIENT AMOUNT (matching frontend)
+        misc_pct = sub_item.get('misc_percentage', 10)
+        overhead_pct = sub_item.get('overhead_profit_percentage', 25)
+        transport_pct = sub_item.get('transport_percentage', 5)
+
+        # Calculate amounts based on CLIENT AMOUNT
+        misc_amt = client_amount * (misc_pct / 100)
+        overhead_amt = client_amount * (overhead_pct / 100)
+        transport_amt = client_amount * (transport_pct / 100)
+
+        # Internal Cost = Materials + Labour + Misc + O&P + Transport
+        internal_cost = materials_cost + labour_cost + misc_amt + overhead_amt + transport_amt
+
+        # Planned Profit = Overhead & Profit amount
+        planned_profit = overhead_amt
+
+        # Actual Profit = Client Amount - Internal Cost
+        actual_profit = client_amount - internal_cost
+
+        # Cost breakdown table (matching frontend structure)
         breakdown_data = [
-            ['Base Cost (Materials + Labour):', f"{base_cost:,.2f}"],
-            [f'Miscellaneous ({misc_pct}%):', f"{misc_amt:,.2f}"],
-            [f'Overhead & Profit ({overhead_pct}%):', f"{overhead_amt:,.2f}"],
-            [f'Transport ({transport_pct}%):', f"{transport_amt:,.2f}"],
-            ['Internal Cost:', f"{internal_cost:,.2f}"],
+            ['Materials Cost:', f"AED {materials_cost:,.2f}"],
+            ['Labour Cost:', f"AED {labour_cost:,.2f}"],
+            [f'Misc ({misc_pct}%):', f"AED {misc_amt:,.2f}"],
+            [f'Overhead & Profit ({overhead_pct}%):', f"AED {overhead_amt:,.2f}"],
+            [f'Transport ({transport_pct}%):', f"AED {transport_amt:,.2f}"],
             ['', ''],
-            ['Client Rate:', f"{client_total:,.2f}"],
-            ['Planned Profit:', f"{planned_profit:,.2f}"],
+            ['Internal Cost (Total):', f"AED {internal_cost:,.2f}"],
+            ['', ''],
+            ['Planned Profit:', f"AED {planned_profit:,.2f}"],
             [{'content': 'Actual Profit:', 'textColor': colors.HexColor('#10B981'), 'fontStyle': 'bold'},
-             {'content': f"{actual_profit:,.2f}", 'textColor': colors.HexColor('#10B981'), 'fontStyle': 'bold'}]
+             {'content': f"AED {actual_profit:,.2f}", 'textColor': colors.HexColor('#10B981'), 'fontStyle': 'bold'}]
         ]
 
         breakdown_table = Table(breakdown_data, colWidths=[4.7*inch, 2*inch])
         breakdown_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 3),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-            ('LINEABOVE', (0, 4), (-1, 4), 1, colors.HexColor('#D1D5DB')),
-            ('LINEABOVE', (0, 6), (-1, 6), 1, colors.HexColor('#D1D5DB')),
-            ('LINEABOVE', (0, 8), (-1, 8), 2, colors.HexColor('#10B981')),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            # Separator lines
+            ('LINEABOVE', (0, 6), (-1, 6), 1, colors.HexColor('#D1D5DB')),  # Before Internal Cost
+            ('LINEABOVE', (0, 8), (-1, 8), 1.5, colors.HexColor('#10B981')),  # Before Planned Profit
+            ('LINEABOVE', (0, 9), (-1, 9), 1, colors.HexColor('#10B981')),  # Before Actual Profit
+            # Highlight Internal Cost row
+            ('TEXTCOLOR', (1, 6), (1, 6), colors.HexColor('#EF5350')),
+            ('FONTNAME', (0, 6), (-1, 6), 'Helvetica-Bold'),
+            # Highlight Planned Profit row
+            ('TEXTCOLOR', (1, 8), (1, 8), colors.HexColor('#1976D2')),
+            ('FONTNAME', (0, 8), (-1, 8), 'Helvetica-Bold'),
         ]))
         elements.append(breakdown_table)
         elements.append(Spacer(1, 10))
@@ -917,30 +916,44 @@ class ModernBOQPDFGenerator:
         elements.append(Spacer(1, 12))
 
         # Calculate totals exactly like frontend
-        client_amount = sum([item.get('selling_price', 0) for item in items])
-        internal_cost_total = total_material_cost + total_labour_cost
-
-        # Calculate all markup amounts
-        total_misc = 0
-        total_overhead = 0
-        total_profit = 0
-
+        # Get all sub-items from all items
+        all_sub_items = []
         for item in items:
-            total_misc += item.get('miscellaneous_amount', 0)
-            total_overhead += item.get('overhead_amount', 0)
-            total_profit += item.get('profit_margin_amount', 0)
+            if item.get('has_sub_items') and item.get('sub_items'):
+                all_sub_items.extend(item.get('sub_items', []))
 
-        # Planned profit (O&P)
-        planned_profit = total_overhead + total_profit
+        # Calculate client amount (sum of all sub-item Qty × Rate)
+        client_amount = 0
+        total_misc = 0
+        total_overhead_profit = 0
+        total_transport = 0
 
-        # Actual profit calculation
+        for sub_item in all_sub_items:
+            qty = sub_item.get('quantity', 0)
+            rate = sub_item.get('rate', 0)
+            sub_client_amount = qty * rate
+            client_amount += sub_client_amount
+
+            # Calculate percentages from CLIENT AMOUNT
+            misc_pct = sub_item.get('misc_percentage', 10)
+            overhead_pct = sub_item.get('overhead_profit_percentage', 25)
+            transport_pct = sub_item.get('transport_percentage', 5)
+
+            total_misc += sub_client_amount * (misc_pct / 100)
+            total_overhead_profit += sub_client_amount * (overhead_pct / 100)
+            total_transport += sub_client_amount * (transport_pct / 100)
+
+        # Internal Cost = Materials + Labour + Misc + O&P + Transport
+        internal_cost_total = total_material_cost + total_labour_cost + total_misc + total_overhead_profit + total_transport
+
+        # Planned profit = Overhead & Profit amount
+        planned_profit = total_overhead_profit
+
+        # Actual profit = Client Amount - Internal Cost
         actual_profit = client_amount - internal_cost_total
 
-        # Variance
-        variance = actual_profit - planned_profit
-
-        # Project margin (excluding planned profit)
-        project_margin = client_amount - internal_cost_total - planned_profit
+        # Project margin = Client Amount - Internal Cost
+        project_margin = actual_profit
         margin_percentage = (project_margin / client_amount * 100) if client_amount > 0 else 0
 
         # Overall Cost Summary Header
@@ -986,21 +999,26 @@ class ModernBOQPDFGenerator:
 
         # Internal Cost Breakdown
         internal_data = [
-            ['Internal Cost:', ''],
+            ['Internal Cost:', f'AED {internal_cost_total:,.2f}'],
             ['  Materials:', f'AED {total_material_cost:,.2f}'],
             ['  Labour:', f'AED {total_labour_cost:,.2f}'],
+            ['  Miscellaneous:', f'AED {total_misc:,.2f}'],
+            ['  Overhead & Profit:', f'AED {total_overhead_profit:,.2f}'],
+            ['  Transport:', f'AED {total_transport:,.2f}'],
         ]
         internal_table = Table(internal_data, colWidths=[4.7*inch, 2*inch])
         internal_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
             ('FONTSIZE', (0, 0), (0, 0), 11),
-            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
             ('TOPPADDING', (0, 0), (-1, -1), 4),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ('TEXTCOLOR', (0, 0), (0, 0), colors.black),
-            ('TEXTCOLOR', (1, 0), (1, -1), colors.HexColor('#EF6C00')),
+            ('TEXTCOLOR', (1, 0), (1, 0), colors.HexColor('#EF6C00')),
+            ('TEXTCOLOR', (1, 1), (1, -1), colors.HexColor('#64748B')),
             ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 0), (1, 0), 'Helvetica-Bold'),
         ]))
         elements.append(internal_table)
 
@@ -1041,14 +1059,12 @@ class ModernBOQPDFGenerator:
         elements.append(profit_header)
 
         profit_data = [
-            ['Planned Profit (O&P):', f'AED {planned_profit:,.2f}'],
+            ['Planned Profit:', f'AED {planned_profit:,.2f}'],
             ['Actual Profit:', f'AED {actual_profit:,.2f}'],
-            ['', ''],
-            ['Variance:', f'AED {variance:,.2f}']
         ]
 
         profit_table = Table(profit_data, colWidths=[4.7*inch, 2*inch])
-        variance_color = colors.HexColor('#EF5350') if variance < 0 else colors.HexColor('#10B981')
+        actual_profit_color = colors.HexColor('#10B981') if actual_profit >= planned_profit else colors.HexColor('#EF6C00')
         profit_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
@@ -1056,10 +1072,8 @@ class ModernBOQPDFGenerator:
             ('TOPPADDING', (0, 0), (-1, -1), 6),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ('TEXTCOLOR', (1, 0), (1, 0), colors.HexColor('#1976D2')),
-            ('TEXTCOLOR', (1, 1), (1, 1), colors.HexColor('#EF6C00')),
-            ('TEXTCOLOR', (1, -1), (1, -1), variance_color),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#D1D5DB')),
+            ('TEXTCOLOR', (1, 1), (1, 1), actual_profit_color),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F1F8E9')),
         ]))
         elements.append(profit_table)
