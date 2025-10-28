@@ -636,20 +636,167 @@ def get_boq_planned_vs_actual(boq_id):
                     "status": labour_status
                 })
 
-            # Calculate item totals
-            planned_base = planned_materials_total + planned_labour_total
-            actual_base = actual_materials_total + actual_labour_total
+            # NEW FLOW: Calculate overhead, profit, and miscellaneous at SUB-ITEM level
+            # Then aggregate to item level
 
+            # Calculate planned amounts from sub-items
+            planned_base = Decimal('0')
+            planned_overhead = Decimal('0')
+            planned_profit = Decimal('0')
+            planned_miscellaneous = Decimal('0')
+            planned_transport = Decimal('0')
+            planned_total = Decimal('0')
+
+            # Calculate actual amounts from sub-items
+            actual_base = Decimal('0')
+            actual_overhead = Decimal('0')
+            actual_profit = Decimal('0')
+            actual_miscellaneous = Decimal('0')
+            actual_transport = Decimal('0')
+            actual_total = Decimal('0')
+
+            sub_items_breakdown = []
+
+            for sub_item in planned_item.get('sub_items', []):
+                sub_item_name = sub_item.get('sub_item_name', '')
+                master_sub_item_id = sub_item.get('master_sub_item_id')
+
+                # Get the base_total (client rate) from sub-item
+                # This is the main amount on which percentages are calculated
+                sub_item_base_total = Decimal(str(sub_item.get('base_total', 0)))
+
+                # Also track internal costs (materials + labour) for comparison
+                sub_item_materials_cost = Decimal(str(sub_item.get('materials_cost', 0)))
+                sub_item_labour_cost = Decimal(str(sub_item.get('labour_cost', 0)))
+                sub_item_internal_cost = sub_item_materials_cost + sub_item_labour_cost
+
+                # Get percentages from sub-item or use defaults
+                misc_pct = Decimal(str(sub_item.get('misc_percentage', 10)))
+                overhead_profit_pct = Decimal(str(sub_item.get('overhead_profit_percentage', 25)))
+                transport_pct = Decimal(str(sub_item.get('transport_percentage', 5)))
+
+                # IMPORTANT: Calculate based on base_total (client rate), NOT internal cost
+                # This is the correct calculation flow as per your example
+                sub_planned_misc = sub_item_base_total * (misc_pct / 100)
+                sub_planned_overhead_profit = sub_item_base_total * (overhead_profit_pct / 100)
+                sub_planned_transport = sub_item_base_total * (transport_pct / 100)
+
+                # Split overhead/profit 40/60 (common industry practice)
+                sub_planned_overhead = sub_planned_overhead_profit * Decimal('0.4')
+                sub_planned_profit = sub_planned_overhead_profit * Decimal('0.6')
+
+                # Get discount if available
+                sub_discount_pct = Decimal(str(sub_item.get('discount_percentage', 0)))
+                sub_discount_amount = Decimal(str(sub_item.get('discount_amount', 0)))
+
+                # If no discount_amount but has percentage, calculate it
+                if sub_discount_amount == 0 and sub_discount_pct > 0:
+                    sub_discount_amount = sub_item_base_total * (sub_discount_pct / 100)
+
+                # CORRECT FORMULA: Total = Materials + Labour + Misc + Overhead + Profit + Transport - Discount
+                sub_planned_total = (sub_item_materials_cost + sub_item_labour_cost +
+                                   sub_planned_misc + sub_planned_overhead + sub_planned_profit +
+                                   sub_planned_transport - sub_discount_amount)
+
+                # Calculate actual internal cost from tracking
+                sub_actual_materials_cost = Decimal('0')
+                sub_actual_labour_cost = Decimal('0')
+
+                # Get actual materials for this sub-item from tracking
+                for mat in materials_comparison:
+                    if mat.get('sub_item_name') == sub_item_name or mat.get('master_sub_item_id') == master_sub_item_id:
+                        if mat.get('actual') and mat['actual'].get('total'):
+                            sub_actual_materials_cost += Decimal(str(mat['actual']['total']))
+                        elif mat.get('planned') and mat['planned'].get('total'):
+                            # If not purchased yet, use planned as estimate
+                            sub_actual_materials_cost += Decimal(str(mat['planned']['total']))
+
+                # Get actual labour for this sub-item (from labour tracking if available)
+                for lab in sub_item.get('labour', []):
+                    lab_cost = Decimal(str(lab.get('total_cost', 0)))
+                    sub_actual_labour_cost += lab_cost
+
+                sub_actual_internal_cost = sub_actual_materials_cost + sub_actual_labour_cost
+
+                # Actual percentages stay the same (based on base_total)
+                sub_actual_misc = sub_item_base_total * (misc_pct / 100)  # Same as planned
+                sub_actual_overhead = sub_planned_overhead  # Same as planned
+                sub_actual_transport = sub_planned_transport  # Same as planned
+
+                # Actual profit = we don't calculate from percentages, it's what remains
+                # For now, use planned profit (will be adjusted by consumption flow later)
+                sub_actual_profit = sub_planned_profit
+
+                # CORRECT FORMULA: Total = Materials + Labour + Misc + Overhead + Profit + Transport - Discount
+                sub_actual_total = (sub_actual_materials_cost + sub_actual_labour_cost +
+                                  sub_actual_misc + sub_actual_overhead + sub_actual_profit +
+                                  sub_actual_transport - sub_discount_amount)
+
+                # Aggregate to item level (planned)
+                planned_base += sub_item_base_total
+                planned_miscellaneous += sub_planned_misc
+                planned_overhead += sub_planned_overhead
+                planned_profit += sub_planned_profit
+                planned_transport += sub_planned_transport
+                planned_total += sub_planned_total
+
+                # Aggregate to item level (actual) - using actual internal costs
+                actual_base += sub_item_base_total  # Client rate stays the same
+                actual_miscellaneous += sub_actual_misc  # Misc % stays the same
+                actual_overhead += sub_actual_overhead  # Overhead % stays the same
+                actual_profit += sub_actual_profit  # Profit varies based on actual spending
+                actual_transport += sub_actual_transport  # Transport % stays the same
+                actual_total += sub_actual_total  # Total varies based on actual costs
+
+                # Store sub-item breakdown for transparency
+                sub_items_breakdown.append({
+                    'sub_item_name': sub_item_name,
+                    'master_sub_item_id': master_sub_item_id,
+                    'base_total': float(sub_item_base_total),  # Client rate
+                    'planned_internal_cost': float(sub_item_internal_cost),
+                    'actual_internal_cost': float(sub_actual_internal_cost),
+                    'materials_cost': {
+                        'planned': float(sub_item_materials_cost),
+                        'actual': float(sub_actual_materials_cost)
+                    },
+                    'labour_cost': {
+                        'planned': float(sub_item_labour_cost),
+                        'actual': float(sub_actual_labour_cost)
+                    },
+                    'miscellaneous': {
+                        'percentage': float(misc_pct),
+                        'amount': float(sub_planned_misc)
+                    },
+                    'overhead': {
+                        'percentage': float(overhead_profit_pct * Decimal('0.4')),
+                        'amount': float(sub_planned_overhead)
+                    },
+                    'profit': {
+                        'percentage': float(overhead_profit_pct * Decimal('0.6')),
+                        'planned_amount': float(sub_planned_profit),
+                        'actual_amount': float(sub_actual_profit)
+                    },
+                    'transport': {
+                        'percentage': float(transport_pct),
+                        'amount': float(sub_planned_transport)
+                    },
+                    'discount': {
+                        'percentage': float(sub_discount_pct),
+                        'amount': float(sub_discount_amount)
+                    },
+                    'planned_total': float(sub_planned_total),
+                    'actual_total': float(sub_actual_total),
+                    'calculation_note': 'Total = Materials + Labour + Misc + Overhead + Profit + Transport - Discount'
+                })
+
+            # Get overall percentages for display (from item level)
             overhead_pct = Decimal(str(planned_item.get('overhead_percentage', 0)))
             profit_pct = Decimal(str(planned_item.get('profit_margin_percentage', 0)))
+            misc_pct = Decimal(str(planned_item.get('miscellaneous_percentage', 10)))
 
-            # Planned amounts (original BOQ)
-            planned_overhead = planned_base * (overhead_pct / 100)
-            planned_profit = planned_base * (profit_pct / 100)
-            planned_total = planned_base + planned_overhead + planned_profit
+            # The selling price is calculated from sub-items
+            selling_price = planned_total
 
-            # The selling price is FIXED - this is what we're selling to the client
-            selling_price = Decimal(str(planned_item.get('selling_price', 0)))
             # 1. Calculate extra costs from material/labour overruns and unplanned items
             extra_costs = Decimal('0')
 
@@ -672,41 +819,54 @@ def get_boq_planned_vs_actual(boq_id):
                     if lab_variance > 0:
                         extra_costs += lab_variance
 
-            # 2. Start with planned overhead and profit (these are our buffers)
+            # 2. Consumption flow: extra costs consume miscellaneous first, then overhead, then profit
+            remaining_miscellaneous = planned_miscellaneous
             remaining_overhead = planned_overhead
             remaining_profit = planned_profit
+            misc_consumed = Decimal('0')
             overhead_consumed = Decimal('0')
             profit_consumed = Decimal('0')
 
             if extra_costs > 0:
-                # We have extra costs - consume overhead first
-                overhead_consumed = min(extra_costs, planned_overhead)
-                remaining_overhead = planned_overhead - overhead_consumed
+                # Step 1: Consume miscellaneous first
+                misc_consumed = min(extra_costs, planned_miscellaneous)
+                remaining_miscellaneous = planned_miscellaneous - misc_consumed
 
-                # If extra costs exceed overhead, consume profit
-                if extra_costs > planned_overhead:
-                    excess_costs = extra_costs - planned_overhead
-                    profit_consumed = min(excess_costs, planned_profit)
-                    remaining_profit = planned_profit - profit_consumed
+                # Step 2: If extra costs exceed miscellaneous, consume overhead
+                if extra_costs > planned_miscellaneous:
+                    excess_after_misc = extra_costs - planned_miscellaneous
+                    overhead_consumed = min(excess_after_misc, planned_overhead)
+                    remaining_overhead = planned_overhead - overhead_consumed
+
+                    # Step 3: If extra costs exceed miscellaneous + overhead, consume profit
+                    if excess_after_misc > planned_overhead:
+                        excess_after_overhead = excess_after_misc - planned_overhead
+                        profit_consumed = min(excess_after_overhead, planned_profit)
+                        remaining_profit = planned_profit - profit_consumed
             else:
-                # No extra costs - keep full overhead and profit
+                # No extra costs - keep full miscellaneous, overhead and profit
+                remaining_miscellaneous = planned_miscellaneous
                 remaining_overhead = planned_overhead
                 remaining_profit = planned_profit
 
-            # 3. Calculate actual overhead and profit (what remains after consumption)
-            actual_overhead = remaining_overhead
-            actual_profit = remaining_profit
+            # 3. Update actual amounts based on consumption (if needed for consumption flow display)
+            # But don't recalculate actual_total - it's already correctly calculated from sub-items
+            remaining_actual_miscellaneous = actual_miscellaneous - misc_consumed
+            remaining_actual_overhead = actual_overhead - overhead_consumed
+            remaining_actual_profit = actual_profit - profit_consumed
 
-            # 4. Calculate actual total cost (base + remaining overhead + remaining profit)
-            actual_total = actual_base + actual_overhead + actual_profit
+            # 4. actual_total is already correctly calculated from sub-items aggregation
+            # Don't recalculate it here!
 
             # 5. Calculate variances
             base_cost_variance = actual_base - planned_base  # For reporting
-            overhead_variance = actual_overhead - planned_overhead
-            profit_variance = actual_profit - planned_profit
+            misc_variance = remaining_actual_miscellaneous - planned_miscellaneous
+            overhead_variance = remaining_actual_overhead - planned_overhead
+            profit_variance = remaining_actual_profit - planned_profit
 
             # Calculate savings/overrun (use absolute values for display)
             cost_savings = abs(planned_base - actual_base)  # Always positive
+            misc_diff = abs(planned_miscellaneous - actual_miscellaneous)  # Always positive
             overhead_diff = abs(planned_overhead - actual_overhead)  # Always positive
             profit_diff = abs(planned_profit - actual_profit)  # Always positive
 
@@ -736,14 +896,18 @@ def get_boq_planned_vs_actual(boq_id):
                 },
                 "materials": materials_comparison,
                 "labour": labour_comparison,
+                "sub_items_breakdown": sub_items_breakdown,  # NEW: Sub-item level breakdown
                 "planned": {
                     "materials_total": float(planned_materials_total),
                     "labour_total": float(planned_labour_total),
                     "base_cost": float(planned_base),
+                    "miscellaneous_amount": float(planned_miscellaneous),
+                    "miscellaneous_percentage": float(misc_pct),
                     "overhead_amount": float(planned_overhead),
                     "overhead_percentage": float(overhead_pct),
                     "profit_amount": float(planned_profit),
                     "profit_percentage": float(profit_pct),
+                    "transport_amount": float(planned_transport),
                     "total": float(planned_total),
                     "selling_price": float(selling_price)
                 },
@@ -751,10 +915,13 @@ def get_boq_planned_vs_actual(boq_id):
                     "materials_total": float(actual_materials_total),
                     "labour_total": float(actual_labour_total),
                     "base_cost": float(actual_base),
+                    "miscellaneous_amount": float(actual_miscellaneous),
+                    "miscellaneous_percentage": float(misc_pct),
                     "overhead_amount": float(actual_overhead),
                     "overhead_percentage": float(overhead_pct),
                     "profit_amount": float(actual_profit),
                     "profit_percentage": (float(actual_profit) / float(selling_price) * 100) if selling_price > 0 else 0,
+                    "transport_amount": float(actual_transport),
                     "total": float(actual_total),
                     "selling_price": float(selling_price)
                 },
@@ -762,19 +929,23 @@ def get_boq_planned_vs_actual(boq_id):
                     "extra_costs": float(extra_costs),
                     "base_cost_variance": float(base_cost_variance),
                     "variance_status": "overspent" if extra_costs > 0 else "saved",
-                    "overhead_variance": float(overhead_variance),
-                    "profit_variance": float(profit_variance),
+                    "miscellaneous_consumed": float(misc_consumed),
+                    "miscellaneous_remaining": float(remaining_actual_miscellaneous),
+                    "miscellaneous_variance": float(misc_variance),
                     "overhead_consumed": float(overhead_consumed),
-                    "overhead_remaining": float(remaining_overhead),
+                    "overhead_remaining": float(remaining_actual_overhead),
+                    "overhead_variance": float(overhead_variance),
                     "profit_consumed": float(profit_consumed),
-                    "profit_remaining": float(remaining_profit),
-                    "explanation": "Extra costs (overruns + unplanned items) consume overhead first, then profit. Incomplete purchases don't affect consumption."
+                    "profit_remaining": float(remaining_actual_profit),
+                    "profit_variance": float(profit_variance),
+                    "explanation": "Extra costs (overruns + unplanned items) consume miscellaneous first, then overhead, then profit. Calculations are done at sub-item level and aggregated."
                 },
                 "savings_breakdown": {
                     "total_cost_savings": float(cost_savings),
+                    "miscellaneous_difference": float(misc_diff),
                     "overhead_difference": float(overhead_diff),
                     "profit_difference": float(profit_diff),
-                    "note": "All values shown as absolute (positive) amounts for clarity"
+                    "note": "All values shown as absolute (positive) amounts for clarity. Calculated from sub-item level."
                 },
                 "variance": {
                     "materials": {
@@ -789,15 +960,20 @@ def get_boq_planned_vs_actual(boq_id):
                         "amount": float(abs(actual_base - planned_base)),
                         "status": "saved" if (planned_base - actual_base) > 0 else "overrun"
                     },
+                    "miscellaneous": {
+                        "planned": float(planned_miscellaneous),
+                        "actual": float(remaining_actual_miscellaneous),
+                        "difference": float(abs(misc_variance))
+                    },
                     "overhead": {
                         "planned": float(planned_overhead),
-                        "actual": float(actual_overhead),
-                        "difference": float(abs(overhead_diff))
+                        "actual": float(remaining_actual_overhead),
+                        "difference": float(abs(overhead_variance))
                     },
                     "profit": {
                         "planned": float(planned_profit),
-                        "actual": float(actual_profit),
-                        "difference": float(abs(profit_diff))
+                        "actual": float(remaining_actual_profit),
+                        "difference": float(abs(profit_variance))
                     }
                 }
             }
@@ -807,28 +983,35 @@ def get_boq_planned_vs_actual(boq_id):
         # Calculate overall summary
         total_planned = sum(float(item['planned']['total']) for item in comparison['items'])
         total_actual = sum(float(item['actual']['total']) for item in comparison['items'])
-        total_planned_profit = sum(float(item['planned']['profit_amount']) for item in comparison['items'])
-        total_actual_profit = sum(float(item['actual']['profit_amount']) for item in comparison['items'])
+        total_planned_miscellaneous = sum(float(item['planned']['miscellaneous_amount']) for item in comparison['items'])
+        total_actual_miscellaneous = sum(float(item['actual']['miscellaneous_amount']) for item in comparison['items'])
         total_planned_overhead = sum(float(item['planned']['overhead_amount']) for item in comparison['items'])
         total_actual_overhead = sum(float(item['actual']['overhead_amount']) for item in comparison['items'])
+        total_planned_profit = sum(float(item['planned']['profit_amount']) for item in comparison['items'])
+        total_actual_profit = sum(float(item['actual']['profit_amount']) for item in comparison['items'])
+        total_planned_transport = sum(float(item['planned']['transport_amount']) for item in comparison['items'])
+        total_actual_transport = sum(float(item['actual']['transport_amount']) for item in comparison['items'])
 
         # Calculate total extra costs that exceeded buffers (losses)
         total_extra_costs = Decimal('0')
+        total_misc_consumed = Decimal('0')
         total_overhead_consumed = Decimal('0')
         total_profit_consumed = Decimal('0')
 
         for item in comparison['items']:
             consumption_flow = item.get('consumption_flow', {})
             extra_costs = Decimal(str(consumption_flow.get('extra_costs', 0)))
+            misc_consumed = Decimal(str(consumption_flow.get('miscellaneous_consumed', 0)))
             overhead_consumed = Decimal(str(consumption_flow.get('overhead_consumed', 0)))
             profit_consumed = Decimal(str(consumption_flow.get('profit_consumed', 0)))
 
             total_extra_costs += extra_costs
+            total_misc_consumed += misc_consumed
             total_overhead_consumed += overhead_consumed
             total_profit_consumed += profit_consumed
 
         # Calculate net loss (costs that exceeded all buffers)
-        total_loss_beyond_buffers = total_extra_costs - total_overhead_consumed - total_profit_consumed
+        total_loss_beyond_buffers = total_extra_costs - total_misc_consumed - total_overhead_consumed - total_profit_consumed
 
         # Adjust actual profit to account for losses beyond buffers
         # If there are losses beyond buffers, reduce the actual profit further (can go negative)
@@ -840,6 +1023,9 @@ def get_boq_planned_vs_actual(boq_id):
             "variance": float(abs(total_actual - total_planned)),  # Always positive number
             "variance_percentage": float(abs((total_actual - total_planned) / total_planned * 100)) if total_planned > 0 else 0,
             "status": "under_budget" if total_actual < total_planned else "over_budget" if total_actual > total_planned else "on_budget",
+            "total_planned_miscellaneous": float(total_planned_miscellaneous),
+            "total_actual_miscellaneous": float(total_actual_miscellaneous),
+            "miscellaneous_variance": float(abs(total_actual_miscellaneous - total_planned_miscellaneous)),
             "total_planned_overhead": float(total_planned_overhead),
             "total_actual_overhead": float(total_actual_overhead),
             "overhead_variance": float(abs(total_actual_overhead - total_planned_overhead)),
@@ -847,12 +1033,17 @@ def get_boq_planned_vs_actual(boq_id):
             "total_actual_profit": float(adjusted_actual_profit),  # Use adjusted profit
             "profit_variance": float(abs(adjusted_actual_profit - total_planned_profit)),
             "profit_status": "loss" if adjusted_actual_profit < 0 else ("reduced" if adjusted_actual_profit < total_planned_profit else "maintained" if adjusted_actual_profit == total_planned_profit else "increased"),
-            "total_overhead_plus_profit": float(total_actual_overhead + adjusted_actual_profit),
-            "planned_overhead_plus_profit": float(total_planned_overhead + total_planned_profit),
+            "total_planned_transport": float(total_planned_transport),
+            "total_actual_transport": float(total_actual_transport),
+            "transport_variance": float(abs(total_actual_transport - total_planned_transport)),
+            "total_buffers": float(total_actual_miscellaneous + total_actual_overhead + adjusted_actual_profit + total_actual_transport),
+            "planned_buffers": float(total_planned_miscellaneous + total_planned_overhead + total_planned_profit + total_planned_transport),
             "total_extra_costs": float(total_extra_costs),
+            "total_miscellaneous_consumed": float(total_misc_consumed),
             "total_overhead_consumed": float(total_overhead_consumed),
             "total_profit_consumed": float(total_profit_consumed),
-            "total_loss_beyond_buffers": float(total_loss_beyond_buffers)
+            "total_loss_beyond_buffers": float(total_loss_beyond_buffers),
+            "calculation_note": "Miscellaneous, overhead, and profit are calculated at sub-item level based on material and labour costs, then aggregated to item level."
         }
 
         return jsonify(comparison), 200
