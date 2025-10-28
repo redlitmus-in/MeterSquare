@@ -706,15 +706,13 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                         <span className="font-bold text-red-600">{formatCurrency(internalCost)}</span>
                                                       </div>
                                                       <div className="flex justify-between pt-1.5 border-t border-green-300">
+                                                        <span className="text-gray-700 font-medium">Planned Profit:</span>
+                                                        <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
+                                                      </div>
+                                                      <div className="flex justify-between">
                                                         <span className="text-gray-800 font-medium">Actual Profit:</span>
                                                         <span className={`font-bold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
                                                           {formatCurrency(actualProfit)}
-                                                        </span>
-                                                      </div>
-                                                      <div className="flex justify-between text-xs">
-                                                        <span className="text-gray-600">Variance:</span>
-                                                        <span className={`font-semibold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-red-600'}`}>
-                                                          {actualProfit >= plannedProfit ? '+' : ''}{formatCurrency(actualProfit - plannedProfit)}
                                                         </span>
                                                       </div>
                                                     </>
