@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
+import { useAdminViewStore } from '@/store/adminViewStore';
 import { UserRole } from '@/types';
 import { validateSupabaseConnection } from '@/utils/environment';
 import { setupCacheValidator } from '@/utils/clearCache';
@@ -96,12 +97,20 @@ import PageLoader from '@/components/ui/PageLoader';
 // Role-specific Procurement Hub Component
 const RoleSpecificProcurementHub: React.FC = () => {
   const { user } = useAuthStore();
+  const { viewingAsRole } = useAdminViewStore();
 
   // Get user role (backend sends camelCase: technicalDirector)
-  const userRole = (user as any)?.role || '';
+  let userRole = (user as any)?.role || '';
+
+  // If admin is viewing as another role, use that role instead
+  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
+    userRole = viewingAsRole;
+  }
+
   const userRoleLower = userRole.toLowerCase();
 
-  console.log('User role from backend:', userRole, 'Lowercase:', userRoleLower);
+  console.log('User role from backend:', userRole, 'Lowercase:', userRoleLower, 'Viewing as:', viewingAsRole);
   // Check if user is Project Manager
   if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' || userRoleLower === 'projectmanager') {
     return <ProjectManagerHub />;
@@ -136,7 +145,16 @@ const RoleSpecificProcurementHub: React.FC = () => {
 // Role-specific Projects Component
 const RoleSpecificProjects: React.FC = () => {
   const { user } = useAuthStore();
-  const userRole = (user as any)?.role || '';
+  const { viewingAsRole } = useAdminViewStore();
+
+  let userRole = (user as any)?.role || '';
+
+  // If admin is viewing as another role, use that role instead
+  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
+    userRole = viewingAsRole;
+  }
+
   const userRoleLower = userRole.toLowerCase();
 
   // Estimator role shows EstimatorHub (Projects & BOQ Management)
@@ -294,7 +312,8 @@ const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children
   const isAdmin = userRole === 'Admin' ||
                  userRoleLower === 'admin' ||
                  roleId === 'admin' ||
-                 roleIdLower === 'admin';
+                 roleIdLower === 'admin' ||
+                 roleId === 5; // Database has admin as role_id: 5
 
   if (!isProjectManager && !isTechnicalDirector && !isAdmin) {
     console.log('Access denied. User role:', userRole, 'role_id:', roleId);
@@ -316,11 +335,12 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const roleId = user?.role_id;
   const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
 
-  // Check if user is Admin
+  // Check if user is Admin (including role_id === 5 from database)
   const isAdmin = userRole === 'Admin' ||
                  userRoleLower === 'admin' ||
                  roleId === 'admin' ||
-                 roleIdLower === 'admin';
+                 roleIdLower === 'admin' ||
+                 roleId === 5; // Database has admin as role_id: 5
 
   if (!isAdmin) {
     console.log('Admin access denied. User role:', userRole, 'role_id:', roleId);

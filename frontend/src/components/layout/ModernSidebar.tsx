@@ -1,6 +1,6 @@
 import React, { Fragment, useState, useMemo, useCallback, memo } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   XMarkIcon,
@@ -49,6 +49,8 @@ import { siteEngineerService } from '@/roles/site-engineer/services/siteEngineer
 import { projectManagerService } from '@/roles/project-manager/services/projectManagerService';
 import { toast } from 'sonner';
 import axios from 'axios';
+import { useAdminViewStore } from '@/store/adminViewStore';
+import { adminApi } from '@/api/admin';
 
 interface NavigationItem {
   name: string;
@@ -197,7 +199,9 @@ NavigationItemComponent.displayName = 'NavigationItemComponent';
 
 const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpen }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, getRoleDashboard } = useAuthStore();
+  const { viewingAsRole, setRoleView, resetToAdminView } = useAdminViewStore();
   const roleName = getRoleDisplayName(user?.role_id || '');
   const roleColor = getRoleThemeColor(user?.role_id || '');
   const dashboardPath = getRoleDashboard();
@@ -248,6 +252,27 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     // Dispatch event for same-tab updates
     window.dispatchEvent(new Event('sidebarToggle'));
   }, [isCollapsed]);
+
+  // Handle admin role category clicks
+  const handleRoleCategoryClick = useCallback((roleName: string) => {
+    // Use actual database role IDs (verified from database)
+    const roleMap: Record<string, { role: string; roleId: number; displayName: string; slug: string }> = {
+      'Technical Director': { role: 'technicalDirector', roleId: 7, displayName: 'Technical Director', slug: 'technical-director' },
+      'Estimator': { role: 'estimator', roleId: 4, displayName: 'Estimator', slug: 'estimator' },
+      'Project Manager': { role: 'projectManager', roleId: 6, displayName: 'Project Manager', slug: 'project-manager' },
+      'Site Engineer': { role: 'siteEngineer', roleId: 3, displayName: 'Site Engineer', slug: 'site-engineer' },
+      'Buyer': { role: 'buyer', roleId: 8, displayName: 'Buyer', slug: 'buyer' }
+    };
+
+    const roleInfo = roleMap[roleName];
+    if (roleInfo) {
+      setRoleView(roleInfo.role, roleInfo.roleId, roleInfo.displayName);
+      toast.success(`Now viewing as ${roleInfo.displayName}`);
+      setSidebarOpen(false); // Close sidebar on mobile
+      // Navigate to the role's dashboard
+      navigate(`/${roleInfo.slug}/dashboard`);
+    }
+  }, [setRoleView, setSidebarOpen, navigate]);
 
   const handleToggleStatus = async () => {
     if (!user?.user_id) return;
@@ -300,9 +325,16 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
   // Memoized navigation items to prevent re-calculation on every render
   const navigation = useMemo(() => {
     const roleId = user?.role_id;
+    const isAdmin = user?.role === 'admin' || user?.role_id === 5; // Database has admin as role_id 5
+
+    // Determine which role to use for building paths
+    // If admin is viewing as another role, use that role; otherwise use actual role
+    const effectiveRoleForPaths = isAdmin && viewingAsRole && viewingAsRole !== 'admin'
+      ? viewingAsRole
+      : (roleId || '');
 
     // Build role-prefixed paths
-    const buildPath = (path: string) => buildRolePath(roleId || '', path);
+    const buildPath = (path: string) => buildRolePath(effectiveRoleForPaths, path);
 
     const baseItems: NavigationItem[] = [
       {
@@ -446,7 +478,8 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       }
     ];
 
-    // Admin specific navigation items - Full access to all role functionalities
+    // Admin specific navigation items - Only User Management
+    // Admin accesses vendor section through role switching (viewing as Technical Director)
     const adminItems: NavigationItem[] = [
       {
         name: 'User Management',
@@ -454,78 +487,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: UsersIcon,
         iconSolid: UsersSolid,
         color: 'text-[#243d8a]'
-      },
-      {
-        name: 'BOQ Management',
-        href: buildPath('/boq-management'),
-        icon: DocumentTextIcon,
-        iconSolid: DocumentTextSolid,
-        color: 'text-green-600'
-      },
-      {
-        name: 'Project Approvals',
-        href: buildPath('/project-approvals'),
-        icon: CheckCircleIcon,
-        iconSolid: CheckCircleSolid,
-        color: 'text-emerald-600'
-      },
-      {
-        name: 'PM Projects',
-        href: buildPath('/pm-projects'),
-        icon: BuildingOfficeIcon,
-        iconSolid: BuildingOfficeSolid,
-        color: 'text-blue-600'
-      },
-      {
-        name: 'SE Projects',
-        href: buildPath('/se-projects'),
-        icon: BuildingOfficeIcon,
-        iconSolid: BuildingOfficeSolid,
-        color: 'text-cyan-600'
-      },
-      {
-        name: 'Production Management',
-        href: buildPath('/record-material'),
-        icon: ShoppingCartIcon,
-        iconSolid: ShoppingCartIcon,
-        color: 'text-indigo-600'
-      },
-      {
-        name: 'Change Requests',
-        href: buildPath('/change-requests'),
-        icon: DocumentPlusIcon,
-        iconSolid: DocumentPlusSolid,
-        color: 'text-red-600'
-      },
-      {
-        name: 'Extra Material',
-        href: buildPath('/extra-material'),
-        icon: CubeIcon,
-        iconSolid: CubeSolid,
-        color: 'text-purple-600'
-      },
-      {
-        name: 'Projects Overview',
-        href: buildPath('/projects-overview'),
-        icon: BuildingOfficeIcon,
-        iconSolid: BuildingOfficeSolid,
-        color: 'text-purple-600'
-      },
-      {
-        name: 'Roles',
-        href: buildPath('/roles'),
-        icon: UserCheck,
-        iconSolid: UserCheck,
-        color: 'text-indigo-600'
       }
-      // Temporarily hidden - Settings
-      // {
-      //   name: 'Settings',
-      //   href: buildPath('/settings'),
-      //   icon: Settings,
-      //   iconSolid: Settings,
-      //   color: 'text-gray-600'
-      // }
     ];
 
 
@@ -595,16 +557,80 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         currentRole === 'buyer' ||
         getRoleDisplayName(roleId || '') === 'Buyer';
 
-    // Check for Admin with multiple format variations
-    const isAdmin = roleId === 'admin' ||
-        roleIdLower === 'admin' ||
-        currentRole === 'admin' ||
-        getRoleDisplayName(roleId || '') === 'Admin' ||
-        user?.role === 'admin';
-
+    // Check for Admin with multiple format variations (using isAdmin from line 324)
     if (isAdmin) {
-      // Admin gets specialized admin menu items
-      navigation.push(...adminItems);
+      // Check if admin is viewing as another role
+      if (viewingAsRole && viewingAsRole !== 'admin') {
+        // Add "Back to Admin" button
+        navigation.push({
+          name: '← Back to Admin View',
+          href: '##back##',
+          icon: UserIcon,
+          iconSolid: UserIcon,
+          color: 'text-red-600'
+        });
+
+        // Show the selected role's navigation items
+        switch (viewingAsRole) {
+          case 'technicalDirector':
+            navigation.push(...technicalDirectorItems);
+            break;
+          case 'estimator':
+            navigation.push(...estimatorItems);
+            break;
+          case 'projectManager':
+            navigation.push(...projectManagerItems);
+            break;
+          case 'siteEngineer':
+            navigation.push(...siteEngineerItems);
+            break;
+          case 'buyer':
+            navigation.push(...buyerItems);
+            break;
+          default:
+            navigation.push(...adminItems);
+        }
+      } else {
+        // Admin default view - show admin items + role categories
+        navigation.push(...adminItems);
+
+        // Add role category navigation items for admin
+        navigation.push({
+          name: 'Technical Director',
+          href: '#',
+          icon: UserGroupIcon,
+          iconSolid: UserGroupIcon,
+          color: 'text-blue-600'
+        });
+        navigation.push({
+          name: 'Estimator',
+          href: '#',
+          icon: UserGroupIcon,
+          iconSolid: UserGroupIcon,
+          color: 'text-indigo-600'
+        });
+        navigation.push({
+          name: 'Project Manager',
+          href: '#',
+          icon: UserGroupIcon,
+          iconSolid: UserGroupIcon,
+          color: 'text-green-600'
+        });
+        navigation.push({
+          name: 'Site Engineer',
+          href: '#',
+          icon: UserGroupIcon,
+          iconSolid: UserGroupIcon,
+          color: 'text-orange-600'
+        });
+        navigation.push({
+          name: 'Buyer',
+          href: '#',
+          icon: UserGroupIcon,
+          iconSolid: UserGroupIcon,
+          color: 'text-purple-600'
+        });
+      }
     } else if (isTechnicalDirector) {
       // Technical Director gets specialized menu items
       navigation.push(...technicalDirectorItems);
@@ -635,7 +661,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
 
     // Profile removed from sidebar - use header dropdown instead
     return navigation;
-  }, [user?.role_id]);
+  }, [user?.role_id, viewingAsRole]);
 
   const isPathActive = useCallback((href: string) => {
     // Extract the base path from both href and location
@@ -726,20 +752,54 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             const isActive = isPathActive(item.href);
             const hasChildren = item.children && item.children.length > 0;
             const isExpanded = expandedSections.includes(item.name.toLowerCase());
+            const isRoleCategory = item.href === '#'; // Role categories have '#' href
+            const isBackButton = item.href === '##back##'; // Back to admin button
 
             return (
               <div key={item.name}>
                 {/* Main Navigation Item */}
                 <div className="relative">
-                  <NavigationItemComponent
-                    item={item}
-                    isActive={isActive}
-                    isCollapsed={isCollapsed}
-                    isExpanded={isExpanded}
-                    hasChildren={hasChildren || false}
-                    onToggleSection={toggleSection}
-                    onNavigate={() => setSidebarOpen(false)}
-                  />
+                  {isRoleCategory ? (
+                    // Special handling for role category items
+                    <button
+                      onClick={() => handleRoleCategoryClick(item.name)}
+                      className={clsx(
+                        'w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors',
+                        isCollapsed ? 'justify-center' : '',
+                        'text-gray-700 hover:bg-gradient-to-r hover:from-gray-50 hover:to-gray-100 hover:text-gray-900'
+                      )}
+                    >
+                      <item.icon className={clsx('w-5 h-5', item.color || 'text-gray-500')} />
+                      {!isCollapsed && <span>{item.name}</span>}
+                    </button>
+                  ) : isBackButton ? (
+                    // Back to admin button
+                    <button
+                      onClick={() => {
+                        resetToAdminView();
+                        toast.success('Returned to Admin view');
+                        setSidebarOpen(false);
+                      }}
+                      className={clsx(
+                        'w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold rounded-lg transition-colors',
+                        isCollapsed ? 'justify-center' : '',
+                        'bg-gradient-to-r from-red-50 to-orange-50 text-red-700 hover:from-red-100 hover:to-orange-100 border border-red-200'
+                      )}
+                    >
+                      <item.icon className="w-5 h-5 text-red-600" />
+                      {!isCollapsed && <span>{item.name}</span>}
+                    </button>
+                  ) : (
+                    <NavigationItemComponent
+                      item={item}
+                      isActive={isActive}
+                      isCollapsed={isCollapsed}
+                      isExpanded={isExpanded}
+                      hasChildren={hasChildren || false}
+                      onToggleSection={toggleSection}
+                      onNavigate={() => setSidebarOpen(false)}
+                    />
+                  )}
                 </div>
 
                 {/* Submenu - Hide when collapsed */}

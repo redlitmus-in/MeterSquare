@@ -69,12 +69,18 @@ def get_all_sitesupervisor_boqs():
     try:
         current_user = g.user
         user_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
 
-        # Get all projects assigned to this site engineer
-        projects = Project.query.filter(
-            Project.site_supervisor_id == user_id,
-            Project.is_deleted == False
-        ).all()
+        # Get all projects assigned to this site engineer (admin sees all)
+        if user_role == 'admin':
+            projects = Project.query.filter(
+                Project.is_deleted == False
+            ).all()
+        else:
+            projects = Project.query.filter(
+                Project.site_supervisor_id == user_id,
+                Project.is_deleted == False
+            ).all()
 
         projects_list = []
         for project in projects:
@@ -145,12 +151,18 @@ def get_sitesupervisor_dashboard():
     try:
         current_user = g.user
         user_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
 
-        # Get all projects assigned to this site engineer
-        projects = Project.query.filter(
-            Project.site_supervisor_id == user_id,
-            Project.is_deleted == False
-        ).all()
+        # Get all projects assigned to this site engineer (admin sees all)
+        if user_role == 'admin':
+            projects = Project.query.filter(
+                Project.is_deleted == False
+            ).all()
+        else:
+            projects = Project.query.filter(
+                Project.site_supervisor_id == user_id,
+                Project.is_deleted == False
+            ).all()
 
         # Count projects by status
         total_projects = len(projects)

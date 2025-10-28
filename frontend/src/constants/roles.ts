@@ -5,11 +5,11 @@
 
 // Role IDs (matching backend database)
 export const ROLE_IDS = {
-  TECHNICAL_DIRECTOR: 1,
-  ESTIMATOR: 6,
-  PROJECT_MANAGER: 5,
-  SITE_ENGINEER: 4,
-  ADMIN: 0
+  TECHNICAL_DIRECTOR: 7,
+  ESTIMATOR: 4,
+  PROJECT_MANAGER: 6,
+  SITE_ENGINEER: 3,
+  ADMIN: 5
 } as const;
 
 // Role Names (matching backend)

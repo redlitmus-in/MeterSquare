@@ -68,46 +68,62 @@ def get_all_pm_boqs():
     try:
         current_user = g.user
         user_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
 
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 10, type=int), 100)
 
-        # Get all projects assigned to this project manager
-        assigned_projects = db.session.query(Project.project_id).filter(
-            Project.user_id == user_id,
-            Project.is_deleted == False
-        ).all()
+        # Get all projects assigned to this project manager (admin sees all)
+        if user_role == 'admin':
+            assigned_projects = db.session.query(Project.project_id).filter(
+                Project.is_deleted == False
+            ).all()
+        else:
+            assigned_projects = db.session.query(Project.project_id).filter(
+                Project.user_id == user_id,
+                Project.is_deleted == False
+            ).all()
         # Extract project IDs
         project_ids = [p.project_id for p in assigned_projects]
 
-        # MODIFIED: Also get BOQs where this PM is the recipient in BOQ history (for approval requests)
-        # Find BOQs where this PM was sent the BOQ for approval OR where PM approved it
-        # Query using raw SQL to search in JSONB array
-        from sqlalchemy import text
+        # Admin sees all BOQs, skip the complex approval query
+        if user_role == 'admin':
+            boq_ids_for_approval = []
+        else:
+            # MODIFIED: Also get BOQs where this PM is the recipient in BOQ history (for approval requests)
+            # Find BOQs where this PM was sent the BOQ for approval OR where PM approved it
+            # Query using raw SQL to search in JSONB array
+            from sqlalchemy import text
 
-        boqs_for_approval_query = db.session.execute(
-            text("""
-                SELECT DISTINCT bh.boq_id
-                FROM boq_history bh,
-                     jsonb_array_elements(bh.action) AS action_item
-                WHERE (
-                    (action_item->>'receiver_role' = 'project_manager'
-                     AND (action_item->>'recipient_user_id')::INTEGER = :user_id
-                     AND action_item->>'type' = 'sent_to_pm')
-                    OR
-                    (action_item->>'sender_role' = 'project_manager'
-                     AND (action_item->>'decided_by_user_id')::INTEGER = :user_id
-                     AND action_item->>'type' = 'sent_to_estimator')
-                )
-            """),
-            {"user_id": user_id}
-        )
+            boqs_for_approval_query = db.session.execute(
+                text("""
+                    SELECT DISTINCT bh.boq_id
+                    FROM boq_history bh,
+                         jsonb_array_elements(bh.action) AS action_item
+                    WHERE (
+                        (action_item->>'receiver_role' = 'project_manager'
+                         AND (action_item->>'recipient_user_id')::INTEGER = :user_id
+                         AND action_item->>'type' = 'sent_to_pm')
+                        OR
+                        (action_item->>'sender_role' = 'project_manager'
+                         AND (action_item->>'decided_by_user_id')::INTEGER = :user_id
+                         AND action_item->>'type' = 'sent_to_estimator')
+                    )
+                """),
+                {"user_id": user_id}
+            )
 
-        boq_ids_for_approval = [row[0] for row in boqs_for_approval_query]
+            boq_ids_for_approval = [row[0] for row in boqs_for_approval_query]
 
         # Build query - get all BOQs for assigned projects OR sent for approval
         # Handle empty lists by providing a fallback
-        if not project_ids and not boq_ids_for_approval:
+        # Admin sees ALL BOQs
+        if user_role == 'admin':
+            query = db.session.query(BOQ).filter(
+                BOQ.is_deleted == False,
+                BOQ.email_sent == True
+            ).order_by(BOQ.created_at.desc())
+        elif not project_ids and not boq_ids_for_approval:
             # No projects assigned and no approval requests
             query = db.session.query(BOQ).filter(
                 BOQ.is_deleted == False,

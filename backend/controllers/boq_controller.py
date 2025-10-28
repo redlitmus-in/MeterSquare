@@ -1549,17 +1549,21 @@ def get_all_boq():
          # Get current logged-in user
         current_user = getattr(g, 'user', None)
         user_id = current_user.get('user_id') if current_user else None
-        # Get all BOQs with their details - filter by Project.estimator_id
-        boqs = (
+        user_role = current_user.get('role', '').lower() if current_user else ''
+
+        # Build base query
+        query = (
             db.session.query(BOQ, BOQDetails, Project)
             .join(BOQDetails, BOQ.boq_id == BOQDetails.boq_id)
             .join(Project, BOQ.project_id == Project.project_id)
-            .filter(
-                BOQ.is_deleted == False,
-                Project.estimator_id == user_id
-            )
-            .all()
+            .filter(BOQ.is_deleted == False)
         )
+
+        # Admin sees all BOQs, estimators see only their assigned BOQs
+        if user_role != 'admin':
+            query = query.filter(Project.estimator_id == user_id)
+
+        boqs = query.all()
         complete_boqs = []
         for boq, boq_detail, project in boqs:
             # Check BOQ history for sender and receiver roles
@@ -2208,18 +2212,29 @@ def update_boq(boq_id):
 
             existing_history.action_by = user_name
             existing_history.boq_status = boq.status
-            existing_history.comments = f"BOQ updated - Version {next_version} by {user_name}"
+            # Add role information for admin users
+            if user_role == 'admin':
+                existing_history.sender_role = 'Admin'
+                existing_history.comments = f"BOQ updated - Version {next_version} by Admin {user_name}"
+            else:
+                existing_history.sender_role = user_role.title() if user_role else None
+                existing_history.comments = f"BOQ updated - Version {next_version} by {user_name}"
             existing_history.action_date = datetime.utcnow()
             existing_history.last_modified_by = user_name
             existing_history.last_modified_at = datetime.utcnow()
         else:
             # Create new history entry
+            # Determine sender role for history tracking
+            sender_role = 'Admin' if user_role == 'admin' else (user_role.title() if user_role else None)
+            comments_text = f"BOQ updated - Version {next_version} by Admin {user_name}" if user_role == 'admin' else f"BOQ updated - Version {next_version} by {user_name}"
+
             boq_history = BOQHistory(
                 boq_id=boq_id,
                 action=[update_action],
                 action_by=user_name,
+                sender_role=sender_role,
                 boq_status=boq.status,
-                comments=f"BOQ updated - Version {next_version} by {user_name}",
+                comments=comments_text,
                 action_date=datetime.utcnow(),
                 created_by=user_name
             )

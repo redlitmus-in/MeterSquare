@@ -51,87 +51,11 @@ export const projectManagerService = {
   // Get all BOQs for the current PM's assigned projects
   async getMyBOQs(page: number = 1, perPage: number = 10): Promise<{ boqs: BOQItem[]; pagination: any }> {
     try {
-      // Check if user is Admin - if so, fetch ALL PMs and their projects
-      const userStr = localStorage.getItem('auth-storage');
-      let userRole = '';
-
-      if (userStr) {
-        try {
-          const authData = JSON.parse(userStr);
-          userRole = (authData?.state?.user?.role || '').toLowerCase();
-        } catch (e) {
-          console.error('Error parsing user data:', e);
-        }
-      }
-
-      // Admin gets all PM projects, PM gets only their BOQs
-      if (userRole === 'admin') {
-        // For Admin, get all PMs and their projects
-        const response = await apiClient.get('/all_pm');
-
-        // Transform all_pm response to match BOQ format
-        // NOTE: API returns FLAT structure - each record IS a project
-        const allProjects: any[] = [];
-        const assignedPMs = response.data.assigned_project_managers || [];
-        const unassignedPMs = response.data.unassigned_project_managers || [];
-
-        console.log('Admin fetching all PM projects...');
-        console.log('Assigned PMs:', assignedPMs.length);
-        console.log('Unassigned PMs:', unassignedPMs.length);
-
-        // Each PM record IS a project record (flat structure)
-        [...assignedPMs, ...unassignedPMs].forEach((pmProject: any) => {
-          console.log('PM Project record:', pmProject);
-
-          // Skip if no project_id (unassigned PM)
-          if (!pmProject.project_id) {
-            console.log('Skipping PM without project:', pmProject.pm_name);
-            return;
-          }
-
-          console.log('Adding project:', pmProject.project_name, 'for PM:', pmProject.pm_name);
-
-          allProjects.push({
-            boq_id: pmProject.boq_id,
-            boq_name: pmProject.boq_name || `BOQ for ${pmProject.project_name}`,
-            boq_status: pmProject.boq_status || 'approved',
-            project_id: pmProject.project_id,
-            project_name: pmProject.project_name,
-            created_at: pmProject.created_at,
-            status: pmProject.project_status || 'active',
-            priority: 'medium',
-            project_details: {
-              project_id: pmProject.project_id,
-              project_name: pmProject.project_name,
-              client: pmProject.client,
-              location: pmProject.location,
-              working_hours: pmProject.working_hours,
-              start_date: pmProject.start_date,
-              end_date: pmProject.end_date,
-              project_status: pmProject.project_status,
-              description: pmProject.description,
-              site_supervisor_id: pmProject.site_supervisor_id,
-              site_supervisor_name: pmProject.site_supervisor_name,
-              completion_requested: pmProject.completion_requested,
-              pm_name: pmProject.pm_name,
-              pm_email: pmProject.email,
-              pm_phone: pmProject.phone,
-              pm_user_id: pmProject.user_id
-            }
-          });
-        });
-
-        console.log('Total projects collected:', allProjects.length);
-        console.log('All projects data:', allProjects);
-
-        return { boqs: allProjects, pagination: {} };
-      } else {
-        // PM gets only their BOQs
-        const response = await apiClient.get('/pm_boq', {
-          params: { page, per_page: perPage }
-        });
-        return response.data;
-      }
+      // Always use the same PM endpoint - backend will handle admin access
+      const response = await apiClient.get('/pm_boq', {
+        params: { page, per_page: perPage }
+      });
+      return response.data;
     } catch (error) {
       console.error('Error fetching PM BOQs:', error);
       throw error;

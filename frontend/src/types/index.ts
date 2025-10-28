@@ -22,7 +22,10 @@ export interface User extends BaseEntity {
   email: string;
   full_name: string;
   role_id: UserRole | number | string; // Can be numeric ID from backend or role string
+  role?: string; // Role name from backend (e.g., 'admin', 'estimator')
   role_name?: string; // Optional role name from backend
+  user_id?: number; // User ID from backend
+  username?: string; // Username from backend
   department?: string;
   phone?: string;
   avatar_url?: string;

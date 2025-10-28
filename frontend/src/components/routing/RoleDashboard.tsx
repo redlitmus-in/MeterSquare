@@ -1,5 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import { useAuthStore } from '@/store/authStore';
+import { useAdminViewStore } from '@/store/adminViewStore';
 import { UserRole } from '@/types';
 import { getRoleName } from '@/utils/roleRouting';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -17,6 +18,7 @@ const BuyerDashboard = lazy(() => import('@/roles/buyer/pages/Dashboard'));
  */
 const RoleDashboard: React.FC = () => {
   const { user, isLoading } = useAuthStore();
+  const { viewingAsRole } = useAdminViewStore();
 
   if (isLoading) {
     return (
@@ -38,8 +40,17 @@ const RoleDashboard: React.FC = () => {
   }
 
   // Get the role name from user (handles both role_id and role string)
-  const userRole = (user as any)?.role || getRoleName(user.role_id);
+  let userRole = (user as any)?.role || getRoleName(user.role_id);
+
+  // If admin is viewing as another role, use that role instead
+  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
+    userRole = viewingAsRole;
+  }
+
   const roleName = typeof userRole === 'string' ? userRole.toLowerCase() : getRoleName(userRole);
+
+  console.log('RoleDashboard - User role:', userRole, 'Role name:', roleName, 'Viewing as:', viewingAsRole);
 
   // Get the dashboard component based on role
   let DashboardComponent: React.LazyExoticComponent<React.FC> | null = null;

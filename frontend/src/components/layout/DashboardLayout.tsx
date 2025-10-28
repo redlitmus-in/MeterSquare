@@ -8,6 +8,7 @@ import { getRoleDisplayName } from '@/utils/roleRouting';
 import { MobileMenuButton } from './MobileMenuButton';
 import { Clock } from 'lucide-react';
 import { sanitizeDocumentTitle } from '@/utils/sanitizer';
+import { useAdminViewStore } from '@/store/adminViewStore';
 
 const DashboardLayout: React.FC = React.memo(() => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -20,6 +21,7 @@ const DashboardLayout: React.FC = React.memo(() => {
   const [lastScrollY, setLastScrollY] = useState(0);
   const { user } = useAuthStore();
   const { unreadCount } = useNotificationStore();
+  const { viewingAsRoleName } = useAdminViewStore();
   const location = useLocation();
 
   // Memoize page name calculation
@@ -60,7 +62,14 @@ const DashboardLayout: React.FC = React.memo(() => {
 
   // Update browser title with user role and notification count
   useEffect(() => {
-    const roleName = user?.role_id ? getRoleDisplayName(String(user.role_id)) : 'User';
+    // For admin viewing as another role, show viewing context
+    let roleName = user?.role_id ? getRoleDisplayName(String(user.role_id)) : 'User';
+
+    // If admin is viewing as another role, override with viewing context
+    if ((user?.role === 'admin' || user?.role_id === 5) && viewingAsRoleName) {
+      roleName = `Admin (${viewingAsRoleName})`;
+    }
+
     const pageName = getPageName();
     const baseTitle = `[${roleName}] ${pageName} - MeterSquare ERP`;
 
@@ -70,7 +79,7 @@ const DashboardLayout: React.FC = React.memo(() => {
       : sanitizeDocumentTitle(baseTitle);
 
     document.title = sanitizedTitle;
-  }, [user, getPageName, unreadCount]);
+  }, [user, getPageName, unreadCount, viewingAsRoleName]);
 
   // Listen for storage changes to sync sidebar state
   useEffect(() => {
@@ -150,6 +159,19 @@ const DashboardLayout: React.FC = React.memo(() => {
       {isDashboardPage && (
         <div className={`fixed top-16 right-4 z-[100] transition-all duration-300 ${showHeader ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}`}>
           <NotificationSystem />
+        </div>
+      )}
+
+      {/* Admin View Context Indicator - Show only for admin when viewing as another role */}
+      {(user?.role === 'admin' || user?.role_id === 5) && viewingAsRoleName && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-40 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-full px-4 py-2 shadow-lg border border-white/20">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
+              Admin viewing as:
+            </span>
+            <span className="font-bold">{viewingAsRoleName}</span>
+          </div>
         </div>
       )}
 

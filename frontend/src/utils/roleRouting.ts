@@ -6,30 +6,28 @@ import { UserRole } from '@/types';
  */
 
 /**
- * Map numeric role IDs to role names (based on database)
- * Database structure:
- * 1: admin
- * 2: siteEngineer
+ * Map numeric role IDs to role names (based on ACTUAL database)
+ * Database structure (from roles table):
  * 3: siteEngineer
  * 4: estimator
- * 5: projectManager
+ * 5: admin  ← CORRECTED
  * 6: projectManager
  * 7: technicalDirector
  * 8: buyer
- * 9: accounts
- * 10: estimator
+ * 9: productionManager
  */
 export const ROLE_ID_TO_NAME: Record<number, string> = {
-  1: 'admin',
-  2: 'siteEngineer',
-  3: 'siteEngineer', // site engineer
-  4: 'estimator', // estimator
-  5: UserRole.PROJECT_MANAGER,
+  3: 'siteEngineer',
+  4: 'estimator',
+  5: 'admin', // ← FIXED: Database has admin as role_id 5
   6: 'projectManager',
   7: 'technicalDirector',
-  8: 'buyer', // Buyer role
-  9: UserRole.ACCOUNTS, // Accounts moved to 9
-  10: 'estimator' // Map ESTIMATOR role ID to estimator
+  8: 'buyer',
+  9: 'productionManager',
+  // Legacy/fallback mappings
+  1: 'admin', // Fallback
+  2: 'siteEngineer', // Fallback
+  10: 'estimator' // Fallback
 };
 
 /**

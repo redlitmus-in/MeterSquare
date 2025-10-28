@@ -85,6 +85,8 @@ interface HistoryAction {
   action_id: number;
   action_type: string;
   action_by: string;
+  sender_role?: string;
+  receiver_role?: string;
   action_at: string;
   sender_email?: string;
   receiver_email?: string;
@@ -155,6 +157,8 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataCh
                 action_id: record.boq_history_id * 1000 + index, // Generate unique ID
                 action_type: actionItem.type?.toUpperCase().replace(/_/g, '_') || 'UNKNOWN',
                 action_by: actionByName,
+                sender_role: record.sender_role,
+                receiver_role: record.receiver_role,
                 action_at: actionItem.timestamp || record.action_date,
                 sender_email: record.sender_role === 'estimator' ? record.sender : undefined,
                 receiver_email: actionItem.recipient_email || record.receiver,
@@ -189,6 +193,8 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataCh
               action_id: record.boq_history_id,
               action_type: 'ACTION',
               action_by: record.action_by,
+              sender_role: record.sender_role,
+              receiver_role: record.receiver_role,
               action_at: record.action_date,
               comments: record.comments,
               status: record.boq_status
@@ -510,8 +516,13 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataCh
                   {/* Performer */}
                   <div className="flex items-center gap-2 text-gray-700">
                     <User className="w-4 h-4 text-gray-500" />
-                    <span>
+                    <span className="flex items-center gap-2">
                       <strong>By:</strong> {action.action_by}
+                      {action.sender_role?.toLowerCase() === 'admin' && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-gradient-to-r from-indigo-500 to-purple-600 text-white border border-white/20 shadow-sm">
+                          Admin
+                        </span>
+                      )}
                     </span>
                   </div>
 

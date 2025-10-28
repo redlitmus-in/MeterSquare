@@ -13,7 +13,7 @@ from controllers.admin_controller import (
     get_all_site_engineers
 )
 
-admin_routes = Blueprint("admin_routes", __name__, url_prefix='/api')
+admin_routes = Blueprint("admin_routes", __name__, url_prefix='/api/admin')
 
 # ============================================
 # USER MANAGEMENT ROUTES
