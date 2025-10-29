@@ -135,9 +135,10 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
           setCurrentRevisionData(null);
           setPreviousRevisions([]);
           // Don't auto-select, let user manually choose next BOQ
-        } else if (updatedBoq.status !== selectedBoq.status) {
-          // Update if status changed but still in list
-          console.log('🔄 BOQ status updated from', selectedBoq.status, 'to', updatedBoq.status);
+        } else if (updatedBoq.status !== selectedBoq.status ||
+                   updatedBoq.updated_at !== selectedBoq.updated_at) {
+          // Update if status changed OR if content edited (updated_at changed) but still in list
+          console.log('🔄 BOQ updated:', updatedBoq.status !== selectedBoq.status ? 'status changed' : 'content edited');
           setSelectedBoq(updatedBoq);
         }
       } else {
@@ -252,6 +253,15 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
     return { value: change, percentage: parseFloat(percentage) };
   };
 
+  // Helper function to check if a value has changed compared to previous revision
+  const hasChanged = (currentValue: any, previousValue: any): boolean => {
+    if (currentValue === undefined || previousValue === undefined) return false;
+    if (typeof currentValue === 'number' && typeof previousValue === 'number') {
+      return Math.abs(currentValue - previousValue) > 0.01; // Account for floating point precision
+    }
+    return currentValue !== previousValue;
+  };
+
   // Get previous revision for comparison (the immediate previous one)
   const getPreviousRevisionForComparison = () => {
     if (previousRevisions.length > 0) {
@@ -272,28 +282,32 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
     return prevRevision.boq_details.items.find((item: any) => item.item_name === itemName);
   };
 
-  // Calculate total price from items
+  // Calculate grand total from items (quantity × rate - discount)
   const calculateTotalFromItems = (boqData: any) => {
     if (!boqData?.boq_details?.items || boqData.boq_details.items.length === 0) return 0;
 
-    return boqData.boq_details.items.reduce((total: number, item: any) => {
-      // Calculate item total from sub_items or direct materials/labour
-      const itemTotal = item.sub_items && item.sub_items.length > 0
-        ? item.sub_items.reduce((sum: number, si: any) =>
-            sum + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
-        : (item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) || 0) +
-          (item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0);
+    const allItems = boqData.boq_details.items || [];
 
-      const miscellaneousAmount = (itemTotal * (item.overhead_percentage || 0)) / 100;
-      const overheadProfitAmount = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
-      const subtotal = itemTotal + miscellaneousAmount + overheadProfitAmount;
-      const discountAmount = (subtotal * (item.discount_percentage || 0)) / 100;
-      const afterDiscount = subtotal - discountAmount;
-      const vatAmount = (afterDiscount * (item.vat_percentage || 0)) / 100;
-      const finalTotalPrice = afterDiscount + vatAmount;
-
-      return total + finalTotalPrice;
+    // Calculate subtotal (sum of all sub-item client amounts using quantity × rate)
+    const clientCostBeforeDiscount = allItems.reduce((sum: number, item: any) => {
+      if (item.sub_items && item.sub_items.length > 0) {
+        return sum + item.sub_items.reduce((siSum: number, si: any) =>
+          siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+        );
+      }
+      return sum + (item.client_cost || 0);
     }, 0);
+
+    // Calculate discount
+    let totalDiscount = 0;
+    if (boqData.boq_details?.discount_percentage && boqData.boq_details.discount_percentage > 0) {
+      totalDiscount = (clientCostBeforeDiscount * boqData.boq_details.discount_percentage) / 100;
+    } else if (boqData.boq_details?.discount_amount && boqData.boq_details.discount_amount > 0) {
+      totalDiscount = boqData.boq_details.discount_amount;
+    }
+
+    // Grand total after discount
+    return clientCostBeforeDiscount - totalDiscount;
   };
 
   // Calculate Grand Total with discount from snapshot
@@ -603,27 +617,6 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
               </div>
             ) : currentRevisionData ? (
               <div className="p-6 space-y-4 max-h-[600px] overflow-y-auto">
-                {/* Summary */}
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h4 className="font-semibold text-gray-900 mb-2">Summary</h4>
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Total Items:</span>
-                      <span className="font-semibold">{currentRevisionData.total_items || 0}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Total Cost:</span>
-                      <span className="font-semibold">{formatCurrency(currentRevisionData.total_cost || 0)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Created:</span>
-                      <span className="font-semibold">
-                        {new Date(currentRevisionData.created_at).toLocaleDateString()}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
                 {/* Items */}
                 {currentRevisionData.boq_details?.items?.map((item: any, index: number) => {
                   const prevRevision = getPreviousRevisionForComparison();
@@ -758,7 +751,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                                 </div>
                               )}
 
-                              {/* Cost Breakdown Percentages (Per-Sub-Item) - EXACT COPY from BOQDetailsModal */}
+                              {/* Cost Breakdown Percentages (Per-Sub-Item) - EXACT COPY from BOQDetailsModal with Yellow Highlighting */}
                               <div className="bg-purple-50/50 rounded-lg p-3 border border-purple-300 mt-3">
                                 <h5 className="text-xs font-bold text-purple-900 mb-2 flex items-center gap-2">
                                   <Calculator className="w-3.5 h-3.5" />
@@ -774,21 +767,31 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                                     const transportPercentage = subItem.transport_percentage || 5;
                                     const transportAmount = subItem.transport_amount || (clientAmount * (transportPercentage / 100));
 
+                                    // Get previous percentages for comparison
+                                    const prevMiscPercentage = prevSubItem ? (prevSubItem.misc_percentage || 10) : miscPercentage;
+                                    const prevOverheadProfitPercentage = prevSubItem ? (prevSubItem.overhead_profit_percentage || 25) : overheadProfitPercentage;
+                                    const prevTransportPercentage = prevSubItem ? (prevSubItem.transport_percentage || 5) : transportPercentage;
+
+                                    // Check if percentages changed
+                                    const miscChanged = prevSubItem && hasChanged(miscPercentage, prevMiscPercentage);
+                                    const overheadChanged = prevSubItem && hasChanged(overheadProfitPercentage, prevOverheadProfitPercentage);
+                                    const transportChanged = prevSubItem && hasChanged(transportPercentage, prevTransportPercentage);
+
                                     return (
                                       <>
                                         <div className="flex justify-between">
                                           <span className="text-gray-700">Client Amount (Qty × Rate):</span>
                                           <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
                                         </div>
-                                        <div className="flex justify-between">
+                                        <div className={`flex justify-between rounded px-2 py-1 ${miscChanged ? 'bg-yellow-200' : ''}`}>
                                           <span className="text-gray-700">Miscellaneous ({miscPercentage}%):</span>
                                           <span className="font-semibold text-red-600">- {formatCurrency(miscAmount)}</span>
                                         </div>
-                                        <div className="flex justify-between">
+                                        <div className={`flex justify-between rounded px-2 py-1 ${overheadChanged ? 'bg-yellow-200' : ''}`}>
                                           <span className="text-gray-700">Overhead & Profit ({overheadProfitPercentage}%):</span>
                                           <span className="font-semibold text-red-600">- {formatCurrency(overheadProfitAmount)}</span>
                                         </div>
-                                        <div className="flex justify-between">
+                                        <div className={`flex justify-between rounded px-2 py-1 ${transportChanged ? 'bg-yellow-200' : ''}`}>
                                           <span className="text-gray-700">Transport ({transportPercentage}%):</span>
                                           <span className="font-semibold text-red-600">- {formatCurrency(transportAmount)}</span>
                                         </div>
@@ -959,8 +962,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                           const projectMargin = item.project_margin || (clientCost - internalCost);
                           const marginPercentage = clientCost > 0 ? ((projectMargin / clientCost) * 100) : 0;
 
-                          // Calculate previous values for yellow highlighting
-                          const prevItem = previousRevisionData?.boq_details?.items?.find((pi: any) => pi.item_name === item.item_name);
+                          // Calculate previous values for yellow highlighting (prevItem already available from line 630)
                           const prevClientCost = prevItem ? (prevItem.client_cost || prevItem.sub_items?.reduce((sum: number, si: any) => sum + ((si.quantity || 0) * (si.rate || 0)), 0) || 0) : 0;
                           const prevInternalCost = prevItem ? (prevItem.internal_cost || prevItem.sub_items?.reduce((sum: number, si: any) => {
                             const materialCost = si.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || m.quantity * m.unit_price), 0) || 0;
@@ -1089,32 +1091,17 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
 
                 {/* Grand Total with Discount Impact */}
                 {(() => {
-                  const totalBeforeDiscount = currentRevisionData.boq_details?.items?.reduce((sum: number, item: any) => {
-                    const itemTotal = item.sub_items && item.sub_items.length > 0
-                      ? item.sub_items.reduce((s: number, si: any) => s + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
-                      : (item.materials?.reduce((s: number, m: any) => s + (m.total_price || 0), 0) || 0) +
-                        (item.labour?.reduce((s: number, l: any) => s + (l.total_cost || 0), 0) || 0);
+                  const allItems = currentRevisionData.boq_details?.items || [];
 
-                    const misc = (itemTotal * (item.overhead_percentage || 0)) / 100;
-                    const overhead = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
-                    const subtotal = itemTotal + misc + overhead;
-                    const discount = (subtotal * (item.discount_percentage || 0)) / 100;
-
-                    return sum + (subtotal - discount);
-                  }, 0) || 0;
-
-                  // Calculate client cost before discount
-                  const clientCostBeforeDiscount = currentRevisionData.boq_details?.items?.reduce((sum: number, item: any) => {
-                    const itemTotal = item.sub_items && item.sub_items.length > 0
-                      ? item.sub_items.reduce((s: number, si: any) => s + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
-                      : (item.materials?.reduce((s: number, m: any) => s + (m.total_price || 0), 0) || 0) +
-                        (item.labour?.reduce((s: number, l: any) => s + (l.total_cost || 0), 0) || 0);
-
-                    const misc = (itemTotal * (item.overhead_percentage || 0)) / 100;
-                    const overhead = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
-
-                    return sum + itemTotal + misc + overhead;
-                  }, 0) || 0;
+                  // Calculate subtotal (sum of all sub-item client amounts using quantity × rate)
+                  const clientCostBeforeDiscount = allItems.reduce((sum: number, item: any) => {
+                    if (item.sub_items && item.sub_items.length > 0) {
+                      return sum + item.sub_items.reduce((siSum: number, si: any) =>
+                        siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+                      );
+                    }
+                    return sum + (item.client_cost || 0);
+                  }, 0);
 
                   // Overall discount - Priority 1: Check for overall BOQ-level discount
                   let totalDiscount = 0;
@@ -1154,15 +1141,36 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                     }
                   }
 
-                  const internalCost = currentRevisionData.boq_details?.profit_analysis?.internal_cost || 0;
-                  const profitBeforeDiscount = clientCostBeforeDiscount - internalCost;
-                  const profitAfterDiscount = totalBeforeDiscount - internalCost;
-                  const profitMarginBefore = clientCostBeforeDiscount > 0
-                    ? (profitBeforeDiscount / clientCostBeforeDiscount) * 100
-                    : 0;
-                  const profitMarginAfter = totalBeforeDiscount > 0
-                    ? (profitAfterDiscount / totalBeforeDiscount) * 100
-                    : 0;
+                  // Grand total after discount
+                  const grandTotal = clientCostBeforeDiscount - totalDiscount;
+
+                  // Calculate total internal cost (same as Estimator)
+                  const totalInternalCost = allItems.reduce((sum: number, item: any) => {
+                    if (item.sub_items && item.sub_items.length > 0) {
+                      return sum + item.sub_items.reduce((siSum: number, si: any) => {
+                        const matCost = si.materials?.reduce((m: number, mat: any) => m + (mat.total_price || mat.quantity * mat.unit_price), 0) || 0;
+                        const labCost = si.labour?.reduce((l: number, lab: any) => l + (lab.total_cost || lab.hours * lab.rate_per_hour), 0) || 0;
+                        const clientAmt = (si.quantity || 0) * (si.rate || 0);
+                        const miscAmt = clientAmt * ((si.misc_percentage || 10) / 100);
+                        const opAmt = clientAmt * ((si.overhead_profit_percentage || 25) / 100);
+                        const transportAmt = clientAmt * ((si.transport_percentage || 5) / 100);
+                        return siSum + matCost + labCost + miscAmt + opAmt + transportAmt;
+                      }, 0);
+                    }
+                    return sum + (item.internal_cost || 0);
+                  }, 0);
+
+                  // Calculate profits
+                  const totalActualProfit = clientCostBeforeDiscount - totalInternalCost;
+                  const profitMarginPercentage = clientCostBeforeDiscount > 0 ? (totalActualProfit / clientCostBeforeDiscount) * 100 : 0;
+
+                  const actualProfitAfterDiscount = grandTotal - totalInternalCost;
+                  const profitMarginAfterDiscount = grandTotal > 0 ? (actualProfitAfterDiscount / grandTotal) * 100 : 0;
+
+                  // Get previous revision for discount comparison
+                  const prevRevisionForDiscount = getPreviousRevisionForComparison();
+                  const prevDiscountPercentage = prevRevisionForDiscount?.boq_details?.discount_percentage || 0;
+                  const discountChanged = prevRevisionForDiscount && hasChanged(discountPercentage, prevDiscountPercentage);
 
                   return (
                     <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg p-4 border-2 border-blue-300">
@@ -1177,7 +1185,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                           </span>
                         </div>
                         {totalDiscount > 0 && (
-                          <div className="flex justify-between items-center bg-red-50 rounded p-2 border border-red-200">
+                          <div className={`flex justify-between items-center bg-red-50 rounded p-2 border border-red-200 ${discountChanged ? 'bg-yellow-200' : ''}`}>
                             <span className="text-sm text-red-700">Discount ({discountPercentage.toFixed(2)}%):</span>
                             <span className="font-bold text-red-700">
                               - AED {totalDiscount.toFixed(2)}
@@ -1187,34 +1195,62 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                         <div className="flex justify-between items-center bg-blue-200 rounded p-3 border border-blue-300">
                           <span className="text-base font-bold text-blue-900">Grand Total (Excluding VAT):</span>
                           <span className="text-xl font-bold text-blue-900">
-                            AED {totalBeforeDiscount.toFixed(2)}
+                            AED {grandTotal.toFixed(2)}
                           </span>
                         </div>
 
-                        {/* Discount Impact on Profitability */}
-                        {totalDiscount > 0 && internalCost > 0 && (
-                          <div className="mt-3 bg-yellow-50 rounded-lg p-3 border border-yellow-300">
-                            <h5 className="font-bold text-yellow-900 mb-2 text-sm">⚠️ Discount Impact on Profitability</h5>
-                            <div className="space-y-1.5 text-xs">
-                              <div className="flex justify-between">
-                                <span className="text-gray-700">Profit Before Discount:</span>
-                                <span className="font-semibold">AED {profitBeforeDiscount.toFixed(2)} ({profitMarginBefore.toFixed(2)}%)</span>
+                        {/* Discount Impact on Profitability - EXACT COPY from Estimator */}
+                        {totalDiscount > 0 && (
+                          <div className="mt-4 pt-4 border-t border-blue-300 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3">
+                            <h6 className="text-xs font-bold text-gray-800 mb-3 flex items-center gap-2">
+                              📊 Discount Impact on Profitability
+                            </h6>
+                            <div className="space-y-2 text-xs">
+                              <div className="flex justify-between items-center">
+                                <span className="text-gray-600">Client Cost:</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gray-500 line-through">
+                                    AED {clientCostBeforeDiscount.toFixed(2)}
+                                  </span>
+                                  <span className="text-blue-700 font-bold">
+                                    → AED {grandTotal.toFixed(2)}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex justify-between">
-                                <span className="text-gray-700">Profit After Discount:</span>
-                                <span className="font-semibold">AED {profitAfterDiscount.toFixed(2)} ({profitMarginAfter.toFixed(2)}%)</span>
-                              </div>
-                              <div className="flex justify-between pt-1 border-t border-yellow-300">
-                                <span className="text-yellow-900 font-semibold">Profit Reduction:</span>
-                                <span className="font-bold text-red-700">
-                                  AED {(profitBeforeDiscount - profitAfterDiscount).toFixed(2)} ({(profitMarginBefore - profitMarginAfter).toFixed(2)}%)
+                              <div className="flex justify-between items-center">
+                                <span className="text-gray-600">Internal Cost:</span>
+                                <span className="font-semibold text-red-600">
+                                  AED {totalInternalCost.toFixed(2)}
                                 </span>
                               </div>
-                              {profitMarginAfter < 15 && (
-                                <div className="mt-2 p-2 bg-red-100 border border-red-300 rounded">
-                                  <p className="text-red-800 font-semibold text-xs">
-                                    ⚠️ Warning: Profit margin has dropped below 15% after discount!
-                                  </p>
+                              <div className="flex justify-between items-center pt-2 border-t border-gray-300">
+                                <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gray-500 line-through">
+                                    AED {totalActualProfit.toFixed(2)}
+                                  </span>
+                                  <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                                    → AED {actualProfitAfterDiscount.toFixed(2)}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex justify-between items-center bg-white/60 rounded px-2 py-1">
+                                <span className="text-gray-700 font-medium">Profit Margin:</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gray-500 text-xs">
+                                    {profitMarginPercentage.toFixed(1)}%
+                                  </span>
+                                  <span className={`font-bold ${profitMarginAfterDiscount >= 15 ? 'text-emerald-700' : profitMarginAfterDiscount >= 10 ? 'text-orange-600' : 'text-red-600'}`}>
+                                    → {profitMarginAfterDiscount.toFixed(1)}%
+                                  </span>
+                                </div>
+                              </div>
+                              {profitMarginAfterDiscount < 15 && (
+                                <div className="mt-2 p-2 bg-orange-100 border border-orange-300 rounded text-orange-800 flex items-start gap-2">
+                                  ⚠️
+                                  <span className="text-xs">
+                                    <strong>Warning:</strong> Profit margin is below recommended 15%. This discount significantly reduces profitability.
+                                  </span>
                                 </div>
                               )}
                             </div>

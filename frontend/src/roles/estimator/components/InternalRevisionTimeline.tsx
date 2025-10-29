@@ -840,7 +840,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                           </div>
                         )}
 
-                        {/* Cost Breakdown Percentages (Per-Sub-Item) */}
+                        {/* Cost Breakdown Percentages (Per-Sub-Item) with Yellow Highlighting */}
                         <div className="bg-purple-50/50 rounded-lg p-3 border border-purple-300 mt-3">
                           <h5 className="text-xs font-bold text-purple-900 mb-2 flex items-center gap-2">
                             💵 Cost Breakdown Percentages
@@ -855,21 +855,31 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                               const transportPercentage = subItem.transport_percentage || 5;
                               const transportAmount = subItem.transport_amount || (clientAmount * (transportPercentage / 100));
 
+                              // Get previous percentages for comparison
+                              const prevMiscPercentage = prevSubItem ? (prevSubItem.misc_percentage || 10) : miscPercentage;
+                              const prevOverheadProfitPercentage = prevSubItem ? (prevSubItem.overhead_profit_percentage || 25) : overheadProfitPercentage;
+                              const prevTransportPercentage = prevSubItem ? (prevSubItem.transport_percentage || 5) : transportPercentage;
+
+                              // Check if percentages changed
+                              const miscChanged = prevSubItem && hasChanged(miscPercentage, prevMiscPercentage);
+                              const overheadChanged = prevSubItem && hasChanged(overheadProfitPercentage, prevOverheadProfitPercentage);
+                              const transportChanged = prevSubItem && hasChanged(transportPercentage, prevTransportPercentage);
+
                               return (
                                 <>
                                   <div className="flex justify-between">
                                     <span className="text-gray-700">Client Amount (Qty × Rate):</span>
                                     <span className="font-semibold text-gray-900">AED {clientAmount.toFixed(2)}</span>
                                   </div>
-                                  <div className="flex justify-between">
+                                  <div className={`flex justify-between rounded px-2 py-1 ${miscChanged ? 'bg-yellow-200' : ''}`}>
                                     <span className="text-gray-700">Miscellaneous ({miscPercentage}%):</span>
                                     <span className="font-semibold text-red-600">- AED {miscAmount.toFixed(2)}</span>
                                   </div>
-                                  <div className="flex justify-between">
+                                  <div className={`flex justify-between rounded px-2 py-1 ${overheadChanged ? 'bg-yellow-200' : ''}`}>
                                     <span className="text-gray-700">Overhead & Profit ({overheadProfitPercentage}%):</span>
                                     <span className="font-semibold text-red-600">- AED {overheadProfitAmount.toFixed(2)}</span>
                                   </div>
-                                  <div className="flex justify-between">
+                                  <div className={`flex justify-between rounded px-2 py-1 ${transportChanged ? 'bg-yellow-200' : ''}`}>
                                     <span className="text-gray-700">Transport ({transportPercentage}%):</span>
                                     <span className="font-semibold text-red-600">- AED {transportAmount.toFixed(2)}</span>
                                   </div>
@@ -1440,6 +1450,10 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                         const actualProfitAfterDiscount = grandTotal - totalInternalCost;
                         const profitMarginAfterDiscount = grandTotal > 0 ? (actualProfitAfterDiscount / grandTotal) * 100 : 0;
 
+                        // Get previous discount percentage for comparison
+                        const prevDiscountPercentage = previousSnapshot?.discount_percentage || 0;
+                        const discountChanged = previousSnapshot && hasChanged(overallDiscountPercentage, prevDiscountPercentage);
+
                         return (
                           <>
                             <div className="flex justify-between text-base font-medium">
@@ -1448,7 +1462,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                             </div>
                             {overallDiscount > 0 && (
                               <>
-                                <div className="flex justify-between text-sm text-red-600">
+                                <div className={`flex justify-between text-sm text-red-600 rounded px-2 py-1 ${discountChanged ? 'bg-yellow-200' : ''}`}>
                                   <span>Discount ({overallDiscountPercentage.toFixed(1)}%):</span>
                                   <span className="font-semibold">- AED {overallDiscount.toFixed(2)}</span>
                                 </div>

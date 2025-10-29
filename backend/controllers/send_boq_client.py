@@ -411,11 +411,40 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     ws[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
     row += 2
 
-    # Calculate totals
-    subtotal_before_discount = sum([item.get('selling_price', 0) for item in items])
-    total_discount = sum([item.get('discount_amount', 0) for item in items])
+    # Calculate subtotal from sub-items (qty × rate) - same as PDF
+    subtotal_before_discount = 0
+    for item in items:
+        has_sub_items = item.get('has_sub_items', False)
+        sub_items = item.get('sub_items', [])
+
+        if has_sub_items and sub_items:
+            for sub_item in sub_items:
+                qty = sub_item.get('quantity', 0)
+                rate = sub_item.get('rate', 0)
+                subtotal_before_discount += qty * rate
+        else:
+            subtotal_before_discount += item.get('selling_price', 0)
+
+    # Get discount from BOQ JSON (same as PDF fix)
+    discount_amount = 0
+    discount_percentage = 0
+
+    if boq_json:
+        discount_amount = boq_json.get('discount_amount', 0)
+        discount_percentage = boq_json.get('discount_percentage', 0)
+
+    # Fallback: try from first item
+    if discount_amount == 0 and discount_percentage == 0 and items:
+        first_item = items[0]
+        discount_percentage = first_item.get('discount_percentage', 0)
+
+    # Calculate discount from subtotal if percentage exists
+    if discount_percentage > 0 and discount_amount == 0:
+        discount_amount = subtotal_before_discount * (discount_percentage / 100)
+
+    total_discount = discount_amount
     subtotal_after_discount = subtotal_before_discount - total_discount
-    total_vat = sum([item.get('vat_amount', 0) for item in items])
+    total_vat = 0  # VAT not used
     grand_total_with_vat = subtotal_after_discount + total_vat
 
     # Subtotal
@@ -429,14 +458,13 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     ws[f'F{row}'].number_format = '#,##0.00'
     row += 1
 
-    # Discount
-    if total_discount > 0:
-        discount_pct = (total_discount / subtotal_before_discount * 100) if subtotal_before_discount > 0 else 0
+    # Discount (only if exists)
+    if discount_amount > 0:
         ws.merge_cells(f'A{row}:E{row}')
-        ws[f'A{row}'] = f"Discount ({discount_pct:.1f}%):"
+        ws[f'A{row}'] = f"Discount ({discount_percentage:.1f}%):"
         ws[f'A{row}'].font = bold_font
         ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'] = -round(total_discount, 2)
+        ws[f'F{row}'] = -round(discount_amount, 2)
         ws[f'F{row}'].font = Font(bold=True, color="EF4444")
         ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
         ws[f'F{row}'].number_format = '#,##0.00'
@@ -452,19 +480,7 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
         ws[f'F{row}'].number_format = '#,##0.00'
         row += 1
 
-    # VAT
-    if total_vat > 0:
-        vat_pct = (total_vat / subtotal_after_discount * 100) if subtotal_after_discount > 0 else 0
-        ws.merge_cells(f'A{row}:E{row}')
-        ws[f'A{row}'] = f"VAT ({vat_pct:.1f}%):"
-        ws[f'A{row}'].font = bold_font
-        ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'] = round(total_vat, 2)
-        ws[f'F{row}'].font = bold_font
-        ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'].number_format = '#,##0.00'
-        row += 1
-
+    # VAT row removed (not used)
     row += 1
 
     # Grand Total
@@ -498,11 +514,20 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
         row += 2
 
         for prelim_item in prelim_items:
-            desc = prelim_item.get('description', prelim_item) if isinstance(prelim_item, dict) else str(prelim_item)
-            ws.merge_cells(f'A{row}:F{row}')
-            ws[f'A{row}'] = f"✓ {desc}"
-            ws[f'A{row}'].font = normal_font
-            row += 1
+            # Filter only selected preliminaries (same as PDF fix)
+            if isinstance(prelim_item, dict):
+                is_selected = prelim_item.get('is_selected', prelim_item.get('selected', prelim_item.get('checked', False)))
+                if not is_selected:
+                    continue
+                desc = prelim_item.get('description', prelim_item.get('name', prelim_item.get('text', '')))
+            else:
+                desc = str(prelim_item)
+
+            if desc:  # Only add if text exists
+                ws.merge_cells(f'A{row}:F{row}')
+                ws[f'A{row}'] = f"✓ {desc}"
+                ws[f'A{row}'].font = normal_font
+                row += 1
 
         if prelim_notes:
             row += 1

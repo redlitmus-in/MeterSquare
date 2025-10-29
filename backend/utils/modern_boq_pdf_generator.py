@@ -60,7 +60,7 @@ class ModernBOQPDFGenerator:
         elements = []
 
         # Header
-        elements.extend(self._client_header(project))
+        elements.extend(self._client_header(project, boq_json))
 
         # Main items table
         elements.extend(self._client_items_table(items, boq_json))
@@ -99,7 +99,7 @@ class ModernBOQPDFGenerator:
         buffer.seek(0)
         return buffer.read()
 
-    def _client_header(self, project):
+    def _client_header(self, project, boq_json=None):
         """Modern clean client header"""
         elements = []
         logo_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'logo.png')
@@ -135,12 +135,20 @@ class ModernBOQPDFGenerator:
         ))
         elements.append(Spacer(1, 8))
 
+        # Get duration from boq_json or project
+        duration = '30 days'  # Default
+        if boq_json and 'project_details' in boq_json:
+            duration_days = boq_json['project_details'].get('duration_days', 30)
+            duration = f'{duration_days} days'
+        elif hasattr(project, 'duration_days'):
+            duration = f'{project.duration_days} days'
+
         # Project info - compact grid
         today = date.today().strftime('%d %B %Y')
         info_data = [
             ['Quotation No:', 'MSQ-BOQ-2025-0101', 'Date:', today],
             ['Client:', getattr(project, 'client', 'N/A'), 'Project:', getattr(project, 'project_name', 'N/A')],
-            ['Location:', getattr(project, 'location', 'Dubai, UAE'), 'Duration:', '45 days']
+            ['Location:', getattr(project, 'location', 'Dubai, UAE'), 'Duration:', duration]
         ]
 
         info_table = Table(info_data, colWidths=[1.2*inch, 2*inch, 1*inch, 2.8*inch])
@@ -237,8 +245,9 @@ class ModernBOQPDFGenerator:
                     for item_data in prelim_items:
                         # Handle both string and dict formats
                         if isinstance(item_data, dict):
-                            # Only show if is_selected is True or if field doesn't exist (backwards compatibility)
-                            is_selected = item_data.get('is_selected', item_data.get('selected', True))
+                            # Check multiple field names: is_selected, selected, checked
+                            # Default to False (don't show if field doesn't exist)
+                            is_selected = item_data.get('is_selected', item_data.get('selected', item_data.get('checked', False)))
                             if not is_selected:
                                 continue
 
@@ -378,8 +387,9 @@ class ModernBOQPDFGenerator:
                     for item_data in prelim_items:
                         # Handle both string and dict formats
                         if isinstance(item_data, dict):
-                            # Only show if is_selected is True
-                            is_selected = item_data.get('is_selected', item_data.get('selected', True))
+                            # Check multiple field names: is_selected, selected, checked
+                            # Default to False (don't show if field doesn't exist)
+                            is_selected = item_data.get('is_selected', item_data.get('selected', item_data.get('checked', False)))
                             if not is_selected:
                                 continue
 
@@ -406,6 +416,9 @@ class ModernBOQPDFGenerator:
                 elements.append(Spacer(1, 10))
 
         table_data = []
+        # Track row indices for material and labour headers (for styling)
+        material_header_rows = []
+        labour_header_rows = []
 
         # Header
         table_data.append([
@@ -466,9 +479,11 @@ class ModernBOQPDFGenerator:
                     # Materials section header
                     materials = sub_item.get('materials', [])
                     if materials:
+                        # Track this row for background color
+                        material_header_rows.append(len(table_data))
                         table_data.append([
                             '',
-                            Paragraph('<b>+ RAW MATERIALS</b>', ParagraphStyle('MatHeader', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold', textColor=colors.HexColor('#1d4ed8'))),
+                            Paragraph('<b>+ RAW MATERIALS</b>', ParagraphStyle('MatHeader', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold', textColor=colors.white)),
                             '', '', '', ''
                         ])
 
@@ -497,9 +512,11 @@ class ModernBOQPDFGenerator:
                     # Labour section header
                     labour = sub_item.get('labour', [])
                     if labour:
+                        # Track this row for background color
+                        labour_header_rows.append(len(table_data))
                         table_data.append([
                             '',
-                            Paragraph('<b>+ LABOUR</b>', ParagraphStyle('LabHeader', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold', textColor=colors.HexColor('#9333ea'))),
+                            Paragraph('<b>+ LABOUR</b>', ParagraphStyle('LabHeader', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold', textColor=colors.white)),
                             '', '', '', ''
                         ])
 
@@ -535,10 +552,12 @@ class ModernBOQPDFGenerator:
                     overhead_pct = sub_item.get('overhead_profit_percentage', item.get('overhead_profit_percentage', item.get('profit_margin_percentage', 25)))
                     transport_pct = sub_item.get('transport_percentage', item.get('transport_percentage', 5))
 
-                    # Calculate based on CLIENT AMOUNT (as per TD modal calculation!)
+                    # Calculate based on CLIENT AMOUNT (as per BOQDetailsModal!)
                     misc_amt = client_amount * (misc_pct / 100)
                     overhead_amt = client_amount * (overhead_pct / 100)
                     transport_amt = client_amount * (transport_pct / 100)
+
+                    # Internal cost = Materials + Labour + Misc + O&P + Transport (as per BOQDetailsModal line 757)
                     internal_cost = base_cost + misc_amt + overhead_amt + transport_amt
 
                     # Add blank row for spacing
@@ -579,7 +598,7 @@ class ModernBOQPDFGenerator:
                         Paragraph('<b>Total Internal Cost</b>',
                                  ParagraphStyle('TotalCost', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold')),
                         '', '', '',
-                        f'{internal_cost:,.2f}'
+                        Paragraph(f'<b>{internal_cost:,.2f}</b>', ParagraphStyle('TotalCostVal', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold'))
                     ])
 
                     # Add blank row
@@ -595,7 +614,8 @@ class ModernBOQPDFGenerator:
                                  ParagraphStyle('ProfitVal', parent=self.styles['Normal'], fontSize=7))
                     ])
 
-                    # Actual Profit row
+                    # Actual Profit row (as per BOQDetailsModal line 758)
+                    # actualProfit = clientAmount - internalCost
                     actual_profit = client_amount - internal_cost
                     profit_color = '#00AA00' if actual_profit >= overhead_amt else '#CC0000'
                     table_data.append([
@@ -609,7 +629,9 @@ class ModernBOQPDFGenerator:
 
         # Create table
         main_table = Table(table_data, colWidths=[0.4*inch, 3*inch, 0.5*inch, 0.5*inch, 0.9*inch, 1.2*inch])
-        main_table.setStyle(TableStyle([
+
+        # Build table style with dynamic background colors
+        table_styles = [
             # Header
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
@@ -631,7 +653,17 @@ class ModernBOQPDFGenerator:
             # Borders
             ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#cccccc')),
             ('INNERGRID', (0,0), (-1,-1), 0.25, colors.HexColor('#e0e0e0')),
-        ]))
+        ]
+
+        # Add light red background for material headers
+        for row_idx in material_header_rows:
+            table_styles.append(('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor('#ffcccc')))
+
+        # Add light red background for labour headers
+        for row_idx in labour_header_rows:
+            table_styles.append(('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor('#ffcccc')))
+
+        main_table.setStyle(TableStyle(table_styles))
 
         elements.append(main_table)
         return elements
@@ -686,20 +718,22 @@ class ModernBOQPDFGenerator:
             summary_data.append(['Discount ({:.1f}%):'.format(discount_percentage), f'- {discount_amount:,.2f} AED'])
             summary_data.append(['After Discount:', f'{after_discount:,.2f} AED'])
 
-        summary_data.append(['VAT (0%):', f'{vat_amount:,.2f} AED'])
-        summary_data.append(['<b>Grand Total:</b>', f'<b>{grand_total_calc:,.2f} AED</b>'])
+        # Grand Total (no VAT row - VAT not used)
+        summary_data.append(['Grand Total:', f'{grand_total_calc:,.2f} AED'])
 
         summary_table = Table(summary_data, colWidths=[5*inch, 1.5*inch])
 
-        # Build style list
+        # Build style list - calculate row index for Grand Total
+        grand_total_row_idx = len(summary_data) - 1
+
         table_styles = [
             ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
-            ('FONTSIZE', (0,0), (-1,-2), 9),
-            ('FONTSIZE', (0,-1), (-1,-1), 10),
-            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+            ('FONTSIZE', (0,grand_total_row_idx), (-1,grand_total_row_idx), 10),
+            ('FONTNAME', (0,grand_total_row_idx), (-1,grand_total_row_idx), 'Helvetica-Bold'),
             ('TOPPADDING', (0,0), (-1,-1), 3),
             ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-            ('LINEABOVE', (0,-1), (-1,-1), 1, colors.black),
+            ('LINEABOVE', (0,grand_total_row_idx), (-1,grand_total_row_idx), 1, colors.black),
         ]
 
         # Add red color for discount row only if discount exists
@@ -740,12 +774,15 @@ class ModernBOQPDFGenerator:
                     overhead_pct = sub_item.get('overhead_profit_percentage', item.get('overhead_profit_percentage', item.get('profit_margin_percentage', 25)))
                     transport_pct = sub_item.get('transport_percentage', item.get('transport_percentage', 5))
 
-                    # Calculate based on CLIENT AMOUNT (as per TD modal!)
+                    # Calculate based on CLIENT AMOUNT (as per BOQDetailsModal!)
                     total_misc += sub_client * (misc_pct / 100)
                     total_overhead += sub_client * (overhead_pct / 100)
                     total_transport += sub_client * (transport_pct / 100)
 
+        # Internal cost = Materials + Labour + Misc + O&P + Transport (as per BOQDetailsModal line 757)
         internal_cost = total_material_cost + total_labour_cost + total_misc + total_overhead + total_transport
+
+        # Actual profit = client - internal (as per BOQDetailsModal line 758)
         actual_profit = client_amount - internal_cost
 
         summary_data = [
@@ -773,15 +810,16 @@ class ModernBOQPDFGenerator:
         summary_table = Table(summary_data, colWidths=[5*inch, 1.5*inch])
         profit_color = colors.HexColor('#00AA00') if actual_profit >= total_overhead else colors.HexColor('#CC0000')
 
+        # Find actual profit row index (last row)
+        actual_profit_row = len(summary_data) - 1
+
         summary_table.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
             ('ALIGN', (1,0), (-1,-1), 'RIGHT'),
             ('FONTSIZE', (0,0), (-1,-1), 8),
             ('TOPPADDING', (0,0), (-1,-1), 2),
             ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-            ('FONTNAME', (0,6), (-1,6), 'Helvetica-Bold'),
-            ('LINEABOVE', (0,6), (-1,6), 1, colors.black),
-            ('TEXTCOLOR', (1,10), (1,10), profit_color),
+            ('TEXTCOLOR', (1,actual_profit_row), (1,actual_profit_row), profit_color),
         ]))
         elements.append(summary_table)
 

@@ -133,6 +133,16 @@ def download_internal_pdf_route(boq_id):
 def download_client_pdf_route(boq_id):
     return download_client_pdf()
 
+@boq_routes.route('/boq/download/internal-excel/<int:boq_id>', methods=['GET'])
+@jwt_required
+def download_internal_excel_route(boq_id):
+    return download_internal_excel()
+
+@boq_routes.route('/boq/download/client-excel/<int:boq_id>', methods=['GET'])
+@jwt_required
+def download_client_excel_route(boq_id):
+    return download_client_excel()
+
 @boq_routes.route('/client_td_approval', methods=['POST'])
 @jwt_required
 def client_revision_td_mail_send_route():

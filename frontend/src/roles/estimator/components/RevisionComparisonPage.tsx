@@ -85,14 +85,15 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
     };
   }, [selectedBoq]);
 
-  // Update selectedBoq when boqList changes (e.g., after approval/rejection or client response)
+  // Update selectedBoq when boqList changes (e.g., after approval/rejection, client response, or edit)
   useEffect(() => {
     if (selectedBoq && boqList.length > 0) {
       const updatedBoq = boqList.find(b => b.boq_id === selectedBoq.boq_id);
       if (updatedBoq) {
-        // Only update if the status actually changed (not just any property)
-        if (updatedBoq.status !== selectedBoq.status) {
-          console.log('🔄 BOQ status updated from', selectedBoq.status, 'to', updatedBoq.status);
+        // Update if status changed OR if updated_at changed (indicating an edit)
+        if (updatedBoq.status !== selectedBoq.status ||
+            updatedBoq.updated_at !== selectedBoq.updated_at) {
+          console.log('🔄 BOQ updated:', updatedBoq.status !== selectedBoq.status ? 'status changed' : 'content edited');
           setSelectedBoq(updatedBoq);
         }
       }
@@ -311,28 +312,32 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
     return prevRevision.boq_details.items.find((item: any) => item.item_name === itemName);
   };
 
-  // Calculate total price from items
+  // Calculate grand total from items (quantity × rate - discount)
   const calculateTotalFromItems = (boqData: any) => {
     if (!boqData?.boq_details?.items || boqData.boq_details.items.length === 0) return 0;
 
-    return boqData.boq_details.items.reduce((total: number, item: any) => {
-      // Calculate item total from sub_items or direct materials/labour
-      const itemTotal = item.sub_items && item.sub_items.length > 0
-        ? item.sub_items.reduce((sum: number, si: any) =>
-            sum + (si.materials_cost || 0) + (si.labour_cost || 0), 0)
-        : (item.materials?.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0) || 0) +
-          (item.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0) || 0);
+    const allItems = boqData.boq_details.items || [];
 
-      const miscellaneousAmount = (itemTotal * (item.overhead_percentage || 0)) / 100;
-      const overheadProfitAmount = (itemTotal * (item.profit_margin_percentage || 0)) / 100;
-      const subtotal = itemTotal + miscellaneousAmount + overheadProfitAmount;
-      const discountAmount = (subtotal * (item.discount_percentage || 0)) / 100;
-      const afterDiscount = subtotal - discountAmount;
-      const vatAmount = (afterDiscount * (item.vat_percentage || 0)) / 100;
-      const finalTotalPrice = afterDiscount + vatAmount;
-
-      return total + finalTotalPrice;
+    // Calculate subtotal (sum of all sub-item client amounts using quantity × rate)
+    const clientCostBeforeDiscount = allItems.reduce((sum: number, item: any) => {
+      if (item.sub_items && item.sub_items.length > 0) {
+        return sum + item.sub_items.reduce((siSum: number, si: any) =>
+          siSum + ((si.quantity || 0) * (si.rate || 0)), 0
+        );
+      }
+      return sum + (item.client_cost || 0);
     }, 0);
+
+    // Calculate discount
+    let totalDiscount = 0;
+    if (boqData.boq_details?.discount_percentage && boqData.boq_details.discount_percentage > 0) {
+      totalDiscount = (clientCostBeforeDiscount * boqData.boq_details.discount_percentage) / 100;
+    } else if (boqData.boq_details?.discount_amount && boqData.boq_details.discount_amount > 0) {
+      totalDiscount = boqData.boq_details.discount_amount;
+    }
+
+    // Grand total after discount
+    return clientCostBeforeDiscount - totalDiscount;
   };
 
   // Calculate Grand Total with discount from snapshot
@@ -600,7 +605,9 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
               </div>
               <div className="text-right">
                 <div className="text-lg font-bold text-blue-900">{getRevisionLabel(selectedBoq)}</div>
-                <div className="text-sm text-blue-700">{formatCurrency(selectedBoq.total_cost || 0)}</div>
+                <div className="text-sm text-blue-700">
+                  {currentRevisionData ? formatCurrency(calculateTotalFromItems(currentRevisionData)) : formatCurrency(selectedBoq.total_cost || 0)}
+                </div>
               </div>
             </div>
           </div>
@@ -639,27 +646,6 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
               </div>
             ) : currentRevisionData ? (
               <div className="p-6 space-y-4 max-h-[600px] overflow-y-auto">
-                {/* Summary */}
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h4 className="font-semibold text-gray-900 mb-2">Summary</h4>
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Total Items:</span>
-                      <span className="font-semibold">{currentRevisionData.total_items || 0}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Total Cost:</span>
-                      <span className="font-semibold">{formatCurrency(currentRevisionData.total_cost || 0)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Created:</span>
-                      <span className="font-semibold">
-                        {new Date(currentRevisionData.created_at).toLocaleDateString()}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
                 {/* Items */}
                 {currentRevisionData.boq_details?.items?.map((item: any, index: number) => {
                   const prevRevision = getPreviousRevisionForComparison();
@@ -823,7 +809,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                   </div>
                                 )}
 
-                                {/* Cost Breakdown Percentages (Per-Sub-Item) - EXACT COPY from BOQDetailsModal */}
+                                {/* Cost Breakdown Percentages (Per-Sub-Item) - EXACT COPY from BOQDetailsModal with Yellow Highlighting */}
                                 <div className="bg-purple-50/50 rounded-lg p-3 border border-purple-300 mt-3">
                                   <h5 className="text-xs font-bold text-purple-900 mb-2 flex items-center gap-2">
                                     <Calculator className="w-3.5 h-3.5" />
@@ -839,21 +825,31 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                                       const transportPercentage = subItem.transport_percentage || 5;
                                       const transportAmount = subItem.transport_amount || (clientAmount * (transportPercentage / 100));
 
+                                      // Get previous percentages for comparison
+                                      const prevMiscPercentage = prevSubItem ? (prevSubItem.misc_percentage || 10) : miscPercentage;
+                                      const prevOverheadProfitPercentage = prevSubItem ? (prevSubItem.overhead_profit_percentage || 25) : overheadProfitPercentage;
+                                      const prevTransportPercentage = prevSubItem ? (prevSubItem.transport_percentage || 5) : transportPercentage;
+
+                                      // Check if percentages changed
+                                      const miscChanged = prevSubItem && hasChanged(miscPercentage, prevMiscPercentage);
+                                      const overheadChanged = prevSubItem && hasChanged(overheadProfitPercentage, prevOverheadProfitPercentage);
+                                      const transportChanged = prevSubItem && hasChanged(transportPercentage, prevTransportPercentage);
+
                                       return (
                                         <>
                                           <div className="flex justify-between">
                                             <span className="text-gray-700">Client Amount (Qty × Rate):</span>
                                             <span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span>
                                           </div>
-                                          <div className="flex justify-between">
+                                          <div className={`flex justify-between rounded px-2 py-1 ${miscChanged ? 'bg-yellow-200' : ''}`}>
                                             <span className="text-gray-700">Miscellaneous ({miscPercentage}%):</span>
                                             <span className="font-semibold text-red-600">- {formatCurrency(miscAmount)}</span>
                                           </div>
-                                          <div className="flex justify-between">
+                                          <div className={`flex justify-between rounded px-2 py-1 ${overheadChanged ? 'bg-yellow-200' : ''}`}>
                                             <span className="text-gray-700">Overhead & Profit ({overheadProfitPercentage}%):</span>
                                             <span className="font-semibold text-red-600">- {formatCurrency(overheadProfitAmount)}</span>
                                           </div>
-                                          <div className="flex justify-between">
+                                          <div className={`flex justify-between rounded px-2 py-1 ${transportChanged ? 'bg-yellow-200' : ''}`}>
                                             <span className="text-gray-700">Transport ({transportPercentage}%):</span>
                                             <span className="font-semibold text-red-600">- {formatCurrency(transportAmount)}</span>
                                           </div>
@@ -1124,6 +1120,11 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                         const actualProfitAfterDiscount = grandTotal - totalInternalCost;
                         const profitMarginAfterDiscount = grandTotal > 0 ? (actualProfitAfterDiscount / grandTotal) * 100 : 0;
 
+                        // Get previous revision for discount comparison
+                        const prevRevisionForDiscount = getPreviousRevisionForComparison();
+                        const prevDiscountPercentage = prevRevisionForDiscount?.boq_details?.discount_percentage || 0;
+                        const discountChanged = prevRevisionForDiscount && hasChanged(overallDiscountPercentage, prevDiscountPercentage);
+
                         return (
                           <>
                             <div className="flex justify-between text-base font-medium">
@@ -1132,7 +1133,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                             </div>
                             {overallDiscount > 0 && (
                               <>
-                                <div className="flex justify-between text-sm text-red-600">
+                                <div className={`flex justify-between text-sm text-red-600 rounded px-2 py-1 ${discountChanged ? 'bg-yellow-200' : ''}`}>
                                   <span>Discount ({overallDiscountPercentage.toFixed(1)}%):</span>
                                   <span className="font-semibold">- AED {overallDiscount.toFixed(2)}</span>
                                 </div>
