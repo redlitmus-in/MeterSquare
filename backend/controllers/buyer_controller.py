@@ -1669,17 +1669,21 @@ def get_se_boq_assignments():
 
                 # Calculate total base from all items
                 for item in items:
-                    if item.get('has_sub_items') and item.get('sub_items'):
+                    sub_items = item.get('sub_items', [])
+
+                    # Support both old and new BOQ structures
+                    if (item.get('has_sub_items') and sub_items) or (sub_items and len(sub_items) > 0):
                         # Sum up base_total from all sub-items
-                        for sub_item in item['sub_items']:
-                            base_total = float(sub_item.get('base_total', 0))
+                        for sub_item in sub_items:
+                            # Try different fields for base total
+                            base_total = float(sub_item.get('base_total', 0) or sub_item.get('internal_cost', 0) or 0)
                             quantity = float(sub_item.get('quantity', 1))
                             # base_total is already calculated per quantity in BOQ structure
                             base_total_for_overhead += base_total
 
                     # Get overhead percentage from item
                     if overhead_percentage == 0:
-                        overhead_percentage = float(item.get('overhead_percentage', 0) or item.get('miscellaneous_percentage', 0) or 0)
+                        overhead_percentage = float(item.get('overhead_percentage', 0) or item.get('miscellaneous_percentage', 0) or item.get('misc_percentage', 0) or 0)
 
                 # Calculate overhead amount
                 if overhead_percentage > 0 and base_total_for_overhead > 0:
@@ -1695,8 +1699,12 @@ def get_se_boq_assignments():
 
                 # Extract materials from all items and sub-items
                 for item in items:
-                    if item.get('has_sub_items') and item.get('sub_items'):
-                        for sub_item in item['sub_items']:
+                    # Check both has_sub_items flag AND if sub_items array exists and has items
+                    sub_items = item.get('sub_items', [])
+
+                    # Support both old and new BOQ structures
+                    if (item.get('has_sub_items') and sub_items) or (sub_items and len(sub_items) > 0):
+                        for sub_item in sub_items:
                             # Get materials from sub-item
                             materials = sub_item.get('materials', [])
                             for material in materials:
