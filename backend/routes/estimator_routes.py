@@ -56,10 +56,12 @@ def cancel_boq_route(boq_id):
 @estimator_routes.route('/boq_details_history/<int:boq_id>', methods=['GET'])
 @jwt_required
 def get_boq_details_history_route(boq_id):
-    """Estimator or Admin views BOQ history"""
-    access_check = check_estimator_or_admin_access()
-    if access_check:
-        return access_check
+    """Estimator, TD, or Admin views BOQ history"""
+    # Allow Estimator, TechnicalDirector, and Admin
+    current_user = g.user
+    user_role = current_user.get('role', '').lower()
+    if user_role not in ['estimator', 'technicaldirector', 'admin']:
+        return jsonify({"error": "Access denied. Estimator, Technical Director, or Admin role required."}), 403
     return get_boq_details_history(boq_id)
 
 # BOQ Email Notification to Project Manager
