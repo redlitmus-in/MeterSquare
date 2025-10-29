@@ -115,8 +115,41 @@ def get_projects_by_revision(revision_number):
             total_cost = 0
             item_count = 0
             if boq_details:
-                total_cost = boq_details.total_cost or 0
                 item_count = boq_details.total_items or 0
+
+                # 🔥 Calculate total_cost from items with discount applied
+                if boq_details.boq_details and boq_details.boq_details.get('items'):
+                    items = boq_details.boq_details.get('items', [])
+                    subtotal = 0
+
+                    # Calculate subtotal from all items using selling_price
+                    for item in items:
+                        # Use selling_price if available (this is the client-facing price with overhead/profit)
+                        item_selling_price = item.get('selling_price', 0) or item.get('total_selling_price', 0) or item.get('estimatedSellingPrice', 0)
+
+                        # If selling_price not available, calculate from quantity * rate
+                        if not item_selling_price or item_selling_price == 0:
+                            item_selling_price = (item.get('quantity', 0) or 0) * (item.get('rate', 0) or 0)
+                            # If rate is 0, calculate from sub_items
+                            if item_selling_price == 0 and item.get('sub_items'):
+                                for sub_item in item.get('sub_items', []):
+                                    item_selling_price += (sub_item.get('quantity', 0) or 0) * (sub_item.get('rate', 0) or 0)
+
+                        subtotal += item_selling_price
+
+                    # Apply discount
+                    discount_amount = boq_details.boq_details.get('discount_amount', 0) or 0
+                    discount_percentage = boq_details.boq_details.get('discount_percentage', 0) or 0
+
+                    if discount_percentage > 0 and discount_amount == 0:
+                        discount_amount = (subtotal * discount_percentage) / 100
+
+                    total_cost = subtotal - discount_amount
+                    log.info(f"📊 BOQ {boq.boq_id}: Client revision - calculated total_cost = {total_cost} (subtotal={subtotal}, discount={discount_amount})")
+                else:
+                    # No items, use stored total_cost
+                    total_cost = boq_details.total_cost or 0
+                    log.info(f"📊 BOQ {boq.boq_id}: Client revision - using stored total_cost = {total_cost}")
 
             boq_data = {
                 'boq_id': boq.boq_id,

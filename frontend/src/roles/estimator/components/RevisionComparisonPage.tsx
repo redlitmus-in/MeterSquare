@@ -519,7 +519,6 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                         }`}>
                           {getRevisionLabel(boq)}
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">{formatCurrency(boq.total_cost || 0)}</div>
                       </div>
                     </div>
                   </button>
@@ -605,9 +604,6 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
               </div>
               <div className="text-right">
                 <div className="text-lg font-bold text-blue-900">{getRevisionLabel(selectedBoq)}</div>
-                <div className="text-sm text-blue-700">
-                  {currentRevisionData ? formatCurrency(calculateTotalFromItems(currentRevisionData)) : formatCurrency(selectedBoq.total_cost || 0)}
-                </div>
               </div>
             </div>
           </div>

@@ -68,18 +68,25 @@ def get_all_td_boqs():
                 for item in items:
                     item_materials_cost = 0
                     item_labour_cost = 0
+                    item_client_amount = 0  # CLIENT SELLING PRICE
 
                     # Check if item has sub_items (new format)
                     if "sub_items" in item and item.get("sub_items"):
-                        # NEW FORMAT: materials/labour are inside sub_items
+                        # NEW FORMAT: Client amount comes from sub_item quantity × rate
                         for sub_item in item.get("sub_items", []):
-                            # Sum up materials cost from sub_item
+                            # Calculate CLIENT AMOUNT (what client pays) = quantity × rate
+                            sub_quantity = sub_item.get("quantity", 0)
+                            sub_rate = sub_item.get("rate", 0)
+                            sub_client_amount = sub_quantity * sub_rate
+                            item_client_amount += sub_client_amount
+
+                            # Sum up materials cost from sub_item (for internal tracking)
                             materials = sub_item.get("materials", [])
                             for mat in materials:
                                 mat_cost = mat.get("total_price", 0)
                                 total_material_cost += mat_cost
                                 item_materials_cost += mat_cost
-                            # Sum up labour cost from sub_item
+                            # Sum up labour cost from sub_item (for internal tracking)
                             labour = sub_item.get("labour", [])
                             for lab in labour:
                                 lab_cost = lab.get("total_cost", 0)
@@ -98,27 +105,36 @@ def get_all_td_boqs():
                             total_labour_cost += lab_cost
                             item_labour_cost += lab_cost
 
-                    # Get selling price from item - if not available, calculate it
-                    item_selling_price = item.get("selling_price", 0) or item.get("estimatedSellingPrice", 0)
+                    # Determine item selling price (client amount)
+                    item_selling_price = 0
 
-                    if not item_selling_price or item_selling_price == 0:
-                        # Calculate selling price from base cost + overhead + profit + misc
-                        item_base_cost = item_materials_cost + item_labour_cost
-                        item_overhead = item.get("overhead_amount", 0)
-                        item_profit = item.get("profit_margin_amount", 0)
-                        item_misc = item.get("miscellaneous_amount", 0)
+                    # For NEW FORMAT with sub_items, use calculated client amount
+                    if item_client_amount > 0:
+                        item_selling_price = item_client_amount
+                    else:
+                        # For OLD FORMAT or if no sub_items, try to get from item fields
+                        item_selling_price = item.get("selling_price", 0) or item.get("estimatedSellingPrice", 0)
 
-                        # If amounts are not present, calculate from percentages
-                        if item_overhead == 0 and item.get("overhead_percentage", 0) > 0:
-                            item_overhead = item_base_cost * (item.get("overhead_percentage", 0) / 100)
-                        if item_profit == 0 and item.get("profit_margin_percentage", 0) > 0:
-                            item_profit = item_base_cost * (item.get("profit_margin_percentage", 0) / 100)
-                        if item_misc == 0 and item.get("miscellaneous_percentage", 0) > 0:
-                            item_misc = item_base_cost * (item.get("miscellaneous_percentage", 0) / 100)
+                        # If still no selling price, calculate from base cost + markup
+                        if not item_selling_price or item_selling_price == 0:
+                            item_base_cost = item_materials_cost + item_labour_cost
+                            item_overhead = item.get("overhead_amount", 0)
+                            item_profit = item.get("profit_margin_amount", 0)
+                            item_misc = item.get("miscellaneous_amount", 0)
 
-                        item_selling_price = item_base_cost + item_overhead + item_profit + item_misc
+                            # If amounts are not present, calculate from percentages
+                            if item_overhead == 0 and item.get("overhead_percentage", 0) > 0:
+                                item_overhead = item_base_cost * (item.get("overhead_percentage", 0) / 100)
+                            if item_profit == 0 and item.get("profit_margin_percentage", 0) > 0:
+                                item_profit = item_base_cost * (item.get("profit_margin_percentage", 0) / 100)
+                            if item_misc == 0 and item.get("miscellaneous_percentage", 0) > 0:
+                                item_misc = item_base_cost * (item.get("miscellaneous_percentage", 0) / 100)
+
+                            item_selling_price = item_base_cost + item_overhead + item_profit + item_misc
 
                     total_selling_price += item_selling_price
+
+                    log.debug(f"Item '{item.get('item_name', 'Unknown')}': client_amount={item_client_amount}, selling_price={item_selling_price}, materials={item_materials_cost}, labour={item_labour_cost}")
 
                     # Get overhead and profit percentages (use first item's values)
                     if overhead_percentage == 0:
@@ -170,11 +186,17 @@ def get_all_td_boqs():
                 "total_labour_cost": total_labour_cost,
                 "overhead_percentage": overhead_percentage,
                 "profit_margin": profit_margin,
+                "discount_percentage": discount_percentage,
+                "discount_amount": discount_amount,
                 "created_at": boq.created_at.isoformat() if boq.created_at else None,
                 "created_by": boq.created_by,
                 "last_modified_at": boq.last_modified_at.isoformat() if boq.last_modified_at else None,
                 "last_modified_by": boq.last_modified_by
             }
+
+            # 🔍 DEBUG: Log the final values being sent to frontend
+            log.info(f"📤 [TD API Response] BOQ {boq.boq_id} ({boq.boq_name}) - Sending to frontend: total_cost={final_total_cost}, selling_price={final_total_cost}, discount_percentage={discount_percentage}%, discount_amount={discount_amount}")
+
             boqs_list.append(boq_data)
 
         return jsonify({

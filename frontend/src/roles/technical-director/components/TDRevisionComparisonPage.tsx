@@ -490,7 +490,6 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                         }`}>
                           {getRevisionLabel(boq)}
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">{formatCurrency(getTotalCost(boq))}</div>
                       </div>
                     </div>
                   </button>
@@ -557,7 +556,6 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                       }`}>
                         {getRevisionLabel(boq)}
                       </div>
-                      <div className="text-xs text-gray-500 mt-1">{formatCurrency(getTotalCost(boq))}</div>
                     </div>
                   </div>
                 </button>
@@ -578,7 +576,6 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
               </div>
               <div className="text-right">
                 <div className="text-lg font-bold text-blue-900">{getRevisionLabel(selectedBoq)}</div>
-                <div className="text-sm text-blue-700">{formatCurrency(getTotalCost(selectedBoq))}</div>
               </div>
             </div>
           </div>

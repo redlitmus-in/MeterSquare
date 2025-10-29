@@ -393,29 +393,48 @@ const EstimatorHub: React.FC = () => {
         setLoading(true);
       }
       const response = await estimatorService.getAllBOQs();
+      console.log('🔍 [EstimatorHub] Raw API Response:', response);
       if (response.success && response.data) {
         // Map the backend BOQ data to include proper project structure
-        const mappedBOQs = response.data.map((boq: any) => ({
-          ...boq,
-          boq_id: boq.boq_id,
-          title: boq.boq_name || boq.title || 'Unnamed BOQ',
-          project: {
-            project_id: boq.project_id,
-            name: boq.project_name || 'Unknown Project',
-            client: boq.client || 'Unknown Client',
-            location: boq.location || 'Unknown Location'
-          },
-          summary: {
-            grandTotal: boq.selling_price || boq.estimatedSellingPrice || boq.total_cost || 0
-          },
-          total_cost: boq.selling_price || boq.estimatedSellingPrice || boq.total_cost || 0,
-          status: boq.status || 'draft',
-          revision_number: boq.revision_number || 0,
-          client_rejection_reason: boq.client_rejection_reason,
-          created_at: boq.created_at,
-          email_sent: boq.email_sent || false,
-          pm_assigned: boq.pm_assigned || false
-        }));
+        const mappedBOQs = response.data.map((boq: any) => {
+          console.log(`📊 [EstimatorHub] BOQ ${boq.boq_id} - Raw values from backend:`, {
+            boq_name: boq.boq_name,
+            total_cost: boq.total_cost,
+            selling_price: boq.selling_price,
+            estimatedSellingPrice: boq.estimatedSellingPrice,
+            discount_percentage: boq.discount_percentage,
+            discount_amount: boq.discount_amount
+          });
+
+          // IMPORTANT: Prioritize total_cost as it's the most reliable field after discount
+          const finalTotalCost = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
+          console.log(`💰 [EstimatorHub] BOQ ${boq.boq_id} - Final total_cost to display: ${finalTotalCost} (Prioritized: total_cost)`);
+
+          return {
+            ...boq,
+            boq_id: boq.boq_id,
+            title: boq.boq_name || boq.title || 'Unnamed BOQ',
+            project: {
+              project_id: boq.project_id,
+              name: boq.project_name || 'Unknown Project',
+              client: boq.client || 'Unknown Client',
+              location: boq.location || 'Unknown Location'
+            },
+            summary: {
+              grandTotal: finalTotalCost
+            },
+            // All price fields use the same finalTotalCost to ensure consistency
+            total_cost: finalTotalCost,
+            selling_price: finalTotalCost,
+            estimatedSellingPrice: finalTotalCost,
+            status: boq.status || 'draft',
+            revision_number: boq.revision_number || 0,
+            client_rejection_reason: boq.client_rejection_reason,
+            created_at: boq.created_at,
+            email_sent: boq.email_sent || false,
+            pm_assigned: boq.pm_assigned || false
+          };
+        });
 
         // Sort by created_at - most recent first
         const sortedBOQs = mappedBOQs.sort((a: any, b: any) => {
@@ -1292,7 +1311,12 @@ const EstimatorHub: React.FC = () => {
 
         {/* Stats */}
         <div className="px-4 pb-3 text-center text-sm">
-          <span className="font-bold text-blue-600 text-lg">{boq.total_cost ? formatCurrency(boq.total_cost) : 'AED 0'}</span>
+          <span className="font-bold text-blue-600 text-lg">
+            {(() => {
+              console.log(`🎨 [Card Render] BOQ ${boq.boq_id} (${boq.title}) - Displaying total_cost: ${boq.total_cost}`);
+              return boq.total_cost ? formatCurrency(boq.total_cost) : 'AED 0';
+            })()}
+          </span>
           <span className="text-gray-600 ml-1 text-xs">Total Value</span>
         </div>
 

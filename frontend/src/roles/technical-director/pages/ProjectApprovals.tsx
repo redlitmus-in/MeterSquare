@@ -521,11 +521,21 @@ const ProjectApprovals: React.FC = () => {
     const clientName = boq.client || boq.project_details?.client || boq.project?.client || 'Unknown Client';
     const status = mapBOQStatus(boq.status);
 
-    // Use backend calculated values directly for consistency
-    const totalValue = boq.selling_price || boq.estimatedSellingPrice || boq.total_cost || 0;
+    // IMPORTANT: Prioritize total_cost as it's the most reliable field after discount
+    const totalValue = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
     const laborCost = boq.total_labour_cost || 0;
     const materialCost = boq.total_material_cost || 0;
     const itemCount = boq.items_count || 0;
+
+    console.log(`📊 [TD ProjectApprovals] BOQ ${boq.boq_id} - Raw values from backend:`, {
+      boq_name: boq.boq_name || boq.project_name,
+      total_cost: boq.total_cost,
+      selling_price: boq.selling_price,
+      estimatedSellingPrice: boq.estimatedSellingPrice,
+      discount_percentage: boq.discount_percentage,
+      discount_amount: boq.discount_amount
+    });
+    console.log(`💰 [TD ProjectApprovals] BOQ ${boq.boq_id} - Final totalValue: ${totalValue}`);
 
     return {
       id: boq.boq_id,
@@ -1908,7 +1918,12 @@ const ProjectApprovals: React.FC = () => {
                     <div className="grid grid-cols-5 gap-4">
                       <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3">
                         <p className="text-xs text-gray-500 mb-1">Total Value</p>
-                        <p className="text-lg font-bold text-gray-900">{formatCurrency(estimation.totalValue)}</p>
+                        <p className="text-lg font-bold text-gray-900">
+                          {(() => {
+                            console.log(`🎨 [TD Card Render] BOQ ${estimation.id} (${estimation.projectName}) - Displaying totalValue: ${estimation.totalValue}`);
+                            return formatCurrency(estimation.totalValue);
+                          })()}
+                        </p>
                       </div>
                       <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3">
                         <p className="text-xs text-gray-500 mb-1">Items</p>

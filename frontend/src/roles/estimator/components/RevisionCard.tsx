@@ -73,6 +73,14 @@ const RevisionCard: React.FC<RevisionCardProps> = ({
   const revisionNumber = getDisplayRevisionNumber();
   const totalCost = project.total_cost || project.selling_price || 0;
 
+  console.log(`📊 [RevisionCard] BOQ ${project.boq_id} - Raw values:`, {
+    boq_name: project.boq_name || project.project_name,
+    total_cost: project.total_cost,
+    selling_price: project.selling_price,
+    revision_number: project.revision_number
+  });
+  console.log(`💰 [RevisionCard] BOQ ${project.boq_id} - Final totalCost to display: ${totalCost}`);
+
   return (
     <div
       className="bg-white rounded-xl shadow-md hover:shadow-lg transition-all border border-gray-200 overflow-hidden"
@@ -97,7 +105,12 @@ const RevisionCard: React.FC<RevisionCardProps> = ({
             </div>
           </div>
           <div className="text-right">
-            <div className="text-2xl font-bold text-blue-600">{formatCurrency(totalCost)}</div>
+            <div className="text-2xl font-bold text-blue-600">
+              {(() => {
+                console.log(`🎨 [RevisionCard Render] BOQ ${project.boq_id} - Displaying totalCost: ${totalCost}`);
+                return formatCurrency(totalCost);
+              })()}
+            </div>
             <div className="text-xs text-gray-500">Total Cost</div>
           </div>
         </div>
