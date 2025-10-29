@@ -586,31 +586,28 @@ class BOQEmailService:
 
                 <p>{message}</p>
 
-                <div class="divider"></div>
-
                 <!-- Project Information -->
-                <h2>Project Details</h2>
-                <div class="info-box">
+                <div class="info-box" style="margin: 20px 0;">
                     <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
                     <p><span class="label">Location:</span> <span class="value">{location}</span></p>
                 </div>
 
                 <!-- Cost Summary -->
-                <div class="total-cost" style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-left: 4px solid #3b82f6; margin: 15px 0;">
-                    <span class="label">Total Project Value (Excluding VAT):</span>
-                    <span class="amount" style="color: #1e40af;">AED {total_value:,.2f}</span>
+                <div class="total-cost" style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-left: 4px solid #3b82f6; margin: 20px 0; padding: 15px;">
+                    <span class="label" style="font-size: 14px;">Total Project Value (Excluding VAT):</span><br/>
+                    <span class="amount" style="color: #1e40af; font-size: 20px; font-weight: bold;">AED {total_value:,.2f}</span>
                 </div>
 
                 <!-- Attachments Info -->
-                <div class="alert" style="background-color: #dbeafe; border-left: 4px solid #3b82f6; margin: 15px 0;">
+                <div class="alert" style="background-color: #dbeafe; border-left: 4px solid #3b82f6; margin: 20px 0; padding: 12px;">
                     <strong>Attached Documents:</strong>
-                    <p style="margin: 8px 0 0 0; color: #1e40af; font-size: 14px;">
-                        Please review the attached Excel document for complete project details including materials, labor, and pricing breakdown.
+                    <p style="margin: 5px 0 0 0; color: #1e40af; font-size: 13px;">
+                        Please review the attached Excel document for complete project details.
                     </p>
                 </div>
 
                 <!-- Action Required -->
-                <div class="alert alert-info" style="margin: 15px 0;">
+                <div class="alert alert-info" style="margin: 20px 0; padding: 12px;">
                     <strong>Next Steps:</strong>
                     <ul style="margin: 8px 0; padding-left: 20px; line-height: 1.6;">
                         <li>Review the attached BOQ documents carefully</li>
@@ -621,10 +618,10 @@ class BOQEmailService:
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
+                <div class="signature" style="margin-top: 30px;">
                     <p><strong>Best Regards,</strong></p>
                     <p>Technical Director</p>
-                    <p>MeterSquare ERP System</p>
+                    <p>MeterSquare Interiors LLC</p>
                 </div>
             </div>
 

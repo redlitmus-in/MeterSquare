@@ -372,7 +372,7 @@ const MyProjects: React.FC = () => {
           total_materials: summaryData.total_material_cost || boqDataAny.total_material_cost || 0,
           total_labour: summaryData.total_labour_cost || boqDataAny.total_labour_cost || 0,
           overhead_percentage: boqDataAny.overhead_percentage || 10,
-          profit_margin_percentage: boqDataAny.profit_margin_percentage || 15,
+          profit_margin_percentage: boqDataAny.profit_margin_percentage || boqDataAny.profit_margin || 15,
           boq_details: boqDataAny
         };
 
@@ -1144,7 +1144,11 @@ const MyProjects: React.FC = () => {
           setShowEditBOQModal(true);
           setShowBOQModal(false);
         } : undefined}
-        onApprove={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? () => {
+        onApprove={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? async () => {
+          // Reload BOQ details before showing approve modal to ensure fresh data
+          if (selectedProject?.boq_id) {
+            await loadBOQDetails(selectedProject.boq_id);
+          }
           setShowApproveModal(true);
           setShowBOQModal(false);
         } : undefined}
@@ -1654,7 +1658,13 @@ const MyProjects: React.FC = () => {
                             Edit BOQ
                           </button>
                           <button
-                            onClick={() => setShowApproveModal(true)}
+                            onClick={async () => {
+                              // Reload BOQ details before showing approve modal to ensure fresh data
+                              if (selectedProject?.boq_id) {
+                                await loadBOQDetails(selectedProject.boq_id);
+                              }
+                              setShowApproveModal(true);
+                            }}
                             className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
                           >
                             <CheckCircleIcon className="w-4 h-4" />
@@ -3005,6 +3015,7 @@ const MyProjects: React.FC = () => {
           // Reopen view modal with fresh data
           setShowBOQModal(true);
         }}
+        editMode={true}
         selectedProject={selectedProject ? {
           project_id: selectedProject.project_id,
           project_name: selectedProject.project_name,
