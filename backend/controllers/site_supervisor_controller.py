@@ -873,6 +873,29 @@ def assign_boq_to_buyer(boq_id):
         if project.site_supervisor_id != se_user_id:
             return jsonify({"error": "You are not assigned to this BOQ"}), 403
 
+        # Verify BOQ has materials before allowing assignment
+        boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq_details or not boq_details.boq_details:
+            return jsonify({"error": "Cannot assign empty BOQ. Please add items and materials to the BOQ first."}), 400
+
+        # Count materials in BOQ
+        items = boq_details.boq_details.get('items', [])
+        total_materials = 0
+        for item in items:
+            # Support both old and new BOQ structures
+            sub_items = item.get('sub_items', [])
+            if (item.get('has_sub_items') and sub_items) or (sub_items and len(sub_items) > 0):
+                for sub_item in sub_items:
+                    materials = sub_item.get('materials', [])
+                    total_materials += len(materials)
+
+        if total_materials == 0:
+            return jsonify({
+                "error": "Cannot assign BOQ with no materials. Please add materials to the BOQ before assigning to buyer.",
+                "boq_name": boq.boq_name,
+                "materials_count": 0
+            }), 400
+
         # Verify buyer exists
         buyer_role = Role.query.filter_by(role='buyer').first()
         buyer = User.query.filter(
