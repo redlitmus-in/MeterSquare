@@ -22,7 +22,8 @@ from controllers.buyer_controller import (
     select_vendor_for_se_boq,
     td_approve_vendor_for_se_boq,
     td_reject_vendor_for_se_boq,
-    complete_se_boq_purchase
+    complete_se_boq_purchase,
+    send_se_boq_vendor_email
 )
 from controllers.auth_controller import jwt_required
 
@@ -288,3 +289,13 @@ def complete_se_boq_purchase_route(assignment_id):
     if access_check:
         return access_check
     return complete_se_boq_purchase(assignment_id)
+
+
+@buyer_routes.route('/se-boq/<int:assignment_id>/send-vendor-email', methods=['POST'])
+@jwt_required
+def send_se_boq_vendor_email_route(assignment_id):
+    """Send PO email to vendor for SE BOQ assignment (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return send_se_boq_vendor_email(assignment_id)

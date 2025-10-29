@@ -100,5 +100,15 @@ def assign_projects_route():
     access_check = check_td_or_admin_access()
     if access_check:
         return access_check
-    return assign_projects() 
+    return assign_projects()
+
+# SE BOQ Vendor Approval routes
+@technical_routes.route('/se-boq-vendor-requests', methods=['GET'])
+@jwt_required
+def get_td_se_boq_vendor_requests_route():
+    """Get all SE BOQ vendor approval requests for TD"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_se_boq_vendor_requests() 
 

@@ -1762,10 +1762,13 @@ def select_vendor_for_se_boq(assignment_id):
     """Buyer selects vendor for SE BOQ assignment"""
     try:
         from models.boq_material_assignment import BOQMaterialAssignment
+        from models.boq import BOQHistory, BOQ
+        from models.project import Project
 
         current_user = g.user
-        buyer_id = current_user['user_id']
-        buyer_name = current_user.get('full_name', 'Buyer')
+        user_id = current_user['user_id']
+        user_name = current_user.get('full_name', 'User')
+        user_role = current_user.get('role', '').lower()
 
         data = request.get_json()
         vendor_id = data.get('vendor_id')
@@ -1773,12 +1776,18 @@ def select_vendor_for_se_boq(assignment_id):
         if not vendor_id:
             return jsonify({"error": "vendor_id is required"}), 400
 
-        # Get assignment
-        assignment = BOQMaterialAssignment.query.filter_by(
-            assignment_id=assignment_id,
-            assigned_to_buyer_user_id=buyer_id,
-            is_deleted=False
-        ).first()
+        # Get assignment - TD/Admin can select for any assignment, Buyer only for their own
+        if user_role in ['technicaldirector', 'admin']:
+            assignment = BOQMaterialAssignment.query.filter_by(
+                assignment_id=assignment_id,
+                is_deleted=False
+            ).first()
+        else:
+            assignment = BOQMaterialAssignment.query.filter_by(
+                assignment_id=assignment_id,
+                assigned_to_buyer_user_id=user_id,
+                is_deleted=False
+            ).first()
 
         if not assignment:
             return jsonify({"error": "Assignment not found"}), 404
@@ -1791,8 +1800,8 @@ def select_vendor_for_se_boq(assignment_id):
         # Update assignment with vendor selection
         assignment.selected_vendor_id = vendor_id
         assignment.selected_vendor_name = vendor.company_name
-        assignment.vendor_selected_by_buyer_id = buyer_id
-        assignment.vendor_selected_by_buyer_name = buyer_name
+        assignment.vendor_selected_by_buyer_id = user_id
+        assignment.vendor_selected_by_buyer_name = user_name
         assignment.vendor_selection_date = datetime.utcnow()
         assignment.vendor_selection_status = 'pending_td_approval'
         assignment.updated_at = datetime.utcnow()
@@ -1816,19 +1825,20 @@ def select_vendor_for_se_boq(assignment_id):
             current_actions = []
 
         # Create new action
+        action_role = user_role if user_role in ['buyer', 'technicaldirector', 'admin'] else 'buyer'
         new_action = {
-            "role": "buyer",
-            "type": "vendor_selected_for_se_boq",
-            "sender": "buyer",
+            "role": action_role,
+            "type": "vendor_selected_for_se_boq" if user_role == 'buyer' else "vendor_changed_for_se_boq",
+            "sender": action_role,
             "receiver": "technical_director",
             "status": "pending_td_approval",
             "boq_name": boq.boq_name if boq else '',
             "project_name": project.project_name if project else '',
             "vendor_name": vendor.company_name,
-            "comments": f"Buyer selected vendor {vendor.company_name} for SE BOQ assignment",
+            "comments": f"{user_name} selected vendor {vendor.company_name} for SE BOQ assignment",
             "timestamp": datetime.utcnow().isoformat(),
-            "sender_name": buyer_name,
-            "sender_user_id": buyer_id,
+            "sender_name": user_name,
+            "sender_user_id": user_id,
             "assignment_id": assignment_id
         }
 
@@ -1843,21 +1853,21 @@ def select_vendor_for_se_boq(assignment_id):
             boq_history = BOQHistory(
                 boq_id=assignment.boq_id,
                 action=current_actions,
-                action_by=buyer_name,
+                action_by=user_name,
                 boq_status=boq.status if boq else '',
-                sender=buyer_name,
+                sender=user_name,
                 receiver='Technical Director',
                 comments=f"Vendor {vendor.company_name} selected, pending TD approval",
-                sender_role='buyer',
+                sender_role=action_role,
                 receiver_role='technical_director',
                 action_date=datetime.utcnow(),
-                created_by=buyer_name
+                created_by=user_name
             )
             db.session.add(boq_history)
 
         db.session.commit()
 
-        log.info(f"Buyer {buyer_id} selected vendor {vendor_id} for SE BOQ assignment {assignment_id}")
+        log.info(f"User {user_id} ({user_role}) selected vendor {vendor_id} for SE BOQ assignment {assignment_id}")
 
         return jsonify({
             "success": True,
@@ -1877,6 +1887,7 @@ def td_approve_vendor_for_se_boq(assignment_id):
     """Technical Director approves vendor selection for SE BOQ assignment"""
     try:
         from models.boq_material_assignment import BOQMaterialAssignment
+        from models.boq import BOQHistory, BOQ
 
         current_user = g.user
         td_id = current_user['user_id']
@@ -1977,6 +1988,7 @@ def td_reject_vendor_for_se_boq(assignment_id):
     """Technical Director rejects vendor selection for SE BOQ assignment"""
     try:
         from models.boq_material_assignment import BOQMaterialAssignment
+        from models.boq import BOQHistory, BOQ
 
         current_user = g.user
         td_id = current_user['user_id']
@@ -2090,6 +2102,7 @@ def complete_se_boq_purchase(assignment_id):
     """Buyer completes purchase for SE BOQ assignment"""
     try:
         from models.boq_material_assignment import BOQMaterialAssignment
+        from models.boq import BOQHistory, BOQ
 
         current_user = g.user
         buyer_id = current_user['user_id']
@@ -2192,3 +2205,140 @@ def complete_se_boq_purchase(assignment_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to complete purchase: {str(e)}"}), 500
+
+
+def send_se_boq_vendor_email(assignment_id):
+    """Send purchase order email to vendor for SE BOQ assignment"""
+    try:
+        from models.boq_material_assignment import BOQMaterialAssignment
+        from models.boq import BOQ, BOQDetails
+        from models.project import Project
+
+        current_user = g.user
+        buyer_id = current_user['user_id']
+        buyer_name = current_user.get('full_name', 'Buyer')
+
+        data = request.get_json()
+        vendor_email = data.get('vendor_email')
+
+        if not vendor_email:
+            return jsonify({"error": "Vendor email is required"}), 400
+
+        # Get assignment
+        assignment = BOQMaterialAssignment.query.filter_by(
+            assignment_id=assignment_id,
+            assigned_to_buyer_user_id=buyer_id,
+            is_deleted=False
+        ).first()
+
+        if not assignment:
+            return jsonify({"error": "Assignment not found"}), 404
+
+        if assignment.vendor_selection_status != 'approved':
+            return jsonify({"error": "Vendor must be approved by TD before sending email"}), 400
+
+        # Get vendor
+        vendor = Vendor.query.filter_by(vendor_id=assignment.selected_vendor_id, is_deleted=False).first()
+        if not vendor:
+            return jsonify({"error": "Vendor not found"}), 404
+
+        # Get BOQ and project
+        boq = BOQ.query.filter_by(boq_id=assignment.boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        project = Project.query.filter_by(project_id=assignment.project_id, is_deleted=False).first()
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Get BOQ details for materials
+        boq_detail = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+        materials_list = []
+
+        if boq_detail and boq_detail.boq_details:
+            items = boq_detail.boq_details.get('items', [])
+            for item in items:
+                item_name = item.get('description', '')
+                sub_items = item.get('sub_items', [])
+                for sub_item in sub_items:
+                    sub_item_name = sub_item.get('sub_item_name', '')
+                    materials = sub_item.get('materials', [])
+                    for material in materials:
+                        materials_list.append({
+                            'item_name': item_name,
+                            'sub_item_name': sub_item_name,
+                            'material_name': material.get('material_name', ''),
+                            'quantity': float(material.get('quantity', 0)),
+                            'unit': material.get('unit', ''),
+                            'unit_price': float(material.get('unit_price', 0)),
+                            'total_price': float(material.get('total_price', 0))
+                        })
+
+        # Calculate totals from actual material data
+        base_total = sum(mat['total_price'] for mat in materials_list)
+        overhead_percentage = float(assignment.overhead_percentage or 0)
+        overhead_amount = base_total * overhead_percentage / 100
+        total_cost = base_total + overhead_amount
+
+        # Prepare data for email
+        vendor_data = {
+            'vendor_id': vendor.vendor_id,
+            'company_name': vendor.company_name,
+            'contact_person_name': vendor.contact_person_name,
+            'email': vendor_email
+        }
+
+        purchase_data = {
+            'assignment_id': assignment.assignment_id,
+            'materials': materials_list,
+            'base_total': base_total,
+            'overhead_percentage': overhead_percentage,
+            'overhead_amount': overhead_amount,
+            'total_cost': total_cost
+        }
+
+        buyer_data = {
+            'buyer_id': buyer_id,
+            'buyer_name': buyer_name,
+            'buyer_email': current_user.get('email', '')
+        }
+
+        project_data = {
+            'project_id': project.project_id,
+            'project_name': project.project_name,
+            'client': project.client,
+            'location': project.location,
+            'boq_name': boq.boq_name
+        }
+
+        # Send email to vendor
+        from utils.boq_email_service import BOQEmailService
+        email_service = BOQEmailService()
+        email_sent = email_service.send_vendor_purchase_order(
+            vendor_email, vendor_data, purchase_data, buyer_data, project_data
+        )
+
+        if email_sent:
+            # Mark email as sent
+            assignment.vendor_email_sent = True
+            assignment.vendor_email_sent_date = datetime.utcnow()
+            assignment.vendor_email_sent_by_user_id = buyer_id
+            assignment.updated_at = datetime.utcnow()
+            db.session.commit()
+
+            log.info(f"SE BOQ purchase order email sent to vendor {vendor_email} for assignment {assignment_id}")
+            return jsonify({
+                "success": True,
+                "message": "Purchase order email sent to vendor successfully"
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Failed to send email to vendor"
+            }), 500
+
+    except Exception as e:
+        log.error(f"Error sending SE BOQ vendor email: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to send vendor email: {str(e)}"}), 500

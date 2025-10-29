@@ -81,7 +81,7 @@ const MaterialDispatchSitePage = lazy(() => import('@/pages/workflows/MaterialDi
 // const PMVendorManagement = lazy(() => import('@/roles/project-manager/pages/PMVendorManagement'));
 // const ProcurementVendorReview = lazy(() => import('@/roles/procurement/pages/ProcurementVendorReview'));
 // const EstimationVendorCheck = lazy(() => import('@/roles/estimation/pages/EstimationVendorCheck'));
-// const TDVendorApproval = lazy(() => import('@/roles/technical-director/pages/TDVendorApproval'));
+const TDVendorApproval = lazy(() => import('@/roles/technical-director/pages/TDVendorApproval'));
 // const AccountsVendorPayment = lazy(() => import('@/roles/accounts/pages/AccountsVendorPayment'));
 
 // Vendor forms - Temporarily commented out
@@ -663,6 +663,11 @@ function App() {
             <Route path="project-approvals" element={
               <TechnicalDirectorRoute>
                 <ProjectApprovals />
+              </TechnicalDirectorRoute>
+            } />
+            <Route path="vendor-approval" element={
+              <TechnicalDirectorRoute>
+                <TDVendorApproval />
               </TechnicalDirectorRoute>
             } />
             <Route path="team-assignment" element={

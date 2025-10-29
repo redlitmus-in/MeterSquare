@@ -24,6 +24,14 @@ class BOQMaterialAssignment(db.Model):
 
     # Assignment status
     status = db.Column(db.String(50), default="assigned_to_buyer")  # assigned_to_buyer, purchase_completed
+    assignment_date = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)
+
+    # Materials tracking
+    material_ids = db.Column(db.JSON, nullable=True)  # Array of material IDs from BOQSubItemMaterial
+
+    # Cost tracking
+    base_total_for_overhead = db.Column(db.Numeric(15, 2), default=0.0)
+    overhead_percentage = db.Column(db.Numeric(5, 2), default=0.0)
 
     # Vendor Selection (requires TD approval)
     selected_vendor_id = db.Column(db.Integer, db.ForeignKey('vendors.vendor_id'), nullable=True)
@@ -78,6 +86,12 @@ class BOQMaterialAssignment(db.Model):
 
             # Status
             'status': self.status,
+            'assignment_date': self.assignment_date.isoformat() if self.assignment_date else None,
+
+            # Materials and Cost
+            'material_ids': self.material_ids,
+            'base_total_for_overhead': float(self.base_total_for_overhead) if self.base_total_for_overhead else 0.0,
+            'overhead_percentage': float(self.overhead_percentage) if self.overhead_percentage else 0.0,
 
             # Vendor Selection
             'selected_vendor_id': self.selected_vendor_id,

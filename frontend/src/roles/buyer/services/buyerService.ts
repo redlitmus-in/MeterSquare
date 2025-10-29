@@ -357,6 +357,34 @@ class BuyerService {
       throw new Error(error.response?.data?.error || 'Failed to send email to vendor');
     }
   }
+
+  // Send email to vendor for SE BOQ assignment
+  async sendSeBoqVendorEmail(assignmentId: number, vendorEmail: string): Promise<SendVendorEmailResponse> {
+    try {
+      const response = await axios.post<SendVendorEmailResponse>(
+        `${API_URL}/buyer/se-boq/${assignmentId}/send-vendor-email`,
+        { vendor_email: vendorEmail },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to send email to vendor');
+    } catch (error: any) {
+      console.error('Error sending SE BOQ vendor email:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Assignment not found');
+      }
+      if (error.response?.status === 403) {
+        throw new Error('You do not have permission to send this email');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to send email to vendor');
+    }
+  }
 }
 
 export const buyerService = new BuyerService();

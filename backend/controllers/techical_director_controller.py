@@ -535,3 +535,143 @@ def td_mail_send():
             "error": str(e),
             "error_type": type(e).__name__
         }), 500
+
+
+def get_td_se_boq_vendor_requests():
+    """Get all SE BOQ vendor approval requests for TD"""
+    try:
+        from models.boq_material_assignment import BOQMaterialAssignment
+        from models.boq import BOQ
+        from models.vendor import Vendor
+        from datetime import datetime
+
+        current_user = g.user
+        td_id = current_user['user_id']
+
+        # Get all assignments with pending TD approval or already approved/rejected
+        assignments = BOQMaterialAssignment.query.filter(
+            BOQMaterialAssignment.is_deleted == False,
+            BOQMaterialAssignment.selected_vendor_id != None
+        ).order_by(BOQMaterialAssignment.vendor_selection_date.desc()).all()
+
+        assignments_list = []
+        for assignment in assignments:
+            # Get BOQ
+            boq = BOQ.query.filter_by(boq_id=assignment.boq_id, is_deleted=False).first()
+            if not boq:
+                continue
+
+            # Get project
+            project = Project.query.filter_by(project_id=assignment.project_id, is_deleted=False).first()
+            if not project:
+                continue
+
+            # Get vendor
+            vendor = None
+            vendor_info = None
+            if assignment.selected_vendor_id:
+                vendor = Vendor.query.filter_by(vendor_id=assignment.selected_vendor_id, is_deleted=False).first()
+                if vendor:
+                    vendor_info = {
+                        'vendor_id': vendor.vendor_id,
+                        'company_name': vendor.company_name,
+                        'email': vendor.email,
+                        'phone': vendor.phone,
+                        'phone_code': vendor.phone_code,
+                        'category': vendor.category
+                    }
+
+            # Get materials for this assignment from BOQDetails JSON
+            from models.boq import BOQDetails
+            material_ids = assignment.material_ids or []
+            materials_list = []
+            total_cost = 0
+
+            if boq:
+                # Get BOQ details which contains materials as JSON
+                boq_detail = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+
+                if boq_detail and boq_detail.boq_details:
+                    items = boq_detail.boq_details.get('items', [])
+
+                    # Extract ALL materials from the JSON structure
+                    for item in items:
+                        item_name = item.get('description', '')
+                        sub_items = item.get('sub_items', [])
+
+                        for sub_item in sub_items:
+                            sub_item_name = sub_item.get('sub_item_name', '')
+                            materials = sub_item.get('materials', [])
+
+                            for material in materials:
+                                # If material_ids is specified, only include those materials
+                                # Otherwise include all materials
+                                material_name = material.get('material_name', '') or material.get('name', '')
+
+                                if not material_ids or material_name in material_ids:
+                                    material_dict = {
+                                        'id': f"{item_name}_{sub_item_name}_{material_name}",
+                                        'item_name': item_name,
+                                        'sub_item_name': sub_item_name,
+                                        'material_name': material_name,
+                                        'quantity': float(material.get('quantity', 0)),
+                                        'unit': material.get('unit', ''),
+                                        'unit_price': float(material.get('unit_price', 0)),
+                                        'total_price': float(material.get('total_price', 0))
+                                    }
+                                    materials_list.append(material_dict)
+                                    total_cost += material_dict['total_price']
+
+            # Calculate overhead if present
+            # Use calculated total_cost from materials as the base total
+            overhead_percentage = float(assignment.overhead_percentage or 0)
+            base_total = total_cost  # Base total is the sum of all material costs
+            overhead_allocated = (base_total * overhead_percentage / 100) if overhead_percentage > 0 else 0
+            total_cost_with_overhead = base_total + overhead_allocated
+
+            assignment_data = {
+                'assignment_id': assignment.assignment_id,
+                'boq_id': assignment.boq_id,
+                'project_id': assignment.project_id,
+                'status': assignment.status,
+                'assigned_by_name': assignment.assigned_by_name,
+                'assigned_to_buyer_name': assignment.assigned_to_buyer_name,
+                'assignment_date': assignment.assignment_date.isoformat() if assignment.assignment_date else None,
+                'vendor_selection_status': assignment.vendor_selection_status,
+                'selected_vendor_id': assignment.selected_vendor_id,
+                'selected_vendor_name': assignment.selected_vendor_name,
+                'vendor_selected_by_buyer_name': assignment.vendor_selected_by_buyer_name,
+                'vendor_selection_date': assignment.vendor_selection_date.isoformat() if assignment.vendor_selection_date else None,
+                'vendor_approved_by_td_name': assignment.vendor_approved_by_td_name,
+                'vendor_approval_date': assignment.vendor_approval_date.isoformat() if assignment.vendor_approval_date else None,
+                'vendor_rejection_reason': assignment.vendor_rejection_reason,
+                'boq': {
+                    'boq_id': boq.boq_id,
+                    'boq_name': boq.boq_name
+                },
+                'project': {
+                    'project_id': project.project_id,
+                    'project_name': project.project_name,
+                    'client': project.client,
+                    'location': project.location
+                },
+                'materials': materials_list,
+                'total_cost': round(total_cost_with_overhead, 2),
+                'overhead_allocated': round(overhead_allocated, 2),
+                'overhead_percentage': round(overhead_percentage, 2),
+                'base_total': round(base_total, 2),
+                'vendor': vendor_info
+            }
+            assignments_list.append(assignment_data)
+
+        return jsonify({
+            "success": True,
+            "assignments": assignments_list,
+            "count": len(assignments_list)
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching TD SE BOQ vendor requests: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to fetch vendor requests: {str(e)}"}), 500
