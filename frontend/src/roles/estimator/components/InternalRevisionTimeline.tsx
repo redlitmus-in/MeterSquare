@@ -492,12 +492,31 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
   // Calculate total from items using API response values
   const calculateTotalFromSnapshot = (snapshot: any) => {
-    if (!snapshot?.items || snapshot.items.length === 0) return 0;
+    // 🔥 First, check if total_cost is available in the snapshot (this includes discount)
+    if (snapshot?.total_cost !== undefined && snapshot.total_cost !== null && snapshot.total_cost > 0) {
+      return snapshot.total_cost;
+    }
 
-    return snapshot.items.reduce((total: number, item: any) => {
+    // Fallback: Calculate from items if total_cost not available
+    if (!snapshot?.items || snapshot.items.length === 0) {
+      return 0;
+    }
+
+    const subtotal = snapshot.items.reduce((total: number, item: any) => {
       const finalTotalPrice = item.selling_price || item.total_selling_price || 0;
       return total + finalTotalPrice;
     }, 0);
+
+    // 🔥 Apply discount if available
+    const discountAmount = snapshot.discount_amount || 0;
+    const discountPercentage = snapshot.discount_percentage || 0;
+
+    let finalDiscount = discountAmount;
+    if (discountPercentage > 0 && discountAmount === 0) {
+      finalDiscount = (subtotal * discountPercentage) / 100;
+    }
+
+    return subtotal - finalDiscount;
   };
 
   const calculateChange = (current: number, previous: number) => {
@@ -518,6 +537,12 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
   // Calculate Grand Total from snapshot items (for display purposes)
   const calculateGrandTotal = (snapshot: any): number => {
+    // 🔥 First, check if total_cost is available in the snapshot (this includes discount)
+    if (snapshot?.total_cost !== undefined && snapshot.total_cost !== null) {
+      return snapshot.total_cost;
+    }
+
+    // Fallback: Calculate from items
     if (!snapshot?.items || snapshot.items.length === 0) return 0;
 
     const allItems = snapshot.items || [];

@@ -79,12 +79,11 @@ def get_all_internal_revision():
                 for revision in internal_revisions:
                     if revision.action_type != 'ORIGINAL_BOQ' and revision.changes_summary:
                         latest_revision_snapshot = revision.changes_summary
-                        latest_revision_total_cost = revision.changes_summary.get('total_cost', 0)
-                        log.info(f"📊 BOQ {boq.boq_id}: Found latest revision total_cost from field = {latest_revision_total_cost}")
 
-                        # 🔥 If total_cost is 0, try to calculate from items
-                        if latest_revision_total_cost == 0 and latest_revision_snapshot.get('items'):
-                            items = latest_revision_snapshot.get('items', [])
+                        # 🔥 ALWAYS recalculate from items to ensure accuracy (don't trust stored total_cost)
+                        items = latest_revision_snapshot.get('items', [])
+                        if items and len(items) > 0:
+                            log.info(f"📊 BOQ {boq.boq_id}: Recalculating total from items")
                             subtotal = 0
                             for item in items:
                                 item_amount = (item.get('quantity', 0) or 0) * (item.get('rate', 0) or 0)
@@ -95,20 +94,33 @@ def get_all_internal_revision():
                                 subtotal += item_amount
 
                             # Apply discount
-                            discount_percentage = latest_revision_snapshot.get('discount_percentage', 0) or 0
                             discount_amount = latest_revision_snapshot.get('discount_amount', 0) or 0
+                            discount_percentage = latest_revision_snapshot.get('discount_percentage', 0) or 0
 
-                            if discount_percentage > 0:
+                            if discount_percentage > 0 and discount_amount == 0:
                                 discount_amount = (subtotal * discount_percentage) / 100
 
                             latest_revision_total_cost = subtotal - discount_amount
-                            log.info(f"📊 BOQ {boq.boq_id}: Calculated total_cost from items = {latest_revision_total_cost} (subtotal={subtotal}, discount={discount_amount})")
+                            log.info(f"📊 BOQ {boq.boq_id}: Calculated - subtotal={subtotal}, discount={discount_amount}, total={latest_revision_total_cost}")
+                        else:
+                            # No items, use stored total_cost
+                            latest_revision_total_cost = revision.changes_summary.get('total_cost', 0)
+                            log.info(f"📊 BOQ {boq.boq_id}: No items, using stored total_cost = {latest_revision_total_cost}")
 
                         break
 
                 # If no non-original revision found, use boq_details.total_cost
                 if latest_revision_total_cost == 0:
                     latest_revision_total_cost = boq_details.total_cost if boq_details else 0
+                    # 🔥 Check if boq_details has discount that needs to be applied
+                    if boq_details and boq_details.boq_details:
+                        details_discount_amount = boq_details.boq_details.get('discount_amount', 0) or 0
+                        details_discount_percentage = boq_details.boq_details.get('discount_percentage', 0) or 0
+                        if details_discount_percentage > 0 and details_discount_amount == 0:
+                            details_discount_amount = (latest_revision_total_cost * details_discount_percentage) / 100
+                        if details_discount_amount > 0:
+                            latest_revision_total_cost = latest_revision_total_cost - details_discount_amount
+                            log.info(f"📊 BOQ {boq.boq_id}: Applied discount from boq_details: {details_discount_amount}, new total = {latest_revision_total_cost}")
                     log.info(f"📊 BOQ {boq.boq_id}: Using boq_details.total_cost = {latest_revision_total_cost}")
 
             # Build BOQ data with complete information
@@ -179,6 +191,38 @@ def get_internal_revisions(boq_id):
         original_boq = None
 
         for rev in revisions:
+            # 🔥 ALWAYS recalculate from items to ensure accuracy (don't trust stored total_cost)
+            changes_summary = rev.changes_summary.copy() if rev.changes_summary else {}
+
+            if changes_summary:
+                items = changes_summary.get('items', [])
+                if items and len(items) > 0:
+                    # Calculate subtotal from items
+                    log.info(f"📊 Revision {rev.id}: Recalculating total from items")
+                    subtotal = 0
+                    for item in items:
+                        item_amount = (item.get('quantity', 0) or 0) * (item.get('rate', 0) or 0)
+                        # If item rate is 0, calculate from sub_items
+                        if item_amount == 0 and item.get('sub_items'):
+                            for sub_item in item.get('sub_items', []):
+                                item_amount += (sub_item.get('quantity', 0) or 0) * (sub_item.get('rate', 0) or 0)
+                        subtotal += item_amount
+
+                    # Apply discount
+                    discount_amount = changes_summary.get('discount_amount', 0) or 0
+                    discount_percentage = changes_summary.get('discount_percentage', 0) or 0
+
+                    if discount_percentage > 0 and discount_amount == 0:
+                        discount_amount = (subtotal * discount_percentage) / 100
+
+                    # Store corrected values
+                    changes_summary['total_cost_before_discount'] = subtotal
+                    changes_summary['total_cost'] = subtotal - discount_amount
+                    log.info(f"📊 Revision {rev.id}: Calculated - subtotal={subtotal}, discount={discount_amount}, total={changes_summary['total_cost']}")
+                else:
+                    # No items, use existing total_cost
+                    log.info(f"📊 Revision {rev.id}: No items, using stored total_cost")
+
             revision_data = {
                 "id": rev.id,
                 "boq_id": rev.boq_id,
@@ -189,7 +233,7 @@ def get_internal_revisions(boq_id):
                 "actor_user_id": rev.actor_user_id,
                 "status_before": rev.status_before,
                 "status_after": rev.status_after,
-                "changes_summary": rev.changes_summary,
+                "changes_summary": changes_summary,
                 "rejection_reason": rev.rejection_reason,
                 "approval_comments": rev.approval_comments,
                 "created_at": rev.created_at.isoformat() if rev.created_at else None
@@ -198,7 +242,7 @@ def get_internal_revisions(boq_id):
             # 🔥 If this is the Original BOQ (revision 0), store it separately
             if rev.internal_revision_number == 0 and rev.action_type == 'ORIGINAL_BOQ':
                 original_boq = {
-                    "boq_details": rev.changes_summary,
+                    "boq_details": changes_summary,  # 🔥 Use the updated changes_summary with discount applied
                     "internal_revision_number": 0,
                     "action_type": "ORIGINAL_BOQ",
                     "created_at": rev.created_at.isoformat() if rev.created_at else None
@@ -288,16 +332,25 @@ def update_internal_revision_boq(boq_id):
         if existing_internal_revisions_count == 0:
             log.info(f"📝 Creating Original BOQ snapshot (before first edit) for BOQ {boq_id}")
             # Capture the current BOQ state BEFORE any edits
+            # 🔥 Get discount from current BOQ state
+            original_discount_percentage = boq_details.boq_details.get("discount_percentage", 0) if boq_details and boq_details.boq_details else 0
+            original_discount_amount = boq_details.boq_details.get("discount_amount", 0) if boq_details and boq_details.boq_details else 0
+            original_total_cost = boq_details.total_cost if boq_details else 0
+
+            # 🔥 Calculate after-discount total for original BOQ
+            original_total_cost_after_discount = original_total_cost - original_discount_amount
+
             before_changes_snapshot = {
                 "boq_id": boq.boq_id,
                 "boq_name": boq.boq_name,
                 "status": current_status,
                 "revision_number": boq.revision_number,
                 "internal_revision_number": 0,
-                "total_cost": boq_details.total_cost if boq_details else 0,
+                "total_cost": original_total_cost_after_discount,  # 🔥 Store grand total AFTER discount
+                "total_cost_before_discount": original_total_cost,  # Store before-discount for reference
                 # 🔥 Capture overall discount at BOQ level
-                "discount_percentage": boq_details.boq_details.get("discount_percentage", 0) if boq_details and boq_details.boq_details else 0,
-                "discount_amount": boq_details.boq_details.get("discount_amount", 0) if boq_details and boq_details.boq_details else 0,
+                "discount_percentage": original_discount_percentage,
+                "discount_amount": original_discount_amount,
                 "items": boq_details.boq_details.get("items", []) if boq_details and boq_details.boq_details else [],
                 "preliminaries": boq_details.boq_details.get("preliminaries", {}) if boq_details and boq_details.boq_details else {},
                 "combined_summary": boq_details.boq_details.get("combined_summary", {}) if boq_details and boq_details.boq_details else {},
@@ -325,13 +378,17 @@ def update_internal_revision_boq(boq_id):
         boq.has_internal_revisions = True
 
         # Create complete BOQ snapshot with incoming data AS-IS
+        # 🔥 Calculate total_cost AFTER discount for display purposes
+        total_cost_after_discount = total_boq_cost - discount_amount
+
         complete_boq_snapshot = {
             "boq_id": boq.boq_id,
             "boq_name": data.get("boq_name", boq.boq_name),
             "status": boq.status,
             "revision_number": boq.revision_number,
             "internal_revision_number": new_internal_rev,
-            "total_cost": total_boq_cost,
+            "total_cost": total_cost_after_discount,  # 🔥 Store grand total AFTER discount
+            "total_cost_before_discount": total_boq_cost,  # Store before-discount for reference
             "total_items": total_items,
             "total_materials": total_materials,
             "total_labour": total_labour,
