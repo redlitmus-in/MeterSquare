@@ -3288,7 +3288,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   Download Template
                 </button>
               )}
-              {!hideBulkUpload && (
+              {!hideBulkUpload && !hideTemplate && (
                 <button
                   type="button"
                   onClick={handleImportTemplate}

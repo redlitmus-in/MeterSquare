@@ -1956,29 +1956,6 @@ const ProjectApprovals: React.FC = () => {
                   />
                 </div>
 
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                  <h3 className="text-sm font-semibold text-blue-900 mb-2">Project Summary:</h3>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <span className="text-gray-600">Total Value:</span>
-                      <span className="font-semibold ml-1">AED{formatCurrency(
-                        selectedEstimation.materialCost +
-                        selectedEstimation.laborCost +
-                        ((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.overheadPercentage / 100) +
-                        ((selectedEstimation.materialCost + selectedEstimation.laborCost) * selectedEstimation.profitMargin / 100)
-                      )}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Profit Margin:</span>
-                      <span className="font-semibold ml-1">{selectedEstimation.profitMargin}%</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Overhead:</span>
-                      <span className="font-semibold ml-1">{selectedEstimation.overheadPercentage}%</span>
-                    </div>
-                  </div>
-                </div>
-
                 <div className="flex items-center gap-3 justify-end">
                   <button
                     onClick={() => {

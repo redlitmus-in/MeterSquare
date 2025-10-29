@@ -90,7 +90,7 @@ class ModernBOQPDFGenerator:
         elements.extend(self._internal_items_table(items, boq_json))
 
         # Cost summary
-        elements.extend(self._internal_summary(items, total_material_cost, total_labour_cost))
+        elements.extend(self._internal_summary(items, total_material_cost, total_labour_cost, boq_json))
 
         # Terms
         elements.extend(self._client_terms())
@@ -719,7 +719,7 @@ class ModernBOQPDFGenerator:
             summary_data.append(['After Discount:', f'{after_discount:,.2f} AED'])
 
         # Grand Total (no VAT row - VAT not used)
-        summary_data.append(['Grand Total:', f'{grand_total_calc:,.2f} AED'])
+        summary_data.append(['Grand Total (Excluding VAT):', f'{grand_total_calc:,.2f} AED'])
 
         summary_table = Table(summary_data, colWidths=[5*inch, 1.5*inch])
 
@@ -745,7 +745,7 @@ class ModernBOQPDFGenerator:
 
         return elements
 
-    def _internal_summary(self, items, total_material_cost, total_labour_cost):
+    def _internal_summary(self, items, total_material_cost, total_labour_cost, boq_json=None):
         """Internal cost analysis"""
         elements = []
         elements.append(Spacer(1, 10))
@@ -779,20 +779,49 @@ class ModernBOQPDFGenerator:
                     total_overhead += sub_client * (overhead_pct / 100)
                     total_transport += sub_client * (transport_pct / 100)
 
+        # Get discount from BOQ JSON (same as client PDF)
+        discount_amount = 0
+        discount_percentage = 0
+
+        if boq_json:
+            discount_amount = boq_json.get('discount_amount', 0)
+            discount_percentage = boq_json.get('discount_percentage', 0)
+
+        # Fallback: try from first item
+        if discount_amount == 0 and discount_percentage == 0 and items:
+            first_item = items[0]
+            discount_percentage = first_item.get('discount_percentage', 0)
+
+        # Calculate discount from client amount if percentage exists
+        if discount_percentage > 0 and discount_amount == 0:
+            discount_amount = client_amount * (discount_percentage / 100)
+
         # Internal cost = Materials + Labour + Misc + O&P + Transport (as per BOQDetailsModal line 757)
         internal_cost = total_material_cost + total_labour_cost + total_misc + total_overhead + total_transport
 
         # Actual profit = client - internal (as per BOQDetailsModal line 758)
         actual_profit = client_amount - internal_cost
 
+        # Client amount after discount
+        client_amount_after_discount = client_amount - discount_amount
+
         summary_data = [
-            ['Client Amount:', f'{client_amount:,.2f} AED'],
+            ['Client Amount (Excluding VAT):', f'{client_amount:,.2f} AED'],
+        ]
+
+        # Add discount if exists
+        if discount_amount > 0:
+            summary_data.append(['Discount ({:.1f}%):'.format(discount_percentage), f'- {discount_amount:,.2f} AED'])
+            summary_data.append(['Client Amount After Discount (Excluding VAT):', f'{client_amount_after_discount:,.2f} AED'])
+
+        summary_data.extend([
+            ['', ''],
             ['Internal Costs:', ''],
             ['  - Materials:', f'{total_material_cost:,.2f} AED'],
             ['  - Labour:', f'{total_labour_cost:,.2f} AED'],
             ['  - Misc:', f'{total_misc:,.2f} AED'],
             ['  - O&P:', f'{total_overhead:,.2f} AED'],
-        ]
+        ])
 
         # Add transport row if exists
         if total_transport > 0:
@@ -804,8 +833,17 @@ class ModernBOQPDFGenerator:
             ['', ''],
             [Paragraph('<b>Profit Analysis:</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold')), ''],
             ['Planned Profit:', f'{total_overhead:,.2f} AED'],
-            ['Actual Profit:', f'{actual_profit:,.2f} AED'],
+            ['Actual Profit (Before Discount):', f'{actual_profit:,.2f} AED'],
         ])
+
+        # Add actual profit after discount if discount exists
+        if discount_amount > 0:
+            actual_profit_after_discount = client_amount_after_discount - internal_cost
+            summary_data.append(['Actual Profit (After Discount):', f'{actual_profit_after_discount:,.2f} AED'])
+
+        summary_data.append(['', ''])
+        summary_data.append([Paragraph('<b>Project Margin:</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold')),
+                            Paragraph(f'<b>{((actual_profit / client_amount * 100) if client_amount > 0 else 0):.2f}%</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold'))])
 
         summary_table = Table(summary_data, colWidths=[5*inch, 1.5*inch])
         profit_color = colors.HexColor('#00AA00') if actual_profit >= total_overhead else colors.HexColor('#CC0000')

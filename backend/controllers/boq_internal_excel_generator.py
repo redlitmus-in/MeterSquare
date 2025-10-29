@@ -420,6 +420,26 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
                 total_overhead += sub_client * (overhead_pct / 100)
                 total_transport += sub_client * (transport_pct / 100)
 
+    # Get discount from BOQ JSON (same as PDF)
+    discount_amount = 0
+    discount_percentage = 0
+
+    if boq_json:
+        discount_amount = boq_json.get('discount_amount', 0)
+        discount_percentage = boq_json.get('discount_percentage', 0)
+
+    # Fallback: try from first item
+    if discount_amount == 0 and discount_percentage == 0 and items:
+        first_item = items[0]
+        discount_percentage = first_item.get('discount_percentage', 0)
+
+    # Calculate discount from client amount if percentage exists
+    if discount_percentage > 0 and discount_amount == 0:
+        discount_amount = client_amount_total * (discount_percentage / 100)
+
+    # Client amount after discount
+    client_amount_after_discount = client_amount_total - discount_amount
+
     # Internal cost = Materials + Labour + Misc + O&P + Transport
     internal_cost_total = total_material_cost + total_labour_cost + total_misc + total_overhead + total_transport
 
@@ -428,14 +448,22 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
 
     # Summary data
     summary_items = [
-        ("Client Amount:", client_amount_total, bold_font),
+        ("Client Amount (Excluding VAT):", client_amount_total, bold_font),
+    ]
+
+    # Add discount if exists
+    if discount_amount > 0:
+        summary_items.append((f"Discount ({discount_percentage:.1f}%):", discount_amount, Font(bold=True, color="EF4444")))
+        summary_items.append(("Client Amount After Discount (Excluding VAT):", client_amount_after_discount, bold_font))
+
+    summary_items.extend([
         ("", 0, normal_font),  # Blank row
         ("Internal Costs:", 0, bold_font),
         ("  - Materials:", total_material_cost, normal_font),
         ("  - Labour:", total_labour_cost, normal_font),
         ("  - Misc:", total_misc, normal_font),
         ("  - O&P:", total_overhead, normal_font),
-    ]
+    ])
 
     if total_transport > 0:
         summary_items.append(("  - Transport:", total_transport, normal_font))
@@ -445,7 +473,17 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
         ("", 0, normal_font),  # Blank row
         ("Profit Analysis:", 0, bold_font),
         ("Planned Profit:", total_overhead, Font(bold=True, color="10B981")),
-        ("Actual Profit:", actual_profit_total, Font(bold=True, color="10B981" if actual_profit_total >= total_overhead else "EF4444")),
+        ("Actual Profit (Before Discount):", actual_profit_total, Font(bold=True, color="10B981" if actual_profit_total >= total_overhead else "EF4444")),
+    ])
+
+    # Add actual profit after discount if discount exists
+    if discount_amount > 0:
+        actual_profit_after_discount = client_amount_after_discount - internal_cost_total
+        summary_items.append(("Actual Profit (After Discount):", actual_profit_after_discount, Font(bold=True, color="10B981" if actual_profit_after_discount >= total_overhead else "EF4444")))
+
+    summary_items.extend([
+        ("", 0, normal_font),  # Blank row
+        ("Project Margin:", (actual_profit_total / client_amount_total * 100) if client_amount_total > 0 else 0, Font(bold=True, size=11)),
     ])
 
     for label, value, font_style in summary_items:
@@ -453,12 +491,27 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
             ws.cell(row=row, column=5).value = label
             ws.cell(row=row, column=5).font = font_style
             ws.cell(row=row, column=5).alignment = Alignment(horizontal='left')
-            if value > 0 or "Analysis" in label or "Costs" in label:
-                ws.cell(row=row, column=6).value = round(value, 2) if value > 0 else ""
+
+            # Show value if it's non-zero or if it's a section header
+            if value != 0 or "Analysis" in label or "Costs" in label:
                 ws.cell(row=row, column=6).font = font_style
                 ws.cell(row=row, column=6).alignment = Alignment(horizontal='right')
-                if value > 0:
+
+                # Handle different value types
+                if "Margin" in label:
+                    # Project Margin is a percentage
+                    ws.cell(row=row, column=6).value = round(value, 2)
+                    ws.cell(row=row, column=6).number_format = '0.00"%"'
+                elif "Discount" in label:
+                    # Discount should be negative
+                    ws.cell(row=row, column=6).value = -round(value, 2)
                     ws.cell(row=row, column=6).number_format = '#,##0.00'
+                elif value != 0:
+                    # All other values
+                    ws.cell(row=row, column=6).value = round(value, 2)
+                    ws.cell(row=row, column=6).number_format = '#,##0.00'
+                else:
+                    ws.cell(row=row, column=6).value = ""
             row += 1
 
     # Column widths

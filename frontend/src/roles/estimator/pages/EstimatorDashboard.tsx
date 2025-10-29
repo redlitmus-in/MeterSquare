@@ -552,6 +552,7 @@ const EstimatorDashboard: React.FC = () => {
         isOpen={isCreatingBoq}
         onClose={() => setIsCreatingBoq(false)}
         onSubmit={handleBOQCreated}
+        hideTemplate={true}
       />
 
       {/* BOQ Details Modal */}

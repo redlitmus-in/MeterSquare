@@ -591,15 +591,8 @@ const EstimatorHub: React.FC = () => {
         });
       } else if (activeTab === 'approved') {
         // Approved: PM approved, TD approved (includes all stages after approvals until PM assignment)
-        // EXCLUDE projects with revision_number > 0 (those stay in Revisions tab)
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
-          const revisionNumber = boq.revision_number || 0;
-
-          // If this BOQ has gone through revisions, it belongs in Revisions tab, not here
-          if (revisionNumber > 0) {
-            return false;
-          }
 
           // Show if PM approved, pending TD approval, TD approved, sent to client, or client confirmed (but not yet PM assigned/completed)
           return (status === 'pm_approved' || status === 'pending_td_approval' || status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed') && !boq.pm_assigned;
@@ -1332,8 +1325,8 @@ const EstimatorHub: React.FC = () => {
             <span className="sm:hidden">View</span>
           </button>
 
-          {/* Show Compare button only if revision number > 0 */}
-          {revisionNumber > 0 && (
+          {/* Show Compare button only if revision number > 0 and not in approved/client statuses */}
+          {revisionNumber > 0 && !isApprovedByTD && !isSentToClient && !isClientConfirmed && (
             <button
               className="text-blue-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm font-semibold"
               onClick={() => {
@@ -3562,6 +3555,7 @@ const EstimatorHub: React.FC = () => {
         }}
         onSubmit={handleBOQCreated}
         selectedProject={selectedProjectForBOQ}
+        hideTemplate={true}
       />
 
       {/* BOQ Details Modal */}

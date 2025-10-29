@@ -593,34 +593,26 @@ class BOQEmailService:
                 <div class="info-box">
                     <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
                     <p><span class="label">Location:</span> <span class="value">{location}</span></p>
-                    <p><span class="label">Total Items:</span> <span class="value">{item_count}</span></p>
                 </div>
 
                 <!-- Cost Summary -->
-                <div class="total-cost" style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-left: 4px solid #3b82f6;">
-                    <span class="label">Total Project Value:</span>
+                <div class="total-cost" style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-left: 4px solid #3b82f6; margin: 15px 0;">
+                    <span class="label">Total Project Value (Excluding VAT):</span>
                     <span class="amount" style="color: #1e40af;">AED {total_value:,.2f}</span>
                 </div>
 
-                <div class="divider"></div>
-
                 <!-- Attachments Info -->
-                <div class="alert" style="background-color: #dbeafe; border-left: 4px solid #3b82f6;">
+                <div class="alert" style="background-color: #dbeafe; border-left: 4px solid #3b82f6; margin: 15px 0;">
                     <strong>Attached Documents:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>BOQ Excel File (Detailed Breakdown with all materials and labor costs)</li>
-                    </ul>
-                    <p style="margin: 10px 0 0 0; color: #1e40af; font-size: 14px;">
+                    <p style="margin: 8px 0 0 0; color: #1e40af; font-size: 14px;">
                         Please review the attached Excel document for complete project details including materials, labor, and pricing breakdown.
                     </p>
                 </div>
 
-                <div class="divider"></div>
-
                 <!-- Action Required -->
-                <div class="alert alert-info">
+                <div class="alert alert-info" style="margin: 15px 0;">
                     <strong>Next Steps:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
+                    <ul style="margin: 8px 0; padding-left: 20px; line-height: 1.6;">
                         <li>Review the attached BOQ documents carefully</li>
                         <li>Verify all items and quantities match your requirements</li>
                         <li>Contact us if you have any questions or need clarifications</li>

@@ -314,13 +314,10 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
                 cell.border = thin_border
             row += 1
 
-            # Sub-items data
-            item_total = 0
-            item_misc = item.get('miscellaneous_amount', 0)
-            item_overhead = item.get('overhead_amount', 0)
-            item_profit = item.get('profit_margin_amount', 0)
-            item_base_cost = sum([si.get('materials_cost', 0) + si.get('labour_cost', 0) for si in sub_items])
+            # Calculate item total from sub-items (clean calculation)
+            item_total_calculated = 0
 
+            # Sub-items data (CLEAN CLIENT VIEW - just qty × rate)
             for sub_item in sub_items:
                 sub_item_name = sub_item.get('sub_item_name', 'N/A')
                 scope = sub_item.get('scope', '')
@@ -340,23 +337,16 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
                     scope_parts.append(f"Brand: {brand}")
                 scope_size = " | ".join(scope_parts) if scope_parts else '-'
 
+                # CLIENT VIEW: Simple qty × rate (same as PDF)
                 quantity = sub_item.get('quantity', 0)
                 unit = sub_item.get('unit', 'nos')
+                rate = sub_item.get('rate', 0)
+                sub_item_total = quantity * rate
 
-                # Calculate sub-item total with distributed misc/overhead/profit
-                materials_cost = sub_item.get('materials_cost', 0)
-                labour_cost = sub_item.get('labour_cost', 0)
-                sub_item_base = materials_cost + labour_cost
+                # Accumulate for item total
+                item_total_calculated += sub_item_total
 
-                if item_base_cost > 0:
-                    sub_item_markup = (sub_item_base / item_base_cost) * (item_misc + item_overhead + item_profit)
-                else:
-                    sub_item_markup = 0
-
-                sub_item_total = sub_item_base + sub_item_markup
-                adjusted_rate = sub_item_total / quantity if quantity > 0 else 0
-
-                # Write row
+                # Write row (same as client PDF structure)
                 ws.cell(row=row, column=1).value = sub_item_name
                 ws.cell(row=row, column=1).alignment = Alignment(horizontal='left', vertical='center')
                 ws.cell(row=row, column=2).value = scope_size
@@ -365,7 +355,7 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
                 ws.cell(row=row, column=3).alignment = Alignment(horizontal='center', vertical='center')
                 ws.cell(row=row, column=4).value = unit
                 ws.cell(row=row, column=4).alignment = Alignment(horizontal='center', vertical='center')
-                ws.cell(row=row, column=5).value = round(adjusted_rate, 2)
+                ws.cell(row=row, column=5).value = round(rate, 2)
                 ws.cell(row=row, column=5).alignment = Alignment(horizontal='right', vertical='center')
                 ws.cell(row=row, column=5).number_format = '#,##0.00'
                 ws.cell(row=row, column=6).value = round(sub_item_total, 2)
@@ -376,7 +366,6 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
                     ws.cell(row=row, column=col).border = thin_border
                     ws.cell(row=row, column=col).font = normal_font
 
-                item_total += sub_item_total
                 row += 1
 
         else:
@@ -395,7 +384,9 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
         ws[f'A{row}'] = "Item Total:"
         ws[f'A{row}'].font = Font(bold=True, size=11, color="10B981")
         ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'] = round(item.get('selling_price', 0), 2)
+        # Use calculated total if has sub-items, otherwise use old field
+        item_total_value = item_total_calculated if (item.get('has_sub_items', False) and item.get('sub_items', [])) else item.get('selling_price', 0)
+        ws[f'F{row}'] = round(item_total_value, 2)
         ws[f'F{row}'].font = Font(bold=True, size=11, color="10B981")
         ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
         ws[f'F{row}'].number_format = '#,##0.00'
@@ -485,7 +476,7 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
 
     # Grand Total
     ws.merge_cells(f'A{row}:E{row}')
-    ws[f'A{row}'] = "TOTAL PROJECT VALUE:"
+    ws[f'A{row}'] = "TOTAL PROJECT VALUE (Excluding VAT):"
     ws[f'A{row}'].font = Font(bold=True, size=12, color="FFFFFF")
     ws[f'A{row}'].fill = green_fill
     ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
