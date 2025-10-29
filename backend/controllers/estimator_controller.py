@@ -374,7 +374,7 @@ def send_boq_to_project_manager():
         items_summary['items'] = items
 
         # Initialize email service
-        boq_email_service = BOQEmailService()
+        # boq_email_service = BOQEmailService()
 
         # Prepare projects data for PM assignment notification
         projects_data = [{
@@ -389,124 +389,124 @@ def send_boq_to_project_manager():
         }]
 
         # Send email to the SPECIFIC Project Manager using existing method
-        email_sent = boq_email_service.send_pm_assignment_notification(
-            pm.email, pm.full_name, current_user_name, projects_data
-        )
+        # email_sent = boq_email_service.send_pm_assignment_notification(
+        #     pm.email, pm.full_name, current_user_name, projects_data
+        # )
 
-        if email_sent:
+        # if email_sent:
             # Update BOQ status to indicate it's sent to PM for approval (NOT assignment)
-            boq.status = 'Pending_PM_Approval'
-            boq.last_modified_by = current_user_name
-            boq.last_modified_at = datetime.utcnow()
-            boq.email_sent = True
+        boq.status = 'Pending_PM_Approval'
+        boq.last_modified_by = current_user_name
+        boq.last_modified_at = datetime.utcnow()
+        boq.email_sent = True
 
-            # NOTE: PM is NOT assigned to project here - only after client approval and TD assignment
+        # NOTE: PM is NOT assigned to project here - only after client approval and TD assignment
 
-            # Check if history entry already exists for this BOQ
-            existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+        # Check if history entry already exists for this BOQ
+        existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
 
-            # Prepare action data
-            new_action = {
-                "role": current_user_role,
-                "type": "sent_to_pm",
-                "sender": current_user_name,
-                "receiver": pm.full_name,
-                "sender_role": current_user_role,
-                "receiver_role": "project_manager",
-                "status": boq.status,
-                "comments": f"BOQ sent to Project Manager {pm.full_name}",
-                "timestamp": datetime.utcnow().isoformat(),
-                "decided_by": current_user_name,
-                "decided_by_user_id": current_user_id,
-                "recipient_email": pm.email,
-                "recipient_name": pm.full_name,
-                "recipient_user_id": pm_id,
-                "boq_name": boq.boq_name,
-                "project_name": project_data.get("project_name")
-            }
+        # Prepare action data
+        new_action = {
+            "role": current_user_role,
+            "type": "sent_to_pm",
+            "sender": current_user_name,
+            "receiver": pm.full_name,
+            "sender_role": current_user_role,
+            "receiver_role": "project_manager",
+            "status": boq.status,
+            "comments": f"BOQ sent to Project Manager {pm.full_name}",
+            "timestamp": datetime.utcnow().isoformat(),
+            "decided_by": current_user_name,
+            "decided_by_user_id": current_user_id,
+            "recipient_email": pm.email,
+            "recipient_name": pm.full_name,
+            "recipient_user_id": pm_id,
+            "boq_name": boq.boq_name,
+            "project_name": project_data.get("project_name")
+        }
 
-            if existing_history:
-                # Handle existing actions - ensure it's always a list
-                if existing_history.action is None:
-                    current_actions = []
-                elif isinstance(existing_history.action, list):
-                    current_actions = existing_history.action
-                elif isinstance(existing_history.action, dict):
-                    current_actions = [existing_history.action]
-                else:
-                    current_actions = []
-
-                # Check if similar action already exists
-                action_exists = False
-                for existing_action in current_actions:
-                    if (existing_action.get('type') == new_action['type'] and
-                        existing_action.get('sender') == new_action['sender'] and
-                        existing_action.get('receiver') == new_action['receiver']):
-                        existing_ts = existing_action.get('timestamp', '')
-                        new_ts = new_action['timestamp']
-                        if existing_ts and new_ts:
-                            try:
-                                existing_dt = datetime.fromisoformat(existing_ts)
-                                new_dt = datetime.fromisoformat(new_ts)
-                                if abs((new_dt - existing_dt).total_seconds()) < 60:
-                                    action_exists = True
-                                    break
-                            except:
-                                pass
-
-                if not action_exists:
-                    current_actions.append(new_action)
-                    existing_history.action = current_actions
-                    from sqlalchemy.orm.attributes import flag_modified
-                    flag_modified(existing_history, "action")
-
-                existing_history.action_by = current_user_name
-                existing_history.boq_status = boq.status
-                existing_history.sender = current_user_name
-                existing_history.receiver = pm.full_name
-                existing_history.comments = f"BOQ sent to Project Manager {pm.full_name}"
-                existing_history.sender_role = current_user_role
-                existing_history.receiver_role = 'project_manager'
-                existing_history.action_date = datetime.utcnow()
-                existing_history.last_modified_by = current_user_name
-                existing_history.last_modified_at = datetime.utcnow()
+        if existing_history:
+            # Handle existing actions - ensure it's always a list
+            if existing_history.action is None:
+                current_actions = []
+            elif isinstance(existing_history.action, list):
+                current_actions = existing_history.action
+            elif isinstance(existing_history.action, dict):
+                current_actions = [existing_history.action]
             else:
-                # Create new history entry
-                boq_history = BOQHistory(
-                    boq_id=boq_id,
-                    action=[new_action],
-                    action_by=current_user_name,
-                    boq_status=boq.status,
-                    sender=current_user_name,
-                    receiver=pm.full_name,
-                    comments=f"BOQ sent to Project Manager {pm.full_name}",
-                    sender_role=current_user_role,
-                    receiver_role='project_manager',
-                    action_date=datetime.utcnow(),
-                    created_by=current_user_name
-                )
-                db.session.add(boq_history)
+                current_actions = []
 
-            db.session.commit()
+            # Check if similar action already exists
+            action_exists = False
+            for existing_action in current_actions:
+                if (existing_action.get('type') == new_action['type'] and
+                    existing_action.get('sender') == new_action['sender'] and
+                    existing_action.get('receiver') == new_action['receiver']):
+                    existing_ts = existing_action.get('timestamp', '')
+                    new_ts = new_action['timestamp']
+                    if existing_ts and new_ts:
+                        try:
+                            existing_dt = datetime.fromisoformat(existing_ts)
+                            new_dt = datetime.fromisoformat(new_ts)
+                            if abs((new_dt - existing_dt).total_seconds()) < 60:
+                                action_exists = True
+                                break
+                        except:
+                            pass
 
-            return jsonify({
-                "success": True,
-                "message": f"BOQ sent successfully to Project Manager {pm.full_name}",
-                "boq_id": boq_id,
-                "project_manager": {
-                    "id": pm_id,
-                    "name": pm.full_name,
-                    "email": pm.email
-                },
-                "status": boq.status
-            }), 200
+            if not action_exists:
+                current_actions.append(new_action)
+                existing_history.action = current_actions
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(existing_history, "action")
+
+            existing_history.action_by = current_user_name
+            existing_history.boq_status = boq.status
+            existing_history.sender = current_user_name
+            existing_history.receiver = pm.full_name
+            existing_history.comments = f"BOQ sent to Project Manager {pm.full_name}"
+            existing_history.sender_role = current_user_role
+            existing_history.receiver_role = 'project_manager'
+            existing_history.action_date = datetime.utcnow()
+            existing_history.last_modified_by = current_user_name
+            existing_history.last_modified_at = datetime.utcnow()
         else:
-            return jsonify({
-                "success": False,
-                "message": "Failed to send BOQ email to Project Manager",
-                "boq_id": boq_id,
-                "error": "Email service failed"
-            }), 500
+            # Create new history entry
+            boq_history = BOQHistory(
+                boq_id=boq_id,
+                action=[new_action],
+                action_by=current_user_name,
+                boq_status=boq.status,
+                sender=current_user_name,
+                receiver=pm.full_name,
+                comments=f"BOQ sent to Project Manager {pm.full_name}",
+                sender_role=current_user_role,
+                receiver_role='project_manager',
+                action_date=datetime.utcnow(),
+                created_by=current_user_name
+            )
+            db.session.add(boq_history)
+
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "message": f"BOQ sent successfully to Project Manager {pm.full_name}",
+            "boq_id": boq_id,
+            "project_manager": {
+                "id": pm_id,
+                "name": pm.full_name,
+                "email": pm.email
+            },
+            "status": boq.status
+        }), 200
+        # else:
+        #     return jsonify({
+        #         "success": False,
+        #         "message": "Failed to send BOQ email to Project Manager",
+        #         "boq_id": boq_id,
+        #         "error": "Email service failed"
+        #     }), 500
 
     except Exception as e:
         db.session.rollback()

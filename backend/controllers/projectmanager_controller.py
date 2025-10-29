@@ -611,25 +611,25 @@ def assign_projects():
 
         # Send email notification to Project Manager
         email_sent = False
-        if user.email and projects_data_for_email:
-            try:
-                email_service = BOQEmailService()
-                email_sent = email_service.send_pm_assignment_notification(
-                    pm_email=user.email,
-                    pm_name=user.full_name,
-                    td_name=td_name,
-                    projects_data=projects_data_for_email
-                )
+        # if user.email and projects_data_for_email:
+            # try:
+            #     email_service = BOQEmailService()
+            #     email_sent = email_service.send_pm_assignment_notification(
+            #         pm_email=user.email,
+            #         pm_name=user.full_name,
+            #         td_name=td_name,
+            #         projects_data=projects_data_for_email
+            #     )
 
-                if email_sent:
-                    log.info(f"Assignment notification email sent successfully to {user.email}")
-                else:
-                    log.warning(f"Failed to send assignment notification email to {user.email}")
-            except Exception as email_error:
-                log.error(f"Error sending assignment notification email: {email_error}")
-                # Don't fail the entire request if email fails
-                import traceback
-                log.error(f"Email error traceback: {traceback.format_exc()}")
+            #     if email_sent:
+            #         log.info(f"Assignment notification email sent successfully to {user.email}")
+            #     else:
+            #         log.warning(f"Failed to send assignment notification email to {user.email}")
+            # except Exception as email_error:
+            #     log.error(f"Error sending assignment notification email: {email_error}")
+            #     # Don't fail the entire request if email fails
+            #     import traceback
+            #     log.error(f"Email error traceback: {traceback.format_exc()}")
 
         return jsonify({
             "success": True,
@@ -732,111 +732,111 @@ def send_boq_to_estimator():
         }]
 
         # Fallback: use existing email function (assuming it's general-purpose)
-        email_sent = boq_email_service.send_pm_assignment_notification(
-            estimator.email, estimator.full_name, current_user_name, projects_data
-        )
+        # email_sent = boq_email_service.send_pm_assignment_notification(
+        #     estimator.email, estimator.full_name, current_user_name, projects_data
+        # )
 
-        if email_sent:
+        # if email_sent:
             # If PM approves, set to PM_Approved so estimator can send to TD
             # If PM rejects, set to rejected
-            if boq_status == 'approved':
-                boq.status = 'PM_Approved'
-            else:
-                boq.status = 'PM_Rejected'
-            boq.last_modified_by = current_user_name
-            boq.last_modified_at = datetime.utcnow()
-            boq.email_sent = True
-
-            # Add to BOQ history
-            existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
-
-            new_action = {
-                "role": current_user_role,
-                "type": "sent_to_estimator",
-                "sender": current_user_name,
-                "receiver": estimator.full_name,
-                "sender_role": current_user_role,
-                "receiver_role": "estimator",
-                "status": boq.status,
-                "comments": comments or f"BOQ {boq_status} and sent to Estimator {estimator.full_name}",
-                "rejection_reason": rejection_reason if boq_status == 'rejected' else '',
-                "timestamp": datetime.utcnow().isoformat(),
-                "decided_by": current_user_name,
-                "decided_by_user_id": current_user_id,
-                "recipient_email": estimator.email,
-                "recipient_name": estimator.full_name,
-                "recipient_user_id": estimator.user_id,
-                "boq_name": boq.boq_name,
-                "project_name": project.project_name
-            }
-
-            if existing_history:
-                current_actions = []
-                if isinstance(existing_history.action, list):
-                    current_actions = existing_history.action
-                elif isinstance(existing_history.action, dict):
-                    current_actions = [existing_history.action]
-
-                action_exists = any(
-                    a.get('type') == new_action['type'] and
-                    a.get('sender') == new_action['sender'] and
-                    a.get('receiver') == new_action['receiver']
-                    for a in current_actions
-                )
-
-                if not action_exists:
-                    current_actions.append(new_action)
-                    existing_history.action = current_actions
-                    from sqlalchemy.orm.attributes import flag_modified
-                    flag_modified(existing_history, "action")
-
-                existing_history.action_by = current_user_name
-                existing_history.boq_status = boq.status
-                existing_history.sender = current_user_name
-                existing_history.receiver = estimator.full_name
-                existing_history.comments = new_action["comments"]
-                existing_history.sender_role = current_user_role
-                existing_history.receiver_role = 'estimator'
-                existing_history.action_date = datetime.utcnow()
-                existing_history.last_modified_by = current_user_name
-                existing_history.last_modified_at = datetime.utcnow()
-            else:
-                boq_history = BOQHistory(
-                    boq_id=boq_id,
-                    action=[new_action],
-                    action_by=current_user_name,
-                    boq_status=boq.status,
-                    sender=current_user_name,
-                    receiver=estimator.full_name,
-                    comments=new_action["comments"],
-                    sender_role=current_user_role,
-                    receiver_role='estimator',
-                    action_date=datetime.utcnow(),
-                    created_by=current_user_name
-                )
-                db.session.add(boq_history)
-
-            db.session.commit()
-
-            return jsonify({
-                "success": True,
-                "message": f"BOQ {boq_status} and sent to Estimator {estimator.full_name}",
-                "boq_id": boq_id,
-                "estimator": {
-                    "id": estimator.user_id,
-                    "name": estimator.full_name,
-                    "email": estimator.email
-                },
-                "status": boq.status
-            }), 200
-
+        if boq_status == 'approved':
+            boq.status = 'PM_Approved'
         else:
-            return jsonify({
-                "success": False,
-                "message": "Failed to send BOQ email to Estimator",
-                "boq_id": boq_id,
-                "error": "Email service failed"
-            }), 500
+            boq.status = 'PM_Rejected'
+        boq.last_modified_by = current_user_name
+        boq.last_modified_at = datetime.utcnow()
+        boq.email_sent = True
+
+        # Add to BOQ history
+        existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        new_action = {
+            "role": current_user_role,
+            "type": "sent_to_estimator",
+            "sender": current_user_name,
+            "receiver": estimator.full_name,
+            "sender_role": current_user_role,
+            "receiver_role": "estimator",
+            "status": boq.status,
+            "comments": comments or f"BOQ {boq_status} and sent to Estimator {estimator.full_name}",
+            "rejection_reason": rejection_reason if boq_status == 'rejected' else '',
+            "timestamp": datetime.utcnow().isoformat(),
+            "decided_by": current_user_name,
+            "decided_by_user_id": current_user_id,
+            "recipient_email": estimator.email,
+            "recipient_name": estimator.full_name,
+            "recipient_user_id": estimator.user_id,
+            "boq_name": boq.boq_name,
+            "project_name": project.project_name
+        }
+
+        if existing_history:
+            current_actions = []
+            if isinstance(existing_history.action, list):
+                current_actions = existing_history.action
+            elif isinstance(existing_history.action, dict):
+                current_actions = [existing_history.action]
+
+            action_exists = any(
+                a.get('type') == new_action['type'] and
+                a.get('sender') == new_action['sender'] and
+                a.get('receiver') == new_action['receiver']
+                for a in current_actions
+            )
+
+            if not action_exists:
+                current_actions.append(new_action)
+                existing_history.action = current_actions
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(existing_history, "action")
+
+            existing_history.action_by = current_user_name
+            existing_history.boq_status = boq.status
+            existing_history.sender = current_user_name
+            existing_history.receiver = estimator.full_name
+            existing_history.comments = new_action["comments"]
+            existing_history.sender_role = current_user_role
+            existing_history.receiver_role = 'estimator'
+            existing_history.action_date = datetime.utcnow()
+            existing_history.last_modified_by = current_user_name
+            existing_history.last_modified_at = datetime.utcnow()
+        else:
+            boq_history = BOQHistory(
+                boq_id=boq_id,
+                action=[new_action],
+                action_by=current_user_name,
+                boq_status=boq.status,
+                sender=current_user_name,
+                receiver=estimator.full_name,
+                comments=new_action["comments"],
+                sender_role=current_user_role,
+                receiver_role='estimator',
+                action_date=datetime.utcnow(),
+                created_by=current_user_name
+            )
+            db.session.add(boq_history)
+
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "message": f"BOQ {boq_status} and sent to Estimator {estimator.full_name}",
+            "boq_id": boq_id,
+            "estimator": {
+                "id": estimator.user_id,
+                "name": estimator.full_name,
+                "email": estimator.email
+            },
+            "status": boq.status
+        }), 200
+
+        # else:
+        #     return jsonify({
+        #         "success": False,
+        #         "message": "Failed to send BOQ email to Estimator",
+        #         "boq_id": boq_id,
+        #         "error": "Email service failed"
+        #     }), 500
 
     except Exception as e:
         db.session.rollback()

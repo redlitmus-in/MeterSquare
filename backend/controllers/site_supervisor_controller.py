@@ -593,26 +593,26 @@ def assign_projects_sitesupervisor():
         log.info(f"Successfully assigned Site Engineer to {len(assigned_projects)} projects and updated {boq_histories_updated} BOQ histories")
 
         # Send email notification to Site Engineer
-        se_email_sent = False
-        if user.email and projects_data_for_email:
-            try:
-                email_service = BOQEmailService()
-                se_email_sent = email_service.send_se_assignment_notification(
-                    se_email=user.email,
-                    se_name=user.full_name,
-                    pm_name=pm_name,
-                    projects_data=projects_data_for_email
-                )
+        # se_email_sent = False
+        # if user.email and projects_data_for_email:
+        #     try:
+        #         email_service = BOQEmailService()
+        #         se_email_sent = email_service.send_se_assignment_notification(
+        #             se_email=user.email,
+        #             se_name=user.full_name,
+        #             pm_name=pm_name,
+        #             projects_data=projects_data_for_email
+        #         )
 
-                if se_email_sent:
-                    log.info(f"Assignment notification email sent successfully to {user.email}")
-                else:
-                    log.warning(f"Failed to send assignment notification email to {user.email}")
-            except Exception as email_error:
-                log.error(f"Error sending assignment notification email: {email_error}")
-                # Don't fail the entire request if email fails
-                import traceback
-                log.error(f"Email error traceback: {traceback.format_exc()}")
+        #         if se_email_sent:
+        #             log.info(f"Assignment notification email sent successfully to {user.email}")
+        #         else:
+        #             log.warning(f"Failed to send assignment notification email to {user.email}")
+        #     except Exception as email_error:
+        #         log.error(f"Error sending assignment notification email: {email_error}")
+        #         # Don't fail the entire request if email fails
+        #         import traceback
+        #         log.error(f"Email error traceback: {traceback.format_exc()}")
 
         # Send email notification to Buyer (if assigned)
         buyer_email_sent = False
@@ -648,7 +648,7 @@ def assign_projects_sitesupervisor():
             "assigned_projects": assigned_projects,
             "assigned_count": len(assigned_projects),
             "boq_histories_updated": boq_histories_updated,
-            "se_email_sent": se_email_sent
+            # "se_email_sent": se_email_sent
         }
 
         # Add buyer info to response if buyer was assigned

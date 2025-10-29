@@ -298,7 +298,7 @@ def td_mail_send():
         items_summary['items'] = items
 
         # Initialize email service
-        boq_email_service = BOQEmailService()
+        # boq_email_service = BOQEmailService()
 
         # Find Estimator (sender of original BOQ)
         estimator_role = Role.query.filter(
@@ -378,17 +378,9 @@ def td_mail_send():
             recipient_name = estimator_name
             recipient_role = "estimator"
 
-            # Send approval email to Estimator
-            email_sent = boq_email_service.send_boq_approval_to_pm(
-                boq_data, project_data, items_summary, recipient_email, comments
-            )
-
-            if not email_sent:
-                return jsonify({
-                    "success": False,
-                    "message": "Failed to send approval email to Estimator",
-                    "error": "Email service failed"
-                }), 500
+            # Email sending disabled - approval proceeds without emails
+            email_sent = True
+            log.info(f"TD approved BOQ {boq_id} for Estimator {recipient_name} - Email disabled")
 
             # Prepare new action for APPROVED
             new_action = {
@@ -424,18 +416,9 @@ def td_mail_send():
             recipient_name = estimator_name
             recipient_role = "estimator"
 
-            # Send rejection email to Estimator
-            email_sent = boq_email_service.send_boq_rejection_to_estimator(
-                boq_data, project_data, items_summary, recipient_email,
-                rejection_reason or comments
-            )
-
-            if not email_sent:
-                return jsonify({
-                    "success": False,
-                    "message": "Failed to send rejection email to Estimator",
-                    "error": "Email service failed"
-                }), 500
+            # Email sending disabled - rejection proceeds without emails
+            email_sent = True
+            log.info(f"TD rejected BOQ {boq_id} for Estimator {recipient_name} - Email disabled")
 
             # Prepare new action for REJECTED
             new_action = {

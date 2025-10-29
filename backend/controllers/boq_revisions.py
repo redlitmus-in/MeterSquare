@@ -371,16 +371,16 @@ def client_revision_td_mail_send():
             recipient_role = "estimator"
 
             # Send approval email to Estimator
-            email_sent = boq_email_service.send_boq_approval_to_pm(
-                boq_data, project_data, items_summary, recipient_email, comments
-            )
+            # email_sent = boq_email_service.send_boq_approval_to_pm(
+            #     boq_data, project_data, items_summary, recipient_email, comments
+            # )
 
-            if not email_sent:
-                return jsonify({
-                    "success": False,
-                    "message": "Failed to send approval email to Estimator",
-                    "error": "Email service failed"
-                }), 500
+            # if not email_sent:
+            #     return jsonify({
+            #         "success": False,
+            #         "message": "Failed to send approval email to Estimator",
+            #         "error": "Email service failed"
+            #     }), 500
 
             # Prepare new action for APPROVED
             new_action = {
@@ -417,17 +417,17 @@ def client_revision_td_mail_send():
             recipient_role = "estimator"
 
             # Send rejection email to Estimator
-            email_sent = boq_email_service.send_boq_rejection_to_estimator(
-                boq_data, project_data, items_summary, recipient_email,
-                rejection_reason or comments
-            )
+            # email_sent = boq_email_service.send_boq_rejection_to_estimator(
+            #     boq_data, project_data, items_summary, recipient_email,
+            #     rejection_reason or comments
+            # )
 
-            if not email_sent:
-                return jsonify({
-                    "success": False,
-                    "message": "Failed to send rejection email to Estimator",
-                    "error": "Email service failed"
-                }), 500
+            # if not email_sent:
+            #     return jsonify({
+            #         "success": False,
+            #         "message": "Failed to send rejection email to Estimator",
+            #         "error": "Email service failed"
+            #     }), 500
 
             # Prepare new action for REJECTED
             new_action = {
