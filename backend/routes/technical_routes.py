@@ -10,8 +10,17 @@ def check_td_or_admin_access():
     """Check if current user is a Technical Director or Admin"""
     current_user = g.user
     user_role = current_user.get('role', '').lower()
-    if user_role not in ['technicaldirector', 'admin']:
+    if user_role not in ['technicaldirector', 'admin', 'estimator']:
         return jsonify({"error": "Access denied. Technical Director or Admin role required."}), 403
+    return None
+
+# Helper function to check if user is Estimator, TD or Admin
+def check_estimator_td_or_admin_access():
+    """Check if current user is an Estimator, Technical Director or Admin"""
+    current_user = g.user
+    user_role = current_user.get('role', '').lower()
+    if user_role not in ['estimator', 'technicaldirector', 'admin']:
+        return jsonify({"error": "Access denied. Estimator, Technical Director or Admin role required."}), 403
     return None
 
 # BOQ Management
@@ -27,8 +36,8 @@ def get_all_td_boqs_route():
 @technical_routes.route('/td_approval', methods=['POST'])
 @jwt_required
 def td_mail_send_route():
-    """TD or Admin approves/rejects BOQ"""
-    access_check = check_td_or_admin_access()
+    """Estimator, TD or Admin sends BOQ to PM"""
+    access_check = check_estimator_td_or_admin_access()
     if access_check:
         return access_check
     return td_mail_send()

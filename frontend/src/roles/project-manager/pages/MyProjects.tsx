@@ -2665,32 +2665,6 @@ const MyProjects: React.FC = () => {
                 />
               </div>
 
-              <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h3 className="text-sm font-semibold text-blue-900 mb-2">Project Summary:</h3>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div>
-                    <span className="text-gray-600">Total Value:</span>
-                    <span className="font-semibold ml-1">AED{(selectedProject.boq_details?.total_cost || 0).toLocaleString()}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Materials:</span>
-                    <span className="font-semibold ml-1">AED{(selectedProject.boq_details?.total_materials || 0).toLocaleString()}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Labour:</span>
-                    <span className="font-semibold ml-1">AED{(selectedProject.boq_details?.total_labour || 0).toLocaleString()}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Overhead:</span>
-                    <span className="font-semibold ml-1">{selectedProject.boq_details?.overhead_percentage || 0}%</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Profit Margin:</span>
-                    <span className="font-semibold ml-1">{selectedProject.boq_details?.profit_margin_percentage || 0}%</span>
-                  </div>
-                </div>
-              </div>
-
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => {

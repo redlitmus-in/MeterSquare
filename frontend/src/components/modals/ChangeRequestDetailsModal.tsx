@@ -90,13 +90,26 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
   // Can edit if:
   // 1. Status is pending AND user is requester or PM
-  // 2. OR user can approve/reject (which means they need to review it)
-  // BUT NOT if it's already been approved by PM and sent forward
-  const canEdit = ((changeRequest.status === 'pending' &&
-                   (changeRequest.requested_by_user_id === user?.user_id || userIsProjectManager)) ||
-                   canApproveReject) &&
-                  !isFinalStatus &&
-                  !isApprovedAndSentForward;
+  // 2. OR user is Estimator/TD reviewing the request (under_review or approved_by_pm)
+  const canEdit = (
+    // Case 1: Pending status - requester or PM can edit
+    (changeRequest.status === 'pending' &&
+     (changeRequest.requested_by_user_id === user?.user_id || userIsProjectManager)) ||
+    // Case 2: Estimator/TD can edit when reviewing (approved_by_pm status)
+    ((userIsEstimator || userIsTechnicalDirector) &&
+     changeRequest.status === 'approved_by_pm')
+  ) &&
+  // Exclude truly final statuses
+  !['approved', 'rejected', 'purchase_completed', 'assigned_to_buyer', 'approved_by_td'].includes(changeRequest.status);
+
+  // Debug logging
+  console.log('[ChangeRequestDetails] Edit Check:', {
+    canEdit,
+    status: changeRequest.status,
+    userIsEstimator,
+    userIsTechnicalDirector,
+    userRole: user?.role
+  });
 
   // Can send for review if the request is pending and user is the requester
   const canSendForReview = changeRequest.status === 'pending' &&

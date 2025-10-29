@@ -38,6 +38,7 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
 import ApprovalWithBuyerModal from '@/components/modals/ApprovalWithBuyerModal';
+import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import { useAuthStore } from '@/store/authStore';
 import { permissions } from '@/utils/rolePermissions';
 
@@ -55,6 +56,7 @@ const ChangeRequestsPage: React.FC = () => {
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   // Fetch change requests from backend - Auto-refresh every 2 seconds
   useEffect(() => {
@@ -163,12 +165,11 @@ const ChangeRequestsPage: React.FC = () => {
   };
 
   const handleEdit = (crId: number) => {
-    // Find the change request and open it in the details modal with edit mode
+    // Find the change request and open it in the edit modal directly
     const request = changeRequests.find(r => r.cr_id === crId);
     if (request) {
       setSelectedChangeRequest(request);
-      setShowDetailsModal(true);
-      // The modal will handle edit mode based on the request status and user role
+      setShowEditModal(true);
     }
   };
 
@@ -761,6 +762,24 @@ const ChangeRequestsPage: React.FC = () => {
           crId={approvingCrId}
           crName={`CR-${approvingCrId}`}
           onSuccess={handleApprovalSuccess}
+        />
+      )}
+
+      {/* Edit Change Request Modal */}
+      {selectedChangeRequest && (
+        <EditChangeRequestModal
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false);
+            setSelectedChangeRequest(null);
+          }}
+          changeRequest={selectedChangeRequest}
+          onSuccess={() => {
+            setShowEditModal(false);
+            setSelectedChangeRequest(null);
+            loadChangeRequests(true);
+            toast.success('Change request updated successfully');
+          }}
         />
       )}
     </div>
