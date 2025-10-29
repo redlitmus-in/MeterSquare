@@ -8,6 +8,7 @@ from utils.boq_email_service import BOQEmailService
 from models.user import User
 from models.role import Role
 from datetime import datetime
+from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
 
 log = get_logger()
 
@@ -71,8 +72,11 @@ def get_all_sitesupervisor_boqs():
         user_id = current_user['user_id']
         user_role = current_user.get('role', '').lower()
 
+        # Get effective user context (handles admin viewing as other roles)
+        context = get_effective_user_context()
+
         # Get all projects assigned to this site engineer (admin sees all)
-        if user_role == 'admin':
+        if user_role == 'admin' or not should_apply_role_filter(context):
             projects = Project.query.filter(
                 Project.is_deleted == False
             ).all()
@@ -115,6 +119,20 @@ def get_all_sitesupervisor_boqs():
                 from datetime import timedelta
                 end_date = (project.start_date + timedelta(days=project.duration_days)).isoformat()
 
+            # Check if BOQ has been assigned to a buyer
+            boq_assigned_to_buyer = False
+            assigned_buyer_name = None
+            if boq_ids:
+                from models.boq_material_assignment import BOQMaterialAssignment
+                assignment = BOQMaterialAssignment.query.filter(
+                    BOQMaterialAssignment.boq_id.in_(boq_ids),
+                    BOQMaterialAssignment.is_deleted == False
+                ).first()
+
+                if assignment:
+                    boq_assigned_to_buyer = True
+                    assigned_buyer_name = assignment.assigned_to_buyer_name
+
             projects_list.append({
                 "project_id": project.project_id,
                 "project_name": project.project_name,
@@ -128,7 +146,9 @@ def get_all_sitesupervisor_boqs():
                 "created_at": project.created_at.isoformat() if project.created_at else None,
                 "priority": getattr(project, 'priority', 'medium'),
                 "boq_ids": boq_ids,  # List of BOQ IDs for reference
-                "completion_requested": project.completion_requested if project.completion_requested is not None else False
+                "completion_requested": project.completion_requested if project.completion_requested is not None else False,
+                "boq_assigned_to_buyer": boq_assigned_to_buyer,
+                "assigned_buyer_name": assigned_buyer_name
             })
 
         return jsonify({
@@ -153,8 +173,11 @@ def get_sitesupervisor_dashboard():
         user_id = current_user['user_id']
         user_role = current_user.get('role', '').lower()
 
+        # Get effective user context (handles admin viewing as other roles)
+        context = get_effective_user_context()
+
         # Get all projects assigned to this site engineer (admin sees all)
-        if user_role == 'admin':
+        if user_role == 'admin' or not should_apply_role_filter(context):
             projects = Project.query.filter(
                 Project.is_deleted == False
             ).all()
@@ -781,4 +804,197 @@ def request_project_completion(project_id):
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({
             "error": f"Failed to request completion: {str(e)}"
+        }), 500
+
+
+def get_available_buyers():
+    """Get list of all active buyers for site engineer to select from"""
+    try:
+        # Get buyer role
+        buyer_role = Role.query.filter_by(role='buyer').first()
+        if not buyer_role:
+            return jsonify({"error": "Buyer role not found"}), 404
+
+        # Get all active buyers
+        buyers = User.query.filter(
+            User.role_id == buyer_role.role_id,
+            User.is_deleted == False,
+            User.is_active == True
+        ).all()
+
+        buyers_list = [{
+            'user_id': buyer.user_id,
+            'full_name': buyer.full_name,
+            'email': buyer.email,
+            'phone': buyer.phone
+        } for buyer in buyers]
+
+        return jsonify({
+            "success": True,
+            "buyers": buyers_list
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching buyers: {str(e)}")
+        return jsonify({
+            "error": f"Failed to fetch buyers: {str(e)}"
+        }), 500
+
+
+def assign_boq_to_buyer(boq_id):
+    """Site Engineer assigns BOQ materials to a buyer"""
+    try:
+        from models.boq_material_assignment import BOQMaterialAssignment
+
+        current_user = g.user
+        se_user_id = current_user['user_id']
+        se_name = current_user.get('full_name', 'Site Engineer')
+
+        data = request.get_json()
+        buyer_id = data.get('buyer_id')
+
+        if not buyer_id:
+            return jsonify({"error": "buyer_id is required"}), 400
+
+        # Verify BOQ exists
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Verify BOQ is assigned to this SE
+        project = Project.query.filter_by(
+            project_id=boq.project_id,
+            is_deleted=False
+        ).first()
+
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        if project.site_supervisor_id != se_user_id:
+            return jsonify({"error": "You are not assigned to this BOQ"}), 403
+
+        # Verify buyer exists
+        buyer_role = Role.query.filter_by(role='buyer').first()
+        buyer = User.query.filter(
+            User.user_id == buyer_id,
+            User.role_id == buyer_role.role_id,
+            User.is_deleted == False,
+            User.is_active == True
+        ).first()
+
+        if not buyer:
+            return jsonify({"error": "Buyer not found"}), 404
+
+        # Check if already assigned
+        existing_assignment = BOQMaterialAssignment.query.filter_by(
+            boq_id=boq_id,
+            assigned_to_buyer_user_id=buyer_id,
+            is_deleted=False
+        ).first()
+
+        if existing_assignment:
+            return jsonify({"error": "BOQ already assigned to this buyer"}), 400
+
+        # Create assignment
+        assignment = BOQMaterialAssignment(
+            boq_id=boq_id,
+            project_id=project.project_id,
+            assigned_by_user_id=se_user_id,
+            assigned_by_name=se_name,
+            assigned_to_buyer_user_id=buyer_id,
+            assigned_to_buyer_name=buyer.full_name,
+            assigned_to_buyer_date=datetime.utcnow(),
+            status='assigned_to_buyer'
+        )
+
+        db.session.add(assignment)
+
+        # Create BOQ history entry
+        boq_history = BOQHistory.query.filter_by(boq_id=boq_id).first()
+
+        # Handle existing actions
+        if boq_history:
+            if boq_history.action is None:
+                current_actions = []
+            elif isinstance(boq_history.action, list):
+                current_actions = boq_history.action
+            elif isinstance(boq_history.action, dict):
+                current_actions = [boq_history.action]
+            else:
+                current_actions = []
+        else:
+            current_actions = []
+
+        # Create new action
+        new_action = {
+            "role": "site_engineer",
+            "type": "boq_assigned_to_buyer",
+            "sender": "site_engineer",
+            "receiver": "buyer",
+            "status": "assigned_to_buyer",
+            "boq_name": boq.boq_name,
+            "project_name": project.project_name,
+            "comments": f"Site Engineer assigned BOQ materials to {buyer.full_name}",
+            "timestamp": datetime.utcnow().isoformat(),
+            "sender_name": se_name,
+            "sender_user_id": se_user_id,
+            "recipient_name": buyer.full_name,
+            "recipient_email": buyer.email,
+            "assignment_id": assignment.assignment_id
+        }
+
+        current_actions.append(new_action)
+
+        if boq_history:
+            boq_history.action = current_actions
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(boq_history, "action")
+            boq_history.last_modified_at = datetime.utcnow()
+        else:
+            boq_history = BOQHistory(
+                boq_id=boq_id,
+                action=current_actions,
+                action_by=se_name,
+                boq_status=boq.status,
+                sender=se_name,
+                receiver=buyer.full_name,
+                comments=f"BOQ assigned to buyer {buyer.full_name}",
+                sender_role='site_engineer',
+                receiver_role='buyer',
+                action_date=datetime.utcnow(),
+                created_by=se_name
+            )
+            db.session.add(boq_history)
+
+        db.session.commit()
+
+        # Send email notification to buyer
+        try:
+            email_service = BOQEmailService()
+            email_service.send_assignment_notification(
+                buyer_email=buyer.email,
+                buyer_name=buyer.full_name,
+                se_name=se_name,
+                boq_name=boq.boq_name,
+                project_name=project.project_name
+            )
+        except Exception as email_error:
+            log.warning(f"Failed to send email notification: {str(email_error)}")
+
+        log.info(f"Site Engineer {se_user_id} assigned BOQ {boq_id} to buyer {buyer_id}")
+
+        return jsonify({
+            "success": True,
+            "message": f"BOQ materials assigned to {buyer.full_name}",
+            "assignment_id": assignment.assignment_id,
+            "buyer_name": buyer.full_name
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error assigning BOQ to buyer: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to assign BOQ: {str(e)}"
         }), 500

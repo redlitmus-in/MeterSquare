@@ -43,6 +43,7 @@ import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 import { useChangeRequestsAutoSync } from '@/hooks/useAutoSync';
+import { permissions } from '@/utils/rolePermissions';
 
 const ChangeRequestsPage: React.FC = () => {
   const location = useLocation();
@@ -1314,7 +1315,7 @@ const ChangeRequestsPage: React.FC = () => {
         changeRequest={selectedChangeRequest}
         onApprove={handleApproveFromModal}
         onReject={handleRejectFromModal}
-        canApprove={selectedChangeRequest?.approval_required_from === 'estimator' && selectedChangeRequest?.status !== 'approved' && selectedChangeRequest?.status !== 'rejected'}
+        canApprove={permissions.canApproveChangeRequest(user) && selectedChangeRequest?.status !== 'approved' && selectedChangeRequest?.status !== 'rejected'}
       />
 
       {/* Edit Change Request Modal */}

@@ -39,6 +39,23 @@ apiClient.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
+    // Add viewing context for admin role
+    const adminViewStore = localStorage.getItem('admin-view-storage');
+    if (adminViewStore) {
+      try {
+        const viewState = JSON.parse(adminViewStore);
+        const viewingAsRole = viewState?.state?.viewingAsRole;
+        const viewingAsRoleId = viewState?.state?.viewingAsRoleId;
+
+        if (viewingAsRole && viewingAsRole !== 'admin') {
+          config.headers['X-Viewing-As-Role'] = viewingAsRole;
+          config.headers['X-Viewing-As-Role-Id'] = viewingAsRoleId;
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+    }
+
     // Add request ID for tracing
     config.headers['X-Request-ID'] = crypto.randomUUID();
 
@@ -194,7 +211,21 @@ export const API_ENDPOINTS = {
   
   // File Download endpoint - used across roles
   DOWNLOAD_FILES: (key: string, id: string | number) => `/download_files?key=${key}&id=${id}`,
-  
+
+  // Change Request endpoints
+  CHANGE_REQUEST: {
+    CREATE: '/boq/change-request',
+    LIST: '/change-requests',
+    GET: (id: string | number) => `/change-request/${id}`,
+    UPDATE: (id: string | number) => `/change-request/${id}`,
+    APPROVE: (id: string | number) => `/change-request/${id}/approve`,
+    REJECT: (id: string | number) => `/change-request/${id}/reject`,
+    SEND_FOR_REVIEW: (id: string | number) => `/change-request/${id}/send-for-review`,
+    COMPLETE_PURCHASE: (id: string | number) => `/change-request/${id}/complete-purchase`,
+    BOQ_REQUESTS: (boqId: string | number) => `/boq/${boqId}/change-requests`,
+    BUYERS: '/buyers',
+  },
+
   TECHNICAL_DIRECTOR: {
     APPROVAL: '/tech_approval',
     DASHBOARD: '/tech_dashboard',

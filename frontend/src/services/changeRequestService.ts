@@ -411,10 +411,18 @@ class ChangeRequestService {
    * PUT /api/change-request/{cr_id}
    */
   async updateChangeRequest(crId: number, data: {
-    quantity?: number;
-    unit_rate?: number;
-    justification?: string;
-    remarks?: string;
+    justification: string;
+    materials: Array<{
+      material_name: string;
+      quantity: number;
+      unit: string;
+      unit_price: number;
+      master_material_id?: number;
+      sub_item_id?: string;
+      sub_item_name?: string;
+      justification?: string;
+      reason?: string;
+    }>;
   }): Promise<{ success: boolean; message?: string; data?: any }> {
     try {
       const response = await axios.put(

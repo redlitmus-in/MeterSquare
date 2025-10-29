@@ -1,7 +1,7 @@
 """
 BOQ Routes - API endpoints for Bill of Quantities management
 """
-from flask import Blueprint
+from flask import Blueprint, g, jsonify
 from utils.authentication import jwt_required
 from controllers.boq_controller import *
 from controllers.boq_upload_controller import *
@@ -12,125 +12,227 @@ from controllers.download_boq_pdf import *
 
 boq_routes = Blueprint('boq_routes', __name__, url_prefix='/api')
 
+# Helper function - BOQ routes accessible by Estimator, PM, SE, TD, or Admin
+def check_boq_access():
+    """Check if current user can access BOQ operations"""
+    current_user = g.user
+    user_role = current_user.get('role', '').lower()
+    allowed_roles = ['estimator', 'projectmanager', 'technicaldirector', 'admin', 'siteengineer', 'sitesupervisor']
+    if user_role not in allowed_roles:
+        return jsonify({"error": "Access denied. Estimator, PM, SE, TD, or Admin role required."}), 403
+    return None
+
 # BOQ Management
 @boq_routes.route('/create_boq', methods=['POST'])
 @jwt_required
 def create_boq_route():
+    """Create BOQ (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return create_boq()
 
 @boq_routes.route('/all_boq', methods=['GET'])
 @jwt_required
 def get_all_boq_route():
+    """View all BOQs (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_all_boq()
 
 @boq_routes.route('/boq/<int:boq_id>', methods=['GET'])
 @jwt_required
 def get_boq_route(boq_id):
+    """View single BOQ (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_boq(boq_id)
 
 @boq_routes.route('/boq/update_boq/<int:boq_id>', methods=['PUT'])
 @jwt_required
 def update_boq_route(boq_id):
+    """Update BOQ (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return update_boq(boq_id)
 
 @boq_routes.route('/revision_boq/<int:boq_id>', methods=['PUT'])
 @jwt_required
 def revision_boq_route(boq_id):
+    """Create BOQ revision (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return revision_boq(boq_id)
 
 @boq_routes.route('/delete_boq/<int:boq_id>', methods=['DELETE'])
 @jwt_required
 def delete_boq_route(boq_id):
+    """Delete BOQ (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return delete_boq(boq_id)
 
 @boq_routes.route('/sub_item/<int:item_id>', methods=['GET'])
 @jwt_required
 def get_sub_item_route(item_id):
+    """Get sub-items (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_sub_item(item_id)
 
 @boq_routes.route('/item_labour/<int:item_id>', methods=['GET'])
 @jwt_required
 def get_sub_item_labours_route(item_id):
+    """Get item labours (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_sub_item_labours(item_id)
 
 @boq_routes.route('/all_item', methods=['GET'])
 @jwt_required
 def get_all_item_route():
+    """Get all items (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_all_item()
 
 # BOQ Email Notification technical director
 @boq_routes.route('/boq_email/<int:boq_id>', methods=['GET'])
 @jwt_required
 def send_boq_email_route(boq_id):
+    """Send BOQ email to TD (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return send_boq_email(boq_id)
 
 #  BOQ Upload and Extraction Routes
 @boq_routes.route('/boq/upload', methods=['POST'])
 @jwt_required
 def upload_boq_route():
+    """Upload BOQ file (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return upload_boq_file()
 
 @boq_routes.route('/boq_history/<int:boq_id>', methods=['GET'])
 @jwt_required
 def get_boq_history_route(boq_id):
+    """Get BOQ history (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_boq_history(boq_id)
 
 @boq_routes.route('/estimator_dashboard', methods=['GET'])
 @jwt_required
 def get_estimator_dashboard_route():
+    """Get estimator dashboard (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_estimator_dashboard()
 
 # BOQ Bulk Upload
 @boq_routes.route('/boq/bulk_upload', methods=['POST'])
 @jwt_required
 def bulk_upload_boq_route():
+    """Bulk upload BOQ (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return bulk_upload_boq()
 
 # BOQ Revisions - Dynamic Tabs
 @boq_routes.route('/boq/revision-tabs', methods=['GET'])
 @jwt_required
 def get_revision_tabs_route():
+    """Get revision tabs (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_revision_tabs()
 
 @boq_routes.route('/boq/revisions/<revision_number>', methods=['GET'])
 @jwt_required
 def get_projects_by_revision_route(revision_number):
+    """Get projects by revision (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_projects_by_revision(revision_number)
 
 @boq_routes.route('/boq/revision-statistics', methods=['GET'])
 @jwt_required
 def get_revision_statistics_route():
+    """Get revision statistics (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_revision_statistics()
 
 @boq_routes.route('/boq/<int:boq_id>/internal_revisions', methods=['GET'])
 @jwt_required
 def get_internal_revisions_route(boq_id):
+    """Get internal revisions (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_internal_revisions(boq_id)
 
 @boq_routes.route('/material/<int:sub_item_id>', methods=['GET'])
 @jwt_required
 def  get_sub_item_material_route(sub_item_id):
+    """Get sub-item materials (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return  get_sub_item_material(sub_item_id)
 
 @boq_routes.route('/update_internal_boq/<int:boq_id>', methods=['PUT'])
 @jwt_required
 def update_internal_revision_boq_route(boq_id):
+    """Update internal BOQ revision (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return update_internal_revision_boq(boq_id)
 
 @boq_routes.route('/boqs/internal_revisions', methods=['GET'])
 @jwt_required
 def get_all_internal_revision_route():
+    """Get all internal revisions (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return get_all_internal_revision()
 
 # PDF Download Routes
 @boq_routes.route('/boq/download/internal/<int:boq_id>', methods=['GET'])
 @jwt_required
 def download_internal_pdf_route(boq_id):
+    """Download internal BOQ PDF (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return download_internal_pdf()
 
 @boq_routes.route('/boq/download/client/<int:boq_id>', methods=['GET'])
 @jwt_required
 def download_client_pdf_route(boq_id):
+    """Download client BOQ PDF (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return download_client_pdf()
 
 @boq_routes.route('/boq/download/internal-excel/<int:boq_id>', methods=['GET'])
@@ -146,4 +248,8 @@ def download_client_excel_route(boq_id):
 @boq_routes.route('/client_td_approval', methods=['POST'])
 @jwt_required
 def client_revision_td_mail_send_route():
+    """Send client revision to TD for approval (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
     return client_revision_td_mail_send()

@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronDownIcon, ChevronRightIcon, UserGroupIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { adminApi } from '@/api/admin';
 import { useAdminViewStore } from '@/store/adminViewStore';
@@ -18,6 +19,7 @@ interface RoleGroup {
   displayName: string;
   users: any[];
   color: string;
+  dashboardPath?: string;
 }
 
 interface AdminRoleNavigatorProps {
@@ -30,16 +32,17 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
   const [roleGroups, setRoleGroups] = useState<RoleGroup[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const navigate = useNavigate();
   const { viewingAsRoleName, setRoleView, resetToAdminView } = useAdminViewStore();
   const { user } = useAuthStore();
 
   // Define role configurations matching backend
   const ROLE_CONFIGS = [
-    { roleId: 7, roleName: 'technicalDirector', displayName: 'Technical Director', color: 'bg-blue-100 text-blue-800' },
-    { roleId: 4, roleName: 'estimator', displayName: 'Estimator', color: 'bg-indigo-100 text-indigo-800' },
-    { roleId: 5, roleName: 'projectManager', displayName: 'Project Manager', color: 'bg-green-100 text-green-800' },
-    { roleId: 2, roleName: 'siteEngineer', displayName: 'Site Engineer', color: 'bg-orange-100 text-orange-800' },
-    { roleId: 8, roleName: 'buyer', displayName: 'Buyer', color: 'bg-purple-100 text-purple-800' }
+    { roleId: 7, roleName: 'technicalDirector', displayName: 'Technical Director', color: 'bg-blue-100 text-blue-800', dashboardPath: '/admin/dashboard' },
+    { roleId: 4, roleName: 'estimator', displayName: 'Estimator', color: 'bg-indigo-100 text-indigo-800', dashboardPath: '/admin/dashboard' },
+    { roleId: 5, roleName: 'projectManager', displayName: 'Project Manager', color: 'bg-green-100 text-green-800', dashboardPath: '/admin/dashboard' },
+    { roleId: 2, roleName: 'siteEngineer', displayName: 'Site Engineer', color: 'bg-orange-100 text-orange-800', dashboardPath: '/admin/dashboard' },
+    { roleId: 8, roleName: 'buyer', displayName: 'Buyer', color: 'bg-purple-100 text-purple-800', dashboardPath: '/admin/dashboard' }
   ];
 
   // Fetch users grouped by role
@@ -86,10 +89,15 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
     setExpandedRole(expandedRole === roleId ? null : roleId);
   };
 
-  const handleViewAsRole = (role: RoleGroup) => {
+  const handleViewAsRole = (role: RoleGroup & { dashboardPath?: string }) => {
     setRoleView(role.roleName, role.roleId, role.displayName);
-    toast.success(`Now viewing as ${role.displayName}`);
+    toast.success(`Now viewing as ${role.displayName}. Navigate to role-specific pages to see their view.`);
     setIsExpanded(false);
+
+    // Navigate to dashboard to refresh the view with new role context
+    if (role.dashboardPath) {
+      navigate(role.dashboardPath);
+    }
   };
 
   const handleResetView = () => {

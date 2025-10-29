@@ -66,15 +66,20 @@ def create_pm():
 
 def get_all_pm_boqs():
     try:
+        from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
+
         current_user = g.user
         user_id = current_user['user_id']
         user_role = current_user.get('role', '').lower()
+
+        # Get effective user context (handles admin viewing as another role)
+        context = get_effective_user_context()
 
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 10, type=int), 100)
 
         # Get all projects assigned to this project manager (admin sees all)
-        if user_role == 'admin':
+        if user_role == 'admin' or not should_apply_role_filter(context):
             assigned_projects = db.session.query(Project.project_id).filter(
                 Project.is_deleted == False
             ).all()

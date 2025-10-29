@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Purchase, buyerService } from '../services/buyerService';
 import { buyerVendorService, Vendor, VendorProduct } from '../services/buyerVendorService';
 import { toast } from 'sonner';
+import { useAuthStore } from '@/store/authStore';
 
 interface VendorSelectionModalProps {
   purchase: Purchase;
@@ -32,6 +33,7 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
   onClose,
   onVendorSelected
 }) => {
+  const { user } = useAuthStore();
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [vendorProducts, setVendorProducts] = useState<Map<number, VendorProduct[]>>(new Map());
   const [loadingVendors, setLoadingVendors] = useState(false);
@@ -43,6 +45,11 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
   const [viewingVendor, setViewingVendor] = useState<Vendor | null>(null);
   const [viewingVendorProducts, setViewingVendorProducts] = useState<VendorProduct[]>([]);
   const [loadingVendorDetails, setLoadingVendorDetails] = useState(false);
+
+  // Check if current user is Technical Director
+  const isTechnicalDirector = user?.role?.toLowerCase().includes('technical') ||
+                               user?.role?.toLowerCase().includes('director') ||
+                               user?.role_name?.toLowerCase().includes('technical');
 
   useEffect(() => {
     if (isOpen) {
@@ -176,11 +183,11 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
     try {
       setIsSelectingVendor(true);
       setShowConfirmation(false);
-      await buyerService.selectVendor({
+      const response = await buyerService.selectVendor({
         cr_id: purchase.cr_id,
         vendor_id: selectedVendorId!
       });
-      toast.success('Vendor selection sent to TD for approval!');
+      toast.success(response.message || 'Vendor selection sent to TD for approval!');
       onVendorSelected?.();
       onClose();
     } catch (error: any) {
@@ -468,12 +475,12 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                     {isSelectingVendor ? (
                       <>
                         <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        Sending for Approval...
+                        {isTechnicalDirector ? 'Saving...' : 'Sending for Approval...'}
                       </>
                     ) : (
                       <>
                         <Store className="w-4 h-4 mr-2" />
-                        Send to TD for Approval
+                        {isTechnicalDirector ? 'Save & Approve' : 'Send to TD for Approval'}
                       </>
                     )}
                   </Button>
@@ -519,7 +526,11 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                         <p className="text-sm text-blue-900">
                           <AlertCircle className="w-4 h-4 inline mr-1.5" />
-                          This selection will be sent to the <span className="font-semibold">Technical Director</span> for approval.
+                          {isTechnicalDirector ? (
+                            <>This selection will be <span className="font-semibold">approved</span> and sent to the <span className="font-semibold">Buyer</span>.</>
+                          ) : (
+                            <>This selection will be sent to the <span className="font-semibold">Technical Director</span> for approval.</>
+                          )}
                         </p>
                       </div>
                     </div>
@@ -538,7 +549,7 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                         className="px-6 bg-blue-600 hover:bg-blue-700 text-white"
                       >
                         <CheckCircle className="w-4 h-4 mr-2" />
-                        Confirm & Send
+                        {isTechnicalDirector ? 'Confirm & Approve' : 'Confirm & Send'}
                       </Button>
                     </div>
                   </motion.div>

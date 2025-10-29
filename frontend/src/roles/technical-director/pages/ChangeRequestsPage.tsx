@@ -40,8 +40,11 @@ import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsM
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import ApprovalWithBuyerModal from '@/components/modals/ApprovalWithBuyerModal';
 import VendorSelectionModal from '@/roles/buyer/components/VendorSelectionModal';
+import { useAuthStore } from '@/store/authStore';
+import { permissions } from '@/utils/rolePermissions';
 
 const ChangeRequestsPage: React.FC = () => {
+  const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('pending');
   const [approvedSubTab, setApprovedSubTab] = useState<'purchase_approved' | 'vendor_approved'>('purchase_approved');
   const [searchTerm, setSearchTerm] = useState('');
@@ -1098,7 +1101,7 @@ const ChangeRequestsPage: React.FC = () => {
         changeRequest={selectedChangeRequest}
         onApprove={handleApproveFromModal}
         onReject={handleRejectFromModal}
-        canApprove={selectedChangeRequest?.status === 'pending' && selectedChangeRequest?.approval_required_from === 'technical_director'}
+        canApprove={permissions.canApproveChangeRequest(user) && selectedChangeRequest?.status === 'pending'}
       />
 
       {/* Edit Change Request Modal */}

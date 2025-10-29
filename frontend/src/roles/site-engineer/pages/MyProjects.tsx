@@ -10,6 +10,7 @@ import {
   XMarkIcon,
   ArrowDownTrayIcon,
   DocumentTextIcon,
+  UserGroupIcon,
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
@@ -23,6 +24,7 @@ import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMateria
 import RejectedRequestsSection from '@/components/boq/RejectedRequestsSection';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
+import AssignBuyerModal from '@/components/sitesupervisor/AssignBuyerModal';
 
 interface BOQItem {
   id: number;
@@ -87,6 +89,8 @@ interface Project {
   completion_requested?: boolean;
   existingPurchaseItems?: BOQItem[];
   newPurchaseItems?: BOQItem[];
+  boq_assigned_to_buyer?: boolean;
+  assigned_buyer_name?: string;
 }
 
 const MyProjects: React.FC = () => {
@@ -106,6 +110,8 @@ const MyProjects: React.FC = () => {
   const [rejectedChangeRequests, setRejectedChangeRequests] = useState<ChangeRequestItem[]>([]);
   const [selectedChangeRequestId, setSelectedChangeRequestId] = useState<number | null>(null);
   const [showChangeRequestModal, setShowChangeRequestModal] = useState(false);
+  const [showAssignBuyerModal, setShowAssignBuyerModal] = useState(false);
+  const [projectToAssign, setProjectToAssign] = useState<Project | null>(null);
 
   // Real-time auto-sync for projects
   const { data: projectsData, isLoading: loading, refetch } = useProjectsAutoSync(
@@ -423,6 +429,33 @@ const MyProjects: React.FC = () => {
                       >
                         <EyeIcon className="w-5 h-5" />
                       </button>
+                      {project.boq_ids && project.boq_ids.length > 0 && (
+                        <>
+                          {project.boq_assigned_to_buyer ? (
+                            <div className="px-4 py-2 bg-green-100 border-2 border-green-400 rounded-lg flex items-center gap-2">
+                              <CheckCircleIcon className="w-5 h-5 text-green-600" />
+                              <div>
+                                <span className="text-sm font-bold text-green-900">Assigned to Buyer</span>
+                                {project.assigned_buyer_name && (
+                                  <p className="text-xs text-green-700">{project.assigned_buyer_name}</p>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setProjectToAssign(project);
+                                setShowAssignBuyerModal(true);
+                              }}
+                              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2 text-sm font-medium shadow-sm"
+                              title="Assign to Buyer"
+                            >
+                              <UserGroupIcon className="w-5 h-5" />
+                              Assign to Buyer
+                            </button>
+                          )}
+                        </>
+                      )}
                       {/* <button
                         onClick={() => {
                           setSelectedProjectForBOQ(project);
@@ -1032,6 +1065,26 @@ const MyProjects: React.FC = () => {
             if (selectedProject) {
               await handleViewProject(selectedProject);
             }
+          }}
+        />
+      )}
+
+      {/* Assign to Buyer Modal */}
+      {projectToAssign && (
+        <AssignBuyerModal
+          isOpen={showAssignBuyerModal}
+          onClose={() => {
+            setShowAssignBuyerModal(false);
+            setProjectToAssign(null);
+          }}
+          boqId={projectToAssign.boq_ids?.[0] || 0}
+          boqName={projectToAssign.boq_name}
+          projectName={projectToAssign.project_name}
+          onSuccess={() => {
+            toast.success('BOQ assigned to buyer successfully!');
+            setShowAssignBuyerModal(false);
+            setProjectToAssign(null);
+            refetch();
           }}
         />
       )}

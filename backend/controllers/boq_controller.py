@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from utils.boq_email_service import BOQEmailService
 from models.user import User
 from models.role import Role
+from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
 
 log = get_logger()
 
@@ -1551,6 +1552,9 @@ def get_all_boq():
         user_id = current_user.get('user_id') if current_user else None
         user_role = current_user.get('role', '').lower() if current_user else ''
 
+        # Get effective user context (handles admin viewing as other roles)
+        context = get_effective_user_context()
+
         # Build base query
         query = (
             db.session.query(BOQ, BOQDetails, Project)
@@ -1560,7 +1564,7 @@ def get_all_boq():
         )
 
         # Admin sees all BOQs, estimators see only their assigned BOQs
-        if user_role != 'admin':
+        if user_role != 'admin' and should_apply_role_filter(context):
             query = query.filter(Project.estimator_id == user_id)
 
         boqs = query.all()
@@ -3421,9 +3425,27 @@ def get_estimator_dashboard():
         from datetime import datetime, timedelta
         from collections import defaultdict
 
-        # Get all BOQs and Projects
-        all_boqs = BOQ.query.filter_by(is_deleted=False).all()
-        projects = Project.query.filter_by(is_deleted=False).all()
+        # Get current user context
+        current_user = getattr(g, 'user', None)
+        user_id = current_user.get('user_id') if current_user else None
+        user_role = current_user.get('role', '').lower() if current_user else ''
+
+        # Get effective user context (handles admin viewing as other roles)
+        context = get_effective_user_context()
+
+        # Get BOQs and Projects based on user role
+        if user_role == 'admin' or not should_apply_role_filter(context):
+            # Admin sees all BOQs and projects
+            all_boqs = BOQ.query.filter_by(is_deleted=False).all()
+            projects = Project.query.filter_by(is_deleted=False).all()
+        else:
+            # Estimators see only their assigned projects
+            projects = Project.query.filter_by(estimator_id=user_id, is_deleted=False).all()
+            project_ids = [p.project_id for p in projects]
+            if project_ids:
+                all_boqs = BOQ.query.filter(BOQ.project_id.in_(project_ids), BOQ.is_deleted == False).all()
+            else:
+                all_boqs = []
 
         # Initialize lists BEFORE using them
         monthly_trend = []

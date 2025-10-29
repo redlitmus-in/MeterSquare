@@ -19,7 +19,7 @@ class Vendor(db.Model):
     pin_code = db.Column(db.String(20), nullable=True)
     gst_number = db.Column(db.String(50), nullable=True)
     category = db.Column(db.String(100), nullable=True)
-    status = db.Column(db.Enum('active', 'inactive'), default='active')
+    status = db.Column(db.Enum('active', 'inactive', name='vendor_status_enum'), default='active')
     is_deleted = db.Column(db.Boolean, default=False)
     created_by = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

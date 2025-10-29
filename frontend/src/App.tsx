@@ -174,9 +174,17 @@ const RoleSpecificProjects: React.FC = () => {
 // Role-specific Vendor Management Hub Component
 const RoleSpecificVendorHub: React.FC = () => {
   const { user } = useAuthStore();
+  const { viewingAsRole } = useAdminViewStore();
 
   // Get user role (backend sends camelCase: technicalDirector)
-  const userRole = (user as any)?.role || '';
+  let userRole = (user as any)?.role || '';
+
+  // If admin is viewing as another role, use that role instead
+  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
+    userRole = viewingAsRole;
+  }
+
   const userRoleLower = userRole.toLowerCase();
   const roleId = user?.role_id;
   const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
@@ -196,8 +204,8 @@ const RoleSpecificVendorHub: React.FC = () => {
                              roleId === 'technicalDirector' ||
                              roleIdLower === 'technical_director';
 
-  // Buyer and Technical Director have vendor management access
-  if (isBuyer || isTechnicalDirector) {
+  // Buyer, Technical Director, and Admin have vendor management access
+  if (isBuyer || isTechnicalDirector || isAdmin) {
     return <VendorManagement />;
   }
 
@@ -317,6 +325,116 @@ const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children
 
   if (!isProjectManager && !isTechnicalDirector && !isAdmin) {
     console.log('Access denied. User role:', userRole, 'role_id:', roleId);
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+// Technical Director and Admin Route Component
+const TechnicalDirectorRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuthStore();
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  const isTechnicalDirector = userRole === 'Technical Director' ||
+                             userRoleLower === 'technical director' ||
+                             userRoleLower === 'technical_director' ||
+                             userRoleLower === 'technicaldirector' ||
+                             roleId === UserRole.TECHNICAL_DIRECTOR ||
+                             roleId === 'technicalDirector' ||
+                             roleIdLower === 'technical_director';
+
+  const isAdmin = userRole === 'Admin' ||
+                 userRoleLower === 'admin' ||
+                 roleId === 'admin' ||
+                 roleIdLower === 'admin' ||
+                 roleId === 5;
+
+  if (!isTechnicalDirector && !isAdmin) {
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+// Estimator and Admin Route Component
+const EstimatorRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuthStore();
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  const isEstimator = userRoleLower === 'estimator' ||
+                     userRoleLower === 'estimation' ||
+                     roleId === 'estimator' ||
+                     roleIdLower === 'estimator';
+
+  const isAdmin = userRole === 'Admin' ||
+                 userRoleLower === 'admin' ||
+                 roleId === 'admin' ||
+                 roleIdLower === 'admin' ||
+                 roleId === 5;
+
+  if (!isEstimator && !isAdmin) {
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+// Site Engineer and Admin Route Component
+const SiteEngineerRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuthStore();
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  const isSiteEngineer = userRoleLower === 'siteengineer' ||
+                        userRoleLower === 'site engineer' ||
+                        userRoleLower === 'site_engineer' ||
+                        userRoleLower === 'sitesupervisor' ||
+                        userRoleLower === 'site supervisor' ||
+                        userRoleLower === 'site_supervisor' ||
+                        roleId === 'siteEngineer' ||
+                        roleIdLower === 'site_engineer';
+
+  const isAdmin = userRole === 'Admin' ||
+                 userRoleLower === 'admin' ||
+                 roleId === 'admin' ||
+                 roleIdLower === 'admin' ||
+                 roleId === 5;
+
+  if (!isSiteEngineer && !isAdmin) {
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+// Buyer and Admin Route Component
+const BuyerRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuthStore();
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  const isBuyer = userRoleLower === 'buyer' ||
+                 roleId === 'buyer' ||
+                 roleIdLower === 'buyer';
+
+  const isAdmin = userRole === 'Admin' ||
+                 userRoleLower === 'admin' ||
+                 roleId === 'admin' ||
+                 roleIdLower === 'admin' ||
+                 roleId === 5;
+
+  if (!isBuyer && !isAdmin) {
     return <Navigate to="/403" replace />;
   }
 
@@ -516,7 +634,11 @@ function App() {
             <Route path="projects" element={<RoleSpecificProjects />} />
 
             {/* Estimator Routes */}
-            <Route path="boq-management" element={<EstimatorHub />} />
+            <Route path="boq-management" element={
+              <EstimatorRoute>
+                <EstimatorHub />
+              </EstimatorRoute>
+            } />
 
             {/* Vendor Management Routes - Role-specific vendor hub */}
             <Route path="vendors" element={<RoleSpecificVendorHub />} />
@@ -538,9 +660,21 @@ function App() {
             <Route path="profile" element={<ProfilePage />} />
 
             {/* Technical Director Routes */}
-            <Route path="project-approvals" element={<ProjectApprovals />} />
-            <Route path="team-assignment" element={<TeamAssignment />} />
-            <Route path="projects-overview" element={<ProjectsOverview />} />
+            <Route path="project-approvals" element={
+              <TechnicalDirectorRoute>
+                <ProjectApprovals />
+              </TechnicalDirectorRoute>
+            } />
+            <Route path="team-assignment" element={
+              <TechnicalDirectorRoute>
+                <TeamAssignment />
+              </TechnicalDirectorRoute>
+            } />
+            <Route path="projects-overview" element={
+              <TechnicalDirectorRoute>
+                <ProjectsOverview />
+              </TechnicalDirectorRoute>
+            } />
 
             {/* Project Manager specific routes */}
             <Route path="my-projects" element={
@@ -564,10 +698,26 @@ function App() {
             <Route path="extra-material" element={<RoleBasedChangeRequests />} />
 
             {/* Buyer Routes */}
-            <Route path="materials" element={<MaterialsToPurchase />} />
-            <Route path="purchase-orders" element={<PurchaseOrders />} />
-            <Route path="vendors" element={<VendorManagement />} />
-            <Route path="vendors/:vendorId" element={<VendorDetails />} />
+            <Route path="materials" element={
+              <BuyerRoute>
+                <MaterialsToPurchase />
+              </BuyerRoute>
+            } />
+            <Route path="purchase-orders" element={
+              <BuyerRoute>
+                <PurchaseOrders />
+              </BuyerRoute>
+            } />
+            <Route path="vendors" element={
+              <BuyerRoute>
+                <VendorManagement />
+              </BuyerRoute>
+            } />
+            <Route path="vendors/:vendorId" element={
+              <BuyerRoute>
+                <VendorDetails />
+              </BuyerRoute>
+            } />
 
             {/* Admin Routes - Use original role pages directly */}
             <Route path="user-management" element={

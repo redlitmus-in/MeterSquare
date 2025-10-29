@@ -451,13 +451,38 @@ def get_assigned_projects():
                 items = boq_details.get('items', [])
 
                 for idx, item in enumerate(items):
-                    # Get item overhead amount
+                    # Get item overhead amount - calculate from base_total of sub-items
                     item_overhead = item.get('overhead_amount', 0)
-                    if item_overhead == 0:
-                        # Calculate from percentage if not stored
-                        overhead_percentage = item.get('overhead_percentage', 10)
-                        total_cost = item.get('total_cost', 0)
-                        item_overhead = (total_cost * overhead_percentage) / 100
+                    overhead_percentage = item.get('overhead_percentage', 0)
+
+                    # Always recalculate from sub-items to ensure accuracy
+                    base_total_for_overhead = 0.0
+
+                    if item.get('has_sub_items') and item.get('sub_items'):
+                        # Sum up base_total from all sub-items
+                        for sub_item in item['sub_items']:
+                            base_total = float(sub_item.get('base_total', 0))
+                            # base_total is already calculated per quantity in BOQ structure
+                            base_total_for_overhead += base_total
+                    else:
+                        # Fallback: If no sub-items, use old calculation method
+                        base_total_for_overhead = (
+                            item.get('base_cost', 0) or
+                            item.get('actualItemCost', 0) or
+                            item.get('sub_items_cost', 0) or
+                            item.get('total_cost', 0) or
+                            item.get('selling_price', 0)
+                        )
+
+                    # Calculate overhead from base_total
+                    if overhead_percentage > 0 and base_total_for_overhead > 0:
+                        item_overhead = (base_total_for_overhead * overhead_percentage) / 100
+                        log.info(f"Calculated overhead for item {item.get('item_name', '')}: {item_overhead} " +
+                               f"from {overhead_percentage}% of base_total {base_total_for_overhead}")
+                    elif item_overhead == 0 or item_overhead is None:
+                        # Log warning if we can't calculate
+                        log.warning(f"Cannot calculate overhead for item {item.get('item_name', 'unknown')}: " +
+                                  f"percentage={overhead_percentage}, base_total={base_total_for_overhead}")
 
                     # Use master_item_id if available, otherwise use index
                     item_id = item.get('master_item_id', '')

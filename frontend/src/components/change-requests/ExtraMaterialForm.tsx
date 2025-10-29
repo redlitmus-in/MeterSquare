@@ -75,6 +75,8 @@ interface ExtraMaterialFormProps {
 const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCancel, onClose }) => {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submissionInProgressRef = React.useRef(false);
   const [projects, setProjects] = useState<Project[]>([]);
 
   // Dynamic field states
@@ -383,6 +385,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // CRITICAL: Prevent double submission
+    if (isSubmitting || submissionInProgressRef.current) {
+      console.warn('Submission already in progress, ignoring duplicate submit');
+      return;
+    }
+
     // Validation
     if (!selectedProject || !selectedArea || !selectedItem) {
       toast.error('Please select project, area, and BOQ item');
@@ -442,8 +450,14 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       overhead_percent: calculations.overheadPercentage
     };
 
+    // Set submission guards
+    setIsSubmitting(true);
+    submissionInProgressRef.current = true;
+
     try {
       setLoading(true);
+
+      // SINGLE submission path - use onSubmit if provided, otherwise direct API call
       if (onSubmit) {
         await onSubmit(payload);
       } else if (onClose) {
@@ -488,6 +502,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       toast.error(error.response?.data?.error || 'Failed to submit request');
     } finally {
       setLoading(false);
+      // Release submission guards
+      setIsSubmitting(false);
+      submissionInProgressRef.current = false;
     }
   };
 
@@ -645,18 +662,19 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           </div>
 
           {/* Threshold Information */}
-          <div className="mt-3 pt-3 border-t border-purple-200">
-            <div className="flex items-start gap-2">
-              <InformationCircleIcon className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
-              <div className="text-xs space-y-1">
-                <p className="text-purple-900">
-                  <span className="font-medium">40% Threshold:</span> AED{(itemOverhead.allocated * 0.4).toLocaleString()}
-                </p>
-                <p className="text-gray-600">
-                  Any request exceeding 40% of allocated miscellaneous (AED{(itemOverhead.allocated * 0.4).toLocaleString()}) will <span className="font-medium">always be sent to Technical Director</span> for approval
-                </p>
+          {itemOverhead.allocated > 0 && (
+            <div className="mt-3 pt-3 border-t border-purple-200">
+              <div className="flex items-start gap-2">
+                <InformationCircleIcon className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <p className="text-purple-900">
+                    <span className="font-medium">40% Threshold:</span> AED{(itemOverhead.allocated * 0.4).toLocaleString()}
+                  </p>
+                  <p className="text-gray-600">
+                    Any request exceeding 40% of allocated miscellaneous (AED{(itemOverhead.allocated * 0.4).toLocaleString()}) will <span className="font-medium">always be sent to Technical Director</span> for approval
+                  </p>
+                </div>
               </div>
-            </div>
 
             {/* Visual Progress Bar */}
             <div className="mt-3">
@@ -683,7 +701,23 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                 <span>AED{itemOverhead.allocated.toLocaleString()}</span>
               </div>
             </div>
-          </div>
+            </div>
+          )}
+
+          {/* Show message when no overhead allocated */}
+          {itemOverhead.allocated === 0 && (
+            <div className="mt-3 pt-3 border-t border-purple-200">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                <div className="flex items-start gap-2">
+                  <InformationCircleIcon className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-yellow-800">
+                    <p className="font-medium mb-1">No Miscellaneous Budget Allocated</p>
+                    <p className="text-xs">This item has AED 0 allocated for miscellaneous expenses. Progress tracking and percentage calculations are not available.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </motion.div>
       )}
 
@@ -1153,11 +1187,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         </button>
         <button
           type="submit"
-          disabled={loading || !selectedItem || !selectedSubItem || materials.length === 0 || calculations.availableAfter < 0}
+          disabled={loading || isSubmitting || !selectedItem || !selectedSubItem || materials.length === 0 || calculations.availableAfter < 0}
           className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
-          title={calculations.availableAfter < 0 ? 'Cannot submit - Budget exceeded' : ''}
+          title={calculations.availableAfter < 0 ? 'Cannot submit - Budget exceeded' : isSubmitting ? 'Submitting request...' : ''}
         >
-          {loading ? 'Submitting...' : 'Submit Request'}
+          {loading || isSubmitting ? 'Submitting...' : 'Submit Request'}
         </button>
       </div>
     </form>

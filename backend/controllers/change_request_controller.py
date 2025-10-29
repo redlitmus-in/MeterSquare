@@ -162,6 +162,41 @@ def create_change_request():
         if overhead_impact['original_overhead_allocated'] > 0:
             percentage_of_item_overhead = (materials_total_cost / overhead_impact['original_overhead_allocated']) * 100
 
+        # DUPLICATE DETECTION: Check for similar requests within last 30 seconds
+        # This prevents accidental double-clicks and form re-submissions
+        from datetime import timedelta
+        thirty_seconds_ago = datetime.utcnow() - timedelta(seconds=30)
+
+        similar_request = ChangeRequest.query.filter(
+            ChangeRequest.boq_id == boq_id,
+            ChangeRequest.requested_by_user_id == user_id,
+            ChangeRequest.materials_total_cost == materials_total_cost,
+            ChangeRequest.created_at >= thirty_seconds_ago,
+            ChangeRequest.is_deleted == False
+        ).first()
+
+        if similar_request:
+            # Check if item_id matches (if both have item_id)
+            if item_id and similar_request.item_id and str(item_id) == str(similar_request.item_id):
+                log.warning(f"Duplicate change request detected: User {user_id}, BOQ {boq_id}, Cost {materials_total_cost}, CR {similar_request.cr_id}")
+                return jsonify({
+                    "success": True,
+                    "message": "Similar request already exists (duplicate prevented)",
+                    "cr_id": similar_request.cr_id,
+                    "is_duplicate": True,
+                    "materials_total_cost": round(materials_total_cost, 2),
+                    "overhead_status": {
+                        "original_allocated": round(overhead_impact['original_overhead_allocated'], 2),
+                        "previously_used": round(overhead_impact['original_overhead_used'], 2),
+                        "available_before": round(overhead_impact['original_overhead_remaining'], 2),
+                        "consumed_by_request": round(overhead_impact['overhead_consumed'], 2),
+                        "available_after": round(overhead_impact['new_overhead_remaining'], 2),
+                        "is_over_budget": overhead_impact['is_over_budget'],
+                        "balance": "negative" if overhead_impact['is_over_budget'] else "positive"
+                    },
+                    "note": "Duplicate request prevented. Using existing request."
+                }), 200
+
         # Create change request with status 'pending'
         # No auto-routing - user must explicitly send for review
         change_request = ChangeRequest(
@@ -1614,13 +1649,22 @@ def update_change_request(cr_id):
 
         # Check edit permissions
         user_role = current_user.get('role_name', '').lower()
+        normalized_role = workflow_service.normalize_role(user_role)
 
-        # PM can edit any pending request, SE can only edit their own
+        # PM can edit any pending request, SE can only edit their own, Estimator can edit requests assigned to them
         if user_role in ['projectmanager', 'project_manager']:
             # PM can edit any pending or under_review request in their projects
             # under_review means SE sent it to PM, PM can still edit before approving
             if change_request.status not in ['pending', 'under_review']:
                 return jsonify({"error": "Can only edit pending or under review requests"}), 400
+        elif normalized_role == 'estimator':
+            # Estimator can edit requests that are assigned to them for approval
+            if change_request.approval_required_from != 'estimator':
+                return jsonify({"error": "You can only edit requests assigned to you for approval"}), 403
+
+            # Estimator can only edit if status is under_review or approved_by_pm (meaning it's waiting for estimator review)
+            if change_request.status not in ['under_review', 'approved_by_pm']:
+                return jsonify({"error": "Can only edit requests that are pending your approval"}), 400
         else:
             # SE can only edit their own requests
             if change_request.requested_by_user_id != user_id:

@@ -1,4 +1,4 @@
-from flask import Blueprint
+from flask import Blueprint, g, jsonify
 from utils.authentication import jwt_required
 from controllers.change_request_controller import (
     create_change_request,
@@ -15,27 +15,25 @@ from controllers.change_request_controller import (
 
 change_request_routes = Blueprint('change_request_routes', __name__, url_prefix='/api')
 
+# Helper function - Change requests accessible by PM, SE, Estimator, TD, or Admin
+def check_cr_access():
+    """Check if current user can access Change Request operations"""
+    current_user = g.user
+    user_role = current_user.get('role', '').lower()
+    allowed_roles = ['projectmanager', 'sitesupervisor', 'siteengineer', 'estimator', 'technicaldirector', 'admin']
+    if user_role not in allowed_roles:
+        return jsonify({"error": "Access denied. PM, SE, Estimator, TD, or Admin role required."}), 403
+    return None
+
 
 # Create change request (PM/SE adds extra materials)
 @change_request_routes.route('/boq/change-request', methods=['POST'])
 @jwt_required
 def create_change_request_route():
-    """
-    PM/SE creates a change request to add extra materials to BOQ
-    Request body:
-    {
-        "boq_id": 123,
-        "justification": "Need additional materials for foundation extension",
-        "materials": [
-            {
-                "material_name": "Cement",
-                "quantity": 10,
-                "unit": "bags",
-                "unit_price": 400
-            }
-        ]
-    }
-    """
+    """PM/SE/Admin creates change request"""
+    access_check = check_cr_access()
+    if access_check:
+        return access_check
     return create_change_request()
 
 
@@ -43,13 +41,10 @@ def create_change_request_route():
 @change_request_routes.route('/change-requests', methods=['GET'])
 @jwt_required
 def get_all_change_requests_route():
-    """
-    Get all change requests filtered by user role:
-    - PM/SE: See their own requests
-    - Estimator: See requests requiring estimator approval (≤50k)
-    - TD: See all requests, especially >50k
-    - Admin: See all
-    """
+    """Get all change requests (role-filtered, Admin sees all)"""
+    access_check = check_cr_access()
+    if access_check:
+        return access_check
     return get_all_change_requests()
 
 
@@ -57,10 +52,10 @@ def get_all_change_requests_route():
 @change_request_routes.route('/change-request/<int:cr_id>', methods=['GET'])
 @jwt_required
 def get_change_request_by_id_route(cr_id):
-    """
-    Get detailed information about a specific change request
-    Includes overhead analysis, budget impact, and materials
-    """
+    """Get specific change request details"""
+    access_check = check_cr_access()
+    if access_check:
+        return access_check
     return get_change_request_by_id(cr_id)
 
 
@@ -68,63 +63,43 @@ def get_change_request_by_id_route(cr_id):
 @change_request_routes.route('/change-request/<int:cr_id>', methods=['PUT'])
 @jwt_required
 def update_change_request_route(cr_id):
-    """
-    Update a pending change request
-    Only the creator can update their own pending requests
-    Request body:
-    {
-        "justification": "Updated justification",
-        "materials": [
-            {
-                "material_name": "Cement",
-                "quantity": 15,
-                "unit": "bags",
-                "unit_price": 450
-            }
-        ]
-    }
-    """
+    """Update pending change request (creator or Admin)"""
+    access_check = check_cr_access()
+    if access_check:
+        return access_check
     return update_change_request(cr_id)
 
 
-# Approve change request (Estimator/TD)
+# Approve change request (Estimator/TD/Admin)
 @change_request_routes.route('/change-request/<int:cr_id>/approve', methods=['POST'])
 @jwt_required
 def approve_change_request_route(cr_id):
-    """
-    Approve change request and merge materials into BOQ
-    Request body:
-    {
-        "comments": "Approved. Within overhead budget."
-    }
-    """
+    """Approve change request (Estimator/TD/Admin)"""
+    access_check = check_cr_access()
+    if access_check:
+        return access_check
     return approve_change_request(cr_id)
 
 
-# Reject change request (Estimator/TD)
+# Reject change request (Estimator/TD/Admin)
 @change_request_routes.route('/change-request/<int:cr_id>/reject', methods=['POST'])
 @jwt_required
 def reject_change_request_route(cr_id):
-    """
-    Reject change request
-    Request body:
-    {
-        "rejection_reason": "Overhead exceeded. Please reduce quantity or request budget increase."
-    }
-    """
+    """Reject change request (Estimator/TD/Admin)"""
+    access_check = check_cr_access()
+    if access_check:
+        return access_check
     return reject_change_request(cr_id)
 
 
-# Send for review (PM/SE sends request to next approver)
+# Send for review (PM/SE/Admin sends request to next approver)
 @change_request_routes.route('/change-request/<int:cr_id>/send-for-review', methods=['POST'])
 @jwt_required
 def send_for_review_route(cr_id):
-    """
-    Send change request for review
-    SE → Sends to PM
-    PM → Sends to TD or Estimator (based on budget threshold)
-    Changes status from 'pending' to 'under_review'
-    """
+    """Send change request for review (PM/SE/Admin)"""
+    access_check = check_cr_access()
+    if access_check:
+        return access_check
     return send_for_review(cr_id)
 
 

@@ -38,8 +38,11 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
 import ApprovalWithBuyerModal from '@/components/modals/ApprovalWithBuyerModal';
+import { useAuthStore } from '@/store/authStore';
+import { permissions } from '@/utils/rolePermissions';
 
 const ChangeRequestsPage: React.FC = () => {
+  const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
@@ -259,6 +262,10 @@ const ChangeRequestsPage: React.FC = () => {
                   </Button>
                   {request.approval_required_from === 'estimator' && request.status !== 'approved' && request.status !== 'rejected' && (
                     <>
+                      <Button size="sm" variant="outline" className="text-blue-600 border-blue-300 hover:bg-blue-50" onClick={() => handleEdit(request.cr_id)}>
+                        <Pencil className="h-3.5 w-3.5 mr-1" />
+                        Edit
+                      </Button>
                       <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(request.cr_id)}>
                         <Check className="h-3.5 w-3.5" />
                       </Button>
@@ -464,24 +471,33 @@ const ChangeRequestsPage: React.FC = () => {
                             <span>Review</span>
                           </button>
                           {request.approval_required_from === 'estimator' && request.status !== 'approved' && request.status !== 'rejected' && (
-                            <div className="grid grid-cols-2 gap-2">
+                            <>
                               <button
-                                onClick={() => handleApprove(request.cr_id)}
-                                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
-                                style={{ backgroundColor: 'rgb(22, 163, 74)' }}
+                                onClick={() => handleEdit(request.cr_id)}
+                                className="w-full border-2 border-blue-300 text-blue-600 text-[10px] sm:text-xs h-8 rounded hover:bg-blue-50 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
                               >
-                                <Check className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                                <span>Approve</span>
+                                <Pencil className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                                <span>Edit</span>
                               </button>
-                              <button
-                                onClick={() => handleReject(request.cr_id)}
-                                className="bg-red-600 hover:bg-red-700 text-white text-[10px] sm:text-xs h-8 rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
-                              >
-                                <X className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                                <span className="hidden sm:inline">Reject</span>
-                                <span className="sm:hidden">No</span>
-                              </button>
-                            </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  onClick={() => handleApprove(request.cr_id)}
+                                  className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                                  style={{ backgroundColor: 'rgb(22, 163, 74)' }}
+                                >
+                                  <Check className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                                  <span>Approve</span>
+                                </button>
+                                <button
+                                  onClick={() => handleReject(request.cr_id)}
+                                  className="bg-red-600 hover:bg-red-700 text-white text-[10px] sm:text-xs h-8 rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                                >
+                                  <X className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                                  <span className="hidden sm:inline">Reject</span>
+                                  <span className="sm:hidden">No</span>
+                                </button>
+                              </div>
+                            </>
                           )}
                         </div>
                       </motion.div>
@@ -720,7 +736,7 @@ const ChangeRequestsPage: React.FC = () => {
         changeRequest={selectedChangeRequest}
         onApprove={handleApproveFromModal}
         onReject={handleRejectFromModal}
-        canApprove={selectedChangeRequest?.approval_required_from === 'estimator' && selectedChangeRequest?.status !== 'approved' && selectedChangeRequest?.status !== 'rejected'}
+        canApprove={permissions.canApproveChangeRequest(user) && selectedChangeRequest?.status !== 'approved' && selectedChangeRequest?.status !== 'rejected'}
       />
 
       {/* Rejection Reason Modal */}

@@ -27,17 +27,17 @@ def create_app():
             "http://localhost:3000",  # For local development testing
             "http://localhost:5173"   # Vite dev server
         ]
-        CORS(app, 
+        CORS(app,
              origins=allowed_origins,
-             allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
-             methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+             allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-Viewing-As-Role", "X-Viewing-As-Role-Id"],
+             methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
              supports_credentials=True)
     else:
         # Development: Allow all origins
-        CORS(app, 
+        CORS(app,
              origins="*",
-             allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
-             methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+             allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-Viewing-As-Role", "X-Viewing-As-Role-Id"],
+             methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
              supports_credentials=True)
     
     # Add after_request handler to ensure CORS headers are always sent
@@ -65,8 +65,8 @@ def create_app():
                 response.headers['Access-Control-Allow-Origin'] = origin
             else:
                 response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-Request-ID'
-        response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-Request-ID,X-Viewing-As-Role,X-Viewing-As-Role-Id'
+        response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS,PATCH'
         response.headers['Access-Control-Allow-Credentials'] = 'true'
         return response
 
