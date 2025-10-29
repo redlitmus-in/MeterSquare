@@ -129,6 +129,22 @@ def get_all_td_boqs():
             # Use calculated selling price if available, otherwise fall back to database value
             final_total_cost = total_selling_price if total_selling_price > 0 else (float(boq_details.total_cost) if boq_details and boq_details.total_cost else 0.0)
 
+            # Apply discount if present in BOQ details
+            discount_percentage = 0
+            discount_amount = 0
+            if boq_details and boq_details.boq_details:
+                discount_percentage = boq_details.boq_details.get("discount_percentage", 0) or 0
+                discount_amount = boq_details.boq_details.get("discount_amount", 0) or 0
+
+                # Calculate discount amount if only percentage is provided
+                if discount_amount == 0 and discount_percentage > 0 and final_total_cost > 0:
+                    discount_amount = final_total_cost * (discount_percentage / 100)
+
+                # Apply discount to final total
+                if discount_amount > 0:
+                    final_total_cost = final_total_cost - discount_amount
+                    log.info(f"BOQ {boq.boq_id}: Applied discount {discount_percentage}% (AED {discount_amount}) to total. Before: {total_selling_price}, After: {final_total_cost}")
+
             boq_data = {
                 "boq_id": boq.boq_id,
                 "project_id": boq.project_id,

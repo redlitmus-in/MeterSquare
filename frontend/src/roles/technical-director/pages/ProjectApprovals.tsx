@@ -521,25 +521,8 @@ const ProjectApprovals: React.FC = () => {
     const clientName = boq.client || boq.project_details?.client || boq.project?.client || 'Unknown Client';
     const status = mapBOQStatus(boq.status);
 
-    // Calculate grand total from sub-items (Client Amount = sum of all quantity × rate)
-    let totalValue = 0;
-    if (boq.items && Array.isArray(boq.items)) {
-      boq.items.forEach((item: any) => {
-        if (item.sub_items && Array.isArray(item.sub_items)) {
-          item.sub_items.forEach((si: any) => {
-            totalValue += (si.quantity || 0) * (si.rate || 0);
-          });
-        } else {
-          // Fallback for old format without sub-items
-          totalValue += (item.quantity || 0) * (item.rate || 0);
-        }
-      });
-    }
-    // Fallback to backend values if no items
-    if (totalValue === 0) {
-      totalValue = boq.selling_price || boq.total_cost || 0;
-    }
-
+    // Use backend calculated values directly for consistency
+    const totalValue = boq.selling_price || boq.estimatedSellingPrice || boq.total_cost || 0;
     const laborCost = boq.total_labour_cost || 0;
     const materialCost = boq.total_material_cost || 0;
     const itemCount = boq.items_count || 0;
@@ -1925,7 +1908,7 @@ const ProjectApprovals: React.FC = () => {
                     <div className="grid grid-cols-5 gap-4">
                       <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3">
                         <p className="text-xs text-gray-500 mb-1">Total Value</p>
-                        <p className="text-lg font-bold text-gray-900">AED{formatCurrency(estimation.totalValue)}</p>
+                        <p className="text-lg font-bold text-gray-900">{formatCurrency(estimation.totalValue)}</p>
                       </div>
                       <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3">
                         <p className="text-xs text-gray-500 mb-1">Items</p>
@@ -1933,11 +1916,11 @@ const ProjectApprovals: React.FC = () => {
                       </div>
                       <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-3">
                         <p className="text-xs text-gray-500 mb-1">Labor Cost</p>
-                        <p className="text-lg font-bold text-green-900">AED{formatCurrency(estimation.laborCost)}</p>
+                        <p className="text-lg font-bold text-green-900">{formatCurrency(estimation.laborCost)}</p>
                       </div>
                       <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-3">
                         <p className="text-xs text-gray-500 mb-1">Material Cost</p>
-                        <p className="text-lg font-bold text-red-900">AED{formatCurrency(estimation.materialCost)}</p>
+                        <p className="text-lg font-bold text-red-900">{formatCurrency(estimation.materialCost)}</p>
                       </div>
                       <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-3">
                         <p className="text-xs text-gray-500 mb-1">O&P Margin</p>
@@ -2059,7 +2042,7 @@ const ProjectApprovals: React.FC = () => {
                         <TableCell className="text-gray-600">{estimation.clientName}</TableCell>
                         <TableCell className="text-gray-600">{estimation.submittedDate}</TableCell>
                         <TableCell className="text-right font-medium">
-                          AED{formatCurrency(estimation.totalValue)}
+                          {formatCurrency(estimation.totalValue)}
                         </TableCell>
                         <TableCell className="text-right">{estimation.itemCount}</TableCell>
                         <TableCell>
@@ -3537,7 +3520,7 @@ const ProjectApprovals: React.FC = () => {
                         <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                           <div className="flex justify-between items-start mb-3">
                             <h4 className="font-bold text-gray-900">{index + 1}. {(item as any).item_name || item.description}</h4>
-                            <span className="font-semibold text-orange-600">AED{formatCurrency(itemTotalCost)}</span>
+                            <span className="font-semibold text-orange-600">{formatCurrency(itemTotalCost)}</span>
                           </div>
 
                           {hasSubItems ? (
@@ -3556,7 +3539,7 @@ const ProjectApprovals: React.FC = () => {
                                       </h5>
                                       <div className="text-right">
                                         <div className="text-xs text-gray-600">Client Amount</div>
-                                        <div className="font-bold text-green-700">AED{formatCurrency(subItemClientCost)}</div>
+                                        <div className="font-bold text-green-700">{formatCurrency(subItemClientCost)}</div>
                                       </div>
                                     </div>
                                     {subItem.scope && (
@@ -3567,7 +3550,7 @@ const ProjectApprovals: React.FC = () => {
                                       {subItem.location && <div><span className="font-medium">Location:</span> {subItem.location}</div>}
                                       {subItem.brand && <div><span className="font-medium">Brand:</span> {subItem.brand}</div>}
                                       <div><span className="font-medium">Qty:</span> {subItem.quantity} {subItem.unit}</div>
-                                      {subItem.rate && <div><span className="font-medium">Rate:</span> AED{formatCurrency(subItem.rate)}/{subItem.unit}</div>}
+                                      {subItem.rate && <div><span className="font-medium">Rate:</span> {formatCurrency(subItem.rate)}/{subItem.unit}</div>}
                                     </div>
 
                                     {/* Sub-item Materials */}
@@ -3578,12 +3561,12 @@ const ProjectApprovals: React.FC = () => {
                                           {subItem.materials.map((mat: any, mIdx: number) => (
                                             <div key={mIdx} className="flex justify-between text-xs">
                                               <span className="text-gray-600">{mat.material_name} ({mat.quantity} {mat.unit})</span>
-                                              <span className="font-medium">AED{formatCurrency(mat.total_price || mat.amount || 0)}</span>
+                                              <span className="font-medium">{formatCurrency(mat.total_price || mat.amount || 0)}</span>
                                             </div>
                                           ))}
                                           <div className="flex justify-between text-xs font-semibold pt-1 border-t border-blue-200">
                                             <span>Total Materials:</span>
-                                            <span>AED{formatCurrency(subMaterialTotal)}</span>
+                                            <span>{formatCurrency(subMaterialTotal)}</span>
                                           </div>
                                         </div>
                                       </div>
@@ -3597,12 +3580,12 @@ const ProjectApprovals: React.FC = () => {
                                           {subItem.labour.map((lab: any, lIdx: number) => (
                                             <div key={lIdx} className="flex justify-between text-xs">
                                               <span className="text-gray-600">{lab.labour_role} ({lab.hours} hrs)</span>
-                                              <span className="font-medium">AED{formatCurrency(lab.total_cost || lab.amount || 0)}</span>
+                                              <span className="font-medium">{formatCurrency(lab.total_cost || lab.amount || 0)}</span>
                                             </div>
                                           ))}
                                           <div className="flex justify-between text-xs font-semibold pt-1 border-t border-purple-200">
                                             <span>Total Labour:</span>
-                                            <span>AED{formatCurrency(subLabourTotal)}</span>
+                                            <span>{formatCurrency(subLabourTotal)}</span>
                                           </div>
                                         </div>
                                       </div>
@@ -3621,12 +3604,12 @@ const ProjectApprovals: React.FC = () => {
                                     {item.materials.map((mat, mIdx) => (
                                       <div key={mIdx} className="flex justify-between text-xs">
                                         <span className="text-gray-600">{mat.name} ({mat.quantity} {mat.unit})</span>
-                                        <span className="font-medium">AED{formatCurrency(mat.amount)}</span>
+                                        <span className="font-medium">{formatCurrency(mat.amount)}</span>
                                       </div>
                                     ))}
                                     <div className="flex justify-between text-xs font-semibold pt-1 border-t">
                                       <span>Total Materials:</span>
-                                      <span>AED{formatCurrency(item.materials.reduce((sum, m) => sum + m.amount, 0))}</span>
+                                      <span>{formatCurrency(item.materials.reduce((sum, m) => sum + m.amount, 0))}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -3639,12 +3622,12 @@ const ProjectApprovals: React.FC = () => {
                                     {item.labour.map((lab, lIdx) => (
                                       <div key={lIdx} className="flex justify-between text-xs">
                                         <span className="text-gray-600">{lab.type} ({lab.quantity} {lab.unit})</span>
-                                        <span className="font-medium">AED{formatCurrency(lab.amount)}</span>
+                                        <span className="font-medium">{formatCurrency(lab.amount)}</span>
                                       </div>
                                     ))}
                                     <div className="flex justify-between text-xs font-semibold pt-1 border-t">
                                       <span>Total Labour:</span>
-                                      <span>AED{formatCurrency(item.laborCost)}</span>
+                                      <span>{formatCurrency(item.laborCost)}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -3724,39 +3707,39 @@ const ProjectApprovals: React.FC = () => {
                               <div className="space-y-2 text-sm">
                                 <div className="flex justify-between">
                                   <span className="text-gray-700">Client Amount:</span>
-                                  <span className="font-bold text-blue-700">AED{formatCurrency(totalClientAmount)}</span>
+                                  <span className="font-bold text-blue-700">{formatCurrency(totalClientAmount)}</span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-gray-700">Internal Cost:</span>
-                                  <span className="font-semibold text-orange-600">AED{formatCurrency(totalInternalCost)}</span>
+                                  <span className="font-semibold text-orange-600">{formatCurrency(totalInternalCost)}</span>
                                 </div>
                                 <div className="ml-4 space-y-1 text-xs text-gray-600">
                                   <div className="flex justify-between">
                                     <span>Materials:</span>
-                                    <span>AED{formatCurrency(materialCost)}</span>
+                                    <span>{formatCurrency(materialCost)}</span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span>Labour:</span>
-                                    <span>AED{formatCurrency(labourCost)}</span>
+                                    <span>{formatCurrency(labourCost)}</span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span>Miscellaneous:</span>
-                                    <span>AED{formatCurrency(totalMiscCost)}</span>
+                                    <span>{formatCurrency(totalMiscCost)}</span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span>Overhead & Profit:</span>
-                                    <span>AED{formatCurrency(totalPlannedProfit)}</span>
+                                    <span>{formatCurrency(totalPlannedProfit)}</span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span>Transport:</span>
-                                    <span>AED{formatCurrency(totalTransportCost)}</span>
+                                    <span>{formatCurrency(totalTransportCost)}</span>
                                   </div>
                                 </div>
                                 <div className="flex justify-between pt-2 border-t border-blue-300">
                                   <span className="font-bold">Project Margin:</span>
                                   <div className="text-right">
                                     <div className={`font-bold ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                      AED{formatCurrency(projectMargin)}
+                                      {formatCurrency(projectMargin)}
                                     </div>
                                     <div className="text-xs">({marginPercentage.toFixed(1)}%)</div>
                                   </div>
@@ -3770,19 +3753,19 @@ const ProjectApprovals: React.FC = () => {
                               <div className="space-y-2 text-sm">
                                 <div className="flex justify-between">
                                   <span className="text-gray-700">Planned Profit (O&P):</span>
-                                  <span className="font-semibold text-blue-600">AED{formatCurrency(totalPlannedProfit)}</span>
+                                  <span className="font-semibold text-blue-600">{formatCurrency(totalPlannedProfit)}</span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-gray-700">Actual Profit:</span>
                                   <span className={`font-bold ${totalActualProfit >= totalPlannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
-                                    AED{formatCurrency(totalActualProfit)}
+                                    {formatCurrency(totalActualProfit)}
                                   </span>
                                 </div>
                                 <div className="flex justify-between pt-2 border-t border-green-300">
                                   <span className="font-bold">Variance:</span>
                                   <div className="text-right">
                                     <div className={`font-bold text-sm ${profitVariance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                      {profitVariance >= 0 ? '+' : ''}AED{formatCurrency(profitVariance)}
+                                      {profitVariance >= 0 ? '+' : ''}{formatCurrency(profitVariance)}
                                     </div>
                                     <div className="text-xs">({profitVariance >= 0 ? '+' : ''}{profitVariancePercentage.toFixed(1)}%)</div>
                                   </div>
@@ -3795,19 +3778,19 @@ const ProjectApprovals: React.FC = () => {
                               <div className="space-y-2">
                                 <div className="flex justify-between text-sm font-medium">
                                   <span className="text-gray-800">Subtotal:</span>
-                                  <span className="font-semibold">AED{formatCurrency(totalClientAmount)}</span>
+                                  <span className="font-semibold">{formatCurrency(totalClientAmount)}</span>
                                 </div>
                                 {totalDiscount > 0 && (
                                   <div className="flex justify-between text-xs text-red-600">
                                     <span>Discount ({discountPercentage.toFixed(1)}%):</span>
-                                    <span className="font-semibold">- AED{formatCurrency(totalDiscount)}</span>
+                                    <span className="font-semibold">- {formatCurrency(totalDiscount)}</span>
                                   </div>
                                 )}
                                 <div className="flex justify-between text-base font-bold pt-2 border-t border-green-400">
                                   <span className="text-green-900">
                                     Grand Total: <span className="text-xs font-normal text-gray-600">(Excluding VAT)</span>
                                   </span>
-                                  <span className="text-green-700">AED{formatCurrency(grandTotalAfterDiscount)}</span>
+                                  <span className="text-green-700">{formatCurrency(grandTotalAfterDiscount)}</span>
                                 </div>
 
                                 {/* Show discount impact on profitability */}
@@ -3822,27 +3805,27 @@ const ProjectApprovals: React.FC = () => {
                                         <span className="text-gray-600">Client Cost:</span>
                                         <div className="flex items-center gap-2">
                                           <span className="text-gray-500 line-through">
-                                            AED{formatCurrency(totalClientAmount)}
+                                            {formatCurrency(totalClientAmount)}
                                           </span>
                                           <span className="text-blue-700 font-bold">
-                                            → AED{formatCurrency(grandTotalAfterDiscount)}
+                                            → {formatCurrency(grandTotalAfterDiscount)}
                                           </span>
                                         </div>
                                       </div>
                                       <div className="flex justify-between items-center">
                                         <span className="text-gray-600">Internal Cost:</span>
                                         <span className="font-semibold text-red-600">
-                                          AED{formatCurrency(totalInternalCost)}
+                                          {formatCurrency(totalInternalCost)}
                                         </span>
                                       </div>
                                       <div className="flex justify-between items-center pt-2 border-t border-gray-300">
                                         <span className="text-gray-700 font-medium">Actual Profit:</span>
                                         <div className="flex items-center gap-2">
                                           <span className="text-gray-500 line-through">
-                                            AED{formatCurrency(totalActualProfit)}
+                                            {formatCurrency(totalActualProfit)}
                                           </span>
                                           <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                                            → AED{formatCurrency(actualProfitAfterDiscount)}
+                                            → {formatCurrency(actualProfitAfterDiscount)}
                                           </span>
                                         </div>
                                       </div>
@@ -3936,13 +3919,13 @@ const ProjectApprovals: React.FC = () => {
                             <div>
                               <p className="text-xs text-gray-600 mb-1">Rate</p>
                               <p className="font-medium text-gray-900">
-                                AED{formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
+                                {formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
                               </p>
                             </div>
                             <div>
                               <p className="text-xs text-gray-600 mb-1">Amount</p>
                               <p className="font-semibold text-orange-700">
-                                AED{formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
+                                {formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
                               </p>
                             </div>
                           </div>
@@ -3988,7 +3971,7 @@ const ProjectApprovals: React.FC = () => {
                         <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                           <div className="flex justify-between items-start mb-3">
                             <h4 className="font-bold text-gray-900">{index + 1}. {(item as any).item_name || item.description}</h4>
-                            <span className="font-semibold text-blue-600">AED{formatCurrency(itemTotal)}</span>
+                            <span className="font-semibold text-blue-600">{formatCurrency(itemTotal)}</span>
                           </div>
 
                           {hasSubItems ? (
@@ -4010,10 +3993,10 @@ const ProjectApprovals: React.FC = () => {
                                       {subItem.location && <div><span className="font-medium">Location:</span> {subItem.location}</div>}
                                       {subItem.brand && <div><span className="font-medium">Brand:</span> {subItem.brand}</div>}
                                       <div><span className="font-medium">Qty:</span> {subItem.quantity} {subItem.unit}</div>
-                                      <div><span className="font-medium">Rate:</span> AED{formatCurrency(subItem.rate || 0)}</div>
+                                      <div><span className="font-medium">Rate:</span> {formatCurrency(subItem.rate || 0)}</div>
                                     </div>
                                     <div className="mt-2 text-right">
-                                      <span className="text-sm font-semibold text-blue-700">Total: AED{formatCurrency(subItemAmount)}</span>
+                                      <span className="text-sm font-semibold text-blue-700">Total: {formatCurrency(subItemAmount)}</span>
                                     </div>
                                   </div>
                                 );
@@ -4065,19 +4048,19 @@ const ProjectApprovals: React.FC = () => {
                           <>
                             <div className="flex justify-between text-base font-medium">
                               <span className="text-gray-800">Subtotal:</span>
-                              <span className="font-semibold">AED{formatCurrency(subtotal)}</span>
+                              <span className="font-semibold">{formatCurrency(subtotal)}</span>
                             </div>
                             {overallDiscount > 0 && (
                               <div className="flex justify-between text-sm text-red-600">
                                 <span>Discount ({discountPercentage.toFixed(1)}%):</span>
-                                <span className="font-semibold">- AED{formatCurrency(overallDiscount)}</span>
+                                <span className="font-semibold">- {formatCurrency(overallDiscount)}</span>
                               </div>
                             )}
                             <div className="flex justify-between pt-3 border-t-2 border-blue-300 text-lg font-bold">
                               <span className="text-blue-900">
                                 Grand Total: <span className="text-xs font-normal text-gray-600">(Excluding VAT)</span>
                               </span>
-                              <span className="text-green-600">AED{formatCurrency(grandTotal)}</span>
+                              <span className="text-green-600">{formatCurrency(grandTotal)}</span>
                             </div>
                           </>
                         );
@@ -4145,13 +4128,13 @@ const ProjectApprovals: React.FC = () => {
                             <div>
                               <p className="text-xs text-gray-600 mb-1">Rate</p>
                               <p className="font-medium text-gray-900">
-                                AED{formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
+                                {formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
                               </p>
                             </div>
                             <div>
                               <p className="text-xs text-gray-600 mb-1">Amount</p>
                               <p className="font-semibold text-blue-700">
-                                AED{formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
+                                {formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
                               </p>
                             </div>
                           </div>

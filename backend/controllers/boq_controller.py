@@ -1029,12 +1029,25 @@ def create_boq():
         # Get preliminaries from request data
         preliminaries = data.get("preliminaries", {})
 
+        # Apply BOQ-level discount to total
+        boq_discount_percentage = data.get("discount_percentage", 0) or 0
+        boq_discount_amount = data.get("discount_amount", 0) or 0
+
+        # Calculate discount amount if only percentage is provided
+        if boq_discount_amount == 0 and boq_discount_percentage > 0 and total_boq_cost > 0:
+            boq_discount_amount = total_boq_cost * (boq_discount_percentage / 100)
+
+        # Apply BOQ-level discount to get final total
+        final_boq_cost = total_boq_cost - boq_discount_amount if boq_discount_amount > 0 else total_boq_cost
+
+        log.info(f"BOQ {boq.boq_id} create totals - Before discount: {total_boq_cost}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), After discount: {final_boq_cost}")
+
         # Create BOQ details JSON
         boq_details_json = {
             "boq_id": boq.boq_id,
             "preliminaries": preliminaries,
-            "discount_percentage": data.get("discount_percentage", 0),
-            "discount_amount": data.get("discount_amount", 0),
+            "discount_percentage": boq_discount_percentage,
+            "discount_amount": boq_discount_amount,
             "items": boq_items,
             "summary": {
                 "total_items": len(boq_items),
@@ -1042,9 +1055,9 @@ def create_boq():
                 "total_labour": total_labour,
                 "total_material_cost": sum(item["totalMaterialCost"] for item in boq_items),
                 "total_labour_cost": sum(item["totalLabourCost"] for item in boq_items),
-                "total_cost": total_boq_cost,
-                "selling_price": total_boq_cost,
-                "estimatedSellingPrice": total_boq_cost
+                "total_cost": final_boq_cost,
+                "selling_price": final_boq_cost,
+                "estimatedSellingPrice": final_boq_cost
             }
         }
 
@@ -1052,7 +1065,7 @@ def create_boq():
         boq_details = BOQDetails(
             boq_id=boq.boq_id,
             boq_details=boq_details_json,
-            total_cost=total_boq_cost,
+            total_cost=final_boq_cost,
             total_items=len(boq_items),
             total_materials=total_materials,
             total_labour=total_labour,
@@ -2031,12 +2044,25 @@ def update_boq(boq_id):
             # Get preliminaries from request data
             preliminaries = data.get("preliminaries", {})
 
+            # Apply BOQ-level discount to total
+            boq_discount_percentage = data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)) or 0
+            boq_discount_amount = data.get("discount_amount", old_boq_details_json.get("discount_amount", 0)) or 0
+
+            # Calculate discount amount if only percentage is provided
+            if boq_discount_amount == 0 and boq_discount_percentage > 0 and total_boq_cost > 0:
+                boq_discount_amount = total_boq_cost * (boq_discount_percentage / 100)
+
+            # Apply BOQ-level discount to get final total
+            final_boq_cost = total_boq_cost - boq_discount_amount if boq_discount_amount > 0 else total_boq_cost
+
+            log.info(f"BOQ {boq.boq_id} update totals - Before discount: {total_boq_cost}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), After discount: {final_boq_cost}")
+
             # Update JSON structure
             updated_json = {
                 "boq_id": boq.boq_id,
                 "preliminaries": preliminaries,
-                "discount_percentage": data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)),
-                "discount_amount": data.get("discount_amount", old_boq_details_json.get("discount_amount", 0)),
+                "discount_percentage": boq_discount_percentage,
+                "discount_amount": boq_discount_amount,
                 "items": boq_items,
                 "summary": {
                     "total_items": len(boq_items),
@@ -2044,15 +2070,15 @@ def update_boq(boq_id):
                     "total_labour": total_labour,
                     "total_material_cost": sum(item["totalMaterialCost"] for item in boq_items),
                     "total_labour_cost": sum(item["totalLabourCost"] for item in boq_items),
-                    "total_cost": total_boq_cost,
-                    "selling_price": total_boq_cost,
-                    "estimatedSellingPrice": total_boq_cost
+                    "total_cost": final_boq_cost,
+                    "selling_price": final_boq_cost,
+                    "estimatedSellingPrice": final_boq_cost
                 }
             }
 
             # Update BOQ details
             boq_details.boq_details = updated_json
-            boq_details.total_cost = total_boq_cost
+            boq_details.total_cost = final_boq_cost
             boq_details.total_items = len(boq_items)
             boq_details.total_materials = total_materials
             boq_details.total_labour = total_labour
@@ -2643,12 +2669,25 @@ def revision_boq(boq_id):
             # Get preliminaries from request data
             preliminaries = data.get("preliminaries", {})
 
+            # Apply BOQ-level discount to total
+            boq_discount_percentage = data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)) or 0
+            boq_discount_amount = data.get("discount_amount", old_boq_details_json.get("discount_amount", 0)) or 0
+
+            # Calculate discount amount if only percentage is provided
+            if boq_discount_amount == 0 and boq_discount_percentage > 0 and total_boq_cost > 0:
+                boq_discount_amount = total_boq_cost * (boq_discount_percentage / 100)
+
+            # Apply BOQ-level discount to get final total
+            final_boq_cost = total_boq_cost - boq_discount_amount if boq_discount_amount > 0 else total_boq_cost
+
+            log.info(f"BOQ {boq.boq_id} revision update totals - Before discount: {total_boq_cost}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), After discount: {final_boq_cost}")
+
             # Update JSON structure
             updated_json = {
                 "boq_id": boq.boq_id,
                 "preliminaries": preliminaries,
-                "discount_percentage": data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)),
-                "discount_amount": data.get("discount_amount", old_boq_details_json.get("discount_amount", 0)),
+                "discount_percentage": boq_discount_percentage,
+                "discount_amount": boq_discount_amount,
                 "items": boq_items,
                 "summary": {
                     "total_items": len(boq_items),
@@ -2656,15 +2695,15 @@ def revision_boq(boq_id):
                     "total_labour": total_labour,
                     "total_material_cost": sum(item["totalMaterialCost"] for item in boq_items),
                     "total_labour_cost": sum(item["totalLabourCost"] for item in boq_items),
-                    "total_cost": total_boq_cost,
-                    "selling_price": total_boq_cost,
-                    "estimatedSellingPrice": total_boq_cost
+                    "total_cost": final_boq_cost,
+                    "selling_price": final_boq_cost,
+                    "estimatedSellingPrice": final_boq_cost
                 }
             }
 
             # Update BOQ details
             boq_details.boq_details = updated_json
-            boq_details.total_cost = total_boq_cost
+            boq_details.total_cost = final_boq_cost
             boq_details.total_items = len(boq_items)
             boq_details.total_materials = total_materials
             boq_details.total_labour = total_labour
