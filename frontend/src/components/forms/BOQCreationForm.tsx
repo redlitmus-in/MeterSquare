@@ -1404,6 +1404,110 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         }, 0);
         const discountAmount = subtotal * (overallDiscount / 100);
 
+        // Calculate combined summary for all items
+        let totalMaterialCost = 0;
+        let totalLabourCost = 0;
+        let totalMaterialsCount = 0;
+        let totalLabourCount = 0;
+
+        const mappedItems = items.map(item => {
+          const costs = calculateItemCost(item);
+
+          // Aggregate materials and labour from sub_items
+          if (item.sub_items && item.sub_items.length > 0) {
+            item.sub_items.forEach(subItem => {
+              if (subItem.materials && subItem.materials.length > 0) {
+                totalMaterialsCount += subItem.materials.length;
+                subItem.materials.forEach(mat => {
+                  totalMaterialCost += (mat.quantity * mat.unit_price);
+                });
+              }
+              if (subItem.labour && subItem.labour.length > 0) {
+                totalLabourCount += subItem.labour.length;
+                subItem.labour.forEach(lab => {
+                  totalLabourCost += (lab.hours * lab.rate_per_hour);
+                });
+              }
+            });
+          }
+
+          // Aggregate item-level materials and labour
+          if (item.materials && item.materials.length > 0) {
+            totalMaterialsCount += item.materials.length;
+            item.materials.forEach(mat => {
+              totalMaterialCost += (mat.quantity * mat.unit_price);
+            });
+          }
+          if (item.labour && item.labour.length > 0) {
+            totalLabourCount += item.labour.length;
+            item.labour.forEach(lab => {
+              totalLabourCost += (lab.hours * lab.rate_per_hour);
+            });
+          }
+
+          return {
+            item_name: item.item_name,
+            quantity: item.quantity,
+            unit: item.unit,
+            rate: item.rate,
+            overhead_percentage: item.overhead_percentage,
+            profit_margin_percentage: item.profit_margin_percentage,
+            discount_percentage: item.discount_percentage,
+            vat_percentage: item.vat_percentage,
+
+            // Add calculated amounts
+            item_total: costs.itemTotal,
+            overhead_amount: costs.miscellaneousAmount,
+            profit_margin_amount: costs.overheadProfitAmount,
+            subtotal: costs.subtotal,
+            discount_amount: costs.discountAmount,
+            after_discount: costs.afterDiscount,
+            vat_amount: costs.vatAmount,
+            selling_price: costs.sellingPrice,
+
+            // Add sub_items structure
+            sub_items: item.sub_items && item.sub_items.length > 0 ? item.sub_items.map(mapSubItemToPayload) : [],
+
+            // Item-level materials and labour for backward compatibility
+            materials: item.materials && item.materials.length > 0 ? item.materials.map(material => {
+              const materialTotal = material.quantity * material.unit_price;
+              const materialVAT = materialTotal * ((material.vat_percentage || 0) / 100);
+              return {
+                material_name: material.material_name,
+                quantity: material.quantity,
+                unit: material.unit,
+                unit_price: material.unit_price,
+                total_price: materialTotal,
+                description: material.description || null,
+                vat_percentage: material.vat_percentage || 0,
+                vat_amount: materialVAT,
+                master_material_id: material.master_material_id || null
+              };
+            }) : [],
+
+            labour: item.labour && item.labour.length > 0 ? item.labour.map(labour => ({
+              labour_role: labour.labour_role,
+              work_type: labour.work_type || 'daily_wages',
+              hours: labour.hours,
+              rate_per_hour: labour.rate_per_hour,
+              total_amount: labour.hours * labour.rate_per_hour,
+              master_labour_id: labour.master_labour_id || null
+            })) : [],
+
+            master_item_id: item.master_item_id || null,
+            is_new: item.is_new || false
+          };
+        });
+
+        // Calculate total cost after discount
+        const totalCostAfterDiscount = subtotal - discountAmount;
+
+        // Calculate total item amount (sum of all item selling prices before overall discount)
+        const totalItemAmount = items.reduce((sum, item) => {
+          const costs = calculateItemCost(item);
+          return sum + costs.sellingPrice;
+        }, 0);
+
         const updatePayload = {
           boq_id: existingBoqData.boq_id,
           boq_name: boqName,
@@ -1424,61 +1528,22 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             },
             notes: preliminaryNotes
           },
-          items: items.map(item => {
-            const costs = calculateItemCost(item);
-            return {
-              item_name: item.item_name,
-              quantity: item.quantity,
-              unit: item.unit,
-              rate: item.rate,
-              overhead_percentage: item.overhead_percentage,
-              profit_margin_percentage: item.profit_margin_percentage,
-              discount_percentage: item.discount_percentage,
-              vat_percentage: item.vat_percentage,
-
-              // Add calculated amounts
-              item_total: costs.itemTotal,
-              overhead_amount: costs.miscellaneousAmount,
-              profit_margin_amount: costs.overheadProfitAmount,
-              subtotal: costs.subtotal,
-              discount_amount: costs.discountAmount,
-              after_discount: costs.afterDiscount,
-              vat_amount: costs.vatAmount,
-              selling_price: costs.sellingPrice,
-
-              // Add sub_items structure
-              sub_items: item.sub_items && item.sub_items.length > 0 ? item.sub_items.map(mapSubItemToPayload) : [],
-
-              // Item-level materials and labour for backward compatibility
-              materials: item.materials && item.materials.length > 0 ? item.materials.map(material => {
-                const materialTotal = material.quantity * material.unit_price;
-                const materialVAT = materialTotal * ((material.vat_percentage || 0) / 100);
-                return {
-                  material_name: material.material_name,
-                  quantity: material.quantity,
-                  unit: material.unit,
-                  unit_price: material.unit_price,
-                  total_price: materialTotal,
-                  description: material.description || null,
-                  vat_percentage: material.vat_percentage || 0,
-                  vat_amount: materialVAT,
-                  master_material_id: material.master_material_id || null
-                };
-              }) : [],
-
-              labour: item.labour && item.labour.length > 0 ? item.labour.map(labour => ({
-                labour_role: labour.labour_role,
-                work_type: labour.work_type || 'daily_wages',
-                hours: labour.hours,
-                rate_per_hour: labour.rate_per_hour,
-                total_amount: labour.hours * labour.rate_per_hour,
-                master_labour_id: labour.master_labour_id || null
-              })) : [],
-
-              master_item_id: item.master_item_id || null,
-              is_new: item.is_new || false
-            };
-          })
+          combined_summary: {
+            total_cost: totalCostAfterDiscount,
+            selling_price: totalCostAfterDiscount,
+            estimatedSellingPrice: totalCostAfterDiscount,
+            total_item_amount: totalItemAmount,
+            total_items: items.length,
+            total_materials: totalMaterialsCount,
+            total_labour: totalLabourCount,
+            total_material_cost: totalMaterialCost,
+            total_labour_cost: totalLabourCost,
+            balance_amount: totalCostAfterDiscount,
+            existing_purchase_amount: 0,
+            new_purchase_amount: 0,
+            total_purchased_amount: 0
+          },
+          items: mappedItems
         };
 
         // Determine which API endpoint to use

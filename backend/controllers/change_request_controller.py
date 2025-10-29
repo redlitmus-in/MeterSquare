@@ -1134,8 +1134,28 @@ def complete_purchase_and_merge_to_boq(cr_id):
         change_request.status = CR_CONFIG.STATUS_PURCHASE_COMPLETE
         change_request.updated_at = datetime.utcnow()
 
-        log.info(f"Buyer {buyer_name} marked purchase complete for CR {cr_id}, merging to BOQ")
+        log.info(f"Buyer {buyer_name} marked purchase complete for CR {cr_id}")
 
+        # IMPORTANT: DO NOT MERGE INTO BOQ JSON
+        # The original BOQ should remain immutable
+        # CR data is tracked separately in ChangeRequest table and MaterialPurchaseTracking
+        # The comparison view will show CRs dynamically without modifying the planned BOQ
+
+        # Skip BOQ merge - just commit the status change
+        db.session.commit()
+
+        log.info(f"CR #{cr_id} marked as purchased_by_buyer - BOQ JSON remains unchanged")
+
+        # Return success without modifying BOQ
+        return jsonify({
+            "message": "Purchase marked as complete successfully",
+            "cr_id": cr_id,
+            "status": change_request.status,
+            "note": "BOQ remains unchanged - CR is tracked separately"
+        }), 200
+
+        # OLD CODE BELOW - COMMENTED OUT TO PRESERVE BOQ IMMUTABILITY
+        """
         # Now merge materials into BOQ
         boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
         if not boq_details:
@@ -1191,29 +1211,87 @@ def complete_purchase_and_merge_to_boq(cr_id):
             log.info(f"CR #{cr_id}: Adding materials to existing item '{target_item.get('item_name')}'")
 
         # Add each material as a sub-item with special marking
+        # IMPORTANT: Only add materials that are truly NEW, not updates to existing materials
         existing_materials = target_item.get('materials', [])
+
+        # Create a set of existing material identifiers (by ID and name)
+        # Check both direct materials and materials inside sub_items
+        existing_material_ids = set()
+        existing_material_names = set()
+
+        # Check direct materials array
+        for existing_mat in existing_materials:
+            # Track by ID if available
+            mat_id = existing_mat.get('master_material_id')
+            if mat_id:
+                existing_material_ids.add(mat_id)
+
+            # Track by name (case-insensitive)
+            mat_name = existing_mat.get('material_name', '').lower().strip()
+            if mat_name:
+                existing_material_names.add(mat_name)
+
+        # Also check materials inside sub_items structure
+        for sub_item in target_item.get('sub_items', []):
+            for existing_mat in sub_item.get('materials', []):
+                # Track by ID if available
+                mat_id = existing_mat.get('master_material_id')
+                if mat_id:
+                    existing_material_ids.add(mat_id)
+
+                # Track by name (case-insensitive)
+                mat_name = existing_mat.get('material_name', '').lower().strip()
+                if mat_name:
+                    existing_material_names.add(mat_name)
 
         # Get sub_items_data if available (preferred), otherwise use materials_data
         materials_to_merge = change_request.sub_items_data or change_request.materials_data or []
 
+        log.info(f"CR #{cr_id}: Found {len(existing_material_names)} existing materials by name: {existing_material_names}")
+        log.info(f"CR #{cr_id}: Found {len(existing_material_ids)} existing materials by ID: {existing_material_ids}")
+        log.info(f"CR #{cr_id}: Processing {len(materials_to_merge)} materials to merge")
+
         for material in materials_to_merge:
-            # Mark this material as from change request with planned_quantity = 0
-            new_material = {
-                'material_name': material.get('material_name'),  # Actual material name like "Bubble Wrap"
-                'sub_item_name': material.get('sub_item_name'),  # Sub-item name like "Protection"
-                'master_material_id': material.get('master_material_id'),
-                'quantity': material.get('quantity', 0),
-                'unit': material.get('unit', 'nos'),
-                'unit_price': material.get('unit_price', 0),
-                'total_price': material.get('total_price', 0),
-                'is_from_change_request': True,
-                'change_request_id': change_request.cr_id,
-                'planned_quantity': 0,  # KEY: This marks it as unplanned
-                'planned_unit_price': 0,
-                'planned_total_price': 0,
-                'justification': material.get('justification', change_request.justification)  # Use per-material justification, fallback to overall
-            }
-            existing_materials.append(new_material)
+            # Check if this material already exists in the BOQ
+            mat_id = material.get('master_material_id')
+            mat_name = material.get('material_name', '').lower().strip()
+
+            log.info(f"CR #{cr_id}: Checking material '{material.get('material_name')}' (normalized: '{mat_name}', ID: {mat_id})")
+
+            is_existing_material = False
+
+            # Check by ID first
+            if mat_id and mat_id in existing_material_ids:
+                is_existing_material = True
+                log.info(f"CR #{cr_id}: Material '{material.get('material_name')}' (ID: {mat_id}) already exists in BOQ - skipping merge")
+
+            # Check by name if no ID match (ALWAYS check name for materials without IDs)
+            if not is_existing_material and mat_name and mat_name in existing_material_names:
+                is_existing_material = True
+                log.info(f"CR #{cr_id}: Material '{material.get('material_name')}' already exists in BOQ by name '{mat_name}' - skipping merge")
+
+            # Only add truly NEW materials (not updates to existing ones)
+            if not is_existing_material:
+                # Mark this material as from change request with planned_quantity = 0
+                new_material = {
+                    'material_name': material.get('material_name'),  # Actual material name like "Bubble Wrap"
+                    'sub_item_name': material.get('sub_item_name'),  # Sub-item name like "Protection"
+                    'master_material_id': material.get('master_material_id'),
+                    'quantity': material.get('quantity', 0),
+                    'unit': material.get('unit', 'nos'),
+                    'unit_price': material.get('unit_price', 0),
+                    'total_price': material.get('total_price', 0),
+                    'is_from_change_request': True,
+                    'change_request_id': change_request.cr_id,
+                    'planned_quantity': 0,  # KEY: This marks it as unplanned
+                    'planned_unit_price': 0,
+                    'planned_total_price': 0,
+                    'justification': material.get('justification', change_request.justification)  # Use per-material justification, fallback to overall
+                }
+                existing_materials.append(new_material)
+                log.info(f"CR #{cr_id}: Added NEW material '{material.get('material_name')}' to BOQ")
+            else:
+                log.info(f"CR #{cr_id}: Skipped material '{material.get('material_name')}' - already exists in original BOQ")
 
         target_item['materials'] = existing_materials
 
@@ -1423,17 +1501,21 @@ def complete_purchase_and_merge_to_boq(cr_id):
 
         db.session.commit()
 
-        log.info(f"Buyer {buyer_name} completed purchase for CR {cr_id} and merged into BOQ {change_request.boq_id}")
+        log.info(f"Buyer {buyer_name} completed purchase for CR {cr_id} - BOQ remains unchanged")
 
-        return jsonify({
-            "success": True,
-            "message": "Purchase completed and materials merged to BOQ",
-            "cr_id": cr_id,
-            "status": CR_CONFIG.STATUS_PURCHASE_COMPLETE,
-            "purchase_completed_by": buyer_name,
-            "purchase_completion_date": change_request.purchase_completion_date.isoformat() if change_request.purchase_completion_date else None,
-            "boq_updated": True
-        }), 200
+        # Close the docstring from above
+        """
+
+        # This return was moved to line 1150 above - old code commented out
+        # return jsonify({
+        #     "success": True,
+        #     "message": "Purchase completed and materials merged to BOQ",
+        #     "cr_id": cr_id,
+        #     "status": CR_CONFIG.STATUS_PURCHASE_COMPLETE,
+        #     "purchase_completed_by": buyer_name,
+        #     "purchase_completion_date": change_request.purchase_completion_date.isoformat() if change_request.purchase_completion_date else None,
+        #     "boq_updated": True
+        # }), 200
 
     except SQLAlchemyError as e:
         db.session.rollback()

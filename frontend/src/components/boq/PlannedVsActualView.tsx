@@ -270,7 +270,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       </thead>
                       <tbody>
                         {item.materials
-                          .filter((mat: any) => mat.planned && !mat.is_from_change_request)
+                          .filter((mat: any) => mat.planned && mat.source !== 'change_request')
                           .map((mat: any, mIdx: number) => (
                           <tr key={mIdx} className="border-t border-gray-100">
                             <td className="py-2 px-3 text-gray-700">
@@ -341,11 +341,17 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     </span>
                     <span className="font-medium text-gray-900">{formatCurrency(item.planned.overhead_amount)}</span>
                   </div>
-                  <div className="flex justify-between py-1 pb-2 text-gray-600">
+                  <div className="flex justify-between py-1 text-gray-600">
                     <span className="flex items-center gap-1">
                       <span className="text-lg">+</span> Overhead & Profit ({item.planned.profit_percentage}%):
                     </span>
                     <span className="font-medium text-gray-900">{formatCurrency(item.planned.profit_amount)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 pb-2 text-gray-600">
+                    <span className="flex items-center gap-1">
+                      <span className="text-lg">+</span> Transport:
+                    </span>
+                    <span className="font-medium text-gray-900">{formatCurrency(item.planned.transport_amount || 0)}</span>
                   </div>
                   <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-gray-50 -mx-4 px-4">
                     <span className="font-bold text-gray-900 flex items-center gap-1">
@@ -355,6 +361,46 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   </div>
                 </div>
               </div>
+
+              {/* Discount Details */}
+              {item.discount_details?.has_discount && (
+                <div className="bg-orange-50 rounded border border-orange-300 p-4 mt-4">
+                  <h5 className="text-sm font-semibold text-orange-800 mb-3">Discount Details</h5>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between py-1">
+                      <span className="text-gray-700">Client Cost (Before Discount):</span>
+                      <span className="font-medium text-gray-900">{formatCurrency(item.discount_details.client_cost_before_discount)}</span>
+                    </div>
+                    <div className="flex justify-between py-1 text-orange-700">
+                      <span className="flex items-center gap-1">
+                        <span className="text-lg">-</span> Discount ({item.discount_details.discount_percentage.toFixed(2)}%):
+                      </span>
+                      <span className="font-medium">-{formatCurrency(item.discount_details.discount_amount)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-t-2 border-orange-400 font-semibold">
+                      <span className="text-gray-900">Grand Total (After Discount):</span>
+                      <span className="text-green-700">{formatCurrency(item.discount_details.grand_total_after_discount)}</span>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-orange-300">
+                      <p className="text-xs font-semibold text-orange-800 mb-2">Profit Impact:</p>
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-600">Profit Before Discount:</span>
+                          <span className="font-medium text-gray-900">{formatCurrency(item.discount_details.profit_impact.profit_before_discount)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-600">Profit After Discount:</span>
+                          <span className="font-medium text-green-700">{formatCurrency(item.discount_details.profit_impact.profit_after_discount)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-red-700 font-semibold">
+                          <span>Profit Reduction:</span>
+                          <span>-{formatCurrency(item.discount_details.profit_impact.profit_reduction)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* RIGHT SIDE - ACTUAL */}
@@ -491,7 +537,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     </span>
                     <span className="font-medium text-gray-900">{formatCurrency(item.actual.overhead_amount)}</span>
                   </div>
-                  <div className="flex justify-between py-1 pb-2 text-gray-600">
+                  <div className="flex justify-between py-1 text-gray-600">
                     <span className="flex items-center gap-1">
                       <span className="text-lg">+</span> Overhead & Profit/Loss:
                     </span>
@@ -500,6 +546,12 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     }`}>
                       {formatCurrency(item.actual.profit_amount)}
                     </span>
+                  </div>
+                  <div className="flex justify-between py-1 pb-2 text-gray-600">
+                    <span className="flex items-center gap-1">
+                      <span className="text-lg">+</span> Transport:
+                    </span>
+                    <span className="font-medium text-gray-900">{formatCurrency(item.actual.transport_amount || 0)}</span>
                   </div>
                   <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-gray-50 -mx-4 px-4">
                     <span className="font-bold text-gray-900 flex items-center gap-1">
@@ -513,6 +565,44 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   </div>
                 </div>
               </div>
+
+              {/* Discount Details - Actual */}
+              {item.discount_details?.has_discount && (
+                <div className="bg-green-50 rounded border border-green-300 p-4 mt-4">
+                  <h5 className="text-sm font-semibold text-green-800 mb-3">Discount Applied</h5>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between py-1">
+                      <span className="text-gray-700">Client Amount (Before Discount):</span>
+                      <span className="font-medium text-gray-900">{formatCurrency(item.discount_details.client_cost_before_discount)}</span>
+                    </div>
+                    <div className="flex justify-between py-1 text-green-700">
+                      <span className="flex items-center gap-1">
+                        <span className="text-lg">-</span> Discount Applied ({item.discount_details.discount_percentage.toFixed(2)}%):
+                      </span>
+                      <span className="font-medium">-{formatCurrency(item.discount_details.discount_amount)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-t-2 border-green-400 font-semibold">
+                      <span className="text-gray-900">Client Pays (After Discount):</span>
+                      <span className="text-green-700">{formatCurrency(item.discount_details.grand_total_after_discount)}</span>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-green-300">
+                      <p className="text-xs font-semibold text-green-800 mb-2">Actual Profit Impact:</p>
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-600">Profit Before Discount:</span>
+                          <span className="font-medium text-gray-900">{formatCurrency(item.actual.profit_before_discount || 0)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-600">Actual Profit (After Discount):</span>
+                          <span className={`font-medium ${item.actual.actual_profit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                            {formatCurrency(item.actual.actual_profit || 0)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -561,12 +651,20 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     {formatCurrency(data.summary.total_planned_overhead || 0)}
                   </span>
                 </div>
-                <div className="flex justify-between py-1 pb-2 text-gray-600">
+                <div className="flex justify-between py-1 text-gray-600">
                   <span className="flex items-center gap-1">
                     <span className="text-lg">+</span> Overhead & Profit:
                   </span>
                   <span className="font-medium text-gray-900">
                     {formatCurrency(data.summary.total_planned_profit || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between py-1 pb-2 text-gray-600">
+                  <span className="flex items-center gap-1">
+                    <span className="text-lg">+</span> Transport:
+                  </span>
+                  <span className="font-medium text-gray-900">
+                    {formatCurrency(data.summary.total_planned_transport || 0)}
                   </span>
                 </div>
                 <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-gray-50 -mx-6 px-6">
@@ -625,7 +723,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     {formatCurrency(data.summary.total_actual_overhead || 0)}
                   </span>
                 </div>
-                <div className="flex justify-between py-1 pb-2 text-gray-600">
+                <div className="flex justify-between py-1 text-gray-600">
                   <span className="flex items-center gap-1">
                     <span className="text-lg">+</span> Overhead & Profit/Loss:
                   </span>
@@ -633,6 +731,14 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     (data.summary.total_actual_profit || 0) < 0 ? 'text-red-600' : 'text-green-600'
                   }`}>
                     {formatCurrency(data.summary.total_actual_profit || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between py-1 pb-2 text-gray-600">
+                  <span className="flex items-center gap-1">
+                    <span className="text-lg">+</span> Transport:
+                  </span>
+                  <span className="font-medium text-gray-900">
+                    {formatCurrency(data.summary.total_actual_transport || 0)}
                   </span>
                 </div>
                 <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-gray-50 -mx-6 px-6">
@@ -651,13 +757,61 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
             </div>
           </div>
 
+          {/* Discount Summary */}
+          {data.summary?.discount_details?.has_discount && (
+            <div className="bg-gradient-to-r from-orange-50 to-yellow-50 rounded-lg border-2 border-orange-300 shadow-md overflow-hidden">
+              <div className="bg-gradient-to-r from-orange-100 to-yellow-100 px-6 py-3 border-b-2 border-orange-300">
+                <h4 className="text-base font-bold text-orange-900">Discount Applied to Project</h4>
+              </div>
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white rounded-lg border border-orange-200 p-4">
+                    <p className="text-xs font-semibold text-gray-600 mb-2 uppercase">Client Cost (Before Discount)</p>
+                    <p className="text-2xl font-bold text-gray-900">{formatCurrency(data.summary.discount_details.client_cost_before_discount)}</p>
+                  </div>
+                  <div className="bg-white rounded-lg border border-orange-200 p-4">
+                    <p className="text-xs font-semibold text-gray-600 mb-2 uppercase">Discount Applied</p>
+                    <p className="text-2xl font-bold text-orange-600">
+                      -{formatCurrency(data.summary.discount_details.discount_amount)}
+                      <span className="text-sm ml-2">({data.summary.discount_details.discount_percentage.toFixed(2)}%)</span>
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-lg border border-green-300 p-4">
+                    <p className="text-xs font-semibold text-gray-600 mb-2 uppercase">Client Pays (After Discount)</p>
+                    <p className="text-2xl font-bold text-green-600">{formatCurrency(data.summary.discount_details.grand_total_after_discount)}</p>
+                  </div>
+                </div>
+
+                <div className="mt-6 pt-6 border-t-2 border-orange-300">
+                  <h5 className="text-sm font-bold text-orange-900 mb-4">Profit Impact from Discount</h5>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-blue-50 rounded-lg border border-blue-200 p-3">
+                      <p className="text-xs text-gray-600 mb-1">Profit Before Discount:</p>
+                      <p className="text-lg font-bold text-gray-900">{formatCurrency(data.summary.discount_details.profit_impact.profit_before_discount)}</p>
+                    </div>
+                    <div className="bg-green-50 rounded-lg border border-green-200 p-3">
+                      <p className="text-xs text-gray-600 mb-1">Profit After Discount:</p>
+                      <p className={`text-lg font-bold ${data.summary.discount_details.profit_impact.profit_after_discount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {formatCurrency(data.summary.discount_details.profit_impact.profit_after_discount)}
+                      </p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg border border-red-200 p-3">
+                      <p className="text-xs text-gray-600 mb-1">Profit Reduction:</p>
+                      <p className="text-lg font-bold text-red-600">-{formatCurrency(data.summary.discount_details.profit_impact.profit_reduction)}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Variance Summary */}
           <div className="bg-white rounded-lg border border-gray-300 shadow-md overflow-hidden">
             <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
               <h4 className="text-base font-bold text-gray-900">Overall Variance</h4>
             </div>
             <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div className="text-center p-4 bg-gray-50 rounded-lg border border-gray-200">
                   <p className="text-xs text-gray-600 mb-1">Sub Item Cost Variance:</p>
                   <p className={`text-lg font-bold ${
@@ -686,6 +840,16 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       : 'text-green-600'
                   }`}>
                     {formatCurrency(Math.abs((data.summary.total_actual_overhead || 0) - (data.summary.total_planned_overhead || 0)))}
+                  </p>
+                </div>
+                <div className="text-center p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <p className="text-xs text-gray-600 mb-1">Transport Variance:</p>
+                  <p className={`text-lg font-bold ${
+                    (data.summary.total_actual_transport || 0) - (data.summary.total_planned_transport || 0) !== 0
+                      ? 'text-orange-600'
+                      : 'text-green-600'
+                  }`}>
+                    {formatCurrency(Math.abs((data.summary.total_actual_transport || 0) - (data.summary.total_planned_transport || 0)))}
                   </p>
                 </div>
                 <div className="text-center p-4 bg-gray-50 rounded-lg border border-gray-200">
