@@ -592,12 +592,6 @@ class BOQEmailService:
                     <p><span class="label">Location:</span> <span class="value">{location}</span></p>
                 </div>
 
-                <!-- Cost Summary -->
-                <div class="total-cost" style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-left: 4px solid #3b82f6; margin: 20px 0; padding: 15px;">
-                    <span class="label" style="font-size: 14px;">Total Project Value (Excluding VAT):</span><br/>
-                    <span class="amount" style="color: #1e40af; font-size: 20px; font-weight: bold;">AED {total_value:,.2f}</span>
-                </div>
-
                 <!-- Attachments Info -->
                 <div class="alert" style="background-color: #dbeafe; border-left: 4px solid #3b82f6; margin: 20px 0; padding: 12px;">
                     <strong>Attached Documents:</strong>

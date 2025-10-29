@@ -2,6 +2,7 @@ from flask import Blueprint, g, jsonify
 from controllers.projectmanager_controller import *
 from utils.authentication import jwt_required
 from controllers.techical_director_controller import *
+from controllers.estimator_controller import get_boq_details_history
 
 technical_routes = Blueprint('technical_routes', __name__, url_prefix='/api')
 
@@ -32,6 +33,15 @@ def td_mail_send_route():
     if access_check:
         return access_check
     return td_mail_send()
+
+@technical_routes.route('/boq_details_history/<int:boq_id>', methods=['GET'])
+@jwt_required
+def get_boq_details_history_td_route(boq_id):
+    """TD or Admin views BOQ revision history"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_boq_details_history(boq_id)
 
 @technical_routes.route('/craete_pm', methods=['POST'])
 @jwt_required
