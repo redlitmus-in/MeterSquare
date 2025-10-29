@@ -124,7 +124,6 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
   let totalLabourCost = 0;
   let totalMisc = 0;
   let totalOverhead = 0;
-  let totalTransport = 0;
   let plannedProfit = 0;
   let clientTotal = 0;
 
@@ -135,18 +134,16 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
 
     const misc = (item.miscellaneous_amount || 0);
     const overhead = (item.overhead_amount || (item.profit_margin_amount || 0));
-    const transport = (item.transport_amount || 0);
 
     totalMaterialCost += materialsCost;
     totalLabourCost += labourCost;
     totalMisc += misc;
     totalOverhead += overhead;
-    totalTransport += transport;
     plannedProfit += overhead;
     clientTotal += item.estimatedSellingPrice || 0;
   });
 
-  const internalCost = totalMaterialCost + totalLabourCost + totalMisc + totalTransport;
+  const internalCost = totalMaterialCost + totalLabourCost + totalMisc;
   const actualProfit = clientTotal - internalCost - plannedProfit;
 
   // HEADER WITH LOGO
@@ -159,8 +156,7 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
 
   // PRELIMINARIES
   if (estimation.preliminaries && (estimation.preliminaries.items?.length || estimation.preliminaries.notes)) {
-    addPreliminaries(doc, estimation.preliminaries, yPos, autoTable);
-    yPos += 60;
+    yPos = addPreliminaries(doc, estimation.preliminaries, yPos, autoTable);
   }
 
   // BOQ ITEMS - INTERNAL VERSION
@@ -207,8 +203,7 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
 
   // PRELIMINARIES
   if (estimation.preliminaries && (estimation.preliminaries.items?.length || estimation.preliminaries.notes)) {
-    addPreliminaries(doc, estimation.preliminaries, yPos, autoTable);
-    yPos += 60;
+    yPos = addPreliminaries(doc, estimation.preliminaries, yPos, autoTable);
   }
 
   // CLIENT BOQ TITLE
@@ -234,7 +229,26 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
     yPos = 20;
   }
 
-  addClientTotal(doc, estimation.totalValue, yPos, autoTable);
+  // Calculate proper totals with discount
+  let subtotal = 0;
+  (estimation.boqItems || []).forEach((item: any) => {
+    if (item.has_sub_items && item.sub_items && item.sub_items.length > 0) {
+      item.sub_items.forEach((subItem: any) => {
+        subtotal += (subItem.quantity || 0) * (subItem.rate || 0);
+      });
+    } else {
+      subtotal += item.estimatedSellingPrice || 0;
+    }
+  });
+
+  const discountAmount = (estimation as any).discount_amount || 0;
+  const discountPercentage = estimation.discountPercentage || 0;
+  let discount = discountAmount;
+  if (discount === 0 && discountPercentage > 0) {
+    discount = subtotal * (discountPercentage / 100);
+  }
+
+  addClientTotal(doc, subtotal, discount, discountPercentage, estimation.totalVatAmount || 0, yPos, autoTable);
   yPos += 25;
 
   // SIGNATURE SECTION
@@ -250,31 +264,26 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
 // ============================================
 
 function addLogoAndHeader(doc: any, yPos: number) {
-  try {
-    doc.addImage('/logo.png', 'PNG', 75, yPos, 60, 20);
-  } catch (error) {
-    // Logo placeholder - MeterSquare style
-    doc.setFillColor(220, 38, 38);
-    doc.triangle(85, yPos + 5, 95, yPos + 5, 90, yPos + 15, 'F');
-    doc.rect(95, yPos + 10, 8, 10, 'F');
+  // Logo placeholder - MeterSquare style
+  doc.setFillColor(30, 64, 175);
+  doc.roundedRect(85, yPos, 40, 15, 2, 2, 'F');
 
-    doc.setFontSize(16);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(30, 64, 175);
-    doc.text('METER SQUARE', 105, yPos + 12);
-    doc.setFontSize(10);
-    doc.text('INTERIORS LLC', 105, yPos + 18);
-  }
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text('METER SQUARE', 105, yPos + 8, { align: 'center' });
+  doc.setFontSize(8);
+  doc.text('INTERIORS LLC', 105, yPos + 12, { align: 'center' });
 
   // Title
-  doc.setFontSize(20);
+  doc.setFontSize(24);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(30, 64, 175);
   doc.text('QUOTATION', 105, yPos + 25, { align: 'center' });
 
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'italic');
-  doc.setTextColor(100);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(120, 120, 120);
   doc.text('Bill of Quantities', 105, yPos + 32, { align: 'center' });
 }
 
@@ -316,53 +325,59 @@ function addProjectInfo(doc: any, estimation: BOQEstimation, yPos: number, autoT
 }
 
 function addPreliminaries(doc: any, preliminaries: any, yPos: number, autoTable: any) {
-  const prelimData = [
-    [
-      { content: 'S.No', styles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' } },
-      { content: 'Item Name', styles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], fontStyle: 'bold' } },
-      { content: 'QTY', styles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' } },
-      { content: 'UNITS', styles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' } },
-      { content: 'UNIT PRICE(AED)', styles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'right' } },
-      { content: 'TOTAL (AED)', styles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'right' } }
-    ]
-  ];
+  // Modern preliminaries section with better formatting
+  doc.setFillColor(254, 243, 199);
+  doc.setDrawColor(245, 158, 11);
+  doc.roundedRect(14, yPos, 182, 5, 1, 1, 'FD');
 
-  let prelimContent = 'PRELIMINARIES & APPROVAL WORKS\n';
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(146, 64, 14);
+  doc.text('PRELIMINARIES & APPROVAL WORKS', 16, yPos + 3.5);
+  yPos += 8;
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(120, 53, 15);
+  doc.text('Selected conditions and terms', 16, yPos);
+  yPos += 6;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(68, 64, 60);
+
   if (preliminaries.items && preliminaries.items.length > 0) {
-    prelimContent += preliminaries.items.map((item: any) => `● ${item.description || item}`).join('\n');
+    preliminaries.items.forEach((item: any) => {
+      const description = typeof item === 'string' ? item : (item.description || item.name || '');
+      if (yPos > 270) {
+        doc.addPage();
+        yPos = 20;
+      }
+      doc.text('✓', 18, yPos);
+      const splitText = doc.splitTextToSize(description, 175);
+      doc.text(splitText, 24, yPos);
+      yPos += (splitText.length * 4.5) + 2;
+    });
   }
+
   if (preliminaries.notes) {
-    prelimContent += `\n\nAdditional Notes:\n${preliminaries.notes}`;
+    yPos += 3;
+    if (yPos > 265) {
+      doc.addPage();
+      yPos = 20;
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(120, 53, 15);
+    doc.text('Note:', 18, yPos);
+    yPos += 4;
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(68, 64, 60);
+    const splitNotes = doc.splitTextToSize(preliminaries.notes, 175);
+    doc.text(splitNotes, 18, yPos);
+    yPos += (splitNotes.length * 4.5);
   }
 
-  prelimData.push([
-    { content: '1', styles: { halign: 'center' } },
-    { content: prelimContent, styles: { fontSize: 8, textColor: [128, 0, 128] } },
-    { content: '1', styles: { halign: 'center' } },
-    { content: 'LS', styles: { halign: 'center' } },
-    { content: '0', styles: { halign: 'right' } },
-    { content: '0\n(Kept "0" intentionally for better understanding)', styles: { halign: 'right', fontSize: 8 } }
-  ]);
-
-  (autoTable as any)(doc, {
-    startY: yPos,
-    body: prelimData,
-    theme: 'grid',
-    styles: {
-      fontSize: 9,
-      cellPadding: 3,
-      lineColor: [200, 200, 200],
-      lineWidth: 0.3
-    },
-    columnStyles: {
-      0: { cellWidth: 15 },
-      1: { cellWidth: 75 },
-      2: { cellWidth: 15 },
-      3: { cellWidth: 20 },
-      4: { cellWidth: 30 },
-      5: { cellWidth: 27 }
-    }
-  });
+  return yPos + 8;
 }
 
 function addInternalBOQItem(doc: any, item: any, itemIndex: number, yPos: number, autoTable: any): number {
@@ -446,12 +461,11 @@ function addInternalBOQItem(doc: any, item: any, itemIndex: number, yPos: number
         });
       }
 
-      // Cost breakdown (Misc, Overhead, Transport)
+      // Cost breakdown (Misc, Overhead) - NO TRANSPORT
       const baseCost = (subItem.materials_cost || 0) + (subItem.labour_cost || 0);
       const misc = baseCost * ((item.miscellaneous_percentage || 0) / 100);
       const overhead = baseCost * ((item.overheadPercentage || item.profit_margin_percentage || 0) / 100);
-      const transport = baseCost * ((item.transport_percentage || 0) / 100);
-      const totalCost = baseCost + misc + overhead + transport;
+      const totalCost = baseCost + misc + overhead;
 
       subItemData.push([
         '',
@@ -469,15 +483,6 @@ function addInternalBOQItem(doc: any, item: any, itemIndex: number, yPos: number
         { content: 'Overhead&Profit', styles: { halign: 'right' } },
         { content: `${item.overheadPercentage || item.profit_margin_percentage || 0}%`, styles: { halign: 'right' } },
         { content: formatCurrency(overhead), styles: { halign: 'right' } }
-      ]);
-
-      subItemData.push([
-        '',
-        '',
-        '',
-        { content: 'Transport', styles: { halign: 'right' } },
-        { content: `${item.transport_percentage || 0}%`, styles: { halign: 'right' } },
-        { content: formatCurrency(transport), styles: { halign: 'right' } }
       ]);
 
       subItemData.push([
@@ -634,13 +639,42 @@ function addCostAnalysis(doc: any, clientCost: number, internalCost: number, pla
   });
 }
 
-function addClientTotal(doc: any, totalValue: number, yPos: number, autoTable: any) {
+function addClientTotal(doc: any, subtotal: number, discount: number, discountPercentage: number, vat: number, yPos: number, autoTable: any) {
+  const afterDiscount = subtotal - discount;
+  const grandTotal = afterDiscount + vat;
+
   const totalData = [
     [
-      { content: 'Total\nVAT will be added extra', styles: { halign: 'center', fontStyle: 'bold', fontSize: 10 }, colSpan: 5 },
-      { content: formatCurrency(totalValue), styles: { halign: 'right', fontStyle: 'bold', fontSize: 11 } }
+      { content: 'Subtotal:', styles: { halign: 'right', fontStyle: 'bold', fontSize: 10 }, colSpan: 5 },
+      { content: formatCurrency(subtotal), styles: { halign: 'right', fontStyle: 'bold', fontSize: 10 } }
     ]
   ];
+
+  // Add discount row if discount exists
+  if (discount > 0) {
+    totalData.push([
+      { content: `Discount (${discountPercentage.toFixed(1)}%):`, styles: { halign: 'right', fontSize: 10, textColor: [220, 38, 38] }, colSpan: 5 },
+      { content: `- ${formatCurrency(discount)}`, styles: { halign: 'right', fontSize: 10, textColor: [220, 38, 38] } }
+    ]);
+    totalData.push([
+      { content: 'After Discount:', styles: { halign: 'right', fontStyle: 'bold', fontSize: 10 }, colSpan: 5 },
+      { content: formatCurrency(afterDiscount), styles: { halign: 'right', fontStyle: 'bold', fontSize: 10 } }
+    ]);
+  }
+
+  // Add VAT row if VAT exists
+  if (vat > 0) {
+    totalData.push([
+      { content: 'VAT (5%):', styles: { halign: 'right', fontSize: 10 }, colSpan: 5 },
+      { content: formatCurrency(vat), styles: { halign: 'right', fontSize: 10 } }
+    ]);
+  }
+
+  // Grand total
+  totalData.push([
+    { content: 'GRAND TOTAL:', styles: { halign: 'right', fontStyle: 'bold', fontSize: 11, fillColor: [227, 243, 253] }, colSpan: 5 },
+    { content: formatCurrency(grandTotal), styles: { halign: 'right', fontStyle: 'bold', fontSize: 11, fillColor: [227, 243, 253] } }
+  ]);
 
   (autoTable as any)(doc, {
     startY: yPos,

@@ -983,7 +983,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                         </div>
                       )}
 
-                      {/* Cost Analysis (Item-Level) - EXACT COPY from BOQDetailsModal */}
+                      {/* Cost Analysis (Item-Level) - EXACT COPY from BOQDetailsModal with Yellow Highlighting */}
                       <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-300 shadow-sm">
                         <h5 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
                           <Calculator className="w-4 h-4" />
@@ -1004,17 +1004,35 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                             const projectMargin = item.project_margin || (clientCost - internalCost);
                             const marginPercentage = clientCost > 0 ? ((projectMargin / clientCost) * 100) : 0;
 
+                            // Calculate previous values for yellow highlighting
+                            const prevItem = prevRevision?.boq_details?.items?.find((pi: any) => pi.item_name === item.item_name);
+                            const prevClientCost = prevItem ? (prevItem.client_cost || prevItem.sub_items?.reduce((sum: number, si: any) => sum + ((si.quantity || 0) * (si.rate || 0)), 0) || 0) : 0;
+                            const prevInternalCost = prevItem ? (prevItem.internal_cost || prevItem.sub_items?.reduce((sum: number, si: any) => {
+                              const materialCost = si.materials?.reduce((mSum: number, m: any) => mSum + (m.total_price || m.quantity * m.unit_price), 0) || 0;
+                              const labourCost = si.labour?.reduce((lSum: number, l: any) => lSum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0;
+                              const subClientAmount = (si.quantity || 0) * (si.rate || 0);
+                              const miscAmount = subClientAmount * ((si.misc_percentage || 10) / 100);
+                              const overheadProfitAmount = subClientAmount * ((si.overhead_profit_percentage || 25) / 100);
+                              const transportAmount = subClientAmount * ((si.transport_percentage || 5) / 100);
+                              return sum + materialCost + labourCost + miscAmount + overheadProfitAmount + transportAmount;
+                            }, 0) || 0) : 0;
+                            const prevProjectMargin = prevItem ? (prevItem.project_margin || (prevClientCost - prevInternalCost)) : 0;
+
+                            const clientCostChanged = prevItem && hasChanged(clientCost, prevClientCost);
+                            const internalCostChanged = prevItem && hasChanged(internalCost, prevInternalCost);
+                            const marginChanged = prevItem && hasChanged(projectMargin, prevProjectMargin);
+
                             return (
                               <>
-                                <div className="flex justify-between items-center py-1">
+                                <div className={`flex justify-between items-center py-1 rounded px-2 ${clientCostChanged ? 'bg-yellow-200' : ''}`}>
                                   <span className="text-gray-700 font-medium">Client Cost (Total):</span>
                                   <span className="text-blue-700 font-bold text-base">{formatCurrency(clientCost)}</span>
                                 </div>
-                                <div className="flex justify-between items-center py-1">
+                                <div className={`flex justify-between items-center py-1 rounded px-2 ${internalCostChanged ? 'bg-yellow-200' : ''}`}>
                                   <span className="text-gray-700 font-medium">Internal Cost (Total):</span>
                                   <span className="text-orange-600 font-semibold">{formatCurrency(internalCost)}</span>
                                 </div>
-                                <div className="flex justify-between items-center pt-2 border-t-2 border-blue-400">
+                                <div className={`flex justify-between items-center pt-2 border-t-2 border-blue-400 rounded px-2 ${marginChanged ? 'bg-yellow-200' : ''}`}>
                                   <span className="text-gray-900 font-bold">Project Margin:</span>
                                   <div className="text-right">
                                     <div className={`font-bold text-lg ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>

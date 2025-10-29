@@ -49,17 +49,18 @@ def calculate_boq_values(items):
             item_base_cost = item_materials + item_labour
 
             # Calculate overhead and profit amounts if only percentages exist
+            # Get actual percentages from item (check multiple field names)
+            overhead_pct = item.get('overhead_profit_percentage', item.get('overhead_percentage', item.get('profit_margin_percentage', 0)))
+            misc_pct = item.get('miscellaneous_percentage', item.get('overhead_percentage', 0))
+
             if 'overhead_amount' not in item or item.get('overhead_amount', 0) == 0:
-                overhead_pct = item.get('overhead_percentage', 10) / 100
-                item['overhead_amount'] = item_base_cost * overhead_pct
+                item['overhead_amount'] = item_base_cost * (overhead_pct / 100)
 
             if 'profit_margin_amount' not in item or item.get('profit_margin_amount', 0) == 0:
-                profit_pct = item.get('profit_margin_percentage', 15) / 100
-                item['profit_margin_amount'] = item_base_cost * profit_pct
+                item['profit_margin_amount'] = item_base_cost * (overhead_pct / 100)
 
             if 'miscellaneous_amount' not in item or item.get('miscellaneous_amount', 0) == 0:
-                misc_pct = item.get('miscellaneous_percentage', 10) / 100
-                item['miscellaneous_amount'] = item_base_cost * misc_pct
+                item['miscellaneous_amount'] = item_base_cost * (misc_pct / 100)
 
             # Calculate selling price
             if 'selling_price' not in item or item.get('selling_price', 0) == 0:
@@ -83,18 +84,18 @@ def calculate_boq_values(items):
             item_labour = sum([l.get('total_cost', 0) for l in labour])
             item_base_cost = item_materials + item_labour
 
-            # Calculate amounts if missing
+            # Calculate amounts if missing - use actual percentages from item
+            overhead_pct = item.get('overhead_profit_percentage', item.get('overhead_percentage', item.get('profit_margin_percentage', 0)))
+            misc_pct = item.get('miscellaneous_percentage', item.get('overhead_percentage', 0))
+
             if 'overhead_amount' not in item or item.get('overhead_amount', 0) == 0:
-                overhead_pct = item.get('overhead_percentage', 10) / 100
-                item['overhead_amount'] = item_base_cost * overhead_pct
+                item['overhead_amount'] = item_base_cost * (overhead_pct / 100)
 
             if 'profit_margin_amount' not in item or item.get('profit_margin_amount', 0) == 0:
-                profit_pct = item.get('profit_margin_percentage', 15) / 100
-                item['profit_margin_amount'] = item_base_cost * profit_pct
+                item['profit_margin_amount'] = item_base_cost * (overhead_pct / 100)
 
             if 'miscellaneous_amount' not in item or item.get('miscellaneous_amount', 0) == 0:
-                misc_pct = item.get('miscellaneous_percentage', 10) / 100
-                item['miscellaneous_amount'] = item_base_cost * misc_pct
+                item['miscellaneous_amount'] = item_base_cost * (misc_pct / 100)
 
             # Calculate selling price
             if 'selling_price' not in item or item.get('selling_price', 0) == 0:

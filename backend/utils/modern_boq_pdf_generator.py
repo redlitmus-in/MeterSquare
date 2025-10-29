@@ -65,8 +65,8 @@ class ModernBOQPDFGenerator:
         # Main items table
         elements.extend(self._client_items_table(items, boq_json))
 
-        # Summary
-        elements.extend(self._client_summary(items, grand_total))
+        # Summary (pass boq_json for discount info)
+        elements.extend(self._client_summary(items, grand_total, boq_json))
 
         # Terms
         elements.extend(self._client_terms())
@@ -216,15 +216,54 @@ class ModernBOQPDFGenerator:
         """Clean client items table - only quantities and prices"""
         elements = []
 
-        # Preliminaries note if exists
+        # Preliminaries section if exists
         if boq_json and boq_json.get('preliminaries'):
-            prelim_items = boq_json['preliminaries'].get('items', [])
-            if prelim_items:
-                prelim_text = '<b>Note:</b> <i>All authority charges & deposits excluded (approx. AED 10,000).</i>'
-                elements.append(Paragraph(prelim_text,
-                    ParagraphStyle('Note', parent=self.styles['Normal'], fontSize=7,
-                                 textColor=colors.HexColor('#666666'))))
+            prelim_data = boq_json['preliminaries']
+            prelim_items = prelim_data.get('items', [])
+            prelim_notes = prelim_data.get('notes', '')
+
+            if prelim_items or prelim_notes:
+                # Title
+                elements.append(Paragraph(
+                    '<b>PRELIMINARIES & APPROVAL WORKS</b>',
+                    ParagraphStyle('PrelimTitle', parent=self.styles['Normal'],
+                                 fontSize=10, fontName='Helvetica-Bold',
+                                 textColor=colors.HexColor('#92400e'))
+                ))
                 elements.append(Spacer(1, 5))
+
+                # Items with checkmarks - FILTER ONLY SELECTED ITEMS
+                if prelim_items:
+                    for item_data in prelim_items:
+                        # Handle both string and dict formats
+                        if isinstance(item_data, dict):
+                            # Only show if is_selected is True or if field doesn't exist (backwards compatibility)
+                            is_selected = item_data.get('is_selected', item_data.get('selected', True))
+                            if not is_selected:
+                                continue
+
+                            item_text = item_data.get('description', item_data.get('name', item_data.get('text', '')))
+                        else:
+                            item_text = str(item_data)
+
+                        if item_text:  # Only add if text exists
+                            elements.append(Paragraph(
+                                f'✓ {item_text}',
+                                ParagraphStyle('PrelimItem', parent=self.styles['Normal'],
+                                             fontSize=8, textColor=colors.HexColor('#44403c'),
+                                             leftIndent=10)
+                            ))
+
+                # Notes
+                if prelim_notes:
+                    elements.append(Spacer(1, 5))
+                    elements.append(Paragraph(
+                        f'<b>Note:</b> {prelim_notes}',
+                        ParagraphStyle('PrelimNote', parent=self.styles['Normal'],
+                                     fontSize=8, textColor=colors.HexColor('#78350f'))
+                    ))
+
+                elements.append(Spacer(1, 10))
 
         table_data = []
 
@@ -320,6 +359,52 @@ class ModernBOQPDFGenerator:
         """Detailed internal items with cost breakdown"""
         elements = []
 
+        # Preliminaries section if exists
+        if boq_json and boq_json.get('preliminaries'):
+            prelim_data = boq_json['preliminaries']
+            prelim_items = prelim_data.get('items', [])
+            prelim_notes = prelim_data.get('notes', '')
+
+            if prelim_items or prelim_notes:
+                elements.append(Paragraph(
+                    '<b>PRELIMINARIES & APPROVAL WORKS</b>',
+                    ParagraphStyle('PrelimTitle', parent=self.styles['Normal'],
+                                 fontSize=10, fontName='Helvetica-Bold',
+                                 textColor=colors.HexColor('#92400e'))
+                ))
+                elements.append(Spacer(1, 5))
+
+                if prelim_items:
+                    for item_data in prelim_items:
+                        # Handle both string and dict formats
+                        if isinstance(item_data, dict):
+                            # Only show if is_selected is True
+                            is_selected = item_data.get('is_selected', item_data.get('selected', True))
+                            if not is_selected:
+                                continue
+
+                            item_text = item_data.get('description', item_data.get('name', item_data.get('text', '')))
+                        else:
+                            item_text = str(item_data)
+
+                        if item_text:
+                            elements.append(Paragraph(
+                                f'✓ {item_text}',
+                                ParagraphStyle('PrelimItem', parent=self.styles['Normal'],
+                                             fontSize=8, textColor=colors.HexColor('#44403c'),
+                                             leftIndent=10)
+                            ))
+
+                if prelim_notes:
+                    elements.append(Spacer(1, 5))
+                    elements.append(Paragraph(
+                        f'<b>Note:</b> {prelim_notes}',
+                        ParagraphStyle('PrelimNote', parent=self.styles['Normal'],
+                                     fontSize=8, textColor=colors.HexColor('#78350f'))
+                    ))
+
+                elements.append(Spacer(1, 10))
+
         table_data = []
 
         # Header
@@ -348,60 +433,178 @@ class ModernBOQPDFGenerator:
 
                 # Sub-items with breakdown
                 for sub_idx, sub_item in enumerate(sub_items, 1):
-                    # Sub-item header
-                    table_data.append([
-                        f'{idx}.{sub_idx}',
-                        Paragraph(f'<b>{sub_item.get("sub_item_name", "N/A")}</b>',
-                                 ParagraphStyle('Sub', parent=self.styles['Normal'], fontSize=7)),
-                        '', '', '', ''
-                    ])
-
-                    # Materials
-                    for mat in sub_item.get('materials', []):
-                        table_data.append([
-                            '',
-                            Paragraph(f'• {mat.get("material_name", "N/A")}',
-                                     ParagraphStyle('Mat', parent=self.styles['Normal'], fontSize=7)),
-                            f'{mat.get("quantity", 0):.0f}',
-                            mat.get('unit', 'nos'),
-                            f'{mat.get("unit_price", 0):.2f}',
-                            f'{mat.get("total_price", 0):.2f}'
-                        ])
-
-                    # Labour
-                    for lab in sub_item.get('labour', []):
-                        table_data.append([
-                            '',
-                            Paragraph(f'• {lab.get("labour_role", "N/A")} (Labour)',
-                                     ParagraphStyle('Lab', parent=self.styles['Normal'], fontSize=7)),
-                            f'{lab.get("hours", 0):.0f}',
-                            'Hrs',
-                            f'{lab.get("rate_per_hour", 0):.2f}',
-                            f'{lab.get("total_cost", 0):.2f}'
-                        ])
-
-                    # Calculations
+                    # Calculate totals
                     qty = sub_item.get('quantity', 0)
                     rate = sub_item.get('rate', 0)
                     client_amount = qty * rate
 
+                    # Sub-item header with details
+                    sub_item_header = f'<b>{sub_item.get("sub_item_name", "N/A")}</b>'
+                    if sub_item.get('scope'):
+                        sub_item_header += f'<br/><font size="6"><i>Scope: {sub_item.get("scope")}</i></font>'
+
+                    details = []
+                    if sub_item.get('size'):
+                        details.append(f'Size: {sub_item.get("size")}')
+                    if sub_item.get('location'):
+                        details.append(f'Location: {sub_item.get("location")}')
+                    if sub_item.get('brand'):
+                        details.append(f'Brand: {sub_item.get("brand")}')
+                    if details:
+                        sub_item_header += f'<br/><font size="6">{" | ".join(details)}</font>'
+
+                    sub_item_header += f'<br/><font size="6">Qty: {qty} {sub_item.get("unit", "nos")} @ AED{rate:.2f}/{sub_item.get("unit", "nos")}</font>'
+
+                    table_data.append([
+                        f'{idx}.{sub_idx}',
+                        Paragraph(sub_item_header, ParagraphStyle('Sub', parent=self.styles['Normal'], fontSize=7)),
+                        '', '',
+                        Paragraph('<b>Client Amount:</b>', ParagraphStyle('ClientLabel', parent=self.styles['Normal'], fontSize=6, alignment=TA_RIGHT)),
+                        Paragraph(f'<b>{client_amount:,.2f}</b>', ParagraphStyle('ClientAmt', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold', alignment=TA_RIGHT, textColor=colors.HexColor('#16a34a')))
+                    ])
+
+                    # Materials section header
+                    materials = sub_item.get('materials', [])
+                    if materials:
+                        table_data.append([
+                            '',
+                            Paragraph('<b>+ RAW MATERIALS</b>', ParagraphStyle('MatHeader', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold', textColor=colors.HexColor('#1d4ed8'))),
+                            '', '', '', ''
+                        ])
+
+                        materials_cost = 0
+                        for mat in materials:
+                            mat_total = mat.get('total_price', 0)
+                            materials_cost += mat_total
+                            table_data.append([
+                                '',
+                                Paragraph(f'  • {mat.get("material_name", "N/A")}',
+                                         ParagraphStyle('Mat', parent=self.styles['Normal'], fontSize=7)),
+                                f'{mat.get("quantity", 0):.0f}',
+                                mat.get('unit', 'nos'),
+                                f'{mat.get("unit_price", 0):.2f}',
+                                f'{mat_total:,.2f}'
+                            ])
+
+                        # Total Materials row
+                        table_data.append([
+                            '',
+                            Paragraph('<b>Total Materials:</b>', ParagraphStyle('MatTotal', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold')),
+                            '', '', '',
+                            Paragraph(f'<b>{materials_cost:,.2f}</b>', ParagraphStyle('MatTotalVal', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold'))
+                        ])
+
+                    # Labour section header
+                    labour = sub_item.get('labour', [])
+                    if labour:
+                        table_data.append([
+                            '',
+                            Paragraph('<b>+ LABOUR</b>', ParagraphStyle('LabHeader', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold', textColor=colors.HexColor('#9333ea'))),
+                            '', '', '', ''
+                        ])
+
+                        labour_cost = 0
+                        for lab in labour:
+                            lab_total = lab.get('total_cost', 0)
+                            labour_cost += lab_total
+                            table_data.append([
+                                '',
+                                Paragraph(f'  • {lab.get("labour_role", "N/A")} (Labour)',
+                                         ParagraphStyle('Lab', parent=self.styles['Normal'], fontSize=7)),
+                                f'{lab.get("hours", 0):.0f}',
+                                'Hrs',
+                                f'{lab.get("rate_per_hour", 0):.2f}',
+                                f'{lab_total:,.2f}'
+                            ])
+
+                        # Total Labour row
+                        table_data.append([
+                            '',
+                            Paragraph('<b>Total Labour:</b>', ParagraphStyle('LabTotal', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold')),
+                            '', '', '',
+                            Paragraph(f'<b>{labour_cost:,.2f}</b>', ParagraphStyle('LabTotalVal', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold'))
+                        ])
+
+                    # Calculations - Get percentages from SUB-ITEM (as per TD modal!)
                     materials_cost = sum([m.get('total_price', 0) for m in sub_item.get('materials', [])])
                     labour_cost = sum([l.get('total_cost', 0) for l in sub_item.get('labour', [])])
+                    base_cost = materials_cost + labour_cost
 
-                    misc_pct = sub_item.get('misc_percentage', 10)
-                    overhead_pct = sub_item.get('overhead_profit_percentage', 25)
+                    # Get percentages from SUB-ITEM first, fallback to PARENT ITEM
+                    misc_pct = sub_item.get('misc_percentage', item.get('miscellaneous_percentage', item.get('overhead_percentage', 10)))
+                    overhead_pct = sub_item.get('overhead_profit_percentage', item.get('overhead_profit_percentage', item.get('profit_margin_percentage', 25)))
+                    transport_pct = sub_item.get('transport_percentage', item.get('transport_percentage', 5))
 
+                    # Calculate based on CLIENT AMOUNT (as per TD modal calculation!)
                     misc_amt = client_amount * (misc_pct / 100)
                     overhead_amt = client_amount * (overhead_pct / 100)
+                    transport_amt = client_amount * (transport_pct / 100)
+                    internal_cost = base_cost + misc_amt + overhead_amt + transport_amt
 
-                    # Show totals
+                    # Add blank row for spacing
+                    table_data.append(['', '', '', '', '', ''])
+
+                    # SEPARATE ROWS for each cost component
+                    # Misc row
                     table_data.append([
                         '',
-                        Paragraph(f'<i>Misc ({misc_pct}%) + O&P ({overhead_pct}%)</i>',
+                        Paragraph(f'<i>Misc ({misc_pct:.1f}%)</i>',
                                  ParagraphStyle('Calc', parent=self.styles['Normal'], fontSize=7, textColor=colors.HexColor('#666666'))),
-                        '', '',
+                        '', '', '',
+                        f'{misc_amt:,.2f}'
+                    ])
+
+                    # O&P row
+                    table_data.append([
                         '',
-                        f'{misc_amt + overhead_amt:,.2f}'
+                        Paragraph(f'<i>O&P ({overhead_pct:.1f}%)</i>',
+                                 ParagraphStyle('Calc', parent=self.styles['Normal'], fontSize=7, textColor=colors.HexColor('#666666'))),
+                        '', '', '',
+                        f'{overhead_amt:,.2f}'
+                    ])
+
+                    # Transport row (if exists)
+                    if transport_pct > 0:
+                        table_data.append([
+                            '',
+                            Paragraph(f'<i>Transport ({transport_pct:.1f}%)</i>',
+                                     ParagraphStyle('Calc', parent=self.styles['Normal'], fontSize=7, textColor=colors.HexColor('#666666'))),
+                            '', '', '',
+                            f'{transport_amt:,.2f}'
+                        ])
+
+                    # Total Internal Cost row
+                    table_data.append([
+                        '',
+                        Paragraph('<b>Total Internal Cost</b>',
+                                 ParagraphStyle('TotalCost', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold')),
+                        '', '', '',
+                        f'{internal_cost:,.2f}'
+                    ])
+
+                    # Add blank row
+                    table_data.append(['', '', '', '', '', ''])
+
+                    # Planned Profit row
+                    table_data.append([
+                        '',
+                        Paragraph('<i>Planned Profit:</i>',
+                                 ParagraphStyle('Profit', parent=self.styles['Normal'], fontSize=7, textColor=colors.HexColor('#00AA00'))),
+                        '', '', '',
+                        Paragraph(f'<font color="#00AA00">{overhead_amt:,.2f}</font>',
+                                 ParagraphStyle('ProfitVal', parent=self.styles['Normal'], fontSize=7))
+                    ])
+
+                    # Actual Profit row
+                    actual_profit = client_amount - internal_cost
+                    profit_color = '#00AA00' if actual_profit >= overhead_amt else '#CC0000'
+                    table_data.append([
+                        '',
+                        Paragraph('<i>Actual Profit:</i>',
+                                 ParagraphStyle('ActualProfit', parent=self.styles['Normal'], fontSize=7, textColor=colors.HexColor(profit_color))),
+                        '', '', '',
+                        Paragraph(f'<font color="{profit_color}">{actual_profit:,.2f}</font>',
+                                 ParagraphStyle('ActualProfitVal', parent=self.styles['Normal'], fontSize=7))
                     ])
 
         # Create table
@@ -433,22 +636,63 @@ class ModernBOQPDFGenerator:
         elements.append(main_table)
         return elements
 
-    def _client_summary(self, items, grand_total):
-        """Clean client summary"""
+    def _client_summary(self, items, grand_total, boq_json=None):
+        """Clean client summary with discount"""
         elements = []
         elements.append(Spacer(1, 10))
 
-        # Calculate totals
-        subtotal = sum([item.get('selling_price', 0) for item in items])
+        # Calculate subtotal from all sub-items (sum of qty × rate)
+        subtotal = 0
+        for item in items:
+            has_sub_items = item.get('has_sub_items', False)
+            sub_items = item.get('sub_items', [])
+
+            if has_sub_items and sub_items:
+                for sub_item in sub_items:
+                    qty = sub_item.get('quantity', 0)
+                    rate = sub_item.get('rate', 0)
+                    subtotal += qty * rate
+            else:
+                subtotal += item.get('selling_price', 0)
+
+        # Get discount from BOQ JSON or items
+        discount_amount = 0
+        discount_percentage = 0
+
+        # Try to get discount from boq_json first (most reliable)
+        if boq_json:
+            discount_amount = boq_json.get('discount_amount', 0)
+            discount_percentage = boq_json.get('discount_percentage', 0)
+
+        # Fallback: try from first item
+        if discount_amount == 0 and discount_percentage == 0 and items:
+            first_item = items[0]
+            discount_percentage = first_item.get('discount_percentage', 0)
+
+        # Calculate discount from subtotal if percentage exists
+        if discount_percentage > 0 and discount_amount == 0:
+            discount_amount = subtotal * (discount_percentage / 100)
+
+        after_discount = subtotal - discount_amount
+        vat_amount = 0  # Usually 0 for UAE internal projects
+        grand_total_calc = after_discount + vat_amount
 
         summary_data = [
-            ['Subtotal:', f'{subtotal:,.2f} AED'],
-            ['VAT (0%):', '0.00 AED'],
-            ['<b>Grand Total:</b>', f'<b>{subtotal:,.2f} AED</b>']
+            ['Subtotal:', f'{subtotal:,.2f} AED']
         ]
 
+        # Add discount row if discount exists
+        if discount_amount > 0:
+            summary_data.append(['Discount ({:.1f}%):'.format(discount_percentage), f'- {discount_amount:,.2f} AED'])
+            summary_data.append(['After Discount:', f'{after_discount:,.2f} AED'])
+
+        summary_data.append(['VAT (0%):', f'{vat_amount:,.2f} AED'])
+        summary_data.append(['<b>Grand Total:</b>', f'<b>{grand_total_calc:,.2f} AED</b>'])
+
         summary_table = Table(summary_data, colWidths=[5*inch, 1.5*inch])
-        summary_table.setStyle(TableStyle([
+
+        # Build style list
+        table_styles = [
             ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
             ('FONTSIZE', (0,0), (-1,-2), 9),
             ('FONTSIZE', (0,-1), (-1,-1), 10),
@@ -456,7 +700,13 @@ class ModernBOQPDFGenerator:
             ('TOPPADDING', (0,0), (-1,-1), 3),
             ('BOTTOMPADDING', (0,0), (-1,-1), 3),
             ('LINEABOVE', (0,-1), (-1,-1), 1, colors.black),
-        ]))
+        ]
+
+        # Add red color for discount row only if discount exists
+        if discount_amount > 0:
+            table_styles.append(('TEXTCOLOR', (0,1), (-1,1), colors.HexColor('#dc2626')))
+
+        summary_table.setStyle(TableStyle(table_styles))
         elements.append(summary_table)
 
         return elements
@@ -466,29 +716,36 @@ class ModernBOQPDFGenerator:
         elements = []
         elements.append(Spacer(1, 10))
 
-        # Calculate from sub-items
-        all_sub_items = []
-        for item in items:
-            if item.get('has_sub_items') and item.get('sub_items'):
-                all_sub_items.extend(item.get('sub_items', []))
-
+        # Calculate from sub-items with correct percentages
         client_amount = 0
         total_misc = 0
         total_overhead = 0
+        total_transport = 0
 
-        for sub_item in all_sub_items:
-            qty = sub_item.get('quantity', 0)
-            rate = sub_item.get('rate', 0)
-            sub_client = qty * rate
-            client_amount += sub_client
+        for item in items:
+            if item.get('has_sub_items') and item.get('sub_items'):
+                for sub_item in item.get('sub_items', []):
+                    qty = sub_item.get('quantity', 0)
+                    rate = sub_item.get('rate', 0)
+                    sub_client = qty * rate
+                    client_amount += sub_client
 
-            misc_pct = sub_item.get('misc_percentage', 10)
-            overhead_pct = sub_item.get('overhead_profit_percentage', 25)
+                    # Calculate base cost from materials and labour
+                    materials_cost = sum([m.get('total_price', 0) for m in sub_item.get('materials', [])])
+                    labour_cost = sum([l.get('total_cost', 0) for l in sub_item.get('labour', [])])
+                    base_cost = materials_cost + labour_cost
 
-            total_misc += sub_client * (misc_pct / 100)
-            total_overhead += sub_client * (overhead_pct / 100)
+                    # Get percentages from SUB-ITEM first, fallback to ITEM
+                    misc_pct = sub_item.get('misc_percentage', item.get('miscellaneous_percentage', item.get('overhead_percentage', 10)))
+                    overhead_pct = sub_item.get('overhead_profit_percentage', item.get('overhead_profit_percentage', item.get('profit_margin_percentage', 25)))
+                    transport_pct = sub_item.get('transport_percentage', item.get('transport_percentage', 5))
 
-        internal_cost = total_material_cost + total_labour_cost + total_misc + total_overhead
+                    # Calculate based on CLIENT AMOUNT (as per TD modal!)
+                    total_misc += sub_client * (misc_pct / 100)
+                    total_overhead += sub_client * (overhead_pct / 100)
+                    total_transport += sub_client * (transport_pct / 100)
+
+        internal_cost = total_material_cost + total_labour_cost + total_misc + total_overhead + total_transport
         actual_profit = client_amount - internal_cost
 
         summary_data = [
@@ -498,12 +755,20 @@ class ModernBOQPDFGenerator:
             ['  - Labour:', f'{total_labour_cost:,.2f} AED'],
             ['  - Misc:', f'{total_misc:,.2f} AED'],
             ['  - O&P:', f'{total_overhead:,.2f} AED'],
-            ['<b>Total Internal Cost:</b>', f'<b>{internal_cost:,.2f} AED</b>'],
+        ]
+
+        # Add transport row if exists
+        if total_transport > 0:
+            summary_data.append(['  - Transport:', f'{total_transport:,.2f} AED'])
+
+        summary_data.extend([
+            [Paragraph('<b>Total Internal Cost:</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold')),
+             Paragraph(f'<b>{internal_cost:,.2f} AED</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold'))],
             ['', ''],
-            ['<b>Profit Analysis:</b>', ''],
+            [Paragraph('<b>Profit Analysis:</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold')), ''],
             ['Planned Profit:', f'{total_overhead:,.2f} AED'],
             ['Actual Profit:', f'{actual_profit:,.2f} AED'],
-        ]
+        ])
 
         summary_table = Table(summary_data, colWidths=[5*inch, 1.5*inch])
         profit_color = colors.HexColor('#00AA00') if actual_profit >= total_overhead else colors.HexColor('#CC0000')

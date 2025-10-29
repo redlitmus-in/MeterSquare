@@ -95,27 +95,26 @@ const prepareSectionsInternal = (boqItems: any[]): any[] => {
     };
 
     if (item.has_sub_items && item.sub_items && item.sub_items.length > 0) {
+      // Get percentages from ITEM level (not sub-item)
+      const itemMiscPercent = item.miscellaneous_percentage || item.overhead_percentage || 0;
+      const itemOverheadPercent = item.overhead_profit_percentage || item.profit_margin_percentage || 0;
+
       item.sub_items.forEach((subItem: any, subIdx: number) => {
         // Calculate costs from materials and labour
         const materials = subItem.materials || [];
         const labour = subItem.labour || [];
 
-        const rawMaterialsCost = materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0);
-        const labourCost = labour.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0);
+        const rawMaterialsCost = materials.reduce((sum: number, m: any) => sum + (m.total_price || m.amount || 0), 0);
+        const labourCost = labour.reduce((sum: number, l: any) => sum + (l.total_cost || l.amount || 0), 0);
         const baseCost = rawMaterialsCost + labourCost;
 
-        // Calculate percentages
-        const miscPercent = subItem.miscellaneous_percentage || 10;
-        const overheadPercent = subItem.overhead_profit_percentage || 25;
-        const transportPercent = subItem.transport_percentage || 6;
+        // Apply item-level percentages to sub-item base cost
+        const miscAmount = baseCost * (itemMiscPercent / 100);
+        const overheadAmount = baseCost * (itemOverheadPercent / 100);
 
-        const miscAmount = baseCost * (miscPercent / 100);
-        const overheadAmount = baseCost * (overheadPercent / 100);
-        const transportAmount = baseCost * (transportPercent / 100);
-
-        const internalCost = baseCost + miscAmount + overheadAmount + transportAmount;
+        const internalCost = baseCost + miscAmount + overheadAmount;
         const clientCost = subItem.quantity * subItem.rate;
-        const plannedProfit = overheadAmount; // 25% is the planned profit
+        const plannedProfit = overheadAmount; // Overhead/Profit percentage is the planned profit
         const actualProfit = clientCost - internalCost;
 
         section.items.push({
@@ -146,12 +145,12 @@ const prepareSectionsInternal = (boqItems: any[]): any[] => {
           // Cost breakdown
           rawMaterialsCost: rawMaterialsCost,
           labourCost: labourCost,
-          miscPercent: miscPercent,
+          miscPercent: itemMiscPercent,
           miscAmount: miscAmount,
-          overheadPercent: overheadPercent,
+          overheadPercent: itemOverheadPercent,
           overheadAmount: overheadAmount,
-          transportPercent: transportPercent,
-          transportAmount: transportAmount,
+          transportPercent: 0, // Not used in the system
+          transportAmount: 0, // Not used in the system
           internalCost: internalCost,
           clientCost: clientCost,
           plannedProfit: plannedProfit,
@@ -163,19 +162,18 @@ const prepareSectionsInternal = (boqItems: any[]): any[] => {
       const materials = item.materials || [];
       const labour = item.labour || [];
 
-      const rawMaterialsCost = materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0);
-      const labourCost = labour.reduce((sum: number, l: any) => sum + (l.total_cost || 0), 0);
+      const rawMaterialsCost = materials.reduce((sum: number, m: any) => sum + (m.total_price || m.amount || 0), 0);
+      const labourCost = labour.reduce((sum: number, l: any) => sum + (l.total_cost || l.amount || 0), 0);
       const baseCost = rawMaterialsCost + labourCost;
 
-      const miscPercent = item.miscellaneous_percentage || 10;
-      const overheadPercent = item.overhead_profit_percentage || 25;
-      const transportPercent = item.transport_percentage || 6;
+      // Get percentages from item
+      const miscPercent = item.miscellaneous_percentage || item.overhead_percentage || 0;
+      const overheadPercent = item.overhead_profit_percentage || item.profit_margin_percentage || 0;
 
       const miscAmount = baseCost * (miscPercent / 100);
       const overheadAmount = baseCost * (overheadPercent / 100);
-      const transportAmount = baseCost * (transportPercent / 100);
 
-      const internalCost = baseCost + miscAmount + overheadAmount + transportAmount;
+      const internalCost = baseCost + miscAmount + overheadAmount;
       const clientCost = item.estimatedSellingPrice || 0;
       const plannedProfit = overheadAmount;
       const actualProfit = clientCost - internalCost;
@@ -210,8 +208,8 @@ const prepareSectionsInternal = (boqItems: any[]): any[] => {
         miscAmount: miscAmount,
         overheadPercent: overheadPercent,
         overheadAmount: overheadAmount,
-        transportPercent: transportPercent,
-        transportAmount: transportAmount,
+        transportPercent: 0, // Not used in the system
+        transportAmount: 0, // Not used in the system
         internalCost: internalCost,
         clientCost: clientCost,
         plannedProfit: plannedProfit,
@@ -229,9 +227,37 @@ const prepareSectionsInternal = (boqItems: any[]): any[] => {
 export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
   try {
     const sections = prepareSectionsClient(estimation.boqItems || []);
-    const subtotal = estimation.totalValue;
+
+    // Calculate subtotal from all items (sum of qty × rate)
+    let calculatedSubtotal = 0;
+    (estimation.boqItems || []).forEach((item: any) => {
+      if (item.has_sub_items && item.sub_items && item.sub_items.length > 0) {
+        item.sub_items.forEach((subItem: any) => {
+          calculatedSubtotal += (subItem.quantity || 0) * (subItem.rate || 0);
+        });
+      } else {
+        calculatedSubtotal += item.estimatedSellingPrice || 0;
+      }
+    });
+
+    // Get discount from estimation
+    const discountAmount = (estimation as any).discount_amount || 0;
+    const discountPercentage = estimation.discountPercentage || 0;
+
+    // Calculate actual discount (use provided amount or calculate from percentage)
+    let discount = discountAmount;
+    if (discount === 0 && discountPercentage > 0) {
+      discount = calculatedSubtotal * (discountPercentage / 100);
+    }
+
+    const afterDiscount = calculatedSubtotal - discount;
     const vat = estimation.totalVatAmount || 0;
-    const grandTotal = subtotal + vat;
+    const grandTotal = afterDiscount + vat;
+
+    // Prepare preliminaries items from the estimation
+    const preliminariesItems = estimation.preliminaries?.items?.map((item: any) =>
+      typeof item === 'string' ? item : (item.description || item.name || '')
+    ) || [];
 
     const data = {
       projectName: estimation.projectName,
@@ -239,10 +265,14 @@ export const exportBOQToPDFClient = async (estimation: BOQEstimation) => {
       location: estimation.location,
       quotationDate: formatDate(estimation.submittedDate),
       sections: sections,
-      subtotal: formatCurrency(subtotal),
+      subtotal: formatCurrency(calculatedSubtotal),
+      discount: discount > 0 ? formatCurrency(discount) : undefined,
+      discountPercentage: discount > 0 ? discountPercentage : undefined,
+      afterDiscount: formatCurrency(afterDiscount),
       vat: vat > 0 ? formatCurrency(vat) : undefined,
       vatRate: 5,
       grandTotal: formatCurrency(grandTotal),
+      preliminariesItems: preliminariesItems,
       notes: estimation.preliminaries?.notes || 'All authority charges & deposits are excluded.'
     };
 
