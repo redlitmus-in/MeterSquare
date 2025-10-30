@@ -1886,8 +1886,34 @@ def update_boq(boq_id):
         # History is only stored in revision_boq function
         next_version = 1
 
-        # If items are provided, update the JSON structure
-        if "items" in data:
+        # Initialize variables
+        boq_items = []
+        total_boq_cost = 0
+
+        # Check if we should store payload directly (when combined_summary exists in payload)
+        if "items" in data and "combined_summary" in data:
+            # Store payload directly without recalculation
+            import copy
+            payload_copy = copy.deepcopy(data)
+
+            # Get values directly from payload
+            boq_items = data.get("items", [])
+            combined_summary = data.get("combined_summary", {})
+            total_boq_cost = combined_summary.get("total_cost", 0)
+            total_items = combined_summary.get("total_items", len(boq_items))
+            total_materials = combined_summary.get("total_materials", 0)
+            total_labour = combined_summary.get("total_labour", 0)
+
+            # Update BOQDetails with the raw payload directly
+            boq_details.boq_details = payload_copy
+            boq_details.total_cost = total_boq_cost
+            boq_details.total_items = total_items
+            boq_details.total_materials = total_materials
+            boq_details.total_labour = total_labour
+            boq_details.last_modified_by = user_name
+
+        # If items are provided, update the JSON structure (normal calculation mode)
+        elif "items" in data:
             # Use the same current user logic for BOQ details
             current_user = getattr(g, 'user', None)
             if current_user:
@@ -1896,7 +1922,6 @@ def update_boq(boq_id):
                 created_by = data.get("modified_by", "Admin")
 
             # Process updated items
-            boq_items = []
             total_boq_cost = 0
             total_materials = 0
             total_labour = 0
@@ -2403,22 +2428,59 @@ def revision_boq(boq_id):
         boq.last_modified_at = datetime.utcnow()
         next_version = old_revision_number
 
-        # Create history entry with current BOQ details BEFORE updating
-        boq_detail_history = BOQDetailsHistory(
-            boq_detail_id=boq_details.boq_detail_id,
-            boq_id=boq_id,
-            version=next_version,
-            boq_details=old_boq_details_json,  # Save OLD state before updating
-            total_cost=old_total_cost,
-            total_items=old_total_items,
-            total_materials=boq_details.total_materials,
-            total_labour=boq_details.total_labour,
-            created_by=user_name
-        )
-        db.session.add(boq_detail_history)
+        # Initialize variables used later in the function
+        boq_items = []
+        total_boq_cost = 0
 
-        # If items are provided, update the JSON structure
-        if "items" in data:
+        # Store the payload directly in BOQDetailsHistory without recalculation
+        if data.get("is_revision", False) and "items" in data:
+            # Create history entry with payload data directly (no recalculation)
+            import copy
+            payload_copy = copy.deepcopy(data)
+
+            # Calculate totals from payload as-is
+            boq_items = data.get("items", [])  # Use payload items directly
+            total_items = len(boq_items)
+            total_materials = 0
+            total_labour = 0
+            total_cost = 0
+
+            for item in boq_items:
+                # Get selling price from payload directly
+                total_cost += item.get("selling_price", 0)
+
+                # Count materials and labour from sub_items
+                for sub_item in item.get("sub_items", []):
+                    total_materials += len(sub_item.get("materials", []))
+                    total_labour += len(sub_item.get("labour", []))
+
+            # Set total_boq_cost for later use
+            total_boq_cost = total_cost
+
+            # Create BOQDetailsHistory entry with the raw payload
+            boq_detail_history = BOQDetailsHistory(
+                boq_detail_id=boq_details.boq_detail_id,
+                boq_id=boq_id,
+                version=next_version,
+                boq_details=payload_copy,  # Store payload directly as-is
+                total_cost=total_cost,
+                total_items=total_items,
+                total_materials=total_materials,
+                total_labour=total_labour,
+                created_by=user_name
+            )
+            db.session.add(boq_detail_history)
+
+            # Also update BOQDetails with the raw payload (no recalculation)
+            boq_details.boq_details = payload_copy
+            boq_details.total_cost = total_cost
+            boq_details.total_items = total_items
+            boq_details.total_materials = total_materials
+            boq_details.total_labour = total_labour
+            boq_details.last_modified_by = user_name
+
+        # If items are provided, update the JSON structure (for non-revision updates)
+        elif "items" in data:
             # Use the same current user logic for BOQ details
             current_user = getattr(g, 'user', None)
             if current_user:

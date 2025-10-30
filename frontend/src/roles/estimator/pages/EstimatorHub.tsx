@@ -617,10 +617,10 @@ const EstimatorHub: React.FC = () => {
           return (status === 'pm_approved' || status === 'pending_td_approval' || status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed') && !boq.pm_assigned;
         });
       } else if (activeTab === 'rejected') {
-        // Rejected: TD rejected OR client rejected
+        // Rejected: TD rejected OR client rejected OR PM rejected
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
-          return status === 'rejected' || status === 'client_rejected';
+          return status === 'rejected' || status === 'client_rejected' || status === 'pm_rejected';
         });
       } else if (activeTab === 'completed') {
         // Completed BOQs (PM assigned)
@@ -1215,7 +1215,7 @@ const EstimatorHub: React.FC = () => {
     const revisionNumber = boq.revision_number || 0;
 
     // Draft: Not sent to TD/PM yet (can edit/delete/send) - status NOT in workflow states
-    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_td_approval' && status !== 'pm_approved' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled');
+    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_td_approval' && status !== 'pm_approved' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'pm_rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled');
     // Sent to TD or PM: Waiting for approval
     const isSentToTD = status === 'pending' || status === 'pending_pm_approval';
     // PM Approved: Ready to send to TD for final approval
@@ -1236,6 +1236,8 @@ const EstimatorHub: React.FC = () => {
     const isClientConfirmed = status === 'client_confirmed';
     // TD rejected: Rejected by Technical Director, can edit and resend
     const isTDRejected = status === 'rejected';
+    // PM rejected: Rejected by Project Manager, can edit and resend to PM
+    const isPMRejected = status === 'pm_rejected';
     // Client rejected: Can be edited and resent OR cancelled
     const isClientRejected = status === 'client_rejected';
     // Client cancelled: Permanently cancelled, no actions allowed
@@ -1335,7 +1337,7 @@ const EstimatorHub: React.FC = () => {
         </div>
 
         {/* Actions */}
-        <div className={`border-t border-gray-200 p-2 sm:p-3 grid ${isClientRejected ? 'grid-cols-4' : revisionNumber > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-1 sm:gap-2`}>
+        <div className={`border-t border-gray-200 p-2 sm:p-3 grid ${isPMRejected ? 'grid-cols-4' : isClientRejected ? 'grid-cols-4' : revisionNumber > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-1 sm:gap-2`}>
           <button
             className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
             style={{ backgroundColor: 'rgb(36, 61, 138)' }}
@@ -1613,6 +1615,44 @@ const EstimatorHub: React.FC = () => {
               <span className="hidden sm:inline">Edit BOQ</span>
               <span className="sm:hidden">Edit</span>
             </button>
+          ) : isPMRejected ? (
+            /* PM Rejected - Can edit, send to PM, or send to TD */
+            <>
+              <button
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+                style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+                onClick={() => {
+                  setEditingBoq(boq);
+                  setShowBoqEdit(true);
+                }}
+              >
+                <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Edit BOQ</span>
+                <span className="sm:hidden">Edit</span>
+              </button>
+              <button
+                className="text-blue-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm"
+                onClick={() => {
+                  handleSendToPM(boq.project);
+                }}
+              >
+                <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Send to PM</span>
+                <span className="sm:hidden">PM</span>
+              </button>
+              <button
+                className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
+                onClick={() => {
+                  setBoqToEmail(boq);
+                  setEmailMode('td');
+                  setShowSendEmailModal(true);
+                }}
+              >
+                <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <span className="hidden sm:inline">Send to TD</span>
+                <span className="sm:hidden">TD</span>
+              </button>
+            </>
           ) : isApprovedByTD || isRevisionApproved ? (
             /* Approved by TD - Can send to client */
             <button
@@ -1982,7 +2022,7 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Rejected</span>
                 <span className="ml-1 sm:ml-2 text-gray-400">({boqs.filter(b => {
                   const s = b.status?.toLowerCase();
-                  return s === 'rejected' || s === 'client_rejected';
+                  return s === 'rejected' || s === 'client_rejected' || s === 'pm_rejected';
                 }).length})</span>
               </TabsTrigger>
               <TabsTrigger
