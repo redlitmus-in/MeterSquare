@@ -19,14 +19,12 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
   onProductAdded,
   editProduct
 }) => {
-  const [formData, setFormData] = useState<Partial<VendorProduct & { quantity?: number; total_amount?: number }>>({
+  const [formData, setFormData] = useState<Partial<VendorProduct>>({
     product_name: '',
     category: '',
     description: '',
     unit: '',
-    unit_price: undefined,
-    quantity: undefined,
-    total_amount: undefined
+    unit_price: undefined
   });
 
   const [categories, setCategories] = useState<string[]>([]);
@@ -64,9 +62,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
       category: '',
       description: '',
       unit: '',
-      unit_price: undefined,
-      quantity: undefined,
-      total_amount: undefined
+      unit_price: undefined
     });
     setErrors([]);
   };
@@ -75,20 +71,9 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
     const { name, value } = e.target;
 
     // Handle numeric fields
-    if (name === 'unit_price' || name === 'quantity') {
+    if (name === 'unit_price') {
       const numValue = value === '' ? undefined : parseFloat(value);
-      setFormData(prev => {
-        const updated = { ...prev, [name]: numValue };
-
-        // Auto-calculate total amount if both unit_price and quantity are present
-        if (name === 'unit_price' && updated.quantity !== undefined && numValue !== undefined) {
-          updated.total_amount = numValue * updated.quantity;
-        } else if (name === 'quantity' && updated.unit_price !== undefined && numValue !== undefined) {
-          updated.total_amount = updated.unit_price * numValue;
-        }
-
-        return updated;
-      });
+      setFormData(prev => ({ ...prev, [name]: numValue }));
     } else {
       setFormData(prev => ({ ...prev, [name]: value }));
     }
@@ -247,7 +232,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
                   />
                 </div>
 
-                {/* Unit, Unit Price, Quantity, and Total */}
+                {/* Unit and Unit Price */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label htmlFor="unit" className="block text-sm font-medium text-gray-700 mb-2">
@@ -282,38 +267,6 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       placeholder="0.00"
                     />
-                  </div>
-
-                  <div>
-                    <label htmlFor="quantity" className="block text-sm font-medium text-gray-700 mb-2">
-                      Quantity
-                    </label>
-                    <input
-                      id="quantity"
-                      type="number"
-                      name="quantity"
-                      value={formData.quantity ?? ''}
-                      onChange={handleInputChange}
-                      step="0.01"
-                      min="0"
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="0"
-                    />
-                  </div>
-
-                  <div>
-                    <label htmlFor="total_amount" className="block text-sm font-medium text-gray-700 mb-2">
-                      Total Amount (AED)
-                    </label>
-                    <input
-                      id="total_amount"
-                      type="number"
-                      value={formData.total_amount ?? ''}
-                      readOnly
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 font-semibold"
-                      placeholder="0.00"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Auto-calculated (Unit Price × Quantity)</p>
                   </div>
                 </div>
               </div>

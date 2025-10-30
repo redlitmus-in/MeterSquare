@@ -377,7 +377,7 @@ const ExtraMaterialPage: React.FC = () => {
           <div className="bg-gradient-to-r from-orange-50 to-amber-50 rounded-2xl p-6 shadow-sm border border-orange-100">
             <div className="flex justify-between items-center">
               <div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">Extra Material</h1>
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">Material Purchase</h1>
                 <p className="text-gray-600">Request additional sub-items for assigned projects</p>
               </div>
             </div>
@@ -491,14 +491,14 @@ const ExtraMaterialPage: React.FC = () => {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.3 }}
           >
-            {/* Add Extra Sub Item Button */}
+            {/* NEW MATERIAL PURCHASE Button */}
             <div className="mb-6 flex justify-end">
               <button
                 onClick={() => setShowForm(true)}
                 className="inline-flex items-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors shadow-md"
               >
                 <PlusIcon className="w-5 h-5 mr-2" />
-                Add Extra Sub Item
+                NEW MATERIAL PURCHASE
               </button>
             </div>
 
@@ -512,7 +512,7 @@ const ExtraMaterialPage: React.FC = () => {
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
                 <CubeIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No Pending Requests</h3>
-                <p className="text-gray-500">Click "Add Extra Sub Item" to create your first request</p>
+                <p className="text-gray-500">Click "NEW MATERIAL PURCHASE" to create your first request</p>
               </div>
             ) : viewMode === 'card' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -546,10 +546,6 @@ const ExtraMaterialPage: React.FC = () => {
                           <div>
                             <p className="text-xs text-gray-500">Quantity</p>
                             <p className="font-semibold">{request.quantity}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500">Total Cost</p>
-                            <p className="font-semibold text-blue-600">AED {request.total_cost.toLocaleString()}</p>
                           </div>
                         </div>
                       </div>
@@ -605,9 +601,6 @@ const ExtraMaterialPage: React.FC = () => {
                           Quantity
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Total Cost
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Actions
                         </th>
                       </tr>
@@ -632,9 +625,6 @@ const ExtraMaterialPage: React.FC = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                             {request.quantity}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            AED{request.total_cost.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
                             <div className="flex gap-2">
@@ -720,10 +710,6 @@ const ExtraMaterialPage: React.FC = () => {
                             <p className="text-xs text-gray-500">Quantity</p>
                             <p className="font-semibold">{request.quantity}</p>
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500">Total Cost</p>
-                            <p className="font-semibold text-yellow-600">AED {request.total_cost.toLocaleString()}</p>
-                          </div>
                         </div>
                         <div className="text-xs text-gray-500 pt-2">
                           Created: {new Date(request.created_at).toLocaleDateString()}
@@ -763,9 +749,6 @@ const ExtraMaterialPage: React.FC = () => {
                           Quantity
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Total Cost
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Status
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -796,9 +779,6 @@ const ExtraMaterialPage: React.FC = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                             {request.quantity}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            AED {request.total_cost.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {getStatusBadge(request.status)}
@@ -929,10 +909,6 @@ const ExtraMaterialPage: React.FC = () => {
                             <p className="text-xs text-gray-500">Quantity</p>
                             <p className="font-semibold">{request.quantity}</p>
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500">Total Cost</p>
-                            <p className="font-semibold text-green-600">AED {request.total_cost.toLocaleString()}</p>
-                          </div>
                         </div>
                         <div className="text-xs text-gray-500 pt-2">
                           Approved: {new Date(request.created_at).toLocaleDateString()}
@@ -964,9 +940,6 @@ const ExtraMaterialPage: React.FC = () => {
                           Quantity
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Total Cost
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Approved Date
                         </th>
                       </tr>
@@ -991,9 +964,6 @@ const ExtraMaterialPage: React.FC = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                             {request.quantity}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            AED{request.total_cost.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {new Date(request.created_at).toLocaleDateString()}
@@ -1057,10 +1027,6 @@ const ExtraMaterialPage: React.FC = () => {
                             <p className="text-xs text-gray-500">Quantity</p>
                             <p className="font-semibold">{request.quantity}</p>
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500">Total Cost</p>
-                            <p className="font-semibold text-red-600">AED {request.total_cost.toLocaleString()}</p>
-                          </div>
                         </div>
 
                         {/* Rejection Details */}
@@ -1110,9 +1076,6 @@ const ExtraMaterialPage: React.FC = () => {
                           Quantity
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Total Cost
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Rejection Reason
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1143,9 +1106,6 @@ const ExtraMaterialPage: React.FC = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                             {request.quantity}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-red-600">
-                            AED {request.total_cost.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 text-sm text-red-700 max-w-xs">
                             <div className="truncate" title={request.rejection_reason}>
@@ -1226,10 +1186,6 @@ const ExtraMaterialPage: React.FC = () => {
                             <p className="text-xs text-gray-500">Quantity</p>
                             <p className="font-semibold">{request.quantity}</p>
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500">Total Cost</p>
-                            <p className="font-semibold text-blue-600">AED {request.total_cost.toLocaleString()}</p>
-                          </div>
                         </div>
 
                         {/* Purchase Completion Details */}
@@ -1287,9 +1243,6 @@ const ExtraMaterialPage: React.FC = () => {
                           Quantity
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Total Cost
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Completed By
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1320,9 +1273,6 @@ const ExtraMaterialPage: React.FC = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                             {request.quantity}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">
-                            AED {request.total_cost.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                             {request.purchase_completed_by || 'N/A'}
@@ -1360,7 +1310,7 @@ const ExtraMaterialPage: React.FC = () => {
               className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
             >
               <div className="sticky top-0 bg-white border-b px-6 py-4">
-                <h2 className="text-xl font-semibold text-gray-900">Request Extra Materials</h2>
+                <h2 className="text-xl font-semibold text-gray-900">Request Material Purchase</h2>
               </div>
               <div className="p-6">
                 <ExtraMaterialForm

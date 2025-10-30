@@ -79,6 +79,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const submissionInProgressRef = React.useRef(false);
   const [projects, setProjects] = useState<Project[]>([]);
 
+  // Check if user is Site Engineer
+  const isSiteEngineer = useMemo(() => {
+    const role = (user as any)?.role?.toLowerCase() || '';
+    return role === 'site engineer' || role === 'site_engineer' || role === 'siteengineer';
+  }, [user]);
+
   // Dynamic field states
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [selectedArea, setSelectedArea] = useState<Area | null>(null);
@@ -213,6 +219,16 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const addExistingMaterial = (material: Material) => {
     if (!selectedSubItem) return;
 
+    // Check if this material is already in the list
+    const isDuplicate = materials.some(
+      mat => !mat.isNew && mat.materialId === material.material_id && mat.subItemId === selectedSubItem.sub_item_id
+    );
+
+    if (isDuplicate) {
+      toast.error('Purchase request already made for this material. Please remove the existing entry if you want to modify it.');
+      return;
+    }
+
     const newMaterialItem: MaterialItem = {
       id: `material-${Date.now()}-${Math.random()}`,
       isNew: false,
@@ -220,7 +236,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       subItemName: selectedSubItem.sub_item_name,  // The sub-item (scope) name like "Protection"
       materialId: material.material_id,  // The material ID like "Bubble Wrap's ID"
       materialName: material.material_name,  // The material name like "Bubble Wrap"
-      quantity: 0,  // Empty for user to fill
+      quantity: material.quantity || 0,  // Auto-fill from BOQ quantity
       unit: material.unit,  // Fixed from material
       unitRate: material.unit_price || 0,  // Fixed from material
       justification: ''  // Empty for user to fill
@@ -632,8 +648,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       )}
 
 
-      {/* Miscellaneous Display */}
-      {itemOverhead && (
+      {/* Miscellaneous Display - Only show if there are new materials (not from BOQ) */}
+      {itemOverhead && materials.some(mat => mat.isNew) && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -643,23 +659,42 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             <CalculatorIcon className="w-5 h-5 text-purple-600" />
             <h3 className="font-medium text-purple-900">Item Miscellaneous Budget</h3>
           </div>
-          <div className="grid grid-cols-3 gap-4 text-sm">
-            <div>
-              <p className="text-gray-600">Total Allocated</p>
-              <p className="font-semibold text-gray-900">AED{itemOverhead.allocated.toLocaleString()}</p>
+
+          {isSiteEngineer ? (
+            /* Simple message for Site Engineers */
+            <div className="bg-white rounded-lg p-4 border border-purple-200">
+              <div className="flex items-start gap-3">
+                <InformationCircleIcon className="w-6 h-6 text-purple-600 flex-shrink-0" />
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-purple-900">
+                    You are making a purchase outside the BOQ
+                  </p>
+                  <p className="text-sm text-gray-700">
+                    The cost will be deducted from the item's miscellaneous budget or actual profit.
+                  </p>
+                </div>
+              </div>
             </div>
-            <div>
-              <p className="text-gray-600">Consumed</p>
-              <p className="font-semibold text-gray-900">AED{itemOverhead.consumed.toLocaleString()}</p>
-              <p className="text-xs text-gray-500 mt-0.5">
-                From approved/pending requests
-              </p>
-            </div>
-            <div>
-              <p className="text-gray-600">Available</p>
-              <p className="font-semibold text-green-600">AED{itemOverhead.available.toLocaleString()}</p>
-            </div>
-          </div>
+          ) : (
+            /* Detailed budget info for PM/other roles */
+            <>
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <div>
+                  <p className="text-gray-600">Total Allocated</p>
+                  <p className="font-semibold text-gray-900">AED{itemOverhead.allocated.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Consumed</p>
+                  <p className="font-semibold text-gray-900">AED{itemOverhead.consumed.toLocaleString()}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    From approved/pending requests
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Available</p>
+                  <p className="font-semibold text-green-600">AED{itemOverhead.available.toLocaleString()}</p>
+                </div>
+              </div>
 
           {/* Threshold Information */}
           {itemOverhead.allocated > 0 && (
@@ -704,19 +739,21 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             </div>
           )}
 
-          {/* Show message when no overhead allocated */}
-          {itemOverhead.allocated === 0 && (
-            <div className="mt-3 pt-3 border-t border-purple-200">
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                <div className="flex items-start gap-2">
-                  <InformationCircleIcon className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-                  <div className="text-sm text-yellow-800">
-                    <p className="font-medium mb-1">No Miscellaneous Budget Allocated</p>
-                    <p className="text-xs">This item has AED 0 allocated for miscellaneous expenses. Progress tracking and percentage calculations are not available.</p>
+              {/* Show message when no overhead allocated */}
+              {itemOverhead.allocated === 0 && (
+                <div className="mt-3 pt-3 border-t border-purple-200">
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                    <div className="flex items-start gap-2">
+                      <InformationCircleIcon className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                      <div className="text-sm text-yellow-800">
+                        <p className="font-medium mb-1">No Miscellaneous Budget Allocated</p>
+                        <p className="text-xs">This item has AED 0 allocated for miscellaneous expenses. Progress tracking and percentage calculations are not available.</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
+              )}
+            </>
           )}
         </motion.div>
       )}
@@ -745,7 +782,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           </div>
 
           {!showExistingRequests ? (
-            <div className="grid grid-cols-4 gap-3 text-sm">
+            <div className={`grid ${isSiteEngineer ? 'grid-cols-3' : 'grid-cols-4'} gap-3 text-sm`}>
               <div>
                 <p className="text-blue-700 text-xs">Pending</p>
                 <p className="font-semibold text-blue-900">
@@ -764,13 +801,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                   {existingRequests.filter(r => r.status === 'rejected').length}
                 </p>
               </div>
-              <div>
-                <p className="text-blue-700 text-xs">Total Cost</p>
-                <p className="font-semibold text-blue-900">
-                  AED {existingRequests.filter(r => r.status !== 'rejected').reduce((sum, r) => sum + (r.materials_total_cost || 0), 0).toLocaleString()}
-                </p>
-                <p className="text-xs text-gray-500">(excl. rejected)</p>
-              </div>
+              {!isSiteEngineer && (
+                <div>
+                  <p className="text-blue-700 text-xs">Total Cost</p>
+                  <p className="font-semibold text-blue-900">
+                    AED {existingRequests.filter(r => r.status !== 'rejected').reduce((sum, r) => sum + (r.materials_total_cost || 0), 0).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-gray-500">(excl. rejected)</p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-2 max-h-60 overflow-y-auto">
@@ -798,8 +837,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         </span>
                       </div>
                       <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                        request.status === 'approved' ? 'bg-green-100 text-green-700' :
-                        request.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                        request.status === 'approved' || request.status === 'approved_by_estimator' || request.status === 'completed' ? 'bg-green-100 text-green-700' :
+                        request.status === 'rejected' || request.status === 'rejected_by_pm' || request.status === 'rejected_by_td' || request.status === 'rejected_by_estimator' ? 'bg-red-100 text-red-700' :
                         request.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
                         'bg-blue-100 text-blue-700'
                       }`}>
@@ -807,7 +846,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                          request.status === 'under_review' ? 'Under Review' :
                          request.status === 'approved_by_pm' ? 'PM Approved' :
                          request.status === 'approved_by_td' ? 'TD Approved' :
-                         request.status === 'approved' ? 'Approved' : 'Rejected'}
+                         request.status === 'approved_by_estimator' ? 'Estimator Approved' :
+                         request.status === 'approved' ? 'Approved' :
+                         request.status === 'completed' ? 'Completed' :
+                         request.status === 'rejected' || request.status === 'rejected_by_pm' || request.status === 'rejected_by_td' || request.status === 'rejected_by_estimator' ? 'Rejected' :
+                         request.status.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
                       </span>
                     </div>
                     <div className="space-y-2 text-sm">
@@ -823,9 +866,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                                   ({material.quantity} {material.unit})
                                 </span>
                               </span>
-                              <span className="font-medium text-gray-900">
-                                AED {((material.quantity || 0) * (material.unit_price || 0)).toLocaleString()}
-                              </span>
+                              {!isSiteEngineer && (
+                                <span className="font-medium text-gray-900">
+                                  AED {((material.quantity || 0) * (material.unit_price || 0)).toLocaleString()}
+                                </span>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -837,10 +882,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           <span className="text-gray-600 text-xs">By: </span>
                           <span className="text-gray-900 font-medium text-xs">{request.requested_by_name}</span>
                         </div>
-                        <div className="text-right">
-                          <p className="text-gray-600 text-xs">Total Cost</p>
-                          <p className="font-semibold text-gray-900">AED {(request.materials_total_cost || 0).toLocaleString()}</p>
-                        </div>
+                        {!isSiteEngineer && (
+                          <div className="text-right">
+                            <p className="text-gray-600 text-xs">Total Cost</p>
+                            <p className="font-semibold text-gray-900">AED {(request.materials_total_cost || 0).toLocaleString()}</p>
+                          </div>
+                        )}
                       </div>
 
                       <div className="text-xs text-gray-500">
@@ -893,7 +940,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                     <option value="">Select Material</option>
                     {selectedSubItem.materials.map(material => (
                       <option key={material.material_id} value={material.material_id}>
-                        {material.material_name} - AED{material.unit_price}/{material.unit}
+                        {material.material_name}{isSiteEngineer ? '' : ` - AED${material.unit_price}/${material.unit}`}
                       </option>
                     ))}
                   </select>
@@ -928,7 +975,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                       <p className="text-xs text-gray-500 mt-1">
                         Scope: {material.subItemName}
                         {!material.isNew && ` | Material: ${material.materialName}`}
-                        {!material.isNew && ` | Unit Rate: AED${material.unitRate}/${material.unit}`}
+                        {!material.isNew && !isSiteEngineer && ` | Unit Rate: AED${material.unitRate}/${material.unit}`}
                       </p>
                     </div>
                     <button
@@ -966,13 +1013,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         <p className="text-sm font-semibold text-blue-900">{material.materialName}</p>
                         <div className="mt-2 flex gap-4 text-xs text-blue-700">
                           <span>Unit: {material.unit}</span>
-                          <span>Rate: AED{material.unitRate.toLocaleString()}/{material.unit}</span>
+                          {!isSiteEngineer && <span>Rate: AED{material.unitRate.toLocaleString()}/{material.unit}</span>}
                         </div>
                       </div>
                     </div>
                   )}
 
-                  <div className="grid grid-cols-3 gap-3 mt-3">
+                  <div className={`grid ${isSiteEngineer ? 'grid-cols-2' : 'grid-cols-3'} gap-3 mt-3`}>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Quantity <span className="text-red-500">*</span>
@@ -981,10 +1028,14 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         type="number"
                         value={material.quantity}
                         onChange={(e) => updateMaterial(material.id, { quantity: parseFloat(e.target.value) || 0 })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                        className={`w-full px-3 py-2 border border-gray-300 rounded-lg ${
+                          !material.isNew && isSiteEngineer ? 'bg-gray-100 cursor-not-allowed' : 'focus:ring-2 focus:ring-purple-500'
+                        }`}
                         min="0.01"
                         step="0.01"
                         placeholder="Enter quantity"
+                        readOnly={!material.isNew && isSiteEngineer}
+                        disabled={!material.isNew && isSiteEngineer}
                       />
                     </div>
                     <div>
@@ -1003,33 +1054,36 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         disabled={!material.isNew}
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Unit Rate (AED) {material.isNew && <span className="text-red-500">*</span>}
-                      </label>
-                      <input
-                        type="number"
-                        value={material.unitRate}
-                        onChange={(e) => material.isNew && updateMaterial(material.id, { unitRate: parseFloat(e.target.value) || 0 })}
-                        className={`w-full px-3 py-2 border border-gray-300 rounded-lg ${
-                          material.isNew ? 'focus:ring-2 focus:ring-purple-500' : 'bg-gray-100 cursor-not-allowed'
-                        }`}
-                        min="0.01"
-                        step="0.01"
-                        readOnly={!material.isNew}
-                        disabled={!material.isNew}
-                      />
-                    </div>
+                    {!isSiteEngineer && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Unit Rate (AED) {material.isNew && <span className="text-red-500">*</span>}
+                        </label>
+                        <input
+                          type="number"
+                          value={material.unitRate}
+                          onChange={(e) => material.isNew && updateMaterial(material.id, { unitRate: parseFloat(e.target.value) || 0 })}
+                          className={`w-full px-3 py-2 border border-gray-300 rounded-lg ${
+                            material.isNew ? 'focus:ring-2 focus:ring-purple-500' : 'bg-gray-100 cursor-not-allowed'
+                          }`}
+                          min="0.01"
+                          step="0.01"
+                          readOnly={!material.isNew}
+                          disabled={!material.isNew}
+                        />
+                      </div>
+                    )}
                   </div>
 
-
-                  <div className="mt-2 text-right">
-                    <span className="text-sm text-gray-600">
-                      Subtotal: <span className="font-medium text-gray-900">
-                        AED{(material.quantity * material.unitRate).toLocaleString()}
+                  {!isSiteEngineer && (
+                    <div className="mt-2 text-right">
+                      <span className="text-sm text-gray-600">
+                        Subtotal: <span className="font-medium text-gray-900">
+                          AED{(material.quantity * material.unitRate).toLocaleString()}
+                        </span>
                       </span>
-                    </span>
-                  </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1077,8 +1131,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         />
       </div>
 
-      {/* Calculations Summary */}
-      {selectedSubItem && materials.length > 0 && (
+      {/* Calculations Summary - Only show if there are new materials (not from BOQ) */}
+      {selectedSubItem && materials.length > 0 && materials.some(mat => mat.isNew) && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1096,7 +1150,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                     <span className="text-gray-600">
                       {idx + 1}. {mat.materialName} ({mat.quantity} {mat.unit})
                     </span>
-                    <span className="text-gray-900">AED{(mat.quantity * mat.unitRate).toLocaleString()}</span>
+                    {!isSiteEngineer && <span className="text-gray-900">AED{(mat.quantity * mat.unitRate).toLocaleString()}</span>}
                   </div>
                 ))}
               </div>
@@ -1104,30 +1158,34 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           )}
 
           <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-gray-600">Additional Cost</p>
-              <p className="font-semibold text-gray-900">AED{calculations.totalCost.toLocaleString()}</p>
-            </div>
+            {!isSiteEngineer && (
+              <div>
+                <p className="text-gray-600">Additional Cost</p>
+                <p className="font-semibold text-gray-900">AED{calculations.totalCost.toLocaleString()}</p>
+              </div>
+            )}
             <div>
               <p className="text-gray-600">Miscellaneous Usage</p>
               <p className={`font-semibold ${calculations.exceeds40Percent ? 'text-red-600' : 'text-green-600'}`}>
-                {calculations.overheadPercentage.toFixed(2)}% of AED{itemOverhead?.allocated.toLocaleString() || '0'}
+                {calculations.overheadPercentage.toFixed(2)}%{!isSiteEngineer && ` of AED${itemOverhead?.allocated.toLocaleString() || '0'}`}
               </p>
               <p className="text-xs text-gray-500 mt-0.5">
                 {calculations.exceeds40Percent ? '> 40% threshold' : '≤ 40% threshold'}
               </p>
             </div>
-            <div>
-              <p className="text-gray-600">Available After Approval</p>
-              <p className={`font-semibold ${calculations.availableAfter < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                AED{calculations.availableAfter.toLocaleString()}
-              </p>
-              {itemOverhead && (
-                <p className="text-xs text-gray-500 mt-0.5">
-                  from AED{itemOverhead.available.toLocaleString()}
+            {!isSiteEngineer && (
+              <div>
+                <p className="text-gray-600">Available After Approval</p>
+                <p className={`font-semibold ${calculations.availableAfter < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  AED{calculations.availableAfter.toLocaleString()}
                 </p>
-              )}
-            </div>
+                {itemOverhead && (
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    from AED{itemOverhead.available.toLocaleString()}
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <p className="text-gray-600">Approval Routing</p>
               <p className="font-semibold text-gray-900 text-xs">
@@ -1189,9 +1247,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           type="submit"
           disabled={loading || isSubmitting || !selectedItem || !selectedSubItem || materials.length === 0 || calculations.availableAfter < 0}
           className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
-          title={calculations.availableAfter < 0 ? 'Cannot submit - Budget exceeded' : isSubmitting ? 'Submitting request...' : ''}
+          title={calculations.availableAfter < 0 ? 'Cannot submit - Budget exceeded' : isSubmitting ? 'Creating purchase request...' : ''}
         >
-          {loading || isSubmitting ? 'Submitting...' : 'Submit Request'}
+          {loading || isSubmitting ? 'Creating...' : 'Create Purchase Request'}
         </button>
       </div>
     </form>

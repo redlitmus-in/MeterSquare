@@ -39,7 +39,7 @@ const ApprovedExtraMaterialsSection: React.FC<ApprovedExtraMaterialsSectionProps
       <div className="bg-gradient-to-r from-green-500 to-green-600 rounded-t-lg px-4 py-3 flex items-center justify-between">
         <h3 className="text-lg font-bold text-white flex items-center gap-2">
           <CheckCircle className="w-5 h-5" />
-          Approved Extra Materials
+          Approved Material Purchases
         </h3>
         <span className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium text-white">
           {materials.length} item{materials.length > 1 ? 's' : ''}
@@ -133,7 +133,7 @@ const ApprovedExtraMaterialsSection: React.FC<ApprovedExtraMaterialsSectionProps
             <tfoot className="bg-gray-50">
               <tr>
                 <td colSpan={4} className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
-                  Total Extra Materials Cost:
+                  Total Material Purchase Cost:
                 </td>
                 <td className="px-4 py-3 text-right text-lg font-bold text-green-600">
                   {formatCurrency(totalCost)}

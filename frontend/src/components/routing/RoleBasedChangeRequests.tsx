@@ -45,7 +45,7 @@ const RoleBasedChangeRequests: React.FC = () => {
             </div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">Access Denied</h3>
             <p className="text-gray-600">
-              Extra Material is not available for your role.
+              Material Purchase is not available for your role.
             </p>
           </div>
         </div>

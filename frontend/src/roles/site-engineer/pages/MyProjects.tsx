@@ -17,7 +17,7 @@ import { useAuthStore } from '@/store/authStore';
 import { siteEngineerService } from '../services/siteEngineerService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
-import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
+import SimplifiedBOQView from '../components/SimplifiedBOQView';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
 import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
@@ -429,7 +429,8 @@ const MyProjects: React.FC = () => {
                       >
                         <EyeIcon className="w-5 h-5" />
                       </button>
-                      {project.boq_ids && project.boq_ids.length > 0 && (
+                      {/* Assign to Buyer button - Hidden for Site Engineer role */}
+                      {/* {project.boq_ids && project.boq_ids.length > 0 && (
                         <>
                           {project.boq_assigned_to_buyer ? (
                             <div className="px-4 py-2 bg-green-100 border-2 border-green-400 rounded-lg flex items-center gap-2">
@@ -455,7 +456,7 @@ const MyProjects: React.FC = () => {
                             </button>
                           )}
                         </>
-                      )}
+                      )} */}
                       {/* <button
                         onClick={() => {
                           setSelectedProjectForBOQ(project);
@@ -520,12 +521,15 @@ const MyProjects: React.FC = () => {
         </div>
       </div>
 
-      {/* BOQ Details Modal - Using shared component */}
-      <BOQDetailsModal
+      {/* BOQ Details Modal - Using simplified view for Site Engineer */}
+      <SimplifiedBOQView
         isOpen={showDetailsModal}
         onClose={handleCloseModal}
-        boq={selectedProject ? { boq_id: selectedProject.boq_id, boq_name: selectedProject.boq_name } : null}
-        showNewPurchaseItems={true}
+        boq={selectedProject ? {
+          boq_id: selectedProject.boq_id,
+          boq_name: selectedProject.boq_name,
+          project_name: selectedProject.project_name
+        } : null}
       />
 
       {/* OLD Details Modal - REMOVED - Replaced with BOQDetailsModal */}
