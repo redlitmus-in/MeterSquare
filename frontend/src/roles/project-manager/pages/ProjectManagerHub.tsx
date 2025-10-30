@@ -18,20 +18,44 @@ const ProjectManagerHub: React.FC = () => {
         throw new Error('User not authenticated');
       }
 
-      const [boqsData, myProjectsData] = await Promise.all([
-        projectManagerService.getMyBOQs(),
-        projectManagerService.getMyProjects(user.user_id)
-      ]);
+      const boqsData = await projectManagerService.getMyBOQs();
 
       return {
-        boqs: boqsData.boqs || [],
-        projects: myProjectsData.user_list || []
+        boqs: boqsData.boqs || []
       };
     }
   );
 
   const boqs = useMemo(() => dashboardData?.boqs || [], [dashboardData]);
-  const projects = useMemo(() => dashboardData?.projects || [], [dashboardData]);
+
+  // Derive unique projects from BOQs data
+  const projects = useMemo(() => {
+    if (!boqs || boqs.length === 0) return [];
+
+    // Group BOQs by project_id to get unique projects
+    const projectMap = new Map();
+    boqs.forEach(boq => {
+      if (boq.project_id && !projectMap.has(boq.project_id)) {
+        projectMap.set(boq.project_id, {
+          project_id: boq.project_id,
+          project_name: boq.project_name || 'Unknown Project',
+          // Calculate progress as percentage of approved BOQs for this project
+          progress: 0
+        });
+      }
+    });
+
+    // Calculate progress for each project
+    projectMap.forEach((project, projectId) => {
+      const projectBoqs = boqs.filter(b => b.project_id === projectId);
+      const approvedCount = projectBoqs.filter(b => b.status === 'approved').length;
+      project.progress = projectBoqs.length > 0
+        ? Math.round((approvedCount / projectBoqs.length) * 100)
+        : 0;
+    });
+
+    return Array.from(projectMap.values());
+  }, [boqs]);
 
   useEffect(() => {
     // Set Highcharts global options for consistent theming

@@ -36,7 +36,7 @@ const CreativeErrorPage = lazy(() => import('@/components/ui/CreativeErrorPage')
 
 // Lazy load role hubs - Direct import for better code splitting
 const ProjectManagerHub = lazy(() => import('@/roles/project-manager/pages/ProjectManagerHub'));
-const EstimationHub = lazy(() => import('@/roles/estimation/pages/EstimationHub'));
+// const EstimationHub = lazy(() => import('@/roles/estimation/pages/EstimationHub'));
 const EstimatorHub = lazy(() => import('@/roles/estimator/pages/EstimatorHub'));
 const TechnicalDirectorHub = lazy(() => import('@/roles/technical-director/pages/TechnicalDirectorHub'));
 // const MEPSupervisorHub = lazy(() => import('@/roles/mep-supervisor/pages/MEPSupervisorHub'));
