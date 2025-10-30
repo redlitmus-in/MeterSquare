@@ -237,6 +237,26 @@ def get_all_pm_boqs():
                     "completion_requested": boq.project.completion_requested if boq.project.completion_requested is not None else False
                 }
 
+            # Check for pending and approved day extension requests that PM sent to TD
+            has_pending_day_extension = False
+            pending_day_extension_count = 0
+            has_approved_extension = False
+            if boq.project and boq.project.user_id:  # Only check if PM is assigned
+                pending_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).all()
+                for hist in pending_history:
+                    if hist.action and isinstance(hist.action, list):
+                        for action in hist.action:
+                            action_type = action.get('type', '').lower()
+                            action_status = action.get('status', '').lower()
+                            # Check for requests PM sent to TD that are still pending
+                            if (action_type == 'day_extension_requested' and
+                                action_status in ['day_request_send_td', 'edited_by_td']):
+                                has_pending_day_extension = True
+                                pending_day_extension_count += 1
+                            # Check for approved extensions
+                            elif action_type == 'day_extension_approved' and action_status == 'approved':
+                                has_approved_extension = True
+
             boq_data = {
                 "boq_id": boq.boq_id,
                 "boq_name": boq.boq_name,
@@ -247,7 +267,11 @@ def get_all_pm_boqs():
                 "last_modified_by": boq.last_modified_by,
                 "email_sent": boq.email_sent,
                 "project_name": boq.project.project_name if boq.project else None,
-                "project_details": project_details  # Complete project information
+                "project_details": project_details,  # Complete project information
+                # Day extension status
+                "has_pending_day_extension": has_pending_day_extension,
+                "pending_day_extension_count": pending_day_extension_count,
+                "has_approved_extension": has_approved_extension
             }
             boqs_list.append(boq_data)
 

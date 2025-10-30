@@ -49,7 +49,7 @@ def download_internal_pdf():
             items = boq_json.get('items', [])
 
         # Calculate all values (this populates selling_price, overhead_amount, etc.)
-        total_material_cost, total_labour_cost, grand_total = calculate_boq_values(items)
+        total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
         # Get project
         project = boq.project
@@ -112,7 +112,7 @@ def download_client_pdf():
             items = boq_json.get('items', [])
 
         # Calculate all values (this populates selling_price, overhead_amount, etc.)
-        total_material_cost, total_labour_cost, grand_total = calculate_boq_values(items)
+        total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
         # Get project
         project = boq.project

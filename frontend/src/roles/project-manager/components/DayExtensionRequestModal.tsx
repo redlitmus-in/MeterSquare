@@ -5,7 +5,11 @@ import {
   CalendarIcon,
   ClockIcon,
   PlusIcon,
-  InformationCircleIcon
+  InformationCircleIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  ChevronDownIcon,
+  ChevronUpIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 
@@ -36,21 +40,23 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
   const [hasPendingRequest, setHasPendingRequest] = useState(false);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [checkingPending, setCheckingPending] = useState(false);
+  const [extensionHistory, setExtensionHistory] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
-  // Check for existing pending requests when modal opens
+  // Fetch extension history when modal opens
   useEffect(() => {
     if (isOpen && boqId) {
-      checkPendingRequests();
+      fetchExtensionHistory();
     }
   }, [isOpen, boqId]);
 
-  const checkPendingRequests = async () => {
+  const fetchExtensionHistory = async () => {
     try {
       setCheckingPending(true);
       const token = localStorage.getItem('access_token') || localStorage.getItem('token');
       const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
 
-      const response = await fetch(`${apiUrl}/boq/${boqId}/pending-day-extensions`, {
+      const response = await fetch(`${apiUrl}/boq/${boqId}/day-extension-history`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -61,11 +67,16 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
       const data = await response.json();
 
       if (response.ok && data.success) {
-        setHasPendingRequest(data.count > 0);
-        setPendingRequestCount(data.count);
+        setExtensionHistory(data.requests || []);
+        setHasPendingRequest(data.has_pending || false);
+        setPendingRequestCount(data.pending_count || 0);
+        // Auto-show history if there are any requests
+        if (data.count > 0) {
+          setShowHistory(true);
+        }
       }
     } catch (error) {
-      console.error('Error checking pending requests:', error);
+      console.error('Error fetching extension history:', error);
     } finally {
       setCheckingPending(false);
     }
@@ -91,6 +102,20 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
       month: 'long',
       day: 'numeric'
     });
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'day_request_send_td':
+      case 'edited_by_td':
+        return <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded-full">Pending TD Approval</span>;
+      case 'approved':
+        return <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" />Approved</span>;
+      case 'rejected':
+        return <span className="px-2 py-1 bg-red-100 text-red-800 text-xs font-medium rounded-full flex items-center gap-1"><XCircleIcon className="w-3 h-3" />Rejected</span>;
+      default:
+        return <span className="px-2 py-1 bg-gray-100 text-gray-800 text-xs font-medium rounded-full">{status}</span>;
+    }
   };
 
   const handleSubmit = async () => {
@@ -141,7 +166,8 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
         // Reset form
         setAdditionalDays(1);
         setReason('');
-        onClose();
+        // Refresh history
+        await fetchExtensionHistory();
         // Call onSuccess callback to refresh data
         if (onSuccess) {
           onSuccess();
@@ -218,6 +244,60 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
 
         {/* Content */}
         <div className="p-4 space-y-4 overflow-y-auto flex-1">
+          {/* History Section */}
+          {extensionHistory.length > 0 && (
+            <div className="bg-gray-50 rounded-lg border border-gray-200">
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-100 transition-colors rounded-lg"
+              >
+                <div className="flex items-center gap-2">
+                  <ClockIcon className="w-5 h-5 text-gray-600" />
+                  <span className="font-semibold text-gray-900">Request History ({extensionHistory.length})</span>
+                </div>
+                {showHistory ? <ChevronUpIcon className="w-5 h-5 text-gray-600" /> : <ChevronDownIcon className="w-5 h-5 text-gray-600" />}
+              </button>
+
+              {showHistory && (
+                <div className="px-4 pb-4 space-y-3 max-h-64 overflow-y-auto">
+                  {extensionHistory.map((request, index) => (
+                    <div key={index} className="bg-white rounded-lg border border-gray-200 p-3">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            {getStatusBadge(request.status)}
+                            <span className="text-xs text-gray-500">
+                              {formatDate(request.request_date)}
+                            </span>
+                          </div>
+                          <p className="text-sm font-medium text-gray-900">
+                            Requested: <span className="text-orange-600">{request.requested_days} day{request.requested_days > 1 ? 's' : ''}</span>
+                          </p>
+                          {request.approved_days && (
+                            <p className="text-sm font-medium text-green-600">
+                              Approved: {request.approved_days} day{request.approved_days > 1 ? 's' : ''}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-1">
+                        <span className="font-medium">Reason:</span> {request.reason}
+                      </p>
+                      {request.rejection_reason && (
+                        <p className="text-sm text-red-600">
+                          <span className="font-medium">Rejection Reason:</span> {request.rejection_reason}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-500 mt-1">
+                        Requested by: {request.requested_by}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Current Project Info */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <h3 className="text-xs font-bold text-blue-900 mb-2 flex items-center gap-1.5">

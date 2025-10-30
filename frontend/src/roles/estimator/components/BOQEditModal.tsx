@@ -839,10 +839,15 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
   };
 
   const calculateGrandTotal = () => {
-    return editedBoq.items.reduce((total, item, index) => {
+    const itemsTotal = editedBoq.items.reduce((total, item, index) => {
       const itemTotals = calculateItemTotals(item, index);
       return total + itemTotals.sellingPrice;
     }, 0);
+
+    // Add preliminary amount if it exists
+    const preliminaryAmount = editedBoq.preliminaries?.cost_details?.amount || 0;
+
+    return itemsTotal + preliminaryAmount;
   };
 
   const handleSave = async () => {
@@ -903,7 +908,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       let totalProfit = 0;
       let totalDiscount = 0;
       let totalVAT = 0;
-      let grandTotal = 0;
+      let itemsTotal = 0;
 
       enrichedItems.forEach((item, index) => {
         const itemTotals = calculateItemTotals(item, index);
@@ -913,8 +918,12 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
         totalProfit += itemTotals.profitAmount;
         totalDiscount += itemTotals.discountAmount;
         totalVAT += itemTotals.vatAmount;
-        grandTotal += itemTotals.sellingPrice;
+        itemsTotal += itemTotals.sellingPrice;
       });
+
+      // Add preliminary amount to grand total
+      const preliminaryAmount = editedBoq.preliminaries?.cost_details?.amount || 0;
+      const grandTotal = itemsTotal + preliminaryAmount;
 
       // Add is_revision flag and complete details to the payload
       const payload = {
@@ -1960,7 +1969,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                           let totalProfit = 0;
                           let totalDiscount = 0;
                           let totalVAT = 0;
-                          let grandTotal = 0;
+                          let itemsTotal = 0;
 
                           editedBoq.items.forEach((item, index) => {
                             const itemTotals = calculateItemTotals(item, index);
@@ -1972,8 +1981,12 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                             totalProfit += itemTotals.profitAmount;
                             totalDiscount += itemTotals.discountAmount;
                             totalVAT += itemTotals.vatAmount;
-                            grandTotal += itemTotals.sellingPrice;
+                            itemsTotal += itemTotals.sellingPrice;
                           });
+
+                          // Add preliminary amount to grand total
+                          const preliminaryAmount = editedBoq.preliminaries?.cost_details?.amount || 0;
+                          const grandTotal = itemsTotal + preliminaryAmount;
 
                           return (
                             <>

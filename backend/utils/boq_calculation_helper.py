@@ -4,20 +4,28 @@ Ensures all BOQ items have calculated values before PDF generation
 """
 
 
-def calculate_boq_values(items):
+def calculate_boq_values(items, boq_json=None):
     """
     Calculate all missing values for BOQ items
     This ensures selling prices, overhead amounts, etc. are populated
 
     Args:
         items: List of BOQ items (will be modified in place)
+        boq_json: Full BOQ JSON containing preliminaries and other data (optional)
 
     Returns:
-        tuple: (total_material_cost, total_labour_cost, grand_total)
+        tuple: (total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total)
     """
     total_material_cost = 0
     total_labour_cost = 0
-    grand_total = 0
+    items_subtotal = 0
+
+    # Extract preliminary amount from boq_json if available
+    preliminary_amount = 0
+    if boq_json:
+        preliminaries = boq_json.get('preliminaries', {})
+        cost_details = preliminaries.get('cost_details', {})
+        preliminary_amount = cost_details.get('amount', 0) or 0
 
     for item in items:
         # Set has_sub_items flag
@@ -73,7 +81,7 @@ def calculate_boq_values(items):
 
             total_material_cost += item_materials
             total_labour_cost += item_labour
-            grand_total += item.get('selling_price', 0)
+            items_subtotal += item.get('selling_price', 0)
 
         else:
             # Old format: single item
@@ -108,6 +116,9 @@ def calculate_boq_values(items):
 
             total_material_cost += item_materials
             total_labour_cost += item_labour
-            grand_total += item.get('selling_price', 0)
+            items_subtotal += item.get('selling_price', 0)
 
-    return total_material_cost, total_labour_cost, grand_total
+    # Calculate grand total including preliminary amount
+    grand_total = items_subtotal + preliminary_amount
+
+    return total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total

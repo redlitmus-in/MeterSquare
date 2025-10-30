@@ -9,7 +9,9 @@ import {
   PencilIcon,
   InformationCircleIcon,
   ChevronLeftIcon,
-  ChevronRightIcon
+  ChevronRightIcon,
+  ChevronDownIcon,
+  ChevronUpIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 
@@ -51,6 +53,9 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
   const [rejectionReason, setRejectionReason] = useState('');
   const [editReason, setEditReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [extensionHistory, setExtensionHistory] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Get current extension request from local state
   const extensionRequest = localRequests[currentIndex] || localRequests[0];
@@ -85,6 +90,44 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
     }
   }, [currentIndex, localRequests]);
 
+  // Fetch extension history when modal opens
+  React.useEffect(() => {
+    if (isOpen && extensionRequest?.boq_id) {
+      fetchExtensionHistory(extensionRequest.boq_id);
+    }
+  }, [isOpen, extensionRequest?.boq_id]);
+
+  const fetchExtensionHistory = async (boqId: number) => {
+    try {
+      setLoadingHistory(true);
+      const token = localStorage.getItem('access_token') || localStorage.getItem('token');
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
+
+      const response = await fetch(`${apiUrl}/boq/${boqId}/day-extension-history`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setExtensionHistory(data.requests || []);
+        // Auto-show history if there are completed requests (approved/rejected)
+        const hasCompletedRequests = data.requests?.some((r: any) => r.status === 'approved' || r.status === 'rejected');
+        if (hasCompletedRequests) {
+          setShowHistory(true);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching extension history:', error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
   // Reset action when navigating between requests
   const navigateRequest = (direction: 'prev' | 'next') => {
     setAction(null);
@@ -104,6 +147,20 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
       month: 'long',
       day: 'numeric'
     });
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'day_request_send_td':
+      case 'edited_by_td':
+        return <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded-full">Pending</span>;
+      case 'approved':
+        return <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" />Approved</span>;
+      case 'rejected':
+        return <span className="px-2 py-1 bg-red-100 text-red-800 text-xs font-medium rounded-full flex items-center gap-1"><XCircleIcon className="w-3 h-3" />Rejected</span>;
+      default:
+        return <span className="px-2 py-1 bg-gray-100 text-gray-800 text-xs font-medium rounded-full">{status}</span>;
+    }
   };
 
   const calculateNewEndDate = (days: number) => {
@@ -178,6 +235,8 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
       if (response.ok && data.success) {
         if (action === 'approve') {
           toast.success('Day extension request approved');
+          // Refresh history to show the newly approved request
+          await fetchExtensionHistory(extensionRequest.boq_id);
           onClose();
           if (onSuccess) {
             onSuccess('approved');
@@ -220,6 +279,8 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
           // Don't call onSuccess for edit - wait for approve/reject
         } else if (action === 'reject') {
           toast.success('Day extension request rejected');
+          // Refresh history to show the newly rejected request
+          await fetchExtensionHistory(extensionRequest.boq_id);
           onClose();
           if (onSuccess) {
             onSuccess('rejected');
@@ -320,6 +381,60 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
 
         {/* Content */}
         <div className="p-4 space-y-4 overflow-y-auto flex-1">
+          {/* History Section */}
+          {extensionHistory.length > 0 && (
+            <div className="bg-gray-50 rounded-lg border border-gray-200">
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-100 transition-colors rounded-lg"
+              >
+                <div className="flex items-center gap-2">
+                  <ClockIcon className="w-5 h-5 text-gray-600" />
+                  <span className="font-semibold text-gray-900">Request History ({extensionHistory.length})</span>
+                </div>
+                {showHistory ? <ChevronUpIcon className="w-5 h-5 text-gray-600" /> : <ChevronDownIcon className="w-5 h-5 text-gray-600" />}
+              </button>
+
+              {showHistory && (
+                <div className="px-4 pb-4 space-y-3 max-h-64 overflow-y-auto">
+                  {extensionHistory.map((request, index) => (
+                    <div key={index} className="bg-white rounded-lg border border-gray-200 p-3">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            {getStatusBadge(request.status)}
+                            <span className="text-xs text-gray-500">
+                              {formatDate(request.request_date)}
+                            </span>
+                          </div>
+                          <p className="text-sm font-medium text-gray-900">
+                            Requested: <span className="text-orange-600">{request.requested_days} day{request.requested_days > 1 ? 's' : ''}</span>
+                          </p>
+                          {request.approved_days && (
+                            <p className="text-sm font-medium text-green-600">
+                              Approved: {request.approved_days} day{request.approved_days > 1 ? 's' : ''}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-1">
+                        <span className="font-medium">Reason:</span> {request.reason}
+                      </p>
+                      {request.rejection_reason && (
+                        <p className="text-sm text-red-600">
+                          <span className="font-medium">Rejection Reason:</span> {request.rejection_reason}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-500 mt-1">
+                        Requested by: {request.requested_by}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Request Info */}
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
             <h3 className="text-xs font-bold text-gray-700 mb-2 flex items-center gap-1.5">

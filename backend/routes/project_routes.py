@@ -62,3 +62,8 @@ def approve_day_extension_route(boq_id):
 def reject_day_extension_route(boq_id):
     return reject_day_extension(boq_id)
 
+@project_routes.route('/boq/<int:boq_id>/day-extension-history', methods=['GET'])
+@jwt_required
+def get_day_extension_history_route(boq_id):
+    return get_day_extension_history(boq_id)
+

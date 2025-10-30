@@ -235,6 +235,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [costRate, setCostRate] = useState<number>(0);
   const [costAmount, setCostAmount] = useState<number>(0);
 
+  // Preliminary internal costing
+  const [preliminaryInternalCost, setPreliminaryInternalCost] = useState<number>(0);
+  const [preliminaryMiscPercentage, setPreliminaryMiscPercentage] = useState<number>(10);
+  const [preliminaryOverheadProfitPercentage, setPreliminaryOverheadProfitPercentage] = useState<number>(25);
+  const [preliminaryTransportPercentage, setPreliminaryTransportPercentage] = useState<number>(5);
+
   // Load projects and master items on mount
   useEffect(() => {
     if (isOpen) {
@@ -376,6 +382,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           setCostUnit(prelimsData.cost_details.unit || 'nos');
           setCostRate(prelimsData.cost_details.rate || 0);
           setCostAmount(prelimsData.cost_details.amount || 0);
+          // Load internal costing fields
+          setPreliminaryInternalCost(prelimsData.cost_details.internal_cost || 0);
+          setPreliminaryMiscPercentage(prelimsData.cost_details.misc_percentage || 10);
+          setPreliminaryOverheadProfitPercentage(prelimsData.cost_details.overhead_profit_percentage || 25);
+          setPreliminaryTransportPercentage(prelimsData.cost_details.transport_percentage || 5);
         }
 
         // Load preliminary notes if available
@@ -1320,7 +1331,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               quantity: costQuantity,
               unit: costUnit,
               rate: costRate,
-              amount: costAmount
+              amount: costAmount,
+              internal_cost: preliminaryInternalCost,
+              misc_percentage: preliminaryMiscPercentage,
+              overhead_profit_percentage: preliminaryOverheadProfitPercentage,
+              transport_percentage: preliminaryTransportPercentage,
+              misc_amount: (costAmount * preliminaryMiscPercentage) / 100,
+              overhead_profit_amount: (costAmount * preliminaryOverheadProfitPercentage) / 100,
+              transport_amount: (costAmount * preliminaryTransportPercentage) / 100,
+              planned_profit: (costAmount * preliminaryOverheadProfitPercentage) / 100,
+              actual_profit: costAmount - (preliminaryInternalCost + (costAmount * preliminaryMiscPercentage) / 100 + (costAmount * preliminaryOverheadProfitPercentage) / 100 + (costAmount * preliminaryTransportPercentage) / 100)
             },
             notes: preliminaryNotes
           },
@@ -1524,7 +1544,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               quantity: costQuantity,
               unit: costUnit,
               rate: costRate,
-              amount: costAmount
+              amount: costAmount,
+              internal_cost: preliminaryInternalCost,
+              misc_percentage: preliminaryMiscPercentage,
+              overhead_profit_percentage: preliminaryOverheadProfitPercentage,
+              transport_percentage: preliminaryTransportPercentage,
+              misc_amount: (costAmount * preliminaryMiscPercentage) / 100,
+              overhead_profit_amount: (costAmount * preliminaryOverheadProfitPercentage) / 100,
+              transport_amount: (costAmount * preliminaryTransportPercentage) / 100,
+              planned_profit: (costAmount * preliminaryOverheadProfitPercentage) / 100,
+              actual_profit: costAmount - (preliminaryInternalCost + (costAmount * preliminaryMiscPercentage) / 100 + (costAmount * preliminaryOverheadProfitPercentage) / 100 + (costAmount * preliminaryTransportPercentage) / 100)
             },
             notes: preliminaryNotes
           },
@@ -1664,7 +1693,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               quantity: costQuantity,
               unit: costUnit,
               rate: costRate,
-              amount: costAmount
+              amount: costAmount,
+              internal_cost: preliminaryInternalCost,
+              misc_percentage: preliminaryMiscPercentage,
+              overhead_profit_percentage: preliminaryOverheadProfitPercentage,
+              transport_percentage: preliminaryTransportPercentage,
+              misc_amount: (costAmount * preliminaryMiscPercentage) / 100,
+              overhead_profit_amount: (costAmount * preliminaryOverheadProfitPercentage) / 100,
+              transport_amount: (costAmount * preliminaryTransportPercentage) / 100,
+              planned_profit: (costAmount * preliminaryOverheadProfitPercentage) / 100,
+              actual_profit: costAmount - (preliminaryInternalCost + (costAmount * preliminaryMiscPercentage) / 100 + (costAmount * preliminaryOverheadProfitPercentage) / 100 + (costAmount * preliminaryTransportPercentage) / 100)
             },
             notes: preliminaryNotes
           },
@@ -1974,84 +2012,181 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                     Add Custom Item
                   </button>
 
-                  {/* Cost Details Section - Separate independent section */}
+                  {/* Cost Details Section - Expanded with Internal Costing */}
                   <div className="mb-6 p-4 bg-purple-50/50 rounded-lg border border-purple-200">
-                    <h4 className="text-sm font-semibold text-purple-900 mb-3">Cost Details</h4>
-                    <div className="grid grid-cols-4 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Quantity
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="Enter quantity"
-                          value={costQuantity}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                          min="0"
-                          step="0.01"
-                          disabled={isSubmitting}
-                          onChange={(e) => {
-                            const qty = parseFloat(e.target.value) || 0;
-                            setCostQuantity(qty);
-                            setCostAmount(qty * costRate);
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Unit
-                        </label>
-                        <select
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
-                          value={costUnit}
-                          disabled={isSubmitting}
-                          onChange={(e) => setCostUnit(e.target.value)}
-                        >
-                          <option value="nos">Nos</option>
-                          <option value="sqft">Sqft</option>
-                          <option value="sqm">Sqm</option>
-                          <option value="rft">Rft</option>
-                          <option value="rm">Rm</option>
-                          <option value="cum">Cum</option>
-                          <option value="kg">Kg</option>
-                          <option value="ltr">Ltr</option>
-                          <option value="bag">Bag</option>
-                          <option value="ton">Ton</option>
-                          <option value="ls">LS</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Rate
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="Enter rate"
-                          value={costRate}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                          min="0"
-                          step="0.01"
-                          disabled={isSubmitting}
-                          onChange={(e) => {
-                            const rate = parseFloat(e.target.value) || 0;
-                            setCostRate(rate);
-                            setCostAmount(costQuantity * rate);
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Amount
-                        </label>
-                        <input
-                          type="number"
-                          value={costAmount}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-gray-100"
-                          disabled
-                          readOnly
-                        />
+                    <h4 className="text-sm font-semibold text-purple-900 mb-3">Cost Details & Analysis</h4>
+
+                    {/* Client-Facing Details */}
+                    <div className="mb-4">
+                      <h5 className="text-xs font-medium text-gray-600 mb-2">Client Amount</h5>
+                      <div className="grid grid-cols-4 gap-4">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Quantity</label>
+                          <input
+                            type="number"
+                            placeholder="Enter quantity"
+                            value={costQuantity}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            min="0"
+                            step="0.01"
+                            disabled={isSubmitting}
+                            onChange={(e) => {
+                              const qty = parseFloat(e.target.value) || 0;
+                              setCostQuantity(qty);
+                              setCostAmount(qty * costRate);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Unit</label>
+                          <select
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                            value={costUnit}
+                            disabled={isSubmitting}
+                            onChange={(e) => setCostUnit(e.target.value)}
+                          >
+                            <option value="nos">Nos</option>
+                            <option value="sqft">Sqft</option>
+                            <option value="sqm">Sqm</option>
+                            <option value="rft">Rft</option>
+                            <option value="rm">Rm</option>
+                            <option value="cum">Cum</option>
+                            <option value="kg">Kg</option>
+                            <option value="ltr">Ltr</option>
+                            <option value="bag">Bag</option>
+                            <option value="ton">Ton</option>
+                            <option value="ls">LS</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Rate</label>
+                          <input
+                            type="number"
+                            placeholder="Enter rate"
+                            value={costRate}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            min="0"
+                            step="0.01"
+                            disabled={isSubmitting}
+                            onChange={(e) => {
+                              const rate = parseFloat(e.target.value) || 0;
+                              setCostRate(rate);
+                              setCostAmount(costQuantity * rate);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Client Amount</label>
+                          <input
+                            type="number"
+                            value={costAmount}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-gray-100 font-semibold"
+                            disabled
+                            readOnly
+                          />
+                        </div>
                       </div>
                     </div>
+
+                    {/* Internal Cost & Percentages */}
+                    <div className="mb-4 pt-4 border-t border-purple-200">
+                      <h5 className="text-xs font-medium text-gray-600 mb-2">Internal Cost Breakdown</h5>
+                      <div className="grid grid-cols-2 gap-4 mb-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Internal Cost</label>
+                          <input
+                            type="number"
+                            placeholder="Enter internal cost"
+                            value={preliminaryInternalCost}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            min="0"
+                            step="0.01"
+                            disabled={isSubmitting}
+                            onChange={(e) => setPreliminaryInternalCost(parseFloat(e.target.value) || 0)}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Misc %</label>
+                          <input
+                            type="number"
+                            value={preliminaryMiscPercentage}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            disabled={isSubmitting}
+                            onChange={(e) => setPreliminaryMiscPercentage(parseFloat(e.target.value) || 0)}
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            Amount: AED {((costAmount * preliminaryMiscPercentage) / 100).toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">O&P %</label>
+                          <input
+                            type="number"
+                            value={preliminaryOverheadProfitPercentage}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            disabled={isSubmitting}
+                            onChange={(e) => setPreliminaryOverheadProfitPercentage(parseFloat(e.target.value) || 0)}
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            Amount: AED {((costAmount * preliminaryOverheadProfitPercentage) / 100).toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Transport %</label>
+                          <input
+                            type="number"
+                            value={preliminaryTransportPercentage}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            disabled={isSubmitting}
+                            onChange={(e) => setPreliminaryTransportPercentage(parseFloat(e.target.value) || 0)}
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            Amount: AED {((costAmount * preliminaryTransportPercentage) / 100).toFixed(2)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Profit Analysis */}
+                    {(() => {
+                      const miscAmount = (costAmount * preliminaryMiscPercentage) / 100;
+                      const opAmount = (costAmount * preliminaryOverheadProfitPercentage) / 100;
+                      const transportAmount = (costAmount * preliminaryTransportPercentage) / 100;
+                      const plannedProfit = opAmount;
+                      const totalInternalCost = preliminaryInternalCost + miscAmount + opAmount + transportAmount;
+                      const actualProfit = costAmount - totalInternalCost;
+
+                      return (
+                        <div className="pt-4 border-t border-purple-200">
+                          <h5 className="text-xs font-medium text-gray-600 mb-2">Profit Analysis</h5>
+                          <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div className="bg-blue-50 p-3 rounded-lg">
+                              <p className="text-xs text-gray-600">Planned Profit</p>
+                              <p className="text-lg font-bold text-blue-600">
+                                AED {plannedProfit.toFixed(2)}
+                              </p>
+                            </div>
+                            <div className={`p-3 rounded-lg ${actualProfit >= plannedProfit ? 'bg-green-50' : 'bg-red-50'}`}>
+                              <p className="text-xs text-gray-600">Actual Profit</p>
+                              <p className={`text-lg font-bold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-red-600'}`}>
+                                AED {actualProfit.toFixed(2)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Notes Section */}
@@ -3160,7 +3295,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
             {/* Grand Total Summary with Overall Discount */}
             {items.length > 0 && (() => {
-              const subtotal = items.reduce((total, item) => {
+              const itemsSubtotal = items.reduce((total, item) => {
                 const costs = calculateItemCost(item);
                 return total + costs.totalClientCost;
               }, 0);
@@ -3170,22 +3305,145 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 return total + costs.totalInternalCost;
               }, 0);
 
-              const totalActualProfit = subtotal - totalInternalCost;
-              const profitMarginPercentage = subtotal > 0 ? (totalActualProfit / subtotal) * 100 : 0;
+              // Add preliminary amount to subtotal
+              const preliminaryAmount = costAmount || 0;
+              const combinedSubtotal = itemsSubtotal + preliminaryAmount;
+
+              const totalActualProfit = itemsSubtotal - totalInternalCost;
+              const profitMarginPercentage = itemsSubtotal > 0 ? (totalActualProfit / itemsSubtotal) * 100 : 0;
 
               // Calculate suggested discount: Keep at least 15% profit margin
               const minProfitMargin = 15; // 15% minimum recommended profit
               const maxSafeDiscount = Math.max(0, profitMarginPercentage - minProfitMargin);
               const suggestedDiscount = Math.min(maxSafeDiscount, 10); // Cap at 10% max
 
-              const discountAmount = subtotal * (overallDiscount / 100);
-              const grandTotal = subtotal - discountAmount;
+              // Calculate preliminaries profit analysis FIRST (before using in combined calculations)
+              const preliminaryMiscAmount = (costAmount * preliminaryMiscPercentage) / 100;
+              const preliminaryOPAmount = (costAmount * preliminaryOverheadProfitPercentage) / 100;
+              const preliminaryTransportAmount = (costAmount * preliminaryTransportPercentage) / 100;
+              const preliminaryPlannedProfit = preliminaryOPAmount;
+              const preliminaryTotalInternalCost = preliminaryInternalCost + preliminaryMiscAmount + preliminaryOPAmount + preliminaryTransportAmount;
+              const preliminaryActualProfit = costAmount - preliminaryTotalInternalCost;
 
-              // Calculate profit after discount
-              const actualProfitAfterDiscount = grandTotal - totalInternalCost;
+              // Combined totals (calculate before using in discount calculations)
+              const combinedInternalCost = totalInternalCost + preliminaryTotalInternalCost;
+              const combinedPlannedProfit = items.reduce((sum, item) => {
+                const costs = calculateItemCost(item);
+                return sum + costs.totalPlannedProfit;
+              }, 0) + preliminaryPlannedProfit;
+              const combinedActualProfit = totalActualProfit + preliminaryActualProfit;
+
+              // Apply discount to combined subtotal (items + preliminary)
+              const discountAmount = combinedSubtotal * (overallDiscount / 100);
+              const grandTotal = combinedSubtotal - discountAmount;
+
+              // Calculate profit after discount (using combined internal cost including preliminaries)
+              const actualProfitAfterDiscount = grandTotal - combinedInternalCost;
               const profitMarginAfterDiscount = grandTotal > 0 ? (actualProfitAfterDiscount / grandTotal) * 100 : 0;
 
               return (
+                <>
+                  {/* Cost Analysis Summary - BOQ Items + Preliminaries */}
+                  {(items.length > 0 || costAmount > 0) && (
+                    <div className="mt-6 bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl p-6 border-2 border-amber-300 shadow-xl">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="p-3 bg-gradient-to-br from-amber-100 to-amber-200 rounded-xl shadow-md">
+                          <Calculator className="w-6 h-6 text-amber-600" />
+                        </div>
+                        <h3 className="text-xl font-bold text-amber-900">Cost Analysis Summary</h3>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* BOQ Items Analysis */}
+                        {items.length > 0 && (
+                          <div className="bg-white rounded-xl p-4 border border-amber-200">
+                            <h4 className="text-sm font-bold text-gray-800 mb-3 pb-2 border-b">BOQ Items</h4>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Client Cost:</span>
+                                <span className="font-semibold text-blue-700">{itemsSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Internal Cost:</span>
+                                <span className="font-semibold text-red-600">{totalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                              </div>
+                              <div className="flex justify-between pt-2 border-t">
+                                <span className="text-gray-600">Planned Profit:</span>
+                                <span className="font-semibold text-indigo-600">
+                                  {items.reduce((sum, item) => {
+                                    const costs = calculateItemCost(item);
+                                    return sum + costs.totalPlannedProfit;
+                                  }, 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Actual Profit:</span>
+                                <span className={`font-semibold ${totalActualProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                  {totalActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Preliminaries Analysis */}
+                        {costAmount > 0 && (
+                          <div className="bg-white rounded-xl p-4 border border-purple-200">
+                            <h4 className="text-sm font-bold text-gray-800 mb-3 pb-2 border-b">Preliminaries & Approvals</h4>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Client Amount:</span>
+                                <span className="font-semibold text-blue-700">{costAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Internal Cost:</span>
+                                <span className="font-semibold text-red-600">{preliminaryTotalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                              </div>
+                              <div className="flex justify-between pt-2 border-t">
+                                <span className="text-gray-600">Planned Profit:</span>
+                                <span className="font-semibold text-indigo-600">{preliminaryPlannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Actual Profit:</span>
+                                <span className={`font-semibold ${preliminaryActualProfit >= preliminaryPlannedProfit ? 'text-green-600' : 'text-red-600'}`}>
+                                  {preliminaryActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Combined Totals */}
+                      {items.length > 0 && costAmount > 0 && (
+                        <div className="mt-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-4 border-2 border-green-300">
+                          <h4 className="text-sm font-bold text-green-900 mb-3">Combined Totals (BOQ + Preliminaries)</h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div className="text-center">
+                              <p className="text-xs text-gray-600 mb-1">Total Client</p>
+                              <p className="text-lg font-bold text-blue-700">{combinedSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-xs text-gray-600 mb-1">Total Internal</p>
+                              <p className="text-lg font-bold text-red-600">{combinedInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-xs text-gray-600 mb-1">Planned Profit</p>
+                              <p className="text-lg font-bold text-indigo-600">{combinedPlannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-xs text-gray-600 mb-1">Actual Profit</p>
+                              <p className={`text-lg font-bold ${combinedActualProfit >= combinedPlannedProfit ? 'text-green-600' : 'text-red-600'}`}>
+                                {combinedActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Total Project Value */}
                 <div className="mt-6 bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-6 border-2 border-green-300 shadow-xl">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-xl shadow-md">
@@ -3196,11 +3454,31 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
                   <div className="bg-white rounded-xl p-4 space-y-3">
                     <div className="flex justify-between items-center">
-                      <span className="text-gray-700 font-medium">Client Cost (Before Discount):</span>
-                      <span className="text-xl font-semibold text-gray-900">
-                        AED {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      <span className="text-gray-700 font-medium">Items Subtotal:</span>
+                      <span className="text-lg font-semibold text-gray-900">
+                        AED {itemsSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
+
+                    {/* Preliminary Amount */}
+                    {preliminaryAmount > 0 && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-700 font-medium">Preliminary Amount:</span>
+                        <span className="text-lg font-semibold text-gray-900">
+                          AED {preliminaryAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Combined Subtotal */}
+                    {preliminaryAmount > 0 && (
+                      <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                        <span className="text-gray-800 font-semibold">Combined Subtotal:</span>
+                        <span className="text-xl font-bold text-gray-900">
+                          AED {combinedSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
 
                     {/* Overall Discount Input with Suggestion */}
                     <div className="py-2 border-t border-gray-200">
@@ -3269,7 +3547,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             <span className="text-gray-600">Client Cost:</span>
                             <div className="flex items-center gap-2">
                               <span className="text-gray-500 line-through">
-                                {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                {combinedSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
                               </span>
                               <span className="text-blue-700 font-bold">
                                 → {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
@@ -3279,14 +3557,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           <div className="flex justify-between items-center">
                             <span className="text-gray-600">Internal Cost:</span>
                             <span className="font-semibold text-red-600">
-                              {totalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                              {combinedInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
                             </span>
                           </div>
                           <div className="flex justify-between items-center pt-2 border-t border-gray-300">
                             <span className="text-gray-700 font-medium">Actual Profit:</span>
                             <div className="flex items-center gap-2">
                               <span className="text-gray-500 line-through">
-                                {totalActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                {combinedActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
                               </span>
                               <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
                                 → {actualProfitAfterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
@@ -3317,6 +3595,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                     )}
                   </div>
                 </div>
+                </>
               );
             })()}
           </div>

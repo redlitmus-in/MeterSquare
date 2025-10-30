@@ -1053,6 +1053,89 @@ def reject_day_extension(boq_id):
         log.error(f"Error rejecting day extension: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+def get_day_extension_history(boq_id):
+    """Get all day extension requests history for a BOQ (for PM to view)"""
+    try:
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({"error": "User not authenticated"}), 401
+
+        user_role = current_user.get('role_name', 'user').lower()
+
+        # Only PM and TD can view history
+        if user_role not in ['projectmanager', 'project_manager', 'technicaldirector', 'technical_director']:
+            return jsonify({"error": "Access denied"}), 403
+
+        # Get the BOQ
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Get associated project
+        project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Get all BOQ history entries with day extension actions
+        history_entries = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).all()
+
+        # Group actions by timestamp to combine request + approval/rejection
+        request_groups = {}
+        for hist in history_entries:
+            if hist.action and isinstance(hist.action, list):
+                for action in hist.action:
+                    action_type = action.get('type', '').lower()
+                    if action_type in ['day_extension_requested', 'day_extension_approved', 'day_extension_rejected', 'day_extension_edited']:
+                        request_date = action.get('timestamp') or hist.action_date.isoformat() if hist.action_date else None
+
+                        # Use timestamp as key to group related actions
+                        if request_date not in request_groups:
+                            request_groups[request_date] = {
+                                "request_date": request_date,
+                                "requested_by": action.get('sender') or hist.action_by,
+                                "requested_days": action.get('requested_additional_days') or action.get('requested_days') or 0,
+                                "approved_days": None,
+                                "new_duration": action.get('new_duration_days') or action.get('new_duration'),
+                                "reason": action.get('reason') or hist.comments or 'No reason provided',
+                                "rejection_reason": None,
+                                "status": action.get('status') or 'unknown',
+                                "type": action_type,
+                                "original_end_date": action.get('original_end_date'),
+                                "new_end_date": action.get('new_end_date')
+                            }
+                        else:
+                            # Update with approval/rejection data
+                            if action_type == 'day_extension_approved':
+                                request_groups[request_date]['approved_days'] = action.get('approved_days')
+                                request_groups[request_date]['status'] = action.get('status') or 'approved'
+                            elif action_type == 'day_extension_rejected':
+                                request_groups[request_date]['rejection_reason'] = action.get('rejection_reason')
+                                request_groups[request_date]['status'] = action.get('status') or 'rejected'
+
+        extension_requests = list(request_groups.values())
+
+        # Count pending requests (only those awaiting TD action)
+        pending_count = sum(1 for req in extension_requests if req['status'] in ['day_request_send_td', 'edited_by_td'])
+
+        return jsonify({
+            "success": True,
+            "count": len(extension_requests),
+            "pending_count": pending_count,
+            "has_pending": pending_count > 0,
+            "requests": extension_requests,
+            "project_info": {
+                "project_id": project.project_id,
+                "project_name": project.project_name,
+                "current_duration": project.duration_days,
+                "start_date": project.start_date.isoformat() if project.start_date else None,
+                "end_date": project.end_date.isoformat() if project.end_date else None
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error getting day extension history for BOQ {boq_id}: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 def get_pending_day_extensions(boq_id):
     try:
         current_user = getattr(g, 'user', None)

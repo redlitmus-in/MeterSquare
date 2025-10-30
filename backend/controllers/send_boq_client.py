@@ -62,7 +62,7 @@ def send_boq_to_client():
             items = boq_json.get('items', [])
 
         # Calculate all values (this populates selling_price, overhead_amount, etc.)
-        total_material_cost, total_labour_cost, grand_total = calculate_boq_values(items)
+        total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
         # Calculate CLIENT VERSION - Selling price (includes overhead/profit distributed)
         client_total_value = grand_total  # Client sees same total as internal, just distributed differently
@@ -402,8 +402,8 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     ws[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
     row += 2
 
-    # Calculate subtotal from sub-items (qty × rate) - same as PDF
-    subtotal_before_discount = 0
+    # Calculate items subtotal from sub-items (qty × rate) - same as PDF
+    items_subtotal = 0
     for item in items:
         has_sub_items = item.get('has_sub_items', False)
         sub_items = item.get('sub_items', [])
@@ -412,9 +412,19 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
             for sub_item in sub_items:
                 qty = sub_item.get('quantity', 0)
                 rate = sub_item.get('rate', 0)
-                subtotal_before_discount += qty * rate
+                items_subtotal += qty * rate
         else:
-            subtotal_before_discount += item.get('selling_price', 0)
+            items_subtotal += item.get('selling_price', 0)
+
+    # Extract preliminary amount from boq_json
+    preliminary_amount = 0
+    if boq_json:
+        preliminaries_data = boq_json.get('preliminaries', {})
+        cost_details = preliminaries_data.get('cost_details', {})
+        preliminary_amount = cost_details.get('amount', 0) or 0
+
+    # Calculate combined subtotal (items + preliminary)
+    combined_subtotal = items_subtotal + preliminary_amount
 
     # Get discount from BOQ JSON (same as PDF fix)
     discount_amount = 0
@@ -429,25 +439,48 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
         first_item = items[0]
         discount_percentage = first_item.get('discount_percentage', 0)
 
-    # Calculate discount from subtotal if percentage exists
+    # Calculate discount from combined subtotal (items + preliminary) if percentage exists
     if discount_percentage > 0 and discount_amount == 0:
-        discount_amount = subtotal_before_discount * (discount_percentage / 100)
+        discount_amount = combined_subtotal * (discount_percentage / 100)
 
     total_discount = discount_amount
-    subtotal_after_discount = subtotal_before_discount - total_discount
+    subtotal_after_discount = combined_subtotal - total_discount
     total_vat = 0  # VAT not used
     grand_total_with_vat = subtotal_after_discount + total_vat
 
-    # Subtotal
+    # Items Subtotal
     ws.merge_cells(f'A{row}:E{row}')
-    ws[f'A{row}'] = "Subtotal:"
+    ws[f'A{row}'] = "Items Subtotal:"
     ws[f'A{row}'].font = bold_font
     ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
-    ws[f'F{row}'] = round(subtotal_before_discount, 2)
+    ws[f'F{row}'] = round(items_subtotal, 2)
     ws[f'F{row}'].font = bold_font
     ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
     ws[f'F{row}'].number_format = '#,##0.00'
     row += 1
+
+    # Preliminary Amount (if exists)
+    if preliminary_amount > 0:
+        ws.merge_cells(f'A{row}:E{row}')
+        ws[f'A{row}'] = "Preliminary Amount:"
+        ws[f'A{row}'].font = bold_font
+        ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
+        ws[f'F{row}'] = round(preliminary_amount, 2)
+        ws[f'F{row}'].font = bold_font
+        ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
+        ws[f'F{row}'].number_format = '#,##0.00'
+        row += 1
+
+        # Combined Subtotal
+        ws.merge_cells(f'A{row}:E{row}')
+        ws[f'A{row}'] = "Combined Subtotal:"
+        ws[f'A{row}'].font = Font(bold=True, size=11)
+        ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
+        ws[f'F{row}'] = round(combined_subtotal, 2)
+        ws[f'F{row}'].font = Font(bold=True, size=11)
+        ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
+        ws[f'F{row}'].number_format = '#,##0.00'
+        row += 1
 
     # Discount (only if exists)
     if discount_amount > 0:

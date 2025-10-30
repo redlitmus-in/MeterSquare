@@ -397,7 +397,7 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
     row += 2
 
     # Calculate totals (same as PDF)
-    client_amount_total = 0
+    items_client_amount = 0
     total_misc = 0
     total_overhead = 0
     total_transport = 0
@@ -408,7 +408,7 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
                 qty = sub_item.get('quantity', 0)
                 rate = sub_item.get('rate', 0)
                 sub_client = qty * rate
-                client_amount_total += sub_client
+                items_client_amount += sub_client
 
                 # Get percentages
                 misc_pct = sub_item.get('misc_percentage', item.get('miscellaneous_percentage', item.get('overhead_percentage', 10)))
@@ -419,6 +419,16 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
                 total_misc += sub_client * (misc_pct / 100)
                 total_overhead += sub_client * (overhead_pct / 100)
                 total_transport += sub_client * (transport_pct / 100)
+
+    # Extract preliminary amount from boq_json
+    preliminary_amount = 0
+    if boq_json:
+        preliminaries_data = boq_json.get('preliminaries', {})
+        cost_details = preliminaries_data.get('cost_details', {})
+        preliminary_amount = cost_details.get('amount', 0) or 0
+
+    # Calculate combined client amount (items + preliminary)
+    combined_client_amount = items_client_amount + preliminary_amount
 
     # Get discount from BOQ JSON (same as PDF)
     discount_amount = 0
@@ -433,23 +443,28 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
         first_item = items[0]
         discount_percentage = first_item.get('discount_percentage', 0)
 
-    # Calculate discount from client amount if percentage exists
+    # Calculate discount from combined client amount (items + preliminary) if percentage exists
     if discount_percentage > 0 and discount_amount == 0:
-        discount_amount = client_amount_total * (discount_percentage / 100)
+        discount_amount = combined_client_amount * (discount_percentage / 100)
 
     # Client amount after discount
-    client_amount_after_discount = client_amount_total - discount_amount
+    client_amount_after_discount = combined_client_amount - discount_amount
 
     # Internal cost = Materials + Labour + Misc + O&P + Transport
     internal_cost_total = total_material_cost + total_labour_cost + total_misc + total_overhead + total_transport
 
-    # Actual profit = client - internal
-    actual_profit_total = client_amount_total - internal_cost_total
+    # Actual profit = combined client amount - internal
+    actual_profit_total = combined_client_amount - internal_cost_total
 
     # Summary data
     summary_items = [
-        ("Client Amount (Excluding VAT):", client_amount_total, bold_font),
+        ("Items Client Amount:", items_client_amount, bold_font),
     ]
+
+    # Add preliminary amount if it exists
+    if preliminary_amount > 0:
+        summary_items.append(("Preliminary Amount:", preliminary_amount, bold_font))
+        summary_items.append(("Combined Client Amount (Excluding VAT):", combined_client_amount, Font(bold=True, size=11)))
 
     # Add discount if exists
     if discount_amount > 0:
@@ -483,7 +498,7 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
 
     summary_items.extend([
         ("", 0, normal_font),  # Blank row
-        ("Project Margin:", (actual_profit_total / client_amount_total * 100) if client_amount_total > 0 else 0, Font(bold=True, size=11)),
+        ("Project Margin:", (actual_profit_total / combined_client_amount * 100) if combined_client_amount > 0 else 0, Font(bold=True, size=11)),
     ])
 
     for label, value, font_style in summary_items:

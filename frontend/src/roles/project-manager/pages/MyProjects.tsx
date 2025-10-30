@@ -93,6 +93,11 @@ interface Project {
   newPurchaseItems?: BOQItem[];
   boq_ids?: number[];
   completion_requested?: boolean;
+  duration_days?: number;
+  // Day extension status
+  hasPendingDayExtension?: boolean;
+  pendingDayExtensionCount?: number;
+  hasApprovedExtension?: boolean;
 }
 
 interface SiteEngineer {
@@ -157,6 +162,7 @@ const MyProjects: React.FC = () => {
           area: boq.project_details?.working_hours,
           start_date: boq.project_details?.start_date,
           end_date: boq.project_details?.end_date,
+          duration_days: boq.project_details?.duration_days,
           status: boq.project_details?.project_status || 'active',
           description: boq.project_details?.description,
           site_supervisor_id: siteSupervisorId,
@@ -168,7 +174,11 @@ const MyProjects: React.FC = () => {
           boq_status: boq.boq_status,
           boq_details: undefined,
           created_at: boq.created_at,
-          priority: boq.priority || 'medium'
+          priority: boq.priority || 'medium',
+          // Day extension status
+          hasPendingDayExtension: boq.has_pending_day_extension || false,
+          pendingDayExtensionCount: boq.pending_day_extension_count || 0,
+          hasApprovedExtension: boq.has_approved_extension || false
         };
       });
 
@@ -791,8 +801,55 @@ const MyProjects: React.FC = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
-                className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200"
+                className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200 relative"
               >
+                {/* Floating Day Extension Request Indicator - Show only in 'assigned' tab */}
+                {filterStatus === 'assigned' && project.site_supervisor_id && (() => {
+                  const hasRequests = project.hasPendingDayExtension;
+                  const requestCount = project.pendingDayExtensionCount || 0;
+
+                  return (
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ delay: 0.3, type: 'spring', stiffness: 200 }}
+                      className="absolute -top-2 -right-2 z-10"
+                    >
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedProject(project);
+                            setShowDayExtensionModal(true);
+                          }}
+                          className={`rounded-full p-2 shadow-sm hover:shadow-md transition-all cursor-pointer group hover:scale-105 ${
+                            hasRequests
+                              ? 'bg-blue-500 text-white animate-pulse'
+                              : 'bg-gray-100 text-gray-500'
+                          }`}
+                          title={hasRequests ? `${requestCount} pending day extension request${requestCount > 1 ? 's' : ''}` : 'No pending day extension requests'}
+                        >
+                          <ClockIcon className="w-5 h-5" />
+                        </button>
+                        {hasRequests && (
+                          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-300 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                          </span>
+                        )}
+                        {/* Tooltip on hover */}
+                        <div className="absolute top-full right-0 mt-2 bg-gray-900 text-white text-xs rounded-lg py-2 px-3 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-[100]">
+                          {hasRequests
+                            ? `${requestCount} Day Extension Request${requestCount > 1 ? 's' : ''}`
+                            : 'No Pending Requests'
+                          }
+                          <div className="absolute -top-1 right-3 w-2 h-2 bg-gray-900 transform rotate-45"></div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })()}
+
                 <div className="p-6">
                   {/* Project Header */}
                   <div className="flex items-start justify-between mb-4">
@@ -953,7 +1010,12 @@ const MyProjects: React.FC = () => {
                       </p>
                     </div>
                     <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                      <p className="text-xs text-orange-700 mb-1">End Date</p>
+                      <p className="text-xs text-orange-700 mb-1 flex items-center gap-1">
+                        End Date
+                        {project.hasApprovedExtension && (
+                          <span className="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-semibold rounded-full">Extended</span>
+                        )}
+                      </p>
                       <p className="text-lg font-bold text-orange-900">
                         {project.end_date ? new Date(project.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A'}
                       </p>

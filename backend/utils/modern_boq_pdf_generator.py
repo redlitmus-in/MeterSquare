@@ -673,8 +673,8 @@ class ModernBOQPDFGenerator:
         elements = []
         elements.append(Spacer(1, 10))
 
-        # Calculate subtotal from all sub-items (sum of qty × rate)
-        subtotal = 0
+        # Calculate items subtotal from all sub-items (sum of qty × rate)
+        items_subtotal = 0
         for item in items:
             has_sub_items = item.get('has_sub_items', False)
             sub_items = item.get('sub_items', [])
@@ -683,9 +683,19 @@ class ModernBOQPDFGenerator:
                 for sub_item in sub_items:
                     qty = sub_item.get('quantity', 0)
                     rate = sub_item.get('rate', 0)
-                    subtotal += qty * rate
+                    items_subtotal += qty * rate
             else:
-                subtotal += item.get('selling_price', 0)
+                items_subtotal += item.get('selling_price', 0)
+
+        # Extract preliminary amount from boq_json
+        preliminary_amount = 0
+        if boq_json:
+            preliminaries = boq_json.get('preliminaries', {})
+            cost_details = preliminaries.get('cost_details', {})
+            preliminary_amount = cost_details.get('amount', 0) or 0
+
+        # Calculate combined subtotal (items + preliminary)
+        combined_subtotal = items_subtotal + preliminary_amount
 
         # Get discount from BOQ JSON or items
         discount_amount = 0
@@ -701,17 +711,22 @@ class ModernBOQPDFGenerator:
             first_item = items[0]
             discount_percentage = first_item.get('discount_percentage', 0)
 
-        # Calculate discount from subtotal if percentage exists
+        # Calculate discount from combined subtotal (items + preliminary) if percentage exists
         if discount_percentage > 0 and discount_amount == 0:
-            discount_amount = subtotal * (discount_percentage / 100)
+            discount_amount = combined_subtotal * (discount_percentage / 100)
 
-        after_discount = subtotal - discount_amount
+        after_discount = combined_subtotal - discount_amount
         vat_amount = 0  # Usually 0 for UAE internal projects
         grand_total_calc = after_discount + vat_amount
 
         summary_data = [
-            ['Subtotal:', f'{subtotal:,.2f} AED']
+            ['Items Subtotal:', f'{items_subtotal:,.2f} AED']
         ]
+
+        # Add preliminary amount row if it exists
+        if preliminary_amount > 0:
+            summary_data.append(['Preliminary Amount:', f'{preliminary_amount:,.2f} AED'])
+            summary_data.append(['Combined Subtotal:', f'{combined_subtotal:,.2f} AED'])
 
         # Add discount row if discount exists
         if discount_amount > 0:
@@ -736,9 +751,12 @@ class ModernBOQPDFGenerator:
             ('LINEABOVE', (0,grand_total_row_idx), (-1,grand_total_row_idx), 1, colors.black),
         ]
 
-        # Add red color for discount row only if discount exists
-        if discount_amount > 0:
-            table_styles.append(('TEXTCOLOR', (0,1), (-1,1), colors.HexColor('#dc2626')))
+        # Add red color for discount row if discount exists
+        # Find discount row index dynamically
+        for idx, row in enumerate(summary_data):
+            if 'Discount' in row[0]:
+                table_styles.append(('TEXTCOLOR', (0,idx), (-1,idx), colors.HexColor('#dc2626')))
+                break
 
         summary_table.setStyle(TableStyle(table_styles))
         elements.append(summary_table)
@@ -751,7 +769,7 @@ class ModernBOQPDFGenerator:
         elements.append(Spacer(1, 10))
 
         # Calculate from sub-items with correct percentages
-        client_amount = 0
+        items_client_amount = 0
         total_misc = 0
         total_overhead = 0
         total_transport = 0
@@ -762,7 +780,7 @@ class ModernBOQPDFGenerator:
                     qty = sub_item.get('quantity', 0)
                     rate = sub_item.get('rate', 0)
                     sub_client = qty * rate
-                    client_amount += sub_client
+                    items_client_amount += sub_client
 
                     # Calculate base cost from materials and labour
                     materials_cost = sum([m.get('total_price', 0) for m in sub_item.get('materials', [])])
@@ -779,6 +797,16 @@ class ModernBOQPDFGenerator:
                     total_overhead += sub_client * (overhead_pct / 100)
                     total_transport += sub_client * (transport_pct / 100)
 
+        # Extract preliminary amount from boq_json
+        preliminary_amount = 0
+        if boq_json:
+            preliminaries = boq_json.get('preliminaries', {})
+            cost_details = preliminaries.get('cost_details', {})
+            preliminary_amount = cost_details.get('amount', 0) or 0
+
+        # Calculate combined client amount (items + preliminary)
+        combined_client_amount = items_client_amount + preliminary_amount
+
         # Get discount from BOQ JSON (same as client PDF)
         discount_amount = 0
         discount_percentage = 0
@@ -792,22 +820,27 @@ class ModernBOQPDFGenerator:
             first_item = items[0]
             discount_percentage = first_item.get('discount_percentage', 0)
 
-        # Calculate discount from client amount if percentage exists
+        # Calculate discount from combined client amount (items + preliminary) if percentage exists
         if discount_percentage > 0 and discount_amount == 0:
-            discount_amount = client_amount * (discount_percentage / 100)
+            discount_amount = combined_client_amount * (discount_percentage / 100)
 
         # Internal cost = Materials + Labour + Misc + O&P + Transport (as per BOQDetailsModal line 757)
         internal_cost = total_material_cost + total_labour_cost + total_misc + total_overhead + total_transport
 
-        # Actual profit = client - internal (as per BOQDetailsModal line 758)
-        actual_profit = client_amount - internal_cost
+        # Actual profit = combined client amount - internal (as per BOQDetailsModal line 758)
+        actual_profit = combined_client_amount - internal_cost
 
         # Client amount after discount
-        client_amount_after_discount = client_amount - discount_amount
+        client_amount_after_discount = combined_client_amount - discount_amount
 
         summary_data = [
-            ['Client Amount (Excluding VAT):', f'{client_amount:,.2f} AED'],
+            ['Items Client Amount:', f'{items_client_amount:,.2f} AED'],
         ]
+
+        # Add preliminary amount row if it exists
+        if preliminary_amount > 0:
+            summary_data.append(['Preliminary Amount:', f'{preliminary_amount:,.2f} AED'])
+            summary_data.append(['Combined Client Amount (Excluding VAT):', f'{combined_client_amount:,.2f} AED'])
 
         # Add discount if exists
         if discount_amount > 0:
@@ -843,7 +876,7 @@ class ModernBOQPDFGenerator:
 
         summary_data.append(['', ''])
         summary_data.append([Paragraph('<b>Project Margin:</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold')),
-                            Paragraph(f'<b>{((actual_profit / client_amount * 100) if client_amount > 0 else 0):.2f}%</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold'))])
+                            Paragraph(f'<b>{((actual_profit / combined_client_amount * 100) if combined_client_amount > 0 else 0):.2f}%</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold'))])
 
         summary_table = Table(summary_data, colWidths=[5*inch, 1.5*inch])
         profit_color = colors.HexColor('#00AA00') if actual_profit >= total_overhead else colors.HexColor('#CC0000')

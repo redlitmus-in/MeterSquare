@@ -1432,8 +1432,8 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                               {(() => {
                                 const allItems = boqData.existing_purchase?.items || boqData.items || [];
 
-                                // Calculate subtotal (sum of all sub-item client amounts)
-                                const subtotal = allItems.reduce((sum, item) => {
+                                // Calculate items subtotal (sum of all sub-item client amounts)
+                                const itemsSubtotal = allItems.reduce((sum, item) => {
                                   if (item.sub_items && item.sub_items.length > 0) {
                                     return sum + item.sub_items.reduce((siSum: number, si: any) =>
                                       siSum + ((si.quantity || 0) * (si.rate || 0)), 0
@@ -1441,6 +1441,12 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                   }
                                   return sum + (item.client_cost || 0);
                                 }, 0);
+
+                                // Extract preliminary amount from BOQ data
+                                const preliminaryAmount = boqData.preliminaries?.cost_details?.amount || 0;
+
+                                // Calculate combined subtotal (items + preliminary)
+                                const subtotal = itemsSubtotal + preliminaryAmount;
 
                                 // Calculate total internal cost
                                 const totalInternalCost = allItems.reduce((sum, item) => {
@@ -1487,9 +1493,24 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 return (
                                   <>
                                     <div className="flex justify-between text-base font-medium">
-                                      <span className="text-gray-800">Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
-                                      <span className="font-semibold">{formatCurrency(subtotal)}</span>
+                                      <span className="text-gray-800">Items Subtotal:</span>
+                                      <span className="font-semibold">{formatCurrency(itemsSubtotal)}</span>
                                     </div>
+
+                                    {/* Show preliminary amount if it exists */}
+                                    {preliminaryAmount > 0 && (
+                                      <>
+                                        <div className="flex justify-between text-base font-medium">
+                                          <span className="text-gray-800">Preliminary Amount:</span>
+                                          <span className="font-semibold">{formatCurrency(preliminaryAmount)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-base font-bold pt-2 border-t border-green-200">
+                                          <span className="text-gray-900">Combined Subtotal:</span>
+                                          <span className="text-gray-900">{formatCurrency(subtotal)}</span>
+                                        </div>
+                                      </>
+                                    )}
+
                                     {overallDiscount > 0 && (
                                       <>
                                         <div className="flex justify-between text-sm text-red-600">

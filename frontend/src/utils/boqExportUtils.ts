@@ -147,15 +147,19 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
     totalVat = estimation.totalVatAmount;
   }
 
-  const subtotal = baseCost + totalOverhead + totalProfit;
-  const afterDiscount = subtotal - totalDiscount;
+  // Extract preliminary amount from estimation
+  const preliminaryAmount = estimation.preliminaries?.cost_details?.amount || 0;
+
+  const itemsSubtotal = baseCost + totalOverhead + totalProfit;
+  const combinedSubtotal = itemsSubtotal + preliminaryAmount;
+  const afterDiscount = combinedSubtotal - totalDiscount;
   const afterVat = afterDiscount + totalVat;
   const grandTotal = afterVat;
 
   // Calculate average percentages for display
   const avgOverheadPct = baseCost > 0 ? (totalOverhead / baseCost) * 100 : 0;
   const avgProfitPct = baseCost > 0 ? (totalProfit / baseCost) * 100 : 0;
-  const avgDiscountPct = subtotal > 0 ? (totalDiscount / subtotal) * 100 : 0;
+  const avgDiscountPct = combinedSubtotal > 0 ? (totalDiscount / combinedSubtotal) * 100 : 0;
 
   // ============================================
   // SINGLE SHEET WITH EVERYTHING
@@ -347,6 +351,14 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
   allData.push(['Base Cost (Material + Labor):', formatCurrency(baseCost)]);
   allData.push([`Overhead (${avgOverheadPct.toFixed(0)}%):`, formatCurrency(totalOverhead)]);
   allData.push([`Profit Margin (${avgProfitPct.toFixed(0)}%):`, formatCurrency(totalProfit)]);
+  allData.push(['Items Subtotal:', formatCurrency(itemsSubtotal)]);
+
+  // Add preliminary amount if it exists
+  if (preliminaryAmount > 0) {
+    allData.push(['Preliminary Amount:', formatCurrency(preliminaryAmount)]);
+    allData.push(['Combined Subtotal:', formatCurrency(combinedSubtotal)]);
+  }
+
   allData.push([`Discount (${avgDiscountPct.toFixed(0)}%):`, totalDiscount > 0 ? `-${formatCurrency(totalDiscount)}` : formatCurrency(0)]);
   allData.push(['Subtotal (After Discount):', formatCurrency(afterDiscount)]);
 
@@ -518,16 +530,24 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
   });
 
   // Cost Summary at END - CLIENT VERSION
-  const subtotalBeforeDiscount = (estimation.boqItems || []).reduce((sum, item) => sum + item.estimatedSellingPrice, 0);
-  const avgDiscountPct = subtotalBeforeDiscount > 0 ? (totalDiscount / subtotalBeforeDiscount) * 100 : 0;
+  const itemsSubtotalClient = (estimation.boqItems || []).reduce((sum, item) => sum + item.estimatedSellingPrice, 0);
+  const preliminaryAmountClient = estimation.preliminaries?.cost_details?.amount || 0;
+  const combinedSubtotalClient = itemsSubtotalClient + preliminaryAmountClient;
+  const avgDiscountPctClient = combinedSubtotalClient > 0 ? (totalDiscount / combinedSubtotalClient) * 100 : 0;
 
   allData.push([]);
   allData.push(['COST SUMMARY']);
   allData.push([]);
-  allData.push(['Subtotal:', formatCurrency(subtotalBeforeDiscount)]);
+  allData.push(['Items Subtotal:', formatCurrency(itemsSubtotalClient)]);
+
+  // Add preliminary amount if it exists
+  if (preliminaryAmountClient > 0) {
+    allData.push(['Preliminary Amount:', formatCurrency(preliminaryAmountClient)]);
+    allData.push(['Combined Subtotal:', formatCurrency(combinedSubtotalClient)]);
+  }
 
   if (totalDiscount > 0) {
-    allData.push([`Discount (${avgDiscountPct.toFixed(0)}%):`, `-${formatCurrency(totalDiscount)}`]);
+    allData.push([`Discount (${avgDiscountPctClient.toFixed(0)}%):`, `-${formatCurrency(totalDiscount)}`]);
     allData.push(['After Discount:', formatCurrency(afterDiscount)]);
   }
 
@@ -627,15 +647,19 @@ const exportBOQToPDFInternalOld = async (estimation: BOQEstimation) => {
     totalVat = estimation.totalVatAmount;
   }
 
-  const subtotal = baseCost + totalOverhead + totalProfit;
-  const afterDiscount = subtotal - totalDiscount;
+  // Extract preliminary amount from estimation
+  const preliminaryAmount = estimation.preliminaries?.cost_details?.amount || 0;
+
+  const itemsSubtotal = baseCost + totalOverhead + totalProfit;
+  const combinedSubtotal = itemsSubtotal + preliminaryAmount;
+  const afterDiscount = combinedSubtotal - totalDiscount;
   const afterVat = afterDiscount + totalVat;
   const grandTotal = afterVat;
 
   // Calculate average percentages for display
   const avgOverheadPct = baseCost > 0 ? (totalOverhead / baseCost) * 100 : 0;
   const avgProfitPct = baseCost > 0 ? (totalProfit / baseCost) * 100 : 0;
-  const avgDiscountPct = subtotal > 0 ? (totalDiscount / subtotal) * 100 : 0;
+  const avgDiscountPct = combinedSubtotal > 0 ? (totalDiscount / combinedSubtotal) * 100 : 0;
 
   // Add company logo
   try {
