@@ -2676,17 +2676,6 @@ const MyProjects: React.FC = () => {
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    setShowApproveModal(false);
-                    setShowRejectModal(true);
-                  }}
-                  disabled={processingBOQ}
-                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-lg font-medium transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <XMarkIcon className="w-5 h-5" />
-                  Reject
-                </button>
-                <button
                   onClick={async () => {
                     try {
                       setProcessingBOQ(true);
