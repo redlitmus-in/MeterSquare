@@ -897,20 +897,21 @@ def approve_change_request(cr_id):
 
                 misc_percentage = (new_materials_cost / miscellaneous_amount * 100) if miscellaneous_amount > 0 else 100
 
+                log.info(f"PM approval routing calculation: NEW materials cost={new_materials_cost}, miscellaneous_amount={miscellaneous_amount}, percentage={misc_percentage:.2f}%")
+
                 if misc_percentage > 40:
                     # NEW materials cost >40% of miscellaneous - Route to TD
                     next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
                     next_approver = 'Technical Director'
-                    change_request.approval_required_from = next_role
-                    change_request.current_approver_role = next_role
-                    log.info(f"PM approved CR {cr_id} with NEW materials cost AED{new_materials_cost} >40% of miscellaneous ({misc_percentage:.2f}%), routing to TD")
+                    log.info(f"PM approved CR {cr_id}: NEW materials {misc_percentage:.2f}% > 40% → Routing to TD")
                 else:
                     # NEW materials cost ≤40% of miscellaneous - Route to Estimator
                     next_role = CR_CONFIG.ROLE_ESTIMATOR
                     next_approver = 'Estimator'
-                    change_request.approval_required_from = next_role
-                    change_request.current_approver_role = next_role
-                    log.info(f"PM approved CR {cr_id} with NEW materials cost AED{new_materials_cost} ≤40% of miscellaneous ({misc_percentage:.2f}%), routing to Estimator")
+                    log.info(f"PM approved CR {cr_id}: NEW materials {misc_percentage:.2f}% ≤ 40% → Routing to Estimator")
+
+                change_request.approval_required_from = next_role
+                change_request.current_approver_role = next_role
             else:
                 # EXISTING MATERIALS: Always route to Estimator (no threshold check)
                 next_role = CR_CONFIG.ROLE_ESTIMATOR
