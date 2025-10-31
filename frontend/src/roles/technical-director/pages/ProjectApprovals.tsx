@@ -3509,7 +3509,7 @@ const ProjectApprovals: React.FC = () => {
                               totalPlannedProfit += opAmt;
                               totalMiscCost += miscAmt;
                               totalTransportCost += transportAmt;
-                              // CORRECTED: Actual Profit = Client Amount - Internal Cost Total
+                              // CORRECTED: Negotiable Margins = Client Amount - Internal Cost Total
                               totalActualProfit += (clientAmt - internalCost);
                             });
                           }
@@ -3534,9 +3534,9 @@ const ProjectApprovals: React.FC = () => {
                         const grandTotalAfterDiscount = totalClientAmount - totalDiscount;
 
                         // Calculate profit after discount
-                        const actualProfitAfterDiscount = grandTotalAfterDiscount - totalInternalCost;
+                        const negotiableMarginAfterDiscount = grandTotalAfterDiscount - totalInternalCost;
                         const profitMarginPercentage = totalClientAmount > 0 ? (totalActualProfit / totalClientAmount) * 100 : 0;
-                        const profitMarginAfterDiscount = grandTotalAfterDiscount > 0 ? (actualProfitAfterDiscount / grandTotalAfterDiscount) * 100 : 0;
+                        const profitMarginAfterDiscount = grandTotalAfterDiscount > 0 ? (negotiableMarginAfterDiscount / grandTotalAfterDiscount) * 100 : 0;
 
                         return (
                           <>
@@ -3595,7 +3595,7 @@ const ProjectApprovals: React.FC = () => {
                                   <span className="font-semibold text-blue-600">{formatCurrency(totalPlannedProfit)}</span>
                                 </div>
                                 <div className="flex justify-between">
-                                  <span className="text-gray-700">Actual Profit:</span>
+                                  <span className="text-gray-700">Negotiable Margins:</span>
                                   <span className={`font-bold ${totalActualProfit >= totalPlannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
                                     {formatCurrency(totalActualProfit)}
                                   </span>
@@ -3658,13 +3658,13 @@ const ProjectApprovals: React.FC = () => {
                                         </span>
                                       </div>
                                       <div className="flex justify-between items-center pt-2 border-t border-gray-300">
-                                        <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                        <span className="text-gray-700 font-medium">Negotiable Margins:</span>
                                         <div className="flex items-center gap-2">
                                           <span className="text-gray-500 line-through">
                                             {formatCurrency(totalActualProfit)}
                                           </span>
-                                          <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                                            → {formatCurrency(actualProfitAfterDiscount)}
+                                          <span className={`font-bold ${negotiableMarginAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                                            → {formatCurrency(negotiableMarginAfterDiscount)}
                                           </span>
                                         </div>
                                       </div>

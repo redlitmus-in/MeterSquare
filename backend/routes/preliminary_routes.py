@@ -19,3 +19,15 @@ def create_preliminary_route():
 def get_latest_preliminary_route():
     return get_latest_preliminary()
 
+# Update preliminary by project_id
+@preliminary_routes.route('/preliminary/<int:project_id>', methods=['PUT'])
+@jwt_required
+def update_preliminary_route(project_id):
+    return update_preliminary(project_id)
+
+# Delete preliminary by project_id (soft delete)
+@preliminary_routes.route('/preliminary/<int:project_id>', methods=['DELETE'])
+@jwt_required
+def delete_preliminary_route(project_id):
+    return delete_preliminary(project_id)
+

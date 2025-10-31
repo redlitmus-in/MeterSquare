@@ -80,7 +80,8 @@ class MasterSubItem(db.Model):
     labour_cost = db.Column(db.Float, default=0.0)
     internal_cost = db.Column(db.Float, default=0.0)
     planned_profit = db.Column(db.Float, default=0.0)
-    actual_profit = db.Column(db.Float, default=0.0)
+    # Map database column 'actual_profit' to Python property 'negotiable_margin'
+    negotiable_margin = db.Column('actual_profit', db.Float, default=0.0)
 
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

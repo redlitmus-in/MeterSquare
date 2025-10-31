@@ -1079,40 +1079,46 @@ def get_day_extension_history(boq_id):
         # Get all BOQ history entries with day extension actions
         history_entries = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).all()
 
-        # Group actions by timestamp to combine request + approval/rejection
-        request_groups = {}
+        # Process each history entry to consolidate request + approval/rejection
+        extension_requests = []
         for hist in history_entries:
             if hist.action and isinstance(hist.action, list):
+                # Collect all day extension actions from this history entry
+                request_action = None
+                approval_action = None
+                rejection_action = None
+                edit_action = None
+
                 for action in hist.action:
                     action_type = action.get('type', '').lower()
-                    if action_type in ['day_extension_requested', 'day_extension_approved', 'day_extension_rejected', 'day_extension_edited']:
-                        request_date = action.get('timestamp') or hist.action_date.isoformat() if hist.action_date else None
+                    if action_type == 'day_extension_requested':
+                        request_action = action
+                    elif action_type == 'day_extension_approved':
+                        approval_action = action
+                    elif action_type == 'day_extension_rejected':
+                        rejection_action = action
+                    elif action_type == 'day_extension_edited':
+                        edit_action = action
 
-                        # Use timestamp as key to group related actions
-                        if request_date not in request_groups:
-                            request_groups[request_date] = {
-                                "request_date": request_date,
-                                "requested_by": action.get('sender') or hist.action_by,
-                                "requested_days": action.get('requested_additional_days') or action.get('requested_days') or 0,
-                                "approved_days": None,
-                                "new_duration": action.get('new_duration_days') or action.get('new_duration'),
-                                "reason": action.get('reason') or hist.comments or 'No reason provided',
-                                "rejection_reason": None,
-                                "status": action.get('status') or 'unknown',
-                                "type": action_type,
-                                "original_end_date": action.get('original_end_date'),
-                                "new_end_date": action.get('new_end_date')
-                            }
-                        else:
-                            # Update with approval/rejection data
-                            if action_type == 'day_extension_approved':
-                                request_groups[request_date]['approved_days'] = action.get('approved_days')
-                                request_groups[request_date]['status'] = action.get('status') or 'approved'
-                            elif action_type == 'day_extension_rejected':
-                                request_groups[request_date]['rejection_reason'] = action.get('rejection_reason')
-                                request_groups[request_date]['status'] = action.get('status') or 'rejected'
+                # Build consolidated request entry
+                if request_action or approval_action or rejection_action:
+                    # Start with request data (or fallback to approval/rejection data)
+                    base_action = request_action or approval_action or rejection_action
 
-        extension_requests = list(request_groups.values())
+                    consolidated_entry = {
+                        "request_date": base_action.get('timestamp') or hist.action_date.isoformat() if hist.action_date else None,
+                        "requested_by": (request_action.get('sender') if request_action else base_action.get('sender')) or hist.action_by,
+                        "requested_days": (request_action.get('requested_additional_days') or request_action.get('requested_days') if request_action else 0) or (approval_action.get('original_request_days') if approval_action else 0),
+                        "approved_days": approval_action.get('approved_days') if approval_action else None,
+                        "new_duration": base_action.get('new_duration_days') or base_action.get('new_duration'),
+                        "reason": (request_action.get('reason') if request_action else base_action.get('reason')) or hist.comments or 'No reason provided',
+                        "rejection_reason": rejection_action.get('rejection_reason') if rejection_action else None,
+                        "status": (approval_action.get('status') or 'approved') if approval_action else ((rejection_action.get('status') or 'rejected') if rejection_action else (request_action.get('status') if request_action else 'unknown')),
+                        "original_end_date": base_action.get('original_end_date'),
+                        "new_end_date": base_action.get('new_end_date')
+                    }
+
+                    extension_requests.append(consolidated_entry)
 
         # Count pending requests (only those awaiting TD action)
         pending_count = sum(1 for req in extension_requests if req['status'] in ['day_request_send_td', 'edited_by_td'])

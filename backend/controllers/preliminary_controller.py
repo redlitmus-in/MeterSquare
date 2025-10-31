@@ -6,6 +6,7 @@ from models.preliminary import Preliminary
 from config.db import db
 from datetime import datetime
 import logging
+from utils.boq_calculation_helper import calculate_preliminary_cost_analysis
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +56,18 @@ def create_preliminary():
                 is_deleted=False
             ).first()
 
-        # Prepare description data with all items (including selected=false)
+        # Calculate cost analysis for preliminaries
+        cost_details = {
+            'quantity': data.get('quantity', 1),
+            'unit': data.get('unit', 'Nos'),
+            'rate': data.get('rate', 0),
+            'misc_percentage': data.get('misc_percentage', 10.0),
+            'overhead_profit_percentage': data.get('overhead_profit_percentage', 25.0),
+            'transport_percentage': data.get('transport_percentage', 5.0)
+        }
+        cost_analysis = calculate_preliminary_cost_analysis(cost_details)
+
+        # Prepare description data with all items (including selected=false) and cost analysis
         description_data = {
             "items": [
                 {
@@ -64,7 +76,8 @@ def create_preliminary():
                     "selected": item.get("selected", False)
                 }
                 for idx, item in enumerate(items)
-            ]
+            ],
+            "cost_analysis": cost_analysis
         }
 
         # UPDATE existing preliminary
@@ -165,6 +178,9 @@ def get_latest_preliminary():
             return jsonify({"message": "No preliminary records found"}), 404
 
         # Format response
+        description = latest_prelim.description
+        cost_analysis = description.get('cost_analysis') if isinstance(description, dict) else None
+
         prelim_data = {
             "preliminary_id": latest_prelim.preliminary_id,
             "description": latest_prelim.description,
@@ -176,7 +192,8 @@ def get_latest_preliminary():
             "created_at": latest_prelim.created_at.isoformat() if latest_prelim.created_at else None,
             "created_by": latest_prelim.created_by,
             "last_modified_at": latest_prelim.last_modified_at.isoformat() if latest_prelim.last_modified_at else None,
-            "last_modified_by": latest_prelim.last_modified_by
+            "last_modified_by": latest_prelim.last_modified_by,
+            "cost_analysis": cost_analysis
         }
 
         return jsonify({"preliminary": prelim_data}), 200
@@ -184,3 +201,90 @@ def get_latest_preliminary():
     except Exception as e:
         log.error(f"Error fetching latest preliminary: {str(e)}")
         return jsonify({"error": f"Failed to fetch latest preliminary: {str(e)}"}), 500
+
+
+def update_preliminary(project_id):
+    """
+    Update preliminary for a project
+    """
+    try:
+        data = request.get_json()
+
+        # Get current user
+        current_user = getattr(g, 'user', None)
+        user_name = current_user.get('full_name') if current_user else 'system'
+
+        # Find existing preliminary
+        preliminary = Preliminary.query.filter_by(
+            project_id=project_id,
+            is_deleted=False
+        ).first()
+
+        if not preliminary:
+            return jsonify({"error": "Preliminary not found"}), 404
+
+        # Update fields
+        if 'preliminaries' in data:
+            preliminary.description = data['preliminaries']
+
+        if 'cost_details' in data.get('preliminaries', {}):
+            cost_details = data['preliminaries']['cost_details']
+            preliminary.quantity = cost_details.get('quantity', preliminary.quantity)
+            preliminary.unit = cost_details.get('unit', preliminary.unit)
+            preliminary.rate = cost_details.get('rate', preliminary.rate)
+            preliminary.amount = cost_details.get('amount', preliminary.amount)
+
+        preliminary.last_modified_by = user_name
+        preliminary.last_modified_at = datetime.utcnow()
+
+        db.session.commit()
+
+        log.info(f"Updated preliminary {preliminary.preliminary_id} for project {project_id}")
+
+        return jsonify({
+            "message": "Preliminary updated successfully",
+            "preliminary_id": preliminary.preliminary_id
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error updating preliminary: {str(e)}")
+        return jsonify({"error": f"Failed to update preliminary: {str(e)}"}), 500
+
+
+def delete_preliminary(project_id):
+    """
+    Soft delete preliminary for a project
+    """
+    try:
+        # Get current user
+        current_user = getattr(g, 'user', None)
+        user_name = current_user.get('full_name') if current_user else 'system'
+
+        # Find existing preliminary
+        preliminary = Preliminary.query.filter_by(
+            project_id=project_id,
+            is_deleted=False
+        ).first()
+
+        if not preliminary:
+            return jsonify({"error": "Preliminary not found"}), 404
+
+        # Soft delete
+        preliminary.is_deleted = True
+        preliminary.last_modified_by = user_name
+        preliminary.last_modified_at = datetime.utcnow()
+
+        db.session.commit()
+
+        log.info(f"Soft deleted preliminary {preliminary.preliminary_id} for project {project_id}")
+
+        return jsonify({
+            "message": "Preliminary deleted successfully",
+            "preliminary_id": preliminary.preliminary_id
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error deleting preliminary: {str(e)}")
+        return jsonify({"error": f"Failed to delete preliminary: {str(e)}"}), 500

@@ -86,7 +86,10 @@ class ModernBOQPDFGenerator:
         # Header
         elements.extend(self._internal_header(project))
 
-        # Items with full breakdown
+        # Preliminaries (shown FIRST, before items)
+        elements.extend(self._preliminaries_section(boq_json))
+
+        # Items with full breakdown (shown AFTER preliminaries)
         elements.extend(self._internal_items_table(items, boq_json))
 
         # Cost summary
@@ -364,6 +367,101 @@ class ModernBOQPDFGenerator:
         elements.append(main_table)
         return elements
 
+    def _preliminaries_section(self, boq_json):
+        """Show preliminaries at top of PDF (before items)"""
+        elements = []
+
+        if not boq_json:
+            return elements
+
+        preliminaries = boq_json.get('preliminaries', {})
+        items = preliminaries.get('items', [])
+
+        if not items or len(items) == 0:
+            return elements
+
+        elements.append(Spacer(1, 10))
+
+        # Section Header
+        header_style = ParagraphStyle(
+            'PrelimHeader',
+            parent=self.styles['Heading2'],
+            fontSize=12,
+            textColor=colors.HexColor('#D97706'),  # Amber color
+            spaceAfter=10,
+            fontName='Helvetica-Bold'
+        )
+        elements.append(Paragraph('📋 Preliminaries & Approval Works', header_style))
+
+        # Items list
+        item_style = ParagraphStyle(
+            'PrelimItem',
+            parent=self.styles['Normal'],
+            fontSize=9,
+            leftIndent=15,
+            spaceBefore=2,
+            spaceAfter=2
+        )
+
+        for idx, item in enumerate(items, 1):
+            desc = item.get('description', 'N/A')
+            item_text = f'{idx}. {desc}'
+            if item.get('isCustom'):
+                item_text += ' <font color="#D97706"><i>(Custom)</i></font>'
+            elements.append(Paragraph(item_text, item_style))
+
+        # Cost Summary
+        cost_details = preliminaries.get('cost_details', {})
+        if cost_details and (cost_details.get('quantity') or cost_details.get('amount')):
+            elements.append(Spacer(1, 8))
+
+            cost_data = [
+                [Paragraph('<b>Cost Summary</b>', self.styles['Normal']), '', '', ''],
+                ['Quantity:', str(cost_details.get('quantity', 1)),
+                 'Unit:', cost_details.get('unit', 'Nos')],
+                ['Rate:', f"{cost_details.get('rate', 0):,.2f} AED",
+                 'Total Amount:', f"<b>{cost_details.get('amount', 0):,.2f} AED</b>"]
+            ]
+
+            cost_table = Table(cost_data, colWidths=[1.2*inch, 1.3*inch, 1.2*inch, 1.8*inch])
+            cost_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FEF3C7')),  # Amber background
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+                ('ALIGN', (3, 0), (3, -1), 'RIGHT'),
+                ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#D97706')),
+                ('INNERGRID', (0, 1), (-1, -1), 0.5, colors.HexColor('#FCD34D')),
+            ]))
+            elements.append(cost_table)
+
+        # Notes
+        notes = preliminaries.get('notes', '')
+        if notes:
+            elements.append(Spacer(1, 5))
+            notes_style = ParagraphStyle(
+                'Notes',
+                parent=self.styles['Normal'],
+                fontSize=8,
+                textColor=colors.HexColor('#78350F'),
+                italic=True
+            )
+            elements.append(Paragraph(f'<b>Notes:</b> {notes}', notes_style))
+
+        elements.append(Spacer(1, 15))
+
+        # Separator line
+        separator = Table([['']], colWidths=[6.5*inch])
+        separator.setStyle(TableStyle([
+            ('LINEBELOW', (0, 0), (-1, -1), 2, colors.HexColor('#D97706')),
+        ]))
+        elements.append(separator)
+        elements.append(Spacer(1, 10))
+
+        return elements
+
     def _internal_items_table(self, items, boq_json):
         """Detailed internal items with cost breakdown"""
         elements = []
@@ -614,16 +712,16 @@ class ModernBOQPDFGenerator:
                                  ParagraphStyle('ProfitVal', parent=self.styles['Normal'], fontSize=7))
                     ])
 
-                    # Actual Profit row (as per BOQDetailsModal line 758)
+                    # Negotiable Margins row (as per BOQDetailsModal line 758)
                     # actualProfit = clientAmount - internalCost
-                    actual_profit = client_amount - internal_cost
-                    profit_color = '#00AA00' if actual_profit >= overhead_amt else '#CC0000'
+                    negotiable_margin = client_amount - internal_cost
+                    profit_color = '#00AA00' if negotiable_margin >= overhead_amt else '#CC0000'
                     table_data.append([
                         '',
-                        Paragraph('<i>Actual Profit:</i>',
+                        Paragraph('<i>Negotiable Margins:</i>',
                                  ParagraphStyle('ActualProfit', parent=self.styles['Normal'], fontSize=7, textColor=colors.HexColor(profit_color))),
                         '', '', '',
-                        Paragraph(f'<font color="{profit_color}">{actual_profit:,.2f}</font>',
+                        Paragraph(f'<font color="{profit_color}">{negotiable_margin:,.2f}</font>',
                                  ParagraphStyle('ActualProfitVal', parent=self.styles['Normal'], fontSize=7))
                     ])
 
@@ -828,10 +926,113 @@ class ModernBOQPDFGenerator:
         internal_cost = total_material_cost + total_labour_cost + total_misc + total_overhead + total_transport
 
         # Actual profit = combined client amount - internal (as per BOQDetailsModal line 758)
-        actual_profit = combined_client_amount - internal_cost
+        negotiable_margin = combined_client_amount - internal_cost
 
         # Client amount after discount
         client_amount_after_discount = combined_client_amount - discount_amount
+
+        # ========== COST ANALYSIS SUMMARY SECTION ==========
+        # Calculate BOQ Items costs
+        boq_items_client_cost = items_client_amount
+        boq_items_internal_cost = total_material_cost + total_labour_cost + total_misc + total_overhead + total_transport
+        boq_items_planned_profit = total_overhead  # Planned profit = O&P
+        boq_items_negotiable_margin = boq_items_client_cost - boq_items_internal_cost
+
+        # Calculate Preliminaries costs
+        prelim_client_amount = preliminary_amount
+        prelim_internal_cost = 0
+        prelim_planned_profit = 0
+        prelim_negotiable_margin = 0
+
+        if preliminary_amount > 0 and boq_json:
+            preliminaries = boq_json.get('preliminaries', {})
+            # Try to get cost_analysis from description
+            description = preliminaries.get('description', {}) if isinstance(preliminaries.get('description'), dict) else {}
+            cost_analysis = description.get('cost_analysis', {})
+
+            if cost_analysis:
+                prelim_internal_cost = cost_analysis.get('internal_cost', 0)
+                prelim_planned_profit = cost_analysis.get('planned_profit', 0)
+                prelim_negotiable_margin = cost_analysis.get('negotiable_margin', 0)
+            else:
+                # Fallback calculation if cost_analysis not available
+                cost_details = preliminaries.get('cost_details', {})
+                misc_pct = cost_details.get('misc_percentage', 10.0)
+                overhead_pct = cost_details.get('overhead_profit_percentage', 25.0)
+                transport_pct = cost_details.get('transport_percentage', 5.0)
+
+                prelim_misc = prelim_client_amount * (misc_pct / 100)
+                prelim_overhead = prelim_client_amount * (overhead_pct / 100)
+                prelim_transport = prelim_client_amount * (transport_pct / 100)
+
+                prelim_internal_cost = prelim_misc + prelim_overhead + prelim_transport
+                prelim_planned_profit = prelim_overhead
+                prelim_negotiable_margin = prelim_client_amount - prelim_internal_cost
+
+        # Combined totals
+        combined_client_cost = boq_items_client_cost + prelim_client_amount
+        combined_internal_cost = boq_items_internal_cost + prelim_internal_cost
+        combined_planned_profit = boq_items_planned_profit + prelim_planned_profit
+        combined_negotiable_margin = boq_items_negotiable_margin + prelim_negotiable_margin
+
+        # Create Cost Analysis Summary Table
+        cost_analysis_header = Paragraph(
+            '<b>Cost Analysis Summary</b>',
+            ParagraphStyle('Header', parent=self.styles['Normal'], fontSize=11, fontName='Helvetica-Bold', textColor=colors.HexColor('#8B5A00'))
+        )
+        elements.append(cost_analysis_header)
+        elements.append(Spacer(1, 8))
+
+        cost_analysis_data = [
+            # Header row
+            [Paragraph('<b></b>', self.styles['Normal']),
+             Paragraph('<b>Client Cost</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=9, fontName='Helvetica-Bold', textColor=colors.HexColor('#0066CC'))),
+             Paragraph('<b>Internal Cost</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=9, fontName='Helvetica-Bold', textColor=colors.HexColor('#CC0000'))),
+             Paragraph('<b>Planned Profit</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=9, fontName='Helvetica-Bold', textColor=colors.HexColor('#0066CC'))),
+             Paragraph('<b>Negotiable Margins</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=9, fontName='Helvetica-Bold', textColor=colors.HexColor('#00AA00')))],
+
+            # BOQ Items row
+            [Paragraph('<b>BOQ Items</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=9, fontName='Helvetica-Bold')),
+             f'{boq_items_client_cost:,.2f}',
+             f'{boq_items_internal_cost:,.2f}',
+             f'{boq_items_planned_profit:,.2f}',
+             f'{boq_items_negotiable_margin:,.2f}'],
+        ]
+
+        # Add Preliminaries row if exists
+        if preliminary_amount > 0:
+            cost_analysis_data.append([
+                Paragraph('<b>Preliminaries & Approvals</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=9, fontName='Helvetica-Bold')),
+                f'{prelim_client_amount:,.2f}',
+                f'{prelim_internal_cost:,.2f}',
+                f'{prelim_planned_profit:,.2f}',
+                f'{prelim_negotiable_margin:,.2f}'
+            ])
+
+        # Combined Totals row
+        cost_analysis_data.append([
+            Paragraph('<b>Combined Totals (BOQ + Preliminaries)</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=10, fontName='Helvetica-Bold', textColor=colors.HexColor('#000000'))),
+            Paragraph(f'<b>{combined_client_cost:,.2f}</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=10, fontName='Helvetica-Bold', textColor=colors.HexColor('#0066CC'))),
+            Paragraph(f'<b>{combined_internal_cost:,.2f}</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=10, fontName='Helvetica-Bold', textColor=colors.HexColor('#CC0000'))),
+            Paragraph(f'<b>{combined_planned_profit:,.2f}</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=10, fontName='Helvetica-Bold', textColor=colors.HexColor('#0066CC'))),
+            Paragraph(f'<b>{combined_negotiable_margin:,.2f}</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=10, fontName='Helvetica-Bold', textColor=colors.HexColor('#00AA00')))
+        ])
+
+        cost_analysis_table = Table(cost_analysis_data, colWidths=[2.2*inch, 1.1*inch, 1.1*inch, 1.1*inch, 1.3*inch])
+        cost_analysis_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFF9E6')),  # Header background
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E6F2FF')),  # Combined totals background
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#8B5A00')),
+        ]))
+        elements.append(cost_analysis_table)
+        elements.append(Spacer(1, 15))
+        # ========== END COST ANALYSIS SUMMARY SECTION ==========
 
         summary_data = [
             ['Items Client Amount:', f'{items_client_amount:,.2f} AED'],
@@ -866,23 +1067,23 @@ class ModernBOQPDFGenerator:
             ['', ''],
             [Paragraph('<b>Profit Analysis:</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold')), ''],
             ['Planned Profit:', f'{total_overhead:,.2f} AED'],
-            ['Actual Profit (Before Discount):', f'{actual_profit:,.2f} AED'],
+            ['Negotiable Margins (Before Discount):', f'{negotiable_margin:,.2f} AED'],
         ])
 
         # Add actual profit after discount if discount exists
         if discount_amount > 0:
-            actual_profit_after_discount = client_amount_after_discount - internal_cost
-            summary_data.append(['Actual Profit (After Discount):', f'{actual_profit_after_discount:,.2f} AED'])
+            negotiable_margin_after_discount = client_amount_after_discount - internal_cost
+            summary_data.append(['Negotiable Margins (After Discount):', f'{negotiable_margin_after_discount:,.2f} AED'])
 
         summary_data.append(['', ''])
         summary_data.append([Paragraph('<b>Project Margin:</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold')),
-                            Paragraph(f'<b>{((actual_profit / combined_client_amount * 100) if combined_client_amount > 0 else 0):.2f}%</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold'))])
+                            Paragraph(f'<b>{((negotiable_margin / combined_client_amount * 100) if combined_client_amount > 0 else 0):.2f}%</b>', ParagraphStyle('Bold', parent=self.styles['Normal'], fontSize=8, fontName='Helvetica-Bold'))])
 
         summary_table = Table(summary_data, colWidths=[5*inch, 1.5*inch])
-        profit_color = colors.HexColor('#00AA00') if actual_profit >= total_overhead else colors.HexColor('#CC0000')
+        profit_color = colors.HexColor('#00AA00') if negotiable_margin >= total_overhead else colors.HexColor('#CC0000')
 
         # Find actual profit row index (last row)
-        actual_profit_row = len(summary_data) - 1
+        negotiable_margin_row = len(summary_data) - 1
 
         summary_table.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
@@ -890,7 +1091,7 @@ class ModernBOQPDFGenerator:
             ('FONTSIZE', (0,0), (-1,-1), 8),
             ('TOPPADDING', (0,0), (-1,-1), 2),
             ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-            ('TEXTCOLOR', (1,actual_profit_row), (1,actual_profit_row), profit_color),
+            ('TEXTCOLOR', (1,negotiable_margin_row), (1,negotiable_margin_row), profit_color),
         ]))
         elements.append(summary_table)
 

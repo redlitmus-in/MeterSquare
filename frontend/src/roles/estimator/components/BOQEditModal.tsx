@@ -96,6 +96,10 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
   const [activeTab, setActiveTab] = useState<'items' | 'summary'>('items');
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
 
+  // Preliminaries state
+  const [preliminaries, setPreliminaries] = useState<any>(null);
+  const [preliminariesExpanded, setPreliminariesExpanded] = useState(true);
+
   // VAT mode state - tracks which items use per-material VAT
   const [useMaterialVAT, setUseMaterialVAT] = useState<Record<number, boolean>>({});
 
@@ -273,6 +277,11 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       const response = await estimatorService.getBOQById(boq.boq_id);
       if (response.success && response.data) {
         setOriginalBoq(response.data);
+
+        // Load preliminaries from database (already included in response)
+        if (response.data.preliminaries) {
+          setPreliminaries(response.data.preliminaries);
+        }
 
         // Get items from correct location (existing_purchase.items OR items)
         const items = (response.data.existing_purchase?.items || response.data.items) || [];
@@ -474,6 +483,36 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
     setEditedBoq({
       ...editedBoq,
       items: updatedItems
+    });
+  };
+
+  // Preliminary handlers
+  const handlePreliminaryCostChange = (field: string, value: any) => {
+    if (!preliminaries) return;
+
+    const updatedCostDetails = {
+      ...preliminaries.cost_details,
+      [field]: value
+    };
+
+    // Recalculate amount if quantity or rate changed
+    if (field === 'quantity' || field === 'rate') {
+      const quantity = field === 'quantity' ? parseFloat(value) || 0 : preliminaries.cost_details.quantity;
+      const rate = field === 'rate' ? parseFloat(value) || 0 : preliminaries.cost_details.rate;
+      updatedCostDetails.amount = quantity * rate;
+    }
+
+    setPreliminaries({
+      ...preliminaries,
+      cost_details: updatedCostDetails
+    });
+  };
+
+  const handlePreliminaryNoteChange = (value: string) => {
+    if (!preliminaries) return;
+    setPreliminaries({
+      ...preliminaries,
+      notes: value
     });
   };
 
@@ -844,8 +883,8 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       return total + itemTotals.sellingPrice;
     }, 0);
 
-    // Add preliminary amount if it exists
-    const preliminaryAmount = editedBoq.preliminaries?.cost_details?.amount || 0;
+    // Add preliminary amount if it exists (from state)
+    const preliminaryAmount = preliminaries?.cost_details?.amount || 0;
 
     return itemsTotal + preliminaryAmount;
   };
@@ -922,16 +961,29 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
       });
 
       // Add preliminary amount to grand total
-      const preliminaryAmount = editedBoq.preliminaries?.cost_details?.amount || 0;
+      const preliminaryAmount = preliminaries?.cost_details?.amount || 0;
       const grandTotal = itemsTotal + preliminaryAmount;
+
+      // Save preliminaries separately if they exist and have been edited
+      if (preliminaries && editedBoq.project_id) {
+        try {
+          const prelimResult = await estimatorService.updatePreliminary(editedBoq.project_id, preliminaries);
+          if (!prelimResult.success) {
+            console.error('Failed to update preliminaries:', prelimResult.message);
+            toast.error('Failed to update preliminaries');
+          }
+        } catch (error) {
+          console.error('Error updating preliminaries:', error);
+        }
+      }
 
       // Add is_revision flag and complete details to the payload
       const payload = {
         ...editedBoq,
         items: enrichedItems,
         is_revision: isRevision,
-        // Include preliminaries from original BOQ
-        preliminaries: originalBoq?.preliminaries || {
+        // Include updated preliminaries
+        preliminaries: preliminaries || originalBoq?.preliminaries || {
           items: [],
           cost_details: {
             quantity: 1,
@@ -1103,6 +1155,136 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                     </div>
                   )}
                 </div>
+
+                {/* Preliminaries Section - Shown FIRST */}
+                {preliminaries && (preliminaries.items?.length > 0 || preliminaries.notes) && (
+                  <div className="mb-6">
+                    <div className="border border-amber-200 rounded-lg overflow-hidden">
+                      {/* Header */}
+                      <button
+                        type="button"
+                        onClick={() => setPreliminariesExpanded(!preliminariesExpanded)}
+                        className="w-full bg-gradient-to-r from-amber-400 to-orange-400 p-4 flex items-center justify-between"
+                        disabled={isSaving}
+                      >
+                        <div className="flex items-center gap-3">
+                          <FileText className="w-6 h-6 text-white" />
+                          <div className="text-left">
+                            <h3 className="text-lg font-bold text-white">Preliminaries & Approval Works</h3>
+                            <p className="text-xs text-white/80">Selected conditions and terms</p>
+                          </div>
+                        </div>
+                        {preliminariesExpanded ? (
+                          <ChevronDown className="w-5 h-5 text-white" />
+                        ) : (
+                          <ChevronRight className="w-5 h-5 text-white" />
+                        )}
+                      </button>
+
+                      {/* Expanded Content */}
+                      {preliminariesExpanded && (
+                        <div className="bg-amber-50">
+                          {/* Preliminary Items List */}
+                          {preliminaries.items && preliminaries.items.length > 0 && (
+                            <div className="p-4 space-y-2">
+                              {preliminaries.items.map((item: any, index: number) => (
+                                <div key={index} className="bg-white rounded-lg p-3 border border-amber-200 flex items-start gap-2">
+                                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center">
+                                    {index + 1}
+                                  </span>
+                                  <p className="text-sm text-gray-800 flex-1">{item.description}</p>
+                                  {item.isCustom && (
+                                    <span className="px-2 py-0.5 text-xs bg-amber-100 text-amber-700 rounded-full">
+                                      Custom
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Cost Details - Editable */}
+                          {preliminaries.cost_details && (
+                            <div className="px-4 pb-4">
+                              <div className="bg-white rounded-lg p-4 border border-amber-200">
+                                <h5 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                                  <Calculator className="w-4 h-4" />
+                                  Cost Summary
+                                </h5>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                                      Quantity
+                                    </label>
+                                    <input
+                                      type="number"
+                                      value={preliminaries.cost_details.quantity || 1}
+                                      onChange={(e) => handlePreliminaryCostChange('quantity', e.target.value)}
+                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                                      disabled={isSaving}
+                                      min="1"
+                                      step="1"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                                      Unit
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={preliminaries.cost_details.unit || 'Nos'}
+                                      onChange={(e) => handlePreliminaryCostChange('unit', e.target.value)}
+                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                                      disabled={isSaving}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                                      Rate (AED)
+                                    </label>
+                                    <input
+                                      type="number"
+                                      value={preliminaries.cost_details.rate || 0}
+                                      onChange={(e) => handlePreliminaryCostChange('rate', e.target.value)}
+                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                                      disabled={isSaving}
+                                      min="0"
+                                      step="0.01"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                                      Total Amount (AED)
+                                    </label>
+                                    <div className="w-full px-3 py-2 text-sm bg-amber-100 border border-amber-300 rounded-lg font-semibold text-amber-900">
+                                      {(preliminaries.cost_details.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Notes */}
+                          {preliminaries.notes && (
+                            <div className="px-4 pb-4">
+                              <div className="bg-white rounded-lg p-4 border border-amber-200">
+                                <h5 className="text-sm font-semibold text-amber-900 mb-2">Additional Notes</h5>
+                                <textarea
+                                  value={preliminaries.notes}
+                                  onChange={(e) => handlePreliminaryNoteChange(e.target.value)}
+                                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 min-h-[60px]"
+                                  disabled={isSaving}
+                                  placeholder="Add any additional notes..."
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* BOQ Items - Match TD Style */}
                 <div className="mb-6">

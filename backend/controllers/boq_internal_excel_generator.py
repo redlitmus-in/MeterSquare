@@ -90,33 +90,68 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
 
     if prelim_items or prelim_notes:
         ws.merge_cells(f'A{row}:G{row}')
-        ws[f'A{row}'] = "PRELIMINARIES & APPROVAL WORKS"
-        ws[f'A{row}'].font = Font(bold=True, size=11, color="92400E")
+        ws[f'A{row}'] = "📋 PRELIMINARIES & APPROVAL WORKS"
+        ws[f'A{row}'].font = Font(bold=True, size=12, color="92400E")
         ws[f'A{row}'].fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+        ws[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
         row += 1
 
-        for prelim_item in prelim_items:
-            # Filter only selected preliminaries
+        # Show all preliminary items (already filtered to selected only)
+        for idx, prelim_item in enumerate(prelim_items, 1):
             if isinstance(prelim_item, dict):
-                is_selected = prelim_item.get('is_selected', prelim_item.get('selected', prelim_item.get('checked', False)))
-                if not is_selected:
-                    continue
                 desc = prelim_item.get('description', prelim_item.get('name', prelim_item.get('text', '')))
             else:
                 desc = str(prelim_item)
 
             if desc:
-                ws.merge_cells(f'A{row}:G{row}')
-                ws[f'A{row}'] = f"✓ {desc}"
+                ws.merge_cells(f'A{row}:F{row}')
+                ws[f'A{row}'] = f"{idx}. {desc}"
                 ws[f'A{row}'].font = normal_font
+                ws[f'A{row}'].fill = PatternFill(start_color="FFFBEB", end_color="FFFBEB", fill_type="solid")
+                ws[f'A{row}'].border = thin_border
+
+                # Add custom badge if applicable
+                if prelim_item.get('isCustom'):
+                    ws[f'G{row}'] = "Custom"
+                    ws[f'G{row}'].font = Font(size=8, color="D97706", italic=True)
+                    ws[f'G{row}'].border = thin_border
+                row += 1
+
+        # Cost Summary
+        cost_details = preliminaries.get('cost_details', {})
+        if cost_details and cost_details.get('amount'):
+            row += 1
+            ws.merge_cells(f'A{row}:G{row}')
+            ws[f'A{row}'] = "Cost Summary"
+            ws[f'A{row}'].font = Font(bold=True, size=10, color="92400E")
+            ws[f'A{row}'].fill = yellow_fill
+            row += 1
+
+            cost_info = [
+                ["Quantity:", cost_details.get('quantity', 1)],
+                ["Unit:", cost_details.get('unit', 'Nos')],
+                ["Rate:", f"{cost_details.get('rate', 0):,.2f} AED"],
+                ["Total Amount:", f"{cost_details.get('amount', 0):,.2f} AED"]
+            ]
+
+            for cost_row in cost_info:
+                ws[f'A{row}'] = cost_row[0]
+                ws[f'A{row}'].font = bold_font
+                ws[f'A{row}'].fill = yellow_fill
+                ws[f'A{row}'].border = thin_border
+                ws[f'B{row}'] = cost_row[1]
+                ws[f'B{row}'].font = normal_font if cost_row[0] != "Total Amount:" else bold_font
+                ws[f'B{row}'].border = thin_border
                 row += 1
 
         if prelim_notes:
             row += 1
             ws.merge_cells(f'A{row}:G{row}')
-            ws[f'A{row}'] = f"Note: {prelim_notes}"
+            ws[f'A{row}'] = f"📝 Note: {prelim_notes}"
             ws[f'A{row}'].font = Font(italic=True, size=9, color="78350F")
             ws[f'A{row}'].alignment = Alignment(wrap_text=True)
+            ws[f'A{row}'].fill = yellow_fill
+            ws[f'A{row}'].border = thin_border
             row += 1
 
         row += 2
@@ -372,14 +407,14 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
                 ws.cell(row=row, column=6).number_format = '#,##0.00'
                 row += 1
 
-                # Actual Profit (as per BOQDetailsModal)
-                actual_profit = client_amount - internal_cost
-                profit_color = "10B981" if actual_profit >= overhead_amt else "EF4444"
+                # Negotiable Margins (as per BOQDetailsModal)
+                negotiable_margin = client_amount - internal_cost
+                profit_color = "10B981" if negotiable_margin >= overhead_amt else "EF4444"
 
-                ws.cell(row=row, column=5).value = "Actual Profit:"
+                ws.cell(row=row, column=5).value = "Negotiable Margins:"
                 ws.cell(row=row, column=5).font = Font(bold=True, size=9, color=profit_color)
                 ws.cell(row=row, column=5).alignment = Alignment(horizontal='right')
-                ws.cell(row=row, column=6).value = round(actual_profit, 2)
+                ws.cell(row=row, column=6).value = round(negotiable_margin, 2)
                 ws.cell(row=row, column=6).font = Font(bold=True, size=9, color=profit_color)
                 ws.cell(row=row, column=6).alignment = Alignment(horizontal='right')
                 ws.cell(row=row, column=6).number_format = '#,##0.00'
@@ -454,7 +489,7 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
     internal_cost_total = total_material_cost + total_labour_cost + total_misc + total_overhead + total_transport
 
     # Actual profit = combined client amount - internal
-    actual_profit_total = combined_client_amount - internal_cost_total
+    negotiable_margin_total = combined_client_amount - internal_cost_total
 
     # Summary data
     summary_items = [
@@ -488,17 +523,17 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
         ("", 0, normal_font),  # Blank row
         ("Profit Analysis:", 0, bold_font),
         ("Planned Profit:", total_overhead, Font(bold=True, color="10B981")),
-        ("Actual Profit (Before Discount):", actual_profit_total, Font(bold=True, color="10B981" if actual_profit_total >= total_overhead else "EF4444")),
+        ("Negotiable Margins (Before Discount):", negotiable_margin_total, Font(bold=True, color="10B981" if negotiable_margin_total >= total_overhead else "EF4444")),
     ])
 
     # Add actual profit after discount if discount exists
     if discount_amount > 0:
-        actual_profit_after_discount = client_amount_after_discount - internal_cost_total
-        summary_items.append(("Actual Profit (After Discount):", actual_profit_after_discount, Font(bold=True, color="10B981" if actual_profit_after_discount >= total_overhead else "EF4444")))
+        negotiable_margin_after_discount = client_amount_after_discount - internal_cost_total
+        summary_items.append(("Negotiable Margins (After Discount):", negotiable_margin_after_discount, Font(bold=True, color="10B981" if negotiable_margin_after_discount >= total_overhead else "EF4444")))
 
     summary_items.extend([
         ("", 0, normal_font),  # Blank row
-        ("Project Margin:", (actual_profit_total / combined_client_amount * 100) if combined_client_amount > 0 else 0, Font(bold=True, size=11)),
+        ("Project Margin:", (negotiable_margin_total / combined_client_amount * 100) if combined_client_amount > 0 else 0, Font(bold=True, size=11)),
     ])
 
     for label, value, font_style in summary_items:

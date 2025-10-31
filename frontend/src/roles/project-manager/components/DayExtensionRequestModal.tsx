@@ -270,12 +270,23 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
                               {formatDate(request.request_date)}
                             </span>
                           </div>
-                          <p className="text-sm font-medium text-gray-900">
-                            Requested: <span className="text-orange-600">{request.requested_days} day{request.requested_days > 1 ? 's' : ''}</span>
-                          </p>
-                          {request.approved_days && (
-                            <p className="text-sm font-medium text-green-600">
-                              Approved: {request.approved_days} day{request.approved_days > 1 ? 's' : ''}
+                          {request.approved_days ? (
+                            // Show consolidated info when approved
+                            request.approved_days !== request.requested_days ? (
+                              <p className="text-sm font-medium text-gray-900">
+                                <span className="text-orange-600">Requested: {request.requested_days} day{request.requested_days > 1 ? 's' : ''}</span>
+                                {' → '}
+                                <span className="text-green-600">TD Approved: {request.approved_days} day{request.approved_days > 1 ? 's' : ''}</span>
+                              </p>
+                            ) : (
+                              <p className="text-sm font-medium text-green-600">
+                                Approved: {request.approved_days} day{request.approved_days > 1 ? 's' : ''}
+                              </p>
+                            )
+                          ) : (
+                            // Show only requested when pending or rejected
+                            <p className="text-sm font-medium text-gray-900">
+                              Requested: <span className="text-orange-600">{request.requested_days} day{request.requested_days > 1 ? 's' : ''}</span>
                             </p>
                           )}
                         </div>

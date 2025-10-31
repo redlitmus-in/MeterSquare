@@ -160,7 +160,7 @@ export const generateInternalHTML = (data: BOQData): string => `
           <tr class="actual-profit">
             <td colspan="4"></td>
             <td>Acutual Profit</td>
-            <td class="right">${Math.round(item.actualProfit)}</td>
+            <td class="right">${Math.round(item.negotiableMargin)}</td>
           </tr>
         </tbody>
       </table>

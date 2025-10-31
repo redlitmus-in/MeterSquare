@@ -6,7 +6,18 @@ class Preliminary(db.Model):
     __tablename__ = "preliminaries"
 
     preliminary_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    description = db.Column(db.JSON, nullable=False)      # JSON column
+    # JSON structure: {
+    #   "items": [...],
+    #   "notes": "...",
+    #   "cost_analysis": {
+    #     "quantity": 1, "unit": "Nos", "rate": 55555, "client_amount": 55555,
+    #     "internal_cost": 22222, "misc_percentage": 10, "misc_amount": 5555.50,
+    #     "overhead_profit_percentage": 25, "overhead_profit_amount": 13888.75,
+    #     "transport_percentage": 5, "transport_amount": 2777.75,
+    #     "planned_profit": 13888.75, "negotiable_margin": 33333.00
+    #   }
+    # }
+    description = db.Column(db.JSON, nullable=False)
     quantity = db.Column(db.Float, default=1)
     unit = db.Column(db.String(50), nullable=True)
     rate = db.Column(db.Float, nullable=True)

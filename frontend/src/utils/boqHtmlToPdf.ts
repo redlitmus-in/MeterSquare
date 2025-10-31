@@ -115,7 +115,7 @@ const prepareSectionsInternal = (boqItems: any[]): any[] => {
         const internalCost = baseCost + miscAmount + overheadAmount;
         const clientCost = subItem.quantity * subItem.rate;
         const plannedProfit = overheadAmount; // Overhead/Profit percentage is the planned profit
-        const actualProfit = clientCost - internalCost;
+        const negotiableMargin = clientCost - internalCost;
 
         section.items.push({
           sno: `${idx + 1}.${subIdx + 1}`,
@@ -154,7 +154,7 @@ const prepareSectionsInternal = (boqItems: any[]): any[] => {
           internalCost: internalCost,
           clientCost: clientCost,
           plannedProfit: plannedProfit,
-          actualProfit: actualProfit
+          negotiableMargin: negotiableMargin
         });
       });
     } else {
@@ -176,7 +176,7 @@ const prepareSectionsInternal = (boqItems: any[]): any[] => {
       const internalCost = baseCost + miscAmount + overheadAmount;
       const clientCost = item.estimatedSellingPrice || 0;
       const plannedProfit = overheadAmount;
-      const actualProfit = clientCost - internalCost;
+      const negotiableMargin = clientCost - internalCost;
 
       section.items.push({
         sno: `${idx + 1}`,
@@ -213,7 +213,7 @@ const prepareSectionsInternal = (boqItems: any[]): any[] => {
         internalCost: internalCost,
         clientCost: clientCost,
         plannedProfit: plannedProfit,
-        actualProfit: actualProfit
+        negotiableMargin: negotiableMargin
       });
     }
 

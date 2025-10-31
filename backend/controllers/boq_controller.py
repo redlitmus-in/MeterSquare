@@ -2,6 +2,7 @@ from flask import request, jsonify, g
 from config.db import db
 from models.project import Project
 from models.boq import *
+from models.preliminary import Preliminary
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils.boq_email_service import BOQEmailService
@@ -193,7 +194,7 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                 labour_cost=sub_item.get("labour_cost", 0.0),
                 internal_cost=sub_item.get("internal_cost", 0.0),
                 planned_profit=sub_item.get("planned_profit", 0.0),
-                actual_profit=sub_item.get("actual_profit", 0.0),
+                negotiable_margin=sub_item.get("negotiable_margin", 0.0),
 
                 created_by=created_by
             )
@@ -223,7 +224,7 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             master_sub_item.labour_cost = sub_item.get("labour_cost", 0.0)
             master_sub_item.internal_cost = sub_item.get("internal_cost", 0.0)
             master_sub_item.planned_profit = sub_item.get("planned_profit", 0.0)
-            master_sub_item.actual_profit = sub_item.get("actual_profit", 0.0)
+            master_sub_item.negotiable_margin = sub_item.get("negotiable_margin", 0.0)
 
             db.session.flush()
 
@@ -346,7 +347,7 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                 labour_cost=sub_item.get("labour_cost", 0.0),
                 internal_cost=sub_item.get("internal_cost", 0.0),
                 planned_profit=sub_item.get("planned_profit", 0.0),
-                actual_profit=sub_item.get("actual_profit", 0.0),
+                negotiable_margin=sub_item.get("negotiable_margin", 0.0),
 
                 created_by=created_by
             )
@@ -376,7 +377,7 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             master_sub_item.labour_cost = sub_item.get("labour_cost", 0.0)
             master_sub_item.internal_cost = sub_item.get("internal_cost", 0.0)
             master_sub_item.planned_profit = sub_item.get("planned_profit", 0.0)
-            master_sub_item.actual_profit = sub_item.get("actual_profit", 0.0)
+            master_sub_item.negotiable_margin = sub_item.get("negotiable_margin", 0.0)
 
             db.session.flush()
 
@@ -635,7 +636,7 @@ def create_boq():
 
                 # Calculate profits
                 planned_profit = overhead_profit_amount
-                actual_profit = sub_item_client_amount - sub_item_internal_cost - misc_amount - transport_amount
+                negotiable_margin = sub_item_client_amount - sub_item_internal_cost - misc_amount - transport_amount
 
                 # Store processed sub-item
                 processed_sub_items.append({
@@ -665,7 +666,7 @@ def create_boq():
                     "labour_cost": sub_item_labour_cost,
                     "internal_cost": sub_item_internal_cost,
                     "planned_profit": planned_profit,
-                    "actual_profit": actual_profit,
+                    "negotiable_margin": negotiable_margin,
 
                     # Legacy fields for backward compatibility
                     "total_materials_cost": sub_item_materials_cost,
@@ -1029,6 +1030,25 @@ def create_boq():
         # Get preliminaries from request data
         preliminaries = data.get("preliminaries", {})
 
+        # Save preliminaries to database table (single row with full JSON)
+        preliminary_id = None
+        if preliminaries and (preliminaries.get('items') or preliminaries.get('cost_details')):
+            cost_details = preliminaries.get('cost_details', {})
+            preliminary_record = Preliminary(
+                description=preliminaries,  # Save entire preliminaries JSON
+                project_id=project_id,
+                quantity=cost_details.get('quantity', 1),
+                unit=cost_details.get('unit', 'Nos'),
+                rate=cost_details.get('rate', 0),
+                amount=cost_details.get('amount', 0),
+                is_default=False,
+                created_by=created_by
+            )
+            db.session.add(preliminary_record)
+            db.session.flush()  # Get preliminary_id
+            preliminary_id = preliminary_record.preliminary_id
+            log.info(f"Saved preliminaries to database with ID: {preliminary_id}")
+
         # Apply BOQ-level discount to total
         boq_discount_percentage = data.get("discount_percentage", 0) or 0
         boq_discount_amount = data.get("discount_amount", 0) or 0
@@ -1046,6 +1066,7 @@ def create_boq():
         boq_details_json = {
             "boq_id": boq.boq_id,
             "preliminaries": preliminaries,
+            "preliminary_id": preliminary_id,  # Reference to preliminaries table
             "discount_percentage": boq_discount_percentage,
             "discount_amount": boq_discount_amount,
             "items": boq_items,
@@ -1411,8 +1432,16 @@ def get_boq(boq_id):
         if boq.status == "new_purchase_approved" and user_role in ['technicaldirector', 'technical_director']:
             display_status = "approved"
 
-        # Get preliminaries from boq_details
-        preliminaries = boq_details.boq_details.get("preliminaries", {}) if boq_details.boq_details else {}
+        # Get preliminaries from database table (preferred) or fallback to BOQ JSON
+        preliminaries = {}
+        preliminary_record = Preliminary.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+        if preliminary_record and preliminary_record.description:
+            preliminaries = preliminary_record.description
+            log.info(f"Retrieved preliminaries from database for project {boq.project_id}")
+        elif boq_details.boq_details:
+            # Fallback to JSON if not in database
+            preliminaries = boq_details.boq_details.get("preliminaries", {})
+            log.info(f"Using preliminaries from BOQ JSON (fallback)")
 
         # Get discount values from boq_details JSON
         discount_percentage = boq_details.boq_details.get("discount_percentage", 0) if boq_details.boq_details else 0
@@ -2115,6 +2144,38 @@ def update_boq(boq_id):
             # Get preliminaries from request data
             preliminaries = data.get("preliminaries", {})
 
+            # Save/update preliminaries to database table
+            preliminary_id = old_boq_details_json.get("preliminary_id") if old_boq_details_json else None
+            if preliminaries and (preliminaries.get('items') or preliminaries.get('cost_details')):
+                cost_details = preliminaries.get('cost_details', {})
+                # Check if preliminary record exists
+                preliminary_record = Preliminary.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+                if preliminary_record:
+                    # Update existing
+                    preliminary_record.description = preliminaries
+                    preliminary_record.quantity = cost_details.get('quantity', 1)
+                    preliminary_record.unit = cost_details.get('unit', 'Nos')
+                    preliminary_record.rate = cost_details.get('rate', 0)
+                    preliminary_record.amount = cost_details.get('amount', 0)
+                    preliminary_record.last_modified_by = created_by
+                    log.info(f"Updated preliminaries in database with ID: {preliminary_record.preliminary_id}")
+                else:
+                    # Create new
+                    preliminary_record = Preliminary(
+                        description=preliminaries,
+                        project_id=boq.project_id,
+                        quantity=cost_details.get('quantity', 1),
+                        unit=cost_details.get('unit', 'Nos'),
+                        rate=cost_details.get('rate', 0),
+                        amount=cost_details.get('amount', 0),
+                        is_default=False,
+                        created_by=created_by
+                    )
+                    db.session.add(preliminary_record)
+                    db.session.flush()
+                    log.info(f"Created new preliminaries in database with ID: {preliminary_record.preliminary_id}")
+                preliminary_id = preliminary_record.preliminary_id
+
             # Apply BOQ-level discount to total
             boq_discount_percentage = data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)) or 0
             boq_discount_amount = data.get("discount_amount", old_boq_details_json.get("discount_amount", 0)) or 0
@@ -2132,6 +2193,7 @@ def update_boq(boq_id):
             updated_json = {
                 "boq_id": boq.boq_id,
                 "preliminaries": preliminaries,
+                "preliminary_id": preliminary_id,
                 "discount_percentage": boq_discount_percentage,
                 "discount_amount": boq_discount_amount,
                 "items": boq_items,
@@ -2777,6 +2839,38 @@ def revision_boq(boq_id):
             # Get preliminaries from request data
             preliminaries = data.get("preliminaries", {})
 
+            # Save/update preliminaries to database table
+            preliminary_id = old_boq_details_json.get("preliminary_id") if old_boq_details_json else None
+            if preliminaries and (preliminaries.get('items') or preliminaries.get('cost_details')):
+                cost_details = preliminaries.get('cost_details', {})
+                # Check if preliminary record exists
+                preliminary_record = Preliminary.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+                if preliminary_record:
+                    # Update existing
+                    preliminary_record.description = preliminaries
+                    preliminary_record.quantity = cost_details.get('quantity', 1)
+                    preliminary_record.unit = cost_details.get('unit', 'Nos')
+                    preliminary_record.rate = cost_details.get('rate', 0)
+                    preliminary_record.amount = cost_details.get('amount', 0)
+                    preliminary_record.last_modified_by = created_by
+                    log.info(f"Updated preliminaries in database with ID: {preliminary_record.preliminary_id}")
+                else:
+                    # Create new
+                    preliminary_record = Preliminary(
+                        description=preliminaries,
+                        project_id=boq.project_id,
+                        quantity=cost_details.get('quantity', 1),
+                        unit=cost_details.get('unit', 'Nos'),
+                        rate=cost_details.get('rate', 0),
+                        amount=cost_details.get('amount', 0),
+                        is_default=False,
+                        created_by=created_by
+                    )
+                    db.session.add(preliminary_record)
+                    db.session.flush()
+                    log.info(f"Created new preliminaries in database with ID: {preliminary_record.preliminary_id}")
+                preliminary_id = preliminary_record.preliminary_id
+
             # Apply BOQ-level discount to total
             boq_discount_percentage = data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)) or 0
             boq_discount_amount = data.get("discount_amount", old_boq_details_json.get("discount_amount", 0)) or 0
@@ -2794,6 +2888,7 @@ def revision_boq(boq_id):
             updated_json = {
                 "boq_id": boq.boq_id,
                 "preliminaries": preliminaries,
+                "preliminary_id": preliminary_id,
                 "discount_percentage": boq_discount_percentage,
                 "discount_amount": boq_discount_amount,
                 "items": boq_items,

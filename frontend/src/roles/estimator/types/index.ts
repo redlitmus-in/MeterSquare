@@ -110,6 +110,20 @@ export interface BOQCreatePayload {
       isCustom: boolean;
     }[];
     notes: string;
+    cost_details?: {
+      quantity: number;
+      unit: string;
+      rate: number;
+      amount: number;
+      internal_cost?: number;
+      misc_percentage?: number;
+      overhead_profit_percentage?: number;
+      transport_percentage?: number;
+      misc_amount?: number;
+      overhead_profit_amount?: number;
+      transport_amount?: number;
+      negotiable_margin?: number;
+    };
   };
   items: {
     item_name: string;

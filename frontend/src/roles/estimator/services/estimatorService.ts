@@ -1649,6 +1649,30 @@ class EstimatorService {
     }
   }
 
+  /**
+   * Update preliminaries for a project
+   */
+  async updatePreliminary(projectId: number, preliminaryData: any): Promise<{ success: boolean; message: string }> {
+    try {
+      const payload = {
+        preliminaries: preliminaryData
+      };
+
+      const response = await apiClient.put(`/preliminary/${projectId}`, payload);
+
+      return {
+        success: true,
+        message: response.data.message || 'Preliminary updated successfully'
+      };
+    } catch (error: any) {
+      console.error('Failed to update preliminary:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to update preliminary'
+      };
+    }
+  }
+
 }
 
 export const estimatorService = new EstimatorService();

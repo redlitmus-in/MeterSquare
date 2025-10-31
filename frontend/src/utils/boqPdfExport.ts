@@ -144,7 +144,7 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
   });
 
   const internalCost = totalMaterialCost + totalLabourCost + totalMisc;
-  const actualProfit = clientTotal - internalCost - plannedProfit;
+  const negotiableMargin = clientTotal - internalCost - plannedProfit;
 
   // HEADER WITH LOGO
   addLogoAndHeader(doc, yPos);
@@ -175,7 +175,7 @@ export const exportBOQToPDFInternal = async (estimation: BOQEstimation) => {
     yPos = 20;
   }
 
-  addCostAnalysis(doc, clientTotal, internalCost, plannedProfit, actualProfit, yPos, autoTable);
+  addCostAnalysis(doc, clientTotal, internalCost, plannedProfit, negotiableMargin, yPos, autoTable);
 
   // Save PDF
   const fileName = `BOQ_${estimation.projectName.replace(/\s+/g, '_')}_Internal_${new Date().toISOString().split('T')[0]}.pdf`;
@@ -503,12 +503,12 @@ function addInternalBOQItem(doc: any, item: any, itemIndex: number, yPos: number
       ]);
 
       // Actual profit
-      const actualProfit = (subItem.quantity * subItem.rate) - totalCost;
+      const negotiableMargin = (subItem.quantity * subItem.rate) - totalCost;
       subItemData.push([
         '',
         { content: 'Difference between the client rate and internal expenditure planning.', styles: { fontSize: 8 }, colSpan: 4 },
         { content: 'Acutual Profit', styles: { textColor: [0, 128, 0], halign: 'right' } },
-        { content: formatCurrency(actualProfit), styles: { textColor: [0, 128, 0], halign: 'right' } }
+        { content: formatCurrency(negotiableMargin), styles: { textColor: [0, 128, 0], halign: 'right' } }
       ]);
 
       (autoTable as any)(doc, {
@@ -603,7 +603,7 @@ function addClientBOQItem(doc: any, item: any, itemIndex: number, yPos: number, 
   return (doc as any).lastAutoTable.finalY + 5;
 }
 
-function addCostAnalysis(doc: any, clientCost: number, internalCost: number, plannedProfit: number, actualProfit: number, yPos: number, autoTable: any) {
+function addCostAnalysis(doc: any, clientCost: number, internalCost: number, plannedProfit: number, negotiableMargin: number, yPos: number, autoTable: any) {
   const costAnalysisData = [
     [
       { content: 'Cost analysis', styles: { fillColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' }, colSpan: 2 }
@@ -618,7 +618,7 @@ function addCostAnalysis(doc: any, clientCost: number, internalCost: number, pla
     ],
     [
       { content: `Project Margin ( Excluding planned profit of ${formatCurrency(plannedProfit)} AED)`, styles: { fontStyle: 'bold', textColor: [0, 128, 0] } },
-      { content: formatCurrency(actualProfit), styles: { halign: 'right', fontStyle: 'bold', textColor: [0, 128, 0] } }
+      { content: formatCurrency(negotiableMargin), styles: { halign: 'right', fontStyle: 'bold', textColor: [0, 128, 0] } }
     ]
   ];
 

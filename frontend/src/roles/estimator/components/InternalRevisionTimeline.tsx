@@ -621,7 +621,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       return sum + (item.internal_cost || 0);
     }, 0);
 
-    const actualProfitAfterDiscount = grandTotal - totalInternalCost;
+    const negotiableMarginAfterDiscount = grandTotal - totalInternalCost;
 
     return (
       <div className="mt-4 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-4 border-2 border-green-300">
@@ -653,9 +653,9 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   <span className="font-semibold text-red-600">AED {totalInternalCost.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between pt-1.5 border-t border-gray-300">
-                  <span className="text-gray-700 font-medium">Actual Profit (After Discount):</span>
-                  <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    AED {actualProfitAfterDiscount.toFixed(2)}
+                  <span className="text-gray-700 font-medium">Negotiable Margins (After Discount):</span>
+                  <span className={`font-bold ${negotiableMarginAfterDiscount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    AED {negotiableMarginAfterDiscount.toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -928,7 +928,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                               const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || 5) / 100));
                               const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || 25) / 100));
                               const internalCost = subItem.internal_cost || (materialCost + labourCost + miscAmount + plannedProfit + transportAmount);
-                              const actualProfit = subItem.actual_profit || (clientAmount - internalCost);
+                              const negotiableMargin = subItem.actual_profit || (clientAmount - internalCost);
 
                               return (
                                 <>
@@ -965,9 +965,9 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                                     <span className="font-semibold text-blue-600">AED {plannedProfit.toFixed(2)}</span>
                                   </div>
                                   <div className="flex justify-between">
-                                    <span className="text-gray-800 font-medium">Actual Profit:</span>
-                                    <span className={`font-bold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
-                                      AED {actualProfit.toFixed(2)}
+                                    <span className="text-gray-800 font-medium">Negotiable Margins:</span>
+                                    <span className={`font-bold ${negotiableMargin >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
+                                      AED {negotiableMargin.toFixed(2)}
                                     </span>
                                   </div>
                                 </>
@@ -1472,8 +1472,8 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                         const grandTotal = subtotal - overallDiscount;
 
                         // Calculate profit after discount
-                        const actualProfitAfterDiscount = grandTotal - totalInternalCost;
-                        const profitMarginAfterDiscount = grandTotal > 0 ? (actualProfitAfterDiscount / grandTotal) * 100 : 0;
+                        const negotiableMarginAfterDiscount = grandTotal - totalInternalCost;
+                        const profitMarginAfterDiscount = grandTotal > 0 ? (negotiableMarginAfterDiscount / grandTotal) * 100 : 0;
 
                         // Get previous discount percentage for comparison
                         const prevDiscountPercentage = previousSnapshot?.discount_percentage || 0;
@@ -1525,13 +1525,13 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                                     </span>
                                   </div>
                                   <div className="flex justify-between items-center pt-2 border-t border-gray-300">
-                                    <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                    <span className="text-gray-700 font-medium">Negotiable Margins:</span>
                                     <div className="flex items-center gap-2">
                                       <span className="text-gray-500 line-through">
                                         AED {totalActualProfit.toFixed(2)}
                                       </span>
-                                      <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                                        → AED {actualProfitAfterDiscount.toFixed(2)}
+                                      <span className={`font-bold ${negotiableMarginAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                                        → AED {negotiableMarginAfterDiscount.toFixed(2)}
                                       </span>
                                     </div>
                                   </div>

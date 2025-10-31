@@ -332,8 +332,8 @@ export const generateInternalHTML = (data: BOQData): string => `
             </tr>
             <tr style="background:#c8e6c9;">
               <td colspan="4"></td>
-              <td style="font-weight:700; color:#1b5e20;">Actual Profit</td>
-              <td class="right" style="font-weight:700; color:#1b5e20;">${item.actualProfit.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+              <td style="font-weight:700; color:#1b5e20;">Negotiable Margins</td>
+              <td class="right" style="font-weight:700; color:#1b5e20;">${item.negotiableMargin.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
             </tr>
           </tbody>
         </table>

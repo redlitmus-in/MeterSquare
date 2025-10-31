@@ -409,89 +409,82 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                       </div>
                     )}
 
-                    {/* Preliminaries & Approval Works */}
-                    {boqData.preliminaries && (boqData.preliminaries.items?.length > 0 || boqData.preliminaries.notes) && (
-                      <div className="mb-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 border border-purple-200 shadow-sm">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className="p-2 bg-purple-500 rounded-lg">
-                            <FileText className="w-5 h-5 text-white" />
+                    {/* Combined Section: Preliminaries FIRST, then BOQ Items */}
+                    <div>
+                      {/* 1. PRELIMINARIES SECTION - Shown FIRST */}
+                      {boqData.preliminaries && (boqData.preliminaries.items?.length > 0 || boqData.preliminaries.notes) && (
+                        <div className="mb-6">
+                          {/* Header */}
+                          <div className="bg-gradient-to-r from-amber-400 to-orange-400 rounded-t-lg p-4 flex items-center gap-3">
+                            <FileText className="w-6 h-6 text-white" />
+                            <div>
+                              <h3 className="text-lg font-bold text-white">Preliminaries & Approval Works</h3>
+                              <p className="text-xs text-white/80">Selected conditions and terms</p>
+                            </div>
                           </div>
-                          <div>
-                            <h3 className="text-lg font-bold text-gray-900">Preliminaries & Approval Works</h3>
-                            <p className="text-xs text-gray-600">Selected conditions and terms</p>
-                          </div>
-                        </div>
 
-                        {boqData.preliminaries.items && boqData.preliminaries.items.length > 0 && (
-                          <>
-                            {/* Selected Items List */}
-                            <div className="mb-4 bg-white rounded-lg border border-purple-200 p-4">
-                              <h5 className="text-sm font-semibold text-purple-900 mb-3">Selected conditions and terms</h5>
+                          {/* Preliminary Items List */}
+                          {boqData.preliminaries.items && boqData.preliminaries.items.length > 0 && (
+                            <div className="bg-amber-50 border-x border-amber-200 p-4">
                               <div className="space-y-2">
-                                {boqData.preliminaries.items.filter((item: any) => item.checked).map((item: any, index: number) => (
-                                  <div key={index} className="flex items-start gap-3">
-                                    <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
-                                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
-                                      </svg>
-                                    </div>
-                                    <div className="flex-1 text-sm text-gray-700">
-                                      {item.description}
-                                      {item.isCustom && (
-                                        <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
-                                      )}
+                                {boqData.preliminaries.items.map((item: any, index: number) => (
+                                  <div key={index} className="bg-white rounded-lg p-3 border border-amber-200 hover:shadow-sm transition-shadow">
+                                    <div className="flex items-start gap-3">
+                                      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500 text-white flex items-center justify-center text-xs font-bold">
+                                        {index + 1}
+                                      </span>
+                                      <div className="flex-1">
+                                        <p className="text-sm text-gray-800">{item.description}</p>
+                                        {item.isCustom && (
+                                          <span className="inline-block mt-1 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded font-medium">
+                                            Custom
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                   </div>
                                 ))}
                               </div>
                             </div>
+                          )}
 
-                            {/* Cost Details Summary - Separate from conditions */}
-                            {boqData.preliminaries.cost_details && (boqData.preliminaries.cost_details.quantity || boqData.preliminaries.cost_details.rate || boqData.preliminaries.cost_details.amount) && (
-                              <div className="mb-4 bg-white rounded-lg border border-purple-200 p-4">
-                                <h5 className="text-sm font-semibold text-purple-900 mb-3">Cost Details</h5>
+                          {/* Cost Summary */}
+                          {boqData.preliminaries.cost_details && (boqData.preliminaries.cost_details.quantity || boqData.preliminaries.cost_details.rate || boqData.preliminaries.cost_details.amount) && (
+                            <div className="bg-amber-50 border-x border-b border-amber-200 rounded-b-lg p-4">
+                              <div className="bg-white rounded-lg p-4 border border-amber-200">
+                                <h5 className="text-sm font-semibold text-amber-900 mb-3">Cost Summary</h5>
                                 <div className="grid grid-cols-4 gap-4">
                                   <div>
                                     <p className="text-xs text-gray-600 mb-1">Quantity</p>
-                                    <p className="text-sm font-medium text-gray-900">
-                                      {boqData.preliminaries.cost_details.quantity || 0}
-                                    </p>
+                                    <p className="text-sm font-medium text-gray-900">{boqData.preliminaries.cost_details.quantity || 0}</p>
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-600 mb-1">Unit</p>
-                                    <p className="text-sm font-medium text-gray-900">
-                                      {boqData.preliminaries.cost_details.unit || 'nos'}
-                                    </p>
+                                    <p className="text-sm font-medium text-gray-900">{boqData.preliminaries.cost_details.unit || 'Nos'}</p>
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-600 mb-1">Rate</p>
-                                    <p className="text-sm font-medium text-gray-900">
-                                      ₹{boqData.preliminaries.cost_details.rate || 0}
-                                    </p>
+                                    <p className="text-sm font-medium text-gray-900">{formatCurrency(boqData.preliminaries.cost_details.rate || 0)}</p>
                                   </div>
                                   <div>
-                                    <p className="text-xs text-gray-600 mb-1">Amount</p>
-                                    <p className="text-sm font-semibold text-purple-700">
-                                      ₹{boqData.preliminaries.cost_details.amount || 0}
-                                    </p>
+                                    <p className="text-xs text-gray-600 mb-1">Total Amount</p>
+                                    <p className="text-sm font-bold text-amber-700">{formatCurrency(boqData.preliminaries.cost_details.amount || 0)}</p>
                                   </div>
                                 </div>
                               </div>
-                            )}
-                          </>
-                        )}
 
-                        {boqData.preliminaries.notes && (
-                          <div className="bg-white rounded-lg p-4 border border-purple-200">
-                            <h4 className="text-sm font-semibold text-gray-900 mb-2">Additional Notes</h4>
-                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{boqData.preliminaries.notes}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                              {boqData.preliminaries.notes && (
+                                <div className="mt-3 bg-white rounded-lg p-4 border border-amber-200">
+                                  <h5 className="text-sm font-semibold text-gray-900 mb-2">Additional Notes</h5>
+                                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{boqData.preliminaries.notes}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
-                    {/* BOQ Items */}
-                    <div>
+                      {/* 2. BOQ ITEMS SECTION - Shown AFTER Preliminaries */}
                       {/* Existing Purchase Items */}
                       {boqData.existing_purchase && boqData.existing_purchase.items.length > 0 && (
                         <div className="mb-8">
@@ -737,7 +730,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                           <p className="text-gray-700 mt-1">= Overhead & Profit amount</p>
                                                         </div>
                                                         <div className="bg-emerald-50 p-2 rounded border-2 border-emerald-200">
-                                                          <strong className="text-emerald-900">Actual Profit:</strong>
+                                                          <strong className="text-emerald-900">Negotiable Margins:</strong>
                                                           <p className="text-gray-700 mt-1">= Client Amount - Internal Cost (Total)</p>
                                                           <p className="text-gray-500 text-xs mt-0.5 italic">Shows actual profit after all costs including O&P</p>
                                                         </div>
@@ -755,7 +748,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                   const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || 5) / 100));
                                                   const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || 25) / 100));
                                                   const internalCost = subItem.internal_cost || (materialCost + labourCost + miscAmount + plannedProfit + transportAmount);
-                                                  const actualProfit = subItem.actual_profit || (clientAmount - internalCost);
+                                                  const negotiableMargin = subItem.actual_profit || (clientAmount - internalCost);
 
                                                   return (
                                                     <>
@@ -792,9 +785,9 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                         <span className="font-semibold text-blue-600">{formatCurrency(plannedProfit)}</span>
                                                       </div>
                                                       <div className="flex justify-between">
-                                                        <span className="text-gray-800 font-medium">Actual Profit:</span>
-                                                        <span className={`font-bold ${actualProfit >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
-                                                          {formatCurrency(actualProfit)}
+                                                        <span className="text-gray-800 font-medium">Negotiable Margins:</span>
+                                                        <span className={`font-bold ${negotiableMargin >= plannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
+                                                          {formatCurrency(negotiableMargin)}
                                                         </span>
                                                       </div>
                                                     </>
@@ -1328,7 +1321,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                     const opAmt = clientAmt * ((si.overhead_profit_percentage || 25) / 100);
                                     const transportAmt = clientAmt * ((si.transport_percentage || 5) / 100);
                                     const internalCost = matCost + labCost + miscAmt + opAmt + transportAmt;
-                                    // Actual Profit = Client Amount - Internal Cost Total
+                                    // Negotiable Margins = Client Amount - Internal Cost Total
                                     return siSum + (clientAmt - internalCost);
                                   }, 0);
                                 }
@@ -1403,7 +1396,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                         <span className="text-base font-semibold text-blue-600">{formatCurrency(totalPlannedProfit)}</span>
                                       </div>
                                       <div className="flex justify-between items-center">
-                                        <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                        <span className="text-gray-700 font-medium">Negotiable Margins:</span>
                                         <span className={`text-xl font-bold ${totalActualProfit >= totalPlannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
                                           {formatCurrency(totalActualProfit)}
                                         </span>
@@ -1487,8 +1480,8 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 const grandTotal = subtotal - overallDiscount;
 
                                 // Calculate profit after discount
-                                const actualProfitAfterDiscount = grandTotal - totalInternalCost;
-                                const profitMarginAfterDiscount = grandTotal > 0 ? (actualProfitAfterDiscount / grandTotal) * 100 : 0;
+                                const negotiableMarginAfterDiscount = grandTotal - totalInternalCost;
+                                const profitMarginAfterDiscount = grandTotal > 0 ? (negotiableMarginAfterDiscount / grandTotal) * 100 : 0;
 
                                 return (
                                   <>
@@ -1552,13 +1545,13 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                             </span>
                                           </div>
                                           <div className="flex justify-between items-center pt-2 border-t border-gray-300">
-                                            <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                            <span className="text-gray-700 font-medium">Negotiable Margins:</span>
                                             <div className="flex items-center gap-2">
                                               <span className="text-gray-500 line-through">
                                                 {formatCurrency(totalActualProfit)}
                                               </span>
-                                              <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                                                → {formatCurrency(actualProfitAfterDiscount)}
+                                              <span className={`font-bold ${negotiableMarginAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                                                → {formatCurrency(negotiableMarginAfterDiscount)}
                                               </span>
                                             </div>
                                           </div>
