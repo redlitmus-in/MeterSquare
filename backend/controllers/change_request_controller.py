@@ -404,12 +404,70 @@ def send_for_review(cr_id):
 
         normalized_role = workflow_service.normalize_role(user_role)
 
+        # Helper function to get miscellaneous amount from BOQ item
+        def get_item_miscellaneous_amount(change_request):
+            """Get miscellaneous amount from BOQ item"""
+            try:
+                boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
+                if not boq_details:
+                    return 0
+
+                boq_json = boq_details.boq_details or {}
+                items = boq_json.get('items', [])
+
+                # Find the item by item_id
+                for item in items:
+                    item_id = item.get('master_item_id') or f"item_{change_request.boq_id}_{items.index(item) + 1}"
+                    if str(item_id) == str(change_request.item_id):
+                        return item.get('miscellaneous_amount', 0)
+
+                return 0
+            except Exception as e:
+                log.error(f"Error getting miscellaneous amount: {str(e)}")
+                return 0
+
         # Determine where to route based on requester role
         if normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
-            # SE always sends to PM
-            next_role = CR_CONFIG.ROLE_PROJECT_MANAGER
-            next_approver = "Project Manager"
-            log.info(f"SE/SS request - routing to PM")
+            # Check if this request contains NEW materials (not from existing BOQ)
+            has_new_materials = False
+            if change_request.materials_data:
+                for mat in change_request.materials_data:
+                    # New material if master_material_id is None or if there's a reason (indicating new material)
+                    if mat.get('master_material_id') is None or mat.get('reason'):
+                        has_new_materials = True
+                        break
+
+            if has_new_materials and normalized_role in ['sitesupervisor', 'site_supervisor']:
+                # Site Supervisor with NEW materials - check 40% threshold against miscellaneous amount ONLY
+                # Calculate cost of ONLY NEW materials (not total cost)
+                new_materials_cost = 0
+                if change_request.materials_data:
+                    for mat in change_request.materials_data:
+                        if mat.get('master_material_id') is None:
+                            new_materials_cost += mat.get('total_price', 0)
+
+                miscellaneous_amount = get_item_miscellaneous_amount(change_request)
+
+                if miscellaneous_amount > 0:
+                    percentage_of_miscellaneous = (new_materials_cost / miscellaneous_amount) * 100
+                else:
+                    percentage_of_miscellaneous = 100  # Default to high if no miscellaneous allocated
+
+                if percentage_of_miscellaneous > 40:
+                    # NEW materials cost >40% of miscellaneous - Route to Technical Director
+                    next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
+                    next_approver = "Technical Director"
+                    log.info(f"Site Supervisor NEW materials cost AED{new_materials_cost} >40% of miscellaneous: Routing to TD. Miscellaneous: {miscellaneous_amount}, %: {percentage_of_miscellaneous:.2f}%")
+                else:
+                    # NEW materials cost ≤40% of miscellaneous - Route directly to Estimator
+                    next_role = CR_CONFIG.ROLE_ESTIMATOR
+                    next_approver = "Estimator"
+                    log.info(f"Site Supervisor NEW materials cost AED{new_materials_cost} ≤40% of miscellaneous: Routing to Estimator. Miscellaneous: {miscellaneous_amount}, %: {percentage_of_miscellaneous:.2f}%")
+            else:
+                # SE or existing materials - always route to PM
+                next_role = CR_CONFIG.ROLE_PROJECT_MANAGER
+                next_approver = "Project Manager"
+                log.info(f"SE/SS request (existing materials or Site Engineer) - routing to PM")
 
         elif normalized_role in ['projectmanager', 'project_manager']:
             # PM can explicitly choose route_to, or auto-route based on 40% threshold
@@ -426,9 +484,45 @@ def send_for_review(cr_id):
                 else:
                     return jsonify({"error": f"Invalid route_to value: {route_to}. Must be 'technical_director' or 'estimator'"}), 400
             else:
-                # Auto-route based on 40% threshold
-                next_role, next_approver = workflow_service.determine_initial_approver(user_role, change_request)
-                log.info(f"PM auto-routing based on {change_request.percentage_of_item_overhead}% overhead")
+                # Auto-route based on 40% threshold of miscellaneous amount ONLY
+                # Check if this request contains NEW materials
+                has_new_materials = False
+                if change_request.materials_data:
+                    for mat in change_request.materials_data:
+                        if mat.get('master_material_id') is None or mat.get('reason'):
+                            has_new_materials = True
+                            break
+
+                if has_new_materials:
+                    # NEW materials - check 40% threshold against miscellaneous amount ONLY
+                    # Calculate cost of ONLY NEW materials (not total cost)
+                    new_materials_cost = 0
+                    if change_request.materials_data:
+                        for mat in change_request.materials_data:
+                            if mat.get('master_material_id') is None:
+                                new_materials_cost += mat.get('total_price', 0)
+
+                    miscellaneous_amount = get_item_miscellaneous_amount(change_request)
+
+                    if miscellaneous_amount > 0:
+                        percentage_of_miscellaneous = (new_materials_cost / miscellaneous_amount) * 100
+                    else:
+                        percentage_of_miscellaneous = 100
+
+                    if percentage_of_miscellaneous > 40:
+                        # NEW materials cost >40% - Route to Technical Director
+                        next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
+                        next_approver = "Technical Director"
+                        log.info(f"PM auto-routing NEW materials cost AED{new_materials_cost} >40% of miscellaneous to TD. Miscellaneous: {miscellaneous_amount}, %: {percentage_of_miscellaneous:.2f}%")
+                    else:
+                        # NEW materials cost ≤40% - Route to Estimator
+                        next_role = CR_CONFIG.ROLE_ESTIMATOR
+                        next_approver = "Estimator"
+                        log.info(f"PM auto-routing NEW materials cost AED{new_materials_cost} ≤40% of miscellaneous to Estimator. Miscellaneous: {miscellaneous_amount}, %: {percentage_of_miscellaneous:.2f}%")
+                else:
+                    # Existing materials - use default workflow (estimator for normal, TD for high value)
+                    next_role, next_approver = workflow_service.determine_initial_approver(user_role, change_request)
+                    log.info(f"PM auto-routing existing materials based on {change_request.percentage_of_item_overhead}% overhead")
         else:
             log.error(f"Invalid role '{user_role}' attempting to send change request")
             return jsonify({"error": f"Invalid role for sending request: {user_role}. Only Site Engineers and Project Managers can create change requests."}), 403
@@ -761,29 +855,69 @@ def approve_change_request(cr_id):
 
         # Multi-stage approval logic
         if normalized_role in ['projectmanager']:
-            # PM approves - route to TD or Buyer based on percentage threshold
+            # PM approves - route to TD or Estimator based on material type and percentage threshold
             change_request.pm_approved_by_user_id = approver_id
             change_request.pm_approved_by_name = approver_name
             change_request.pm_approval_date = datetime.utcnow()
             change_request.status = CR_CONFIG.STATUS_APPROVED_BY_PM
 
-            # Determine next approver based on 40% threshold
+            # Check if this request contains NEW materials (not from existing BOQ)
+            has_new_materials = False
+            if change_request.materials_data:
+                for mat in change_request.materials_data:
+                    # New material if master_material_id is None
+                    if mat.get('master_material_id') is None:
+                        has_new_materials = True
+                        break
+
+            # Determine next approver
             percentage = change_request.percentage_of_item_overhead or 0
 
-            if percentage > 40:
-                # Route to TD for high-value requests
-                next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
-                next_approver = 'Technical Director'
-                change_request.approval_required_from = next_role
-                change_request.current_approver_role = next_role
-                log.info(f"PM approved CR {cr_id} with {percentage:.2f}% overhead (>40%), routing to TD")
+            if has_new_materials:
+                # NEW MATERIALS: Apply 40% threshold against miscellaneous amount
+                # Calculate cost of ONLY NEW materials (not total cost)
+                new_materials_cost = 0
+                if change_request.materials_data:
+                    for mat in change_request.materials_data:
+                        if mat.get('master_material_id') is None:
+                            new_materials_cost += mat.get('total_price', 0)
+
+                # Get miscellaneous amount from BOQ item
+                boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
+                miscellaneous_amount = 0
+
+                if boq_details:
+                    boq_json = boq_details.boq_details or {}
+                    items = boq_json.get('items', [])
+                    for item in items:
+                        item_id = item.get('master_item_id') or f"item_{change_request.boq_id}_{items.index(item) + 1}"
+                        if str(item_id) == str(change_request.item_id):
+                            miscellaneous_amount = item.get('miscellaneous_amount', 0)
+                            break
+
+                misc_percentage = (new_materials_cost / miscellaneous_amount * 100) if miscellaneous_amount > 0 else 100
+
+                if misc_percentage > 40:
+                    # NEW materials cost >40% of miscellaneous - Route to TD
+                    next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
+                    next_approver = 'Technical Director'
+                    change_request.approval_required_from = next_role
+                    change_request.current_approver_role = next_role
+                    log.info(f"PM approved CR {cr_id} with NEW materials cost AED{new_materials_cost} >40% of miscellaneous ({misc_percentage:.2f}%), routing to TD")
+                else:
+                    # NEW materials cost ≤40% of miscellaneous - Route to Estimator
+                    next_role = CR_CONFIG.ROLE_ESTIMATOR
+                    next_approver = 'Estimator'
+                    change_request.approval_required_from = next_role
+                    change_request.current_approver_role = next_role
+                    log.info(f"PM approved CR {cr_id} with NEW materials cost AED{new_materials_cost} ≤40% of miscellaneous ({misc_percentage:.2f}%), routing to Estimator")
             else:
-                # Route to Estimator for low-value requests
+                # EXISTING MATERIALS: Always route to Estimator (no threshold check)
                 next_role = CR_CONFIG.ROLE_ESTIMATOR
                 next_approver = 'Estimator'
                 change_request.approval_required_from = next_role
                 change_request.current_approver_role = next_role
-                log.info(f"PM approved CR {cr_id} with {percentage:.2f}% overhead (≤40%), routing to Estimator")
+                log.info(f"PM approved CR {cr_id} with EXISTING materials, routing to Estimator")
 
             # Add to BOQ History - PM Approval
             existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()

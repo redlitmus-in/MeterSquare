@@ -71,15 +71,19 @@ const ExtraMaterialPage: React.FC = () => {
       const seRequests = (response.data.data || [])
         .filter((cr: any) => cr.requested_by_user_id === user?.user_id);
 
+      console.log('SE Requests:', seRequests.map(r => ({ cr_id: r.cr_id, status: r.status, current_approver: r.current_approver_role })));
+
       // Transform pending materials (status: 'pending' - not yet sent to PM)
       const filteredPending = seRequests
         .filter((cr: any) => cr.status === 'pending')
         .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
         .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
 
-      const transformedPending = filteredPending.flatMap((cr: any) => {
+      const transformedPending = filteredPending.map((cr: any) => {
         const materials = cr.materials_data || [];
-        return materials.map((mat: any) => ({
+        // Get first material for display, but keep all materials in the object
+        const firstMat = materials[0] || {};
+        return {
           id: cr.cr_id,
           project_id: cr.project_id,
           project_name: cr.project_name,
@@ -87,18 +91,20 @@ const ExtraMaterialPage: React.FC = () => {
           area_name: cr.area_name,
           boq_item_id: cr.item_id,
           boq_item_name: cr.item_name,
-          sub_item_id: mat.master_material_id,
-          sub_item_name: mat.material_name,
-          quantity: mat.quantity,
-          unit_rate: mat.unit_price,
-          total_cost: mat.total_price,
-          reason_for_new_sub_item: mat.reason,
+          sub_item_id: firstMat.master_material_id,
+          sub_item_name: firstMat.material_name,
+          quantity: firstMat.quantity,
+          unit_rate: firstMat.unit_price,
+          total_cost: materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0),
+          reason_for_new_sub_item: firstMat.reason,
           requested_by: cr.requested_by_name,
           overhead_percent: cr.percentage_of_item_overhead,
           status: cr.status,
           created_at: cr.created_at,
-          remarks: cr.justification
-        }));
+          remarks: cr.justification,
+          materials_count: materials.length,
+          all_materials: materials
+        };
       });
 
       // Transform under review materials (status: 'under_review' - sent to PM, waiting for approval)
@@ -107,9 +113,10 @@ const ExtraMaterialPage: React.FC = () => {
         .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
         .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
 
-      const transformedUnderReview = filteredUnderReview.flatMap((cr: any) => {
+      const transformedUnderReview = filteredUnderReview.map((cr: any) => {
         const materials = cr.materials_data || [];
-        return materials.map((mat: any) => ({
+        const firstMat = materials[0] || {};
+        return {
           id: cr.cr_id,
           project_id: cr.project_id,
           project_name: cr.project_name,
@@ -117,30 +124,36 @@ const ExtraMaterialPage: React.FC = () => {
           area_name: cr.area_name,
           boq_item_id: cr.item_id,
           boq_item_name: cr.item_name,
-          sub_item_id: mat.master_material_id,
-          sub_item_name: mat.material_name,
-          quantity: mat.quantity,
-          unit_rate: mat.unit_price,
-          total_cost: mat.total_price,
-          reason_for_new_sub_item: mat.reason,
+          sub_item_id: firstMat.master_material_id,
+          sub_item_name: firstMat.material_name,
+          quantity: firstMat.quantity,
+          unit_rate: firstMat.unit_price,
+          total_cost: materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0),
+          reason_for_new_sub_item: firstMat.reason,
           requested_by: cr.requested_by_name,
           overhead_percent: cr.percentage_of_item_overhead,
           status: cr.status,
           created_at: cr.created_at,
-          remarks: cr.justification
-        }));
+          remarks: cr.justification,
+          materials_count: materials.length,
+          all_materials: materials
+        };
       });
 
       // Transform approved materials (only SE's own approved requests WITHOUT purchase completion)
       const filteredApproved = seRequests
-        .filter((cr: any) => cr.status === 'approved' && !cr.purchase_completion_date)
+        .filter((cr: any) => {
+          const approvedStatuses = ['approved', 'approved_by_pm', 'approved_by_estimator', 'approved_by_td', 'assigned_to_buyer'];
+          return approvedStatuses.includes(cr.status) && !cr.purchase_completion_date;
+        })
         .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
         .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea))
         .filter((cr: any) => !filterItem || cr.item_id === filterItem);
 
-      const transformedApproved = filteredApproved.flatMap((cr: any) => {
+      const transformedApproved = filteredApproved.map((cr: any) => {
         const materials = cr.materials_data || [];
-        return materials.map((mat: any) => ({
+        const firstMat = materials[0] || {};
+        return {
           id: cr.cr_id,
           project_id: cr.project_id,
           project_name: cr.project_name,
@@ -148,18 +161,20 @@ const ExtraMaterialPage: React.FC = () => {
           area_name: cr.area_name,
           boq_item_id: cr.item_id,
           boq_item_name: cr.item_name,
-          sub_item_id: mat.master_material_id,
-          sub_item_name: mat.material_name,
-          quantity: mat.quantity,
-          unit_rate: mat.unit_price,
-          total_cost: mat.total_price,
-          reason_for_new_sub_item: mat.reason,
+          sub_item_id: firstMat.master_material_id,
+          sub_item_name: firstMat.material_name,
+          quantity: firstMat.quantity,
+          unit_rate: firstMat.unit_price,
+          total_cost: materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0),
+          reason_for_new_sub_item: firstMat.reason,
           requested_by: cr.requested_by_name,
           overhead_percent: cr.percentage_of_item_overhead,
           status: cr.status,
           created_at: cr.created_at,
-          remarks: cr.justification
-        }));
+          remarks: cr.justification,
+          materials_count: materials.length,
+          all_materials: materials
+        };
       });
 
       // Transform rejected materials (only SE's own rejected requests)
@@ -168,9 +183,10 @@ const ExtraMaterialPage: React.FC = () => {
         .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
         .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
 
-      const transformedRejected = filteredRejected.flatMap((cr: any) => {
+      const transformedRejected = filteredRejected.map((cr: any) => {
         const materials = cr.materials_data || [];
-        return materials.map((mat: any) => ({
+        const firstMat = materials[0] || {};
+        return {
           id: cr.cr_id,
           project_id: cr.project_id,
           project_name: cr.project_name,
@@ -178,12 +194,12 @@ const ExtraMaterialPage: React.FC = () => {
           area_name: cr.area_name,
           boq_item_id: cr.item_id,
           boq_item_name: cr.item_name,
-          sub_item_id: mat.master_material_id,
-          sub_item_name: mat.material_name,
-          quantity: mat.quantity,
-          unit_rate: mat.unit_price,
-          total_cost: mat.total_price,
-          reason_for_new_sub_item: mat.reason,
+          sub_item_id: firstMat.master_material_id,
+          sub_item_name: firstMat.material_name,
+          quantity: firstMat.quantity,
+          unit_rate: firstMat.unit_price,
+          total_cost: materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0),
+          reason_for_new_sub_item: firstMat.reason,
           requested_by: cr.requested_by_name,
           overhead_percent: cr.percentage_of_item_overhead,
           status: cr.status,
@@ -191,8 +207,10 @@ const ExtraMaterialPage: React.FC = () => {
           remarks: cr.justification,
           rejection_reason: cr.rejection_reason,
           rejected_by: cr.rejected_by_name,
-          rejected_at: cr.rejected_at_stage
-        }));
+          rejected_at: cr.rejected_at_stage,
+          materials_count: materials.length,
+          all_materials: materials
+        };
       });
 
       // Transform completed materials (purchase completed by buyer - status is 'purchase_completed')
@@ -201,9 +219,10 @@ const ExtraMaterialPage: React.FC = () => {
         .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
         .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
 
-      const transformedCompleted = filteredCompleted.flatMap((cr: any) => {
+      const transformedCompleted = filteredCompleted.map((cr: any) => {
         const materials = cr.materials_data || [];
-        return materials.map((mat: any) => ({
+        const firstMat = materials[0] || {};
+        return {
           id: cr.cr_id,
           project_id: cr.project_id,
           project_name: cr.project_name,
@@ -211,20 +230,22 @@ const ExtraMaterialPage: React.FC = () => {
           area_name: cr.area_name,
           boq_item_id: cr.item_id,
           boq_item_name: cr.item_name,
-          sub_item_id: mat.master_material_id,
-          sub_item_name: mat.material_name,
-          quantity: mat.quantity,
-          unit_rate: mat.unit_price,
-          total_cost: mat.total_price,
-          reason_for_new_sub_item: mat.reason,
+          sub_item_id: firstMat.master_material_id,
+          sub_item_name: firstMat.material_name,
+          quantity: firstMat.quantity,
+          unit_rate: firstMat.unit_price,
+          total_cost: materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0),
+          reason_for_new_sub_item: firstMat.reason,
           requested_by: cr.requested_by_name,
           overhead_percent: cr.percentage_of_item_overhead,
           status: cr.status,
           created_at: cr.created_at,
           remarks: cr.justification,
           purchase_completed_by: cr.purchase_completed_by_name,
-          purchase_completion_date: cr.purchase_completion_date
-        }));
+          purchase_completion_date: cr.purchase_completion_date,
+          materials_count: materials.length,
+          all_materials: materials
+        };
       });
 
       return {
@@ -344,10 +365,32 @@ const ExtraMaterialPage: React.FC = () => {
     }
   };
 
-  const handleEdit = (requestId: number) => {
-    // For now, show a toast - full edit functionality would require edit modal
-    toast.info('Edit functionality coming soon');
-    // TODO: Implement edit modal with pre-filled form
+  const handleEdit = async (requestId: number) => {
+    try {
+      // Fetch the change request details
+      const response = await axios.get(`${API_URL}/change-request/${requestId}`, { headers });
+
+      if (response.data && response.data.data) {
+        const cr = response.data.data;
+
+        // Set the selected request for editing
+        setSelectedRequest({
+          ...cr,
+          editMode: true,
+          cr_id: requestId
+        });
+
+        // Open the form
+        setShowForm(true);
+
+        toast.info('Loading change request for editing...');
+      } else {
+        toast.error('Failed to load change request');
+      }
+    } catch (error) {
+      console.error('Error loading change request for edit:', error);
+      toast.error('Failed to load change request');
+    }
   };
 
   const handleSendToPM = async (requestId: number) => {
@@ -541,6 +584,9 @@ const ExtraMaterialPage: React.FC = () => {
                         <div>
                           <p className="text-xs text-gray-500">Sub-Item</p>
                           <p className="font-medium">{request.sub_item_name}</p>
+                          {request.materials_count > 1 && (
+                            <p className="text-xs text-purple-600 mt-1">+ {request.materials_count - 1} more material(s)</p>
+                          )}
                         </div>
                         <div className="flex justify-between pt-2 border-t">
                           <div>
@@ -571,7 +617,7 @@ const ExtraMaterialPage: React.FC = () => {
                             className="bg-[#243d8a] hover:bg-[#1e3270] text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
                           >
                             <PaperAirplaneIcon className="w-4 h-4" />
-                            Send
+                            Send to PM
                           </button>
                         </div>
                       </div>
@@ -1310,12 +1356,23 @@ const ExtraMaterialPage: React.FC = () => {
               className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
             >
               <div className="sticky top-0 bg-white border-b px-6 py-4">
-                <h2 className="text-xl font-semibold text-gray-900">Request Material Purchase</h2>
+                <h2 className="text-xl font-semibold text-gray-900">
+                  {selectedRequest?.editMode ? 'Edit Material Purchase Request' : 'Request Material Purchase'}
+                </h2>
               </div>
               <div className="p-6">
                 <ExtraMaterialForm
-                  onSubmit={handleSubmitExtraMaterial}
-                  onCancel={() => setShowForm(false)}
+                  onSubmit={selectedRequest?.editMode ? undefined : handleSubmitExtraMaterial}
+                  onCancel={() => {
+                    setShowForm(false);
+                    setSelectedRequest(null);
+                  }}
+                  onSuccess={() => {
+                    setShowForm(false);
+                    setSelectedRequest(null);
+                    refetch();
+                  }}
+                  initialData={selectedRequest}
                 />
               </div>
             </motion.div>

@@ -70,9 +70,11 @@ interface ExtraMaterialFormProps {
   onSubmit?: (data: any) => Promise<void>;
   onCancel?: () => void;
   onClose?: () => void;  // Support for PM's ChangeRequestsPage
+  onSuccess?: () => void;  // Called after successful create/update
+  initialData?: any;  // For editing existing change requests
 }
 
-const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCancel, onClose }) => {
+const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCancel, onClose, onSuccess, initialData }) => {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -117,6 +119,77 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   useEffect(() => {
     fetchAssignedProjects();
   }, []);
+
+  // Handle editing mode - pre-fill form with initialData
+  useEffect(() => {
+    if (initialData && initialData.editMode && projects.length > 0) {
+      console.log('Edit mode - initialData:', initialData);
+
+      // Find and select the project
+      const project = projects.find(p => p.project_id === initialData.project_id);
+      if (project) {
+        setSelectedProject(project);
+
+        // Find the area and BOQ - need to search through all areas
+        let foundArea = null;
+        let foundBoq = null;
+
+        for (const area of project.areas || []) {
+          const boq = area.boqs?.find(b => b.boq_id === initialData.boq_id);
+          if (boq) {
+            foundArea = area;
+            foundBoq = boq;
+            break;
+          }
+        }
+
+        if (foundArea && foundBoq) {
+          setSelectedArea(foundArea);
+          setSelectedBoq(foundBoq);
+
+          // Find and select the item
+          const item = foundBoq.items?.find(i => String(i.item_id) === String(initialData.item_id));
+          if (item) {
+            setSelectedItem(item);
+
+            // Find the sub-item from sub_items_data
+            if (initialData.sub_items_data && initialData.sub_items_data.length > 0) {
+              const firstSubItem = initialData.sub_items_data[0];
+              const subItem = item.sub_items?.find(si =>
+                si.sub_item_id === firstSubItem.sub_item_id ||
+                si.sub_item_name === firstSubItem.sub_item_name
+              );
+              if (subItem) {
+                setSelectedSubItem(subItem);
+              }
+            }
+
+            // Pre-fill justification and remarks
+            setJustification(initialData.justification || '');
+            setRemarks(initialData.remarks || '');
+
+            // Pre-fill materials using sub_items_data
+            if (initialData.sub_items_data && Array.isArray(initialData.sub_items_data)) {
+              const transformedMaterials = initialData.sub_items_data.map((mat: any, index: number) => ({
+                id: `material-edit-${index}`,
+                isNew: mat.is_new || mat.master_material_id === null,
+                subItemId: mat.sub_item_id || '',
+                subItemName: mat.sub_item_name || mat.material_name || '',
+                materialId: mat.master_material_id,
+                materialName: mat.material_name,
+                quantity: mat.quantity || 0,
+                unit: mat.unit || 'nos',
+                unitRate: mat.unit_price || 0,
+                reasonForNew: mat.reason || '',
+                justification: mat.justification || initialData.justification || ''
+              }));
+              setMaterials(transformedMaterials);
+            }
+          }
+        }
+      }
+    }
+  }, [initialData, projects]);
 
   // Fetch item overhead and existing requests when item is selected
   useEffect(() => {
@@ -473,9 +546,49 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     try {
       setLoading(true);
 
+      // Check if we're in edit mode
+      const isEditMode = initialData && initialData.editMode && initialData.cr_id;
+
       // SINGLE submission path - use onSubmit if provided, otherwise direct API call
       if (onSubmit) {
         await onSubmit(payload);
+      } else if (isEditMode) {
+        // Edit mode - update existing change request
+        const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+        const token = localStorage.getItem('access_token');
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+        const updatePayload = {
+          boq_id: selectedBoq.boq_id,
+          item_id: selectedItem?.item_id || null,
+          item_name: selectedItem?.item_name || null,
+          justification: justification || remarks,
+          remarks: remarks,
+          materials: materials.map(mat => ({
+            material_name: mat.materialName,
+            sub_item_id: mat.subItemId,
+            sub_item_name: mat.subItemName,
+            quantity: mat.quantity,
+            unit: mat.unit,
+            unit_price: mat.unitRate,
+            master_material_id: mat.isNew ? null : mat.materialId,
+            reason: mat.isNew ? mat.reasonForNew : null,
+            justification: mat.justification
+          }))
+        };
+
+        const response = await axios.put(
+          `${API_URL}/change-request/${initialData.cr_id}`,
+          updatePayload,
+          { headers }
+        );
+
+        if (response.data.success || response.data.data) {
+          toast.success('Change request updated successfully');
+          if (onSuccess) onSuccess();
+          if (onCancel) onCancel();
+          if (onClose) onClose();
+        }
       } else if (onClose) {
         // For PM's ChangeRequestsPage - submit directly here
         const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
@@ -1019,7 +1132,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                     </div>
                   )}
 
-                  <div className={`grid ${isSiteEngineer ? 'grid-cols-2' : 'grid-cols-3'} gap-3 mt-3`}>
+                  <div className="grid grid-cols-3 gap-3 mt-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Quantity <span className="text-red-500">*</span>
@@ -1049,30 +1162,29 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         className={`w-full px-3 py-2 border border-gray-300 rounded-lg ${
                           material.isNew ? 'focus:ring-2 focus:ring-purple-500' : 'bg-gray-100 cursor-not-allowed'
                         }`}
-                        placeholder={material.isNew ? "e.g., kg, m²" : ""}
+                        placeholder={material.isNew ? "e.g., kg, m², nos" : ""}
                         readOnly={!material.isNew}
                         disabled={!material.isNew}
                       />
                     </div>
-                    {!isSiteEngineer && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Unit Rate (AED) {material.isNew && <span className="text-red-500">*</span>}
-                        </label>
-                        <input
-                          type="number"
-                          value={material.unitRate}
-                          onChange={(e) => material.isNew && updateMaterial(material.id, { unitRate: parseFloat(e.target.value) || 0 })}
-                          className={`w-full px-3 py-2 border border-gray-300 rounded-lg ${
-                            material.isNew ? 'focus:ring-2 focus:ring-purple-500' : 'bg-gray-100 cursor-not-allowed'
-                          }`}
-                          min="0.01"
-                          step="0.01"
-                          readOnly={!material.isNew}
-                          disabled={!material.isNew}
-                        />
-                      </div>
-                    )}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Unit Rate (AED) {material.isNew && <span className="text-red-500">*</span>}
+                      </label>
+                      <input
+                        type="number"
+                        value={material.unitRate}
+                        onChange={(e) => updateMaterial(material.id, { unitRate: parseFloat(e.target.value) || 0 })}
+                        className={`w-full px-3 py-2 border border-gray-300 rounded-lg ${
+                          material.isNew ? 'focus:ring-2 focus:ring-purple-500' : 'bg-gray-100 cursor-not-allowed'
+                        }`}
+                        min="0.01"
+                        step="0.01"
+                        placeholder={material.isNew ? "Enter rate" : ""}
+                        readOnly={!material.isNew}
+                        disabled={!material.isNew}
+                      />
+                    </div>
                   </div>
 
                   {!isSiteEngineer && (
@@ -1247,9 +1359,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           type="submit"
           disabled={loading || isSubmitting || !selectedItem || !selectedSubItem || materials.length === 0 || calculations.availableAfter < 0}
           className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
-          title={calculations.availableAfter < 0 ? 'Cannot submit - Budget exceeded' : isSubmitting ? 'Creating purchase request...' : ''}
+          title={calculations.availableAfter < 0 ? 'Cannot submit - Budget exceeded' : isSubmitting ? (initialData?.editMode ? 'Updating...' : 'Creating purchase request...') : ''}
         >
-          {loading || isSubmitting ? 'Creating...' : 'Create Purchase Request'}
+          {loading || isSubmitting ? (initialData?.editMode ? 'Updating...' : 'Creating...') : (initialData?.editMode ? 'Update Purchase Request' : 'Create Purchase Request')}
         </button>
       </div>
     </form>

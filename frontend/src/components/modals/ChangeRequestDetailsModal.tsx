@@ -501,7 +501,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
             {/* Hide footer completely if in accepted/final state */}
             {!(isFinalStatus || isApprovedAndSentForward) && (
               <div className="border-t border-gray-200 px-4 sm:px-6 py-3 sm:py-4 bg-gray-50 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3">
-                {canSendForReview && (
+                {/* {canSendForReview && (
                   <button
                     onClick={handleSendForReview}
                     disabled={sendingForReview}
@@ -519,8 +519,8 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       </>
                     )}
                   </button>
-                )}
-                {canEdit && (
+                )} */}
+                {/* {canEdit && (
                   <button
                     onClick={() => {
                       if (onEdit) {
@@ -534,7 +534,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                     <Edit className="w-4 h-4" />
                     Edit Request
                   </button>
-                )}
+                )} */}
                 {canApproveReject ? (
                   <>
                     <button
