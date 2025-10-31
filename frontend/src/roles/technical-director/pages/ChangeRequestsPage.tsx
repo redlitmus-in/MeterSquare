@@ -39,6 +39,7 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import ApprovalWithBuyerModal from '@/components/modals/ApprovalWithBuyerModal';
+import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
 import VendorSelectionModal from '@/roles/buyer/components/VendorSelectionModal';
 import { useAuthStore } from '@/store/authStore';
 import { permissions } from '@/utils/rolePermissions';
@@ -64,6 +65,8 @@ const ChangeRequestsPage: React.FC = () => {
   const [vendorDetails, setVendorDetails] = useState<Vendor | null>(null);
   const [vendorProducts, setVendorProducts] = useState<VendorProduct[]>([]);
   const [loadingVendorDetails, setLoadingVendorDetails] = useState(false);
+  const [showRejectionModal, setShowRejectionModal] = useState(false);
+  const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
 
   // Fetch change requests and vendor approvals from backend - Auto-refresh every 2 seconds
   useEffect(() => {
@@ -191,14 +194,20 @@ const ChangeRequestsPage: React.FC = () => {
   };
 
   const handleReject = async (crId: number) => {
-    const reason = prompt('Please provide a reason for rejection:');
-    if (!reason) return;
+    setRejectingCrId(crId);
+    setShowRejectionModal(true);
+  };
+
+  const handleRejectionSubmit = async (reason: string) => {
+    if (!rejectingCrId) return;
 
     try {
-      const response = await changeRequestService.reject(crId, reason);
+      const response = await changeRequestService.reject(rejectingCrId, reason);
       if (response.success) {
         toast.success('Change request rejected');
         loadChangeRequests();
+        setShowRejectionModal(false);
+        setRejectingCrId(null);
       } else {
         toast.error(response.message);
       }
@@ -251,22 +260,9 @@ const ChangeRequestsPage: React.FC = () => {
 
   const handleRejectFromModal = async () => {
     if (!selectedChangeRequest) return;
-    const reason = prompt('Please provide a reason for rejection:');
-    if (!reason) return;
-
-    try {
-      const response = await changeRequestService.reject(selectedChangeRequest.cr_id, reason);
-      if (response.success) {
-        toast.success('Change request rejected');
-        loadChangeRequests();
-        setShowDetailsModal(false);
-        setSelectedChangeRequest(null);
-      } else {
-        toast.error(response.message);
-      }
-    } catch (error) {
-      toast.error('Failed to reject change request');
-    }
+    setShowDetailsModal(false);
+    setRejectingCrId(selectedChangeRequest.cr_id);
+    setShowRejectionModal(true);
   };
 
   // Mock data for backwards compatibility - will be replaced with real data
@@ -1394,6 +1390,18 @@ const ChangeRequestsPage: React.FC = () => {
           }}
         />
       )}
+
+      {/* Rejection Reason Modal */}
+      <RejectionReasonModal
+        isOpen={showRejectionModal}
+        onClose={() => {
+          setShowRejectionModal(false);
+          setRejectingCrId(null);
+          setSelectedChangeRequest(null);
+        }}
+        onSubmit={handleRejectionSubmit}
+        title="Reject Change Request"
+      />
     </div>
   );
 };

@@ -354,17 +354,19 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
   // Computed fields
   const calculations = useMemo(() => {
-    // Only calculate cost for newly added materials, not existing sub-items
+    // Calculate total cost of ALL materials (for display purposes)
     const totalCost = materials.reduce((sum, mat) =>
       sum + (mat.quantity * mat.unitRate), 0
     );
 
-    // For overhead calculation, we need to consider what's already consumed
-    // and only add the new materials cost
-    const newMaterialsCost = totalCost;
+    // Calculate cost of ONLY NEW materials (for 40% threshold calculation)
+    // This excludes existing materials (where isNew === false)
+    const newMaterialsCost = materials.reduce((sum, mat) =>
+      mat.isNew ? sum + (mat.quantity * mat.unitRate) : sum, 0
+    );
 
-    // Calculate the overhead percentage based on the new materials only
-    // This represents the additional overhead consumption
+    // Calculate the overhead percentage based on NEW materials ONLY
+    // This represents the additional overhead consumption for threshold routing
     const overheadPercentage = itemOverhead && itemOverhead.allocated > 0
       ? (newMaterialsCost / itemOverhead.allocated * 100)
       : 0;
@@ -377,8 +379,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     const exceeds40Percent = overheadPercentage > 40;
 
     return {
-      totalCost: newMaterialsCost,
-      overheadPercentage,
+      totalCost: totalCost,  // Total cost of ALL materials (existing + new)
+      newMaterialsCost: newMaterialsCost,  // Cost of NEW materials ONLY
+      overheadPercentage,  // Percentage based on NEW materials only
       availableAfter,
       exceeds40Percent,
       routingPath: exceeds40Percent
@@ -1255,12 +1258,14 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           {/* Materials breakdown if multiple */}
           {materials.length > 1 && (
             <div className="mb-3 pb-3 border-b border-gray-200">
-              <p className="text-sm text-gray-600 mb-2">New Materials to be Added:</p>
+              <p className="text-sm text-gray-600 mb-2">All Materials to be Added:</p>
               <div className="space-y-1">
                 {materials.map((mat, idx) => (
                   <div key={mat.id} className="flex justify-between text-sm">
                     <span className="text-gray-600">
                       {idx + 1}. {mat.materialName} ({mat.quantity} {mat.unit})
+                      {!mat.isNew && <span className="ml-2 text-xs text-blue-600">(Existing)</span>}
+                      {mat.isNew && <span className="ml-2 text-xs text-green-600">(New)</span>}
                     </span>
                     {!isSiteEngineer && <span className="text-gray-900">AED{(mat.quantity * mat.unitRate).toLocaleString()}</span>}
                   </div>
@@ -1272,8 +1277,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           <div className="grid grid-cols-2 gap-4 text-sm">
             {!isSiteEngineer && (
               <div>
-                <p className="text-gray-600">Additional Cost</p>
+                <p className="text-gray-600">Additional Cost (Total)</p>
                 <p className="font-semibold text-gray-900">AED{calculations.totalCost.toLocaleString()}</p>
+                {calculations.totalCost !== calculations.newMaterialsCost && (
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    New materials: AED{calculations.newMaterialsCost.toLocaleString()}
+                  </p>
+                )}
               </div>
             )}
             <div>
@@ -1283,6 +1293,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
               </p>
               <p className="text-xs text-gray-500 mt-0.5">
                 {calculations.exceeds40Percent ? '> 40% threshold' : '≤ 40% threshold'}
+              </p>
+              <p className="text-xs text-blue-600 mt-0.5">
+                Based on NEW materials only
               </p>
             </div>
             {!isSiteEngineer && (

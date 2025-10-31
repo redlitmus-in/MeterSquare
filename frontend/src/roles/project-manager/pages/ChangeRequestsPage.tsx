@@ -97,9 +97,15 @@ const ChangeRequestsPage: React.FC = () => {
 
   const handleApprove = async (crId: number) => {
     try {
+      // Find the request to show routing info
+      const request = changeRequests.find(r => r.cr_id === crId);
+      const overheadPercent = request?.percentage_of_item_overhead || 0;
+
       const response = await changeRequestService.approve(crId, 'Approved by PM');
       if (response.success) {
-        toast.success(response.message || 'Change request approved successfully');
+        // Enhanced message showing where request is being routed based on backend logic
+        const routedTo = overheadPercent > 40 ? 'Technical Director' : 'Estimator';
+        toast.success(response.message || `Approved! Forwarded to ${routedTo} (${overheadPercent.toFixed(1)}% overhead)`);
         refetch(); // Trigger background refresh
       } else {
         toast.error(response.message);
@@ -972,10 +978,15 @@ const ChangeRequestsPage: React.FC = () => {
                             <div className="grid grid-cols-2 gap-2">
                               <button
                                 onClick={() => handleApprove(request.cr_id)}
-                                className="bg-green-600 hover:bg-green-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                className="bg-green-600 hover:bg-green-700 text-white text-xs h-9 rounded transition-all flex flex-col items-center justify-center font-semibold"
                               >
-                                <Check className="h-4 w-4" />
-                                <span>Approve</span>
+                                <div className="flex items-center gap-1">
+                                  <Check className="h-3.5 w-3.5" />
+                                  <span>Approve</span>
+                                </div>
+                                <span className="text-[9px] opacity-80">
+                                  → {(request.percentage_of_item_overhead || 0) > 40 ? 'TD' : 'Est'}
+                                </span>
                               </button>
                               <button
                                 onClick={() => handleReject(request.cr_id)}

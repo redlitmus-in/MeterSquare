@@ -157,10 +157,18 @@ def create_change_request():
                     item_name = itm.get('item_name', '')
                     break
 
-        # Calculate percentage of item overhead
+        # Calculate percentage of item overhead - ONLY for NEW materials
+        # Separate NEW materials from EXISTING materials for threshold calculation
+        new_materials_cost = 0.0
+        for mat in materials_data:
+            # New material if master_material_id is None
+            if mat.get('master_material_id') is None:
+                new_materials_cost += mat.get('total_price', 0)
+
         percentage_of_item_overhead = 0.0
         if overhead_impact['original_overhead_allocated'] > 0:
-            percentage_of_item_overhead = (materials_total_cost / overhead_impact['original_overhead_allocated']) * 100
+            # Calculate percentage based on NEW materials ONLY
+            percentage_of_item_overhead = (new_materials_cost / overhead_impact['original_overhead_allocated']) * 100
 
         # DUPLICATE DETECTION: Check for similar requests within last 30 seconds
         # This prevents accidental double-clicks and form re-submissions
@@ -861,64 +869,26 @@ def approve_change_request(cr_id):
             change_request.pm_approval_date = datetime.utcnow()
             change_request.status = CR_CONFIG.STATUS_APPROVED_BY_PM
 
-            # Check if this request contains NEW materials (not from existing BOQ)
-            has_new_materials = False
-            if change_request.materials_data:
-                for mat in change_request.materials_data:
-                    # New material if master_material_id is None
-                    if mat.get('master_material_id') is None:
-                        has_new_materials = True
-                        break
-
-            # Determine next approver
+            # Determine next approver based on percentage_of_item_overhead
+            # This percentage represents: (materials_total_cost / overhead_allocated) * 100
             percentage = change_request.percentage_of_item_overhead or 0
 
-            if has_new_materials:
-                # NEW MATERIALS: Apply 40% threshold against miscellaneous amount
-                # Calculate cost of ONLY NEW materials (not total cost)
-                new_materials_cost = 0
-                if change_request.materials_data:
-                    for mat in change_request.materials_data:
-                        if mat.get('master_material_id') is None:
-                            new_materials_cost += mat.get('total_price', 0)
+            log.info(f"PM approval routing: CR {cr_id} has percentage_of_item_overhead={percentage:.2f}%")
 
-                # Get miscellaneous amount from BOQ item
-                boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
-                miscellaneous_amount = 0
-
-                if boq_details:
-                    boq_json = boq_details.boq_details or {}
-                    items = boq_json.get('items', [])
-                    for item in items:
-                        item_id = item.get('master_item_id') or f"item_{change_request.boq_id}_{items.index(item) + 1}"
-                        if str(item_id) == str(change_request.item_id):
-                            miscellaneous_amount = item.get('miscellaneous_amount', 0)
-                            break
-
-                misc_percentage = (new_materials_cost / miscellaneous_amount * 100) if miscellaneous_amount > 0 else 100
-
-                log.info(f"PM approval routing calculation: NEW materials cost={new_materials_cost}, miscellaneous_amount={miscellaneous_amount}, percentage={misc_percentage:.2f}%")
-
-                if misc_percentage > 40:
-                    # NEW materials cost >40% of miscellaneous - Route to TD
-                    next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
-                    next_approver = 'Technical Director'
-                    log.info(f"PM approved CR {cr_id}: NEW materials {misc_percentage:.2f}% > 40% → Routing to TD")
-                else:
-                    # NEW materials cost ≤40% of miscellaneous - Route to Estimator
-                    next_role = CR_CONFIG.ROLE_ESTIMATOR
-                    next_approver = 'Estimator'
-                    log.info(f"PM approved CR {cr_id}: NEW materials {misc_percentage:.2f}% ≤ 40% → Routing to Estimator")
-
-                change_request.approval_required_from = next_role
-                change_request.current_approver_role = next_role
+            # Apply 40% threshold for routing decision
+            if percentage > 40:
+                # Overhead >40% - Route to Technical Director
+                next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
+                next_approver = 'Technical Director'
+                log.info(f"PM approved CR {cr_id}: {percentage:.2f}% > 40% → Routing to TD")
             else:
-                # EXISTING MATERIALS: Always route to Estimator (no threshold check)
+                # Overhead ≤40% - Route to Estimator
                 next_role = CR_CONFIG.ROLE_ESTIMATOR
                 next_approver = 'Estimator'
-                change_request.approval_required_from = next_role
-                change_request.current_approver_role = next_role
-                log.info(f"PM approved CR {cr_id} with EXISTING materials, routing to Estimator")
+                log.info(f"PM approved CR {cr_id}: {percentage:.2f}% ≤ 40% → Routing to Estimator")
+
+            change_request.approval_required_from = next_role
+            change_request.current_approver_role = next_role
 
             # Add to BOQ History - PM Approval
             existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
