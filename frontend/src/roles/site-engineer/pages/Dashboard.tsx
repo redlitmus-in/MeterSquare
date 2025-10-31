@@ -1,5 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import Highcharts from 'highcharts';
+import HighchartsReact from 'highcharts-react-official';
 import {
   BuildingOfficeIcon,
   ClockIcon,
@@ -59,19 +61,19 @@ const Dashboard: React.FC = () => {
       title: 'Assigned Projects',
       value: stats.assigned_projects,
       icon: ClockIcon,
-      color: 'from-orange-500 to-orange-600',
-      bgColor: 'bg-orange-50',
-      borderColor: 'border-orange-200',
-      textColor: 'text-orange-900'
+      color: 'from-red-500 to-rose-600',
+      bgColor: 'bg-red-50',
+      borderColor: 'border-red-200',
+      textColor: 'text-red-900'
     },
     {
       title: 'Ongoing Projects',
       value: stats.ongoing_projects,
       icon: ChartBarIcon,
-      color: 'from-purple-500 to-purple-600',
-      bgColor: 'bg-purple-50',
-      borderColor: 'border-purple-200',
-      textColor: 'text-purple-900'
+      color: 'from-indigo-500 to-indigo-600',
+      bgColor: 'bg-indigo-50',
+      borderColor: 'border-indigo-200',
+      textColor: 'text-indigo-900'
     },
     {
       title: 'Completed Projects',
@@ -84,14 +86,186 @@ const Dashboard: React.FC = () => {
     }
   ];
 
+  // Chart configurations
+  const projectStatusChart = {
+    chart: {
+      type: 'pie',
+      backgroundColor: 'transparent',
+      height: 300
+    },
+    title: {
+      text: 'Project Status',
+      align: 'center',
+      style: {
+        fontSize: '16px',
+        fontWeight: 'bold',
+        color: '#1f2937'
+      }
+    },
+    series: [{
+      name: 'Projects',
+      data: [
+        { name: 'Assigned', y: stats.assigned_projects || 0, color: '#ef4444' },
+        { name: 'Ongoing', y: stats.ongoing_projects || 0, color: '#6366f1' },
+        { name: 'Completed', y: stats.completed_projects || 0, color: '#10b981' }
+      ]
+    }],
+    plotOptions: {
+      pie: {
+        innerSize: '60%',
+        dataLabels: {
+          enabled: true,
+          distance: 20,
+          format: '{point.name}: {point.y}',
+          style: {
+            fontSize: '13px',
+            fontWeight: '600',
+            textOutline: 'none'
+          }
+        }
+      }
+    },
+    credits: { enabled: false },
+    legend: {
+      enabled: false
+    }
+  };
+
+  const projectTrendChart = {
+    chart: {
+      type: 'column',
+      backgroundColor: 'transparent',
+      height: 300
+    },
+    title: {
+      text: 'Project Overview',
+      align: 'center',
+      style: {
+        fontSize: '16px',
+        fontWeight: 'bold',
+        color: '#1f2937'
+      }
+    },
+    xAxis: {
+      categories: ['Total', 'Assigned', 'Ongoing', 'Completed'],
+      labels: {
+        style: {
+          fontSize: '11px',
+          color: '#6b7280'
+        }
+      }
+    },
+    yAxis: {
+      title: {
+        text: 'Count',
+        style: {
+          fontSize: '12px',
+          color: '#6b7280'
+        }
+      },
+      labels: {
+        style: {
+          fontSize: '11px',
+          color: '#6b7280'
+        }
+      }
+    },
+    series: [{
+      name: 'Projects',
+      data: [
+        stats.total_projects,
+        stats.assigned_projects,
+        stats.ongoing_projects,
+        stats.completed_projects
+      ],
+      color: '#3b82f6'
+    }],
+    plotOptions: {
+      column: {
+        borderRadius: 5,
+        dataLabels: { enabled: false }
+      }
+    },
+    legend: {
+      enabled: false
+    },
+    credits: { enabled: false }
+  };
+
+  const progressChart = {
+    chart: {
+      type: 'bar',
+      backgroundColor: 'transparent',
+      height: 300
+    },
+    title: {
+      text: 'Project Progress',
+      align: 'center',
+      style: {
+        fontSize: '16px',
+        fontWeight: 'bold',
+        color: '#1f2937'
+      }
+    },
+    xAxis: {
+      categories: ['Completion Rate'],
+      labels: {
+        style: {
+          fontSize: '11px',
+          color: '#6b7280'
+        }
+      }
+    },
+    yAxis: {
+      min: 0,
+      max: 100,
+      title: {
+        text: 'Percentage',
+        style: {
+          fontSize: '12px',
+          color: '#6b7280'
+        }
+      },
+      labels: {
+        style: {
+          fontSize: '11px',
+          color: '#6b7280'
+        }
+      }
+    },
+    series: [{
+      name: 'Completed',
+      data: [stats.total_projects > 0 ? (stats.completed_projects / stats.total_projects) * 100 : 0],
+      color: '#10b981'
+    }],
+    plotOptions: {
+      bar: {
+        borderRadius: 5,
+        dataLabels: {
+          enabled: true,
+          format: '{point.y:.0f}%'
+        }
+      }
+    },
+    legend: {
+      enabled: false
+    },
+    credits: { enabled: false }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Welcome back, {user?.full_name?.split(' ')[0] || 'Site Engineer'}!</h1>
-            <p className="text-sm sm:text-base text-gray-600 mt-2">Here's an overview of your projects</p>
+      {/* Header - Red Soft Gradient */}
+      <div className="bg-gradient-to-r from-red-500/10 to-rose-500/10 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
+              <ChartBarIcon className="w-6 h-6 text-red-600" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Welcome back, {user?.full_name?.split(' ')[0] || 'Site Engineer'}!</h1>
+              <p className="text-sm text-gray-600">Here's an overview of your projects</p>
+            </div>
           </div>
         </div>
       </div>
@@ -120,12 +294,39 @@ const Dashboard: React.FC = () => {
           ))}
         </div>
 
+        {/* Charts Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-8 mb-8">
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="bg-white rounded-xl shadow-md border border-gray-100 p-4"
+          >
+            <HighchartsReact highcharts={Highcharts} options={projectStatusChart} />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-xl shadow-md border border-gray-100 p-4"
+          >
+            <HighchartsReact highcharts={Highcharts} options={projectTrendChart} />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="bg-white rounded-xl shadow-md border border-gray-100 p-4"
+          >
+            <HighchartsReact highcharts={Highcharts} options={progressChart} />
+          </motion.div>
+        </div>
+
         {/* Quick Actions */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
-          className="mt-8 bg-white rounded-xl shadow-sm border border-gray-200 p-6"
+          className="bg-white rounded-xl shadow-sm border border-gray-200 p-6"
         >
           <h2 className="text-xl font-bold text-gray-900 mb-4">Quick Actions</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -141,12 +342,12 @@ const Dashboard: React.FC = () => {
             </a>
             <a
               href="/siteSupervisor/projects/ongoing"
-              className="flex items-center gap-3 p-4 rounded-lg bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 hover:shadow-md transition-all"
+              className="flex items-center gap-3 p-4 rounded-lg bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-200 hover:shadow-md transition-all"
             >
-              <ChartBarIcon className="w-6 h-6 text-purple-600" />
+              <ChartBarIcon className="w-6 h-6 text-indigo-600" />
               <div>
-                <p className="font-semibold text-purple-900">Track Progress</p>
-                <p className="text-xs text-purple-700">Monitor ongoing projects</p>
+                <p className="font-semibold text-indigo-900">Track Progress</p>
+                <p className="text-xs text-indigo-700">Monitor ongoing projects</p>
               </div>
             </a>
             <a

@@ -14,6 +14,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { buyerVendorService, Vendor } from '@/roles/buyer/services/buyerVendorService';
 import AddVendorModal from '@/components/buyer/AddVendorModal';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
 
@@ -121,8 +122,8 @@ const VendorManagement: React.FC = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading vendors...</p>
+          <ModernLoadingSpinners variant="pulse-wave" color="blue" />
+          <p className="text-gray-600 mt-4">Loading vendors...</p>
         </div>
       </div>
     );
@@ -136,7 +137,7 @@ const VendorManagement: React.FC = () => {
         animate={{ opacity: 1, y: 0 }}
         className="mb-8"
       >
-        <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 sm:p-8 border border-purple-200">
+        <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6 sm:p-8 border border-blue-200">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl sm:text-3xl font-bold mb-2 text-gray-800">
@@ -148,7 +149,7 @@ const VendorManagement: React.FC = () => {
             </div>
             <button
               onClick={handleAddVendor}
-              className="hidden sm:flex items-center gap-1.5 bg-purple-600 text-white px-4 py-2 text-sm rounded-lg hover:bg-purple-700 transition-colors shadow-md"
+              className="hidden sm:flex items-center gap-1.5 bg-[#243d8a] text-white px-4 py-2 text-sm rounded-lg hover:bg-[#1e3270] transition-colors shadow-md"
             >
               <PlusIcon className="w-4 h-4" />
               Add Vendor
@@ -173,7 +174,7 @@ const VendorManagement: React.FC = () => {
               placeholder="Search vendors..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#243d8a] focus:border-transparent"
             />
           </div>
 
@@ -182,7 +183,7 @@ const VendorManagement: React.FC = () => {
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#243d8a] focus:border-transparent bg-white"
             >
               <option value="">All Categories</option>
               {categories.map((cat) => (
@@ -196,7 +197,7 @@ const VendorManagement: React.FC = () => {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#243d8a] focus:border-transparent bg-white"
             >
               <option value="">All Status</option>
               <option value="active">Active</option>
@@ -234,7 +235,7 @@ const VendorManagement: React.FC = () => {
           {!searchTerm && !categoryFilter && !statusFilter && (
             <button
               onClick={handleAddVendor}
-              className="inline-flex items-center gap-2 bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors"
+              className="inline-flex items-center gap-2 bg-[#243d8a] text-white px-6 py-3 rounded-lg hover:bg-[#1e3270] transition-colors"
             >
               <PlusIcon className="w-5 h-5" />
               Add Your First Vendor
@@ -256,7 +257,7 @@ const VendorManagement: React.FC = () => {
                 <div className="flex-1">
                   <h3 className="text-lg font-bold text-gray-800 mb-1">{vendor.company_name}</h3>
                   {vendor.category && (
-                    <span className="inline-block px-3 py-1 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
+                    <span className="inline-block px-3 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
                       {vendor.category}
                     </span>
                   )}
@@ -302,7 +303,7 @@ const VendorManagement: React.FC = () => {
                 </button>
                 <button
                   onClick={() => handleEditVendor(vendor)}
-                  className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-xs bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors"
                 >
                   <PencilIcon className="w-3.5 h-3.5" />
                   Edit
@@ -323,7 +324,7 @@ const VendorManagement: React.FC = () => {
       {/* Mobile Add Button */}
       <button
         onClick={handleAddVendor}
-        className="sm:hidden fixed bottom-6 right-6 bg-purple-600 text-white p-3 rounded-full shadow-lg hover:bg-purple-700 transition-colors z-10"
+        className="sm:hidden fixed bottom-6 right-6 bg-[#243d8a] text-white p-3 rounded-full shadow-lg hover:bg-[#1e3270] transition-colors z-10"
         title="Add vendor"
       >
         <PlusIcon className="w-5 h-5" />

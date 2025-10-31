@@ -374,7 +374,7 @@ const ExtraMaterialPage: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
         >
-          <div className="bg-gradient-to-r from-orange-50 to-amber-50 rounded-2xl p-6 shadow-sm border border-orange-100">
+          <div className="bg-gradient-to-r from-red-500/10 to-rose-500/10 rounded-2xl p-6 shadow-sm border border-red-200">
             <div className="flex justify-between items-center">
               <div>
                 <h1 className="text-3xl font-bold text-gray-900 mb-2">Material Purchase</h1>
@@ -392,7 +392,7 @@ const ExtraMaterialPage: React.FC = () => {
                 onClick={() => setActiveTab('pending')}
                 className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === 'pending'
-                    ? 'border-orange-500 text-orange-600'
+                    ? 'border-red-600 text-red-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
@@ -405,7 +405,7 @@ const ExtraMaterialPage: React.FC = () => {
                 onClick={() => setActiveTab('request')}
                 className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === 'request'
-                    ? 'border-orange-500 text-orange-600'
+                    ? 'border-red-600 text-red-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
@@ -418,7 +418,7 @@ const ExtraMaterialPage: React.FC = () => {
                 onClick={() => setActiveTab('approved')}
                 className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === 'approved'
-                    ? 'border-orange-500 text-orange-600'
+                    ? 'border-red-600 text-red-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
@@ -431,7 +431,7 @@ const ExtraMaterialPage: React.FC = () => {
                 onClick={() => setActiveTab('rejected')}
                 className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === 'rejected'
-                    ? 'border-orange-500 text-orange-600'
+                    ? 'border-red-600 text-red-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
@@ -444,7 +444,7 @@ const ExtraMaterialPage: React.FC = () => {
                 onClick={() => setActiveTab('complete')}
                 className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === 'complete'
-                    ? 'border-orange-500 text-orange-600'
+                    ? 'border-red-600 text-red-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
@@ -461,7 +461,7 @@ const ExtraMaterialPage: React.FC = () => {
                 onClick={() => setViewMode('card')}
                 className={`p-2 rounded-lg transition-colors ${
                   viewMode === 'card'
-                    ? 'bg-orange-100 text-orange-600'
+                    ? 'bg-red-100 text-red-600'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
                 title="Card View"
@@ -472,7 +472,7 @@ const ExtraMaterialPage: React.FC = () => {
                 onClick={() => setViewMode('table')}
                 className={`p-2 rounded-lg transition-colors ${
                   viewMode === 'table'
-                    ? 'bg-orange-100 text-orange-600'
+                    ? 'bg-red-100 text-red-600'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
                 title="Table View"
@@ -495,7 +495,7 @@ const ExtraMaterialPage: React.FC = () => {
             <div className="mb-6 flex justify-end">
               <button
                 onClick={() => setShowForm(true)}
-                className="inline-flex items-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors shadow-md"
+                className="inline-flex items-center px-4 py-2 bg-[#243d8a] text-white rounded-lg hover:bg-[#1e3270] transition-colors shadow-md"
               >
                 <PlusIcon className="w-5 h-5 mr-2" />
                 NEW MATERIAL PURCHASE
@@ -506,7 +506,7 @@ const ExtraMaterialPage: React.FC = () => {
             {/* Pending List */}
             {loading ? (
               <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#243d8a]"></div>
               </div>
             ) : pendingMaterials.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
@@ -553,7 +553,7 @@ const ExtraMaterialPage: React.FC = () => {
                       <div className="space-y-2">
                         <button
                           onClick={() => handleViewDetails(request.id)}
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                          className="w-full bg-red-500 hover:bg-red-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
                         >
                           <EyeIcon className="w-4 h-4" />
                           View Details
@@ -568,7 +568,7 @@ const ExtraMaterialPage: React.FC = () => {
                           </button>
                           <button
                             onClick={() => handleSendToPM(request.id)}
-                            className="bg-orange-600 hover:bg-orange-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
+                            className="bg-[#243d8a] hover:bg-[#1e3270] text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
                           >
                             <PaperAirplaneIcon className="w-4 h-4" />
                             Send
@@ -630,7 +630,7 @@ const ExtraMaterialPage: React.FC = () => {
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleViewDetails(request.id)}
-                                className="text-blue-600 hover:text-blue-800 font-medium"
+                                className="text-red-600 hover:text-red-700 font-medium"
                               >
                                 <EyeIcon className="w-4 h-4 inline mr-1" />
                                 View
@@ -644,7 +644,7 @@ const ExtraMaterialPage: React.FC = () => {
                               </button>
                               <button
                                 onClick={() => handleSendToPM(request.id)}
-                                className="text-orange-600 hover:text-orange-800 font-medium"
+                                className="text-[#243d8a] hover:text-[#1e3270] font-medium"
                               >
                                 <PaperAirplaneIcon className="w-4 h-4 inline mr-1" />
                                 Send to PM
@@ -669,7 +669,7 @@ const ExtraMaterialPage: React.FC = () => {
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Sent for PM Approval</h2>
             {loading ? (
               <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#243d8a]"></div>
               </div>
             ) : underReviewMaterials.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
@@ -718,7 +718,7 @@ const ExtraMaterialPage: React.FC = () => {
 
                       <button
                         onClick={() => handleViewDetails(request.id)}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                        className="w-full bg-red-500 hover:bg-red-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
                       >
                         <EyeIcon className="w-4 h-4" />
                         View Details
@@ -789,7 +789,7 @@ const ExtraMaterialPage: React.FC = () => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
                             <button
                               onClick={() => handleViewDetails(request.id)}
-                              className="text-blue-600 hover:text-blue-800 font-medium"
+                              className="text-red-600 hover:text-red-700 font-medium"
                             >
                               <EyeIcon className="w-4 h-4 inline mr-1" />
                               View
@@ -822,7 +822,7 @@ const ExtraMaterialPage: React.FC = () => {
                   <select
                     value={filterProject}
                     onChange={(e) => setFilterProject(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#243d8a]"
                   >
                     <option value="">All Projects</option>
                     {/* Projects will be populated from API */}
@@ -833,7 +833,7 @@ const ExtraMaterialPage: React.FC = () => {
                   <select
                     value={filterArea}
                     onChange={(e) => setFilterArea(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#243d8a]"
                     disabled={!filterProject}
                   >
                     <option value="">All Areas</option>
@@ -845,7 +845,7 @@ const ExtraMaterialPage: React.FC = () => {
                   <select
                     value={filterItem}
                     onChange={(e) => setFilterItem(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#243d8a]"
                   >
                     <option value="">All Items</option>
                     {/* Items will be populated from API */}
@@ -856,7 +856,7 @@ const ExtraMaterialPage: React.FC = () => {
                   <select
                     value={filterStatus}
                     onChange={(e) => setFilterStatus(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#243d8a]"
                   >
                     <option value="">All Status</option>
                     <option value="approved">Approved</option>
@@ -868,7 +868,7 @@ const ExtraMaterialPage: React.FC = () => {
             {/* Approved List */}
             {loading ? (
               <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#243d8a]"></div>
               </div>
             ) : approvedMaterials.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
@@ -986,7 +986,7 @@ const ExtraMaterialPage: React.FC = () => {
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Rejected Requests</h2>
             {loading ? (
               <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#243d8a]"></div>
               </div>
             ) : rejectedMaterials.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
@@ -1045,7 +1045,7 @@ const ExtraMaterialPage: React.FC = () => {
 
                       <button
                         onClick={() => handleViewDetails(request.id)}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                        className="w-full bg-red-500 hover:bg-red-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
                       >
                         <EyeIcon className="w-4 h-4" />
                         View Details
@@ -1118,7 +1118,7 @@ const ExtraMaterialPage: React.FC = () => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
                             <button
                               onClick={() => handleViewDetails(request.id)}
-                              className="text-blue-600 hover:text-blue-800 font-medium"
+                              className="text-red-600 hover:text-red-700 font-medium"
                             >
                               <EyeIcon className="w-4 h-4 inline mr-1" />
                               View
@@ -1142,7 +1142,7 @@ const ExtraMaterialPage: React.FC = () => {
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Completed Purchases</h2>
             {loading ? (
               <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#243d8a]"></div>
               </div>
             ) : completedMaterials.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
@@ -1212,7 +1212,7 @@ const ExtraMaterialPage: React.FC = () => {
 
                       <button
                         onClick={() => handleViewDetails(request.id)}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                        className="w-full bg-red-500 hover:bg-red-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
                       >
                         <EyeIcon className="w-4 h-4" />
                         View Details
@@ -1285,7 +1285,7 @@ const ExtraMaterialPage: React.FC = () => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
                             <button
                               onClick={() => handleViewDetails(request.id)}
-                              className="text-blue-600 hover:text-blue-800 font-medium"
+                              className="text-red-600 hover:text-red-700 font-medium"
                             >
                               <EyeIcon className="w-4 h-4 inline mr-1" />
                               View

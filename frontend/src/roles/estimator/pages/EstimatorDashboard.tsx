@@ -298,14 +298,14 @@ const EstimatorDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Header - Exact TD Style */}
-      <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
+      {/* Header - Red Soft Gradient */}
+      <div className="bg-gradient-to-r from-red-500/10 to-rose-500/10 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
               <BarChart3 className="w-6 h-6 text-red-600" />
             </div>
-            <h1 className="text-2xl font-bold text-[#243d8a]">Estimator Dashboard</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Estimator Dashboard</h1>
           </div>
         </div>
       </div>

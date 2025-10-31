@@ -174,14 +174,14 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="bg-gradient-to-r from-purple-50 to-purple-100 px-6 py-5 border-b border-purple-200">
+              <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-5 border-b border-blue-200">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <h2 className="text-2xl font-bold text-gray-900">
                         {purchase.project_name}
                       </h2>
-                      <Badge className="bg-purple-100 text-purple-800">
+                      <Badge className="bg-blue-100 text-blue-800">
                         CR #{purchase.cr_id}
                       </Badge>
                       {purchase.status === 'completed' && (
@@ -208,7 +208,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                   </div>
                   <button
                     onClick={handleClose}
-                    className="p-2 hover:bg-purple-200 rounded-lg transition-colors"
+                    className="p-2 hover:bg-blue-200 rounded-lg transition-colors"
                   >
                     <X className="w-5 h-5 text-gray-600" />
                   </button>
@@ -219,14 +219,14 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
               <div className="p-6 max-h-[70vh] overflow-y-auto">
                 {/* Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                  <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                     <div className="flex items-center gap-3">
-                      <div className="p-2 bg-purple-100 rounded-lg">
-                        <Package className="w-5 h-5 text-purple-600" />
+                      <div className="p-2 bg-blue-100 rounded-lg">
+                        <Package className="w-5 h-5 text-blue-600" />
                       </div>
                       <div>
                         <div className="text-sm text-gray-600">Materials</div>
-                        <div className="text-2xl font-bold text-purple-600">
+                        <div className="text-2xl font-bold text-green-600">
                           {purchase.materials_count}
                         </div>
                       </div>
@@ -410,7 +410,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                             <TableCell className="font-medium text-sm">{material.material_name}</TableCell>
                             <TableCell className="text-sm">
                               {material.sub_item_name && (
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                                   {material.sub_item_name}
                                 </span>
                               )}
@@ -444,14 +444,14 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                                 formatCurrency(material.unit_price)
                               )}
                             </TableCell>
-                            <TableCell className="text-right font-bold text-purple-600 text-sm">
+                            <TableCell className="text-right font-bold text-green-600 text-sm">
                               {formatCurrency(material.total_price)}
                             </TableCell>
                           </TableRow>
                         ))}
-                        <TableRow className="bg-purple-50 font-bold">
+                        <TableRow className="bg-blue-50 font-bold">
                           <TableCell colSpan={5} className="text-right text-sm">Total Cost:</TableCell>
-                          <TableCell className="text-right text-purple-700 text-base">
+                          <TableCell className="text-right text-green-700 text-base">
                             {formatCurrency(
                               isEditing
                                 ? editedMaterials.reduce((sum, mat) => sum + mat.total_price, 0)

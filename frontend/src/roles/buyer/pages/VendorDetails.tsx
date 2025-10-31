@@ -15,6 +15,7 @@ import {
 import { buyerVendorService, Vendor, VendorProduct } from '@/roles/buyer/services/buyerVendorService';
 import AddVendorModal from '@/components/buyer/AddVendorModal';
 import AddProductModal from '@/components/buyer/AddProductModal';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { toast } from 'sonner';
 
 const VendorDetails: React.FC = () => {
@@ -116,8 +117,8 @@ const VendorDetails: React.FC = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading vendor details...</p>
+          <ModernLoadingSpinners variant="pulse-wave" color="blue" />
+          <p className="text-gray-600 mt-4">Loading vendor details...</p>
         </div>
       </div>
     );
@@ -131,7 +132,7 @@ const VendorDetails: React.FC = () => {
           <h3 className="text-xl font-semibold text-gray-700 mb-2">Vendor Not Found</h3>
           <button
             onClick={() => navigate('/buyer/vendors')}
-            className="text-purple-600 hover:text-purple-700"
+            className="text-[#243d8a] hover:text-[#1e3270]"
           >
             Back to Vendors
           </button>
@@ -156,7 +157,7 @@ const VendorDetails: React.FC = () => {
           <ArrowLeftIcon className="w-5 h-5" />
         </button>
 
-        <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 border border-purple-200">
+        <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6 border border-blue-200">
           <div className="flex items-start justify-between">
             <div className="flex-1">
               <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-2">
@@ -164,7 +165,7 @@ const VendorDetails: React.FC = () => {
               </h1>
               <div className="flex flex-wrap gap-2">
                 {vendor.category && (
-                  <span className="px-3 py-1 bg-purple-100 text-purple-700 text-sm font-medium rounded-full">
+                  <span className="px-3 py-1 bg-blue-100 text-blue-700 text-sm font-medium rounded-full">
                     {vendor.category}
                   </span>
                 )}
@@ -182,7 +183,7 @@ const VendorDetails: React.FC = () => {
             <div className="flex gap-2">
               <button
                 onClick={handleEditVendor}
-                className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-1.5"
+                className="px-3 py-1.5 text-sm bg-[#243d8a] text-white rounded-lg hover:bg-[#1e3270] transition-colors flex items-center gap-1.5"
               >
                 <PencilIcon className="w-3.5 h-3.5" />
                 Edit
@@ -219,7 +220,7 @@ const VendorDetails: React.FC = () => {
 
               {vendor.email && (
                 <div className="flex items-start gap-2">
-                  <EnvelopeIcon className="w-4 h-4 text-purple-600 mt-0.5" />
+                  <EnvelopeIcon className="w-4 h-4 text-[#243d8a] mt-0.5" />
                   <div>
                     <p className="text-xs text-gray-500 mb-0.5">Email</p>
                     <p className="text-sm text-gray-800">{vendor.email}</p>
@@ -229,7 +230,7 @@ const VendorDetails: React.FC = () => {
 
               {vendor.phone && (
                 <div className="flex items-start gap-2">
-                  <PhoneIcon className="w-4 h-4 text-purple-600 mt-0.5" />
+                  <PhoneIcon className="w-4 h-4 text-[#243d8a] mt-0.5" />
                   <div>
                     <p className="text-xs text-gray-500 mb-0.5">Phone</p>
                     <p className="text-sm text-gray-800">
@@ -241,7 +242,7 @@ const VendorDetails: React.FC = () => {
 
               {(vendor.street_address || vendor.city || vendor.state || vendor.country) && (
                 <div className="flex items-start gap-2">
-                  <MapPinIcon className="w-4 h-4 text-purple-600 mt-0.5" />
+                  <MapPinIcon className="w-4 h-4 text-[#243d8a] mt-0.5" />
                   <div>
                     <p className="text-xs text-gray-500 mb-0.5">Address</p>
                     <div className="text-sm text-gray-800">
@@ -317,7 +318,7 @@ const VendorDetails: React.FC = () => {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 + index * 0.05 }}
-                    className="border border-gray-200 rounded-lg p-3 hover:border-purple-300 transition-colors"
+                    className="border border-gray-200 rounded-lg p-3 hover:border-blue-300 transition-colors"
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">

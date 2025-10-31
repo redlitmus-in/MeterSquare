@@ -97,7 +97,7 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-[#243d8a] to-[#1e3270] px-6 py-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/20 rounded-lg">
                   <FileText className="w-6 h-6 text-white" />
@@ -131,12 +131,12 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
               ) : (
                 <div className="space-y-6">
                   {/* Project Info */}
-                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
+                  <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 rounded-xl p-4 border border-[#243d8a]/20">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
                         <p className="text-sm text-gray-600 mb-1">Project Name</p>
                         <p className="font-semibold text-gray-900 flex items-center gap-2">
-                          <Building2 className="w-4 h-4 text-blue-600" />
+                          <Building2 className="w-4 h-4 text-[#243d8a]" />
                           {boqData.project?.project_name || boqData.project_name || boq?.project_name || 'N/A'}
                         </p>
                       </div>
@@ -155,7 +155,7 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                   <div className="flex justify-end">
                     <button
                       onClick={toggleAll}
-                      className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                      className="text-sm text-[#243d8a] hover:text-[#1e3270] font-medium flex items-center gap-1"
                     >
                       {allExpanded ? (
                         <>
@@ -186,16 +186,16 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                         return (
                           <div
                             key={itemId}
-                            className="bg-white rounded-lg border-2 border-blue-200 shadow-sm overflow-hidden"
+                            className="bg-white rounded-lg border-2 border-[#243d8a]/20 shadow-sm overflow-hidden"
                           >
                             {/* Item Header */}
                             <div
-                              className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 cursor-pointer hover:from-blue-100 hover:to-blue-150 transition-colors"
+                              className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 p-4 cursor-pointer hover:from-[#243d8a]/10 hover:to-[#243d8a]/15 transition-colors"
                               onClick={() => toggleItem(itemId)}
                             >
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3 flex-1">
-                                  <div className="p-2 bg-blue-600 rounded-lg shadow-md">
+                                  <div className="p-2 bg-[#243d8a] rounded-lg shadow-md">
                                     <Package className="w-6 h-6 text-white" />
                                   </div>
                                   <div className="flex-1">
@@ -209,15 +209,15 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                 </div>
                                 <div className="flex items-center gap-3">
                                   {item.sub_items?.length > 0 && (
-                                    <span className="text-sm font-medium text-blue-700 bg-white px-3 py-1 rounded-full border border-blue-200">
+                                    <span className="text-sm font-medium text-[#243d8a] bg-white px-3 py-1 rounded-full border border-[#243d8a]/20">
                                       {item.sub_items.length} sub-item{item.sub_items.length > 1 ? 's' : ''}
                                     </span>
                                   )}
-                                  <button className="p-1 hover:bg-blue-200 rounded transition-colors">
+                                  <button className="p-1 hover:bg-[#243d8a]/10 rounded transition-colors">
                                     {isExpanded ? (
-                                      <ChevronDown className="w-5 h-5 text-blue-600" />
+                                      <ChevronDown className="w-5 h-5 text-[#243d8a]" />
                                     ) : (
-                                      <ChevronRight className="w-5 h-5 text-blue-600" />
+                                      <ChevronRight className="w-5 h-5 text-[#243d8a]" />
                                     )}
                                   </button>
                                 </div>
@@ -245,7 +245,7 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                           >
                                             <div className="mb-3">
                                               <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2 mb-1">
-                                                <FileText className="w-4 h-4 text-blue-600" />
+                                                <FileText className="w-4 h-4 text-[#243d8a]" />
                                                 {subItem.sub_item_name || `Sub-Item ${subIndex + 1}`}
                                               </h4>
                                               {subItem.description && (
@@ -260,7 +260,7 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                                   <Package className="w-3.5 h-3.5" />
                                                   Raw Materials Required
                                                 </h5>
-                                                <div className="bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg overflow-hidden border border-gray-200">
+                                                <div className="bg-gradient-to-r from-gray-50 to-[#243d8a]/5 rounded-lg overflow-hidden border border-gray-200">
                                                   <table className="min-w-full">
                                                     <thead className="bg-gray-100">
                                                       <tr>
@@ -277,10 +277,10 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                                     </thead>
                                                     <tbody className="divide-y divide-gray-200">
                                                       {subItem.materials.map((material: any, matIndex: number) => (
-                                                        <tr key={matIndex} className="hover:bg-blue-50 transition-colors">
+                                                        <tr key={matIndex} className="hover:bg-[#243d8a]/5 transition-colors">
                                                           <td className="px-3 py-2 text-sm text-gray-900">
                                                             <div className="flex items-center gap-2">
-                                                              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                                                              <div className="w-2 h-2 bg-[#243d8a] rounded-full"></div>
                                                               {material.material_name || material.name || 'N/A'}
                                                             </div>
                                                           </td>
@@ -288,7 +288,7 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                                             {material.quantity || 0}
                                                           </td>
                                                           <td className="px-3 py-2 text-sm text-gray-700 text-center">
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#243d8a]/10 text-[#243d8a]">
                                                               {material.unit || 'N/A'}
                                                             </span>
                                                           </td>
@@ -336,7 +336,7 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                                           </td>
                                                           <td className="px-3 py-2 text-sm text-gray-700 text-center">
                                                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                                                              labour.work_type === 'contract' ? 'bg-blue-100 text-blue-800' :
+                                                              labour.work_type === 'contract' ? 'bg-[#243d8a]/10 text-[#243d8a]' :
                                                               labour.work_type === 'daily_wages' ? 'bg-purple-100 text-purple-800' :
                                                               labour.work_type === 'piece_rate' ? 'bg-orange-100 text-orange-800' :
                                                               'bg-gray-100 text-gray-800'

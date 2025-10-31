@@ -274,20 +274,20 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
               {/* Body */}
               <div className="p-6 max-h-[70vh] overflow-y-auto">
                 {/* Materials Summary */}
-                <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-xl">
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
                   <div className="flex items-center gap-2 mb-3">
-                    <Package className="w-5 h-5 text-purple-600" />
-                    <h3 className="text-sm font-semibold text-purple-800">Required Materials</h3>
+                    <Package className="w-5 h-5 text-blue-600" />
+                    <h3 className="text-sm font-semibold text-blue-800">Required Materials</h3>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {purchase.materials.slice(0, 4).map((material, idx) => (
-                      <div key={idx} className="text-xs text-purple-900">
+                      <div key={idx} className="text-xs text-blue-900">
                         <span className="font-medium">{material.material_name}</span>
-                        <span className="text-purple-600"> - {material.quantity} {material.unit}</span>
+                        <span className="text-green-600"> - {material.quantity} {material.unit}</span>
                       </div>
                     ))}
                     {purchase.materials.length > 4 && (
-                      <div className="text-xs text-purple-600 italic">
+                      <div className="text-xs text-blue-600 italic">
                         +{purchase.materials.length - 4} more items...
                       </div>
                     )}
@@ -366,7 +366,7 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                                   {matchingProducts.length} Matching
                                 </Badge>
                                 {vendor.category && (
-                                  <Badge className="bg-purple-100 text-purple-800 text-xs">
+                                  <Badge className="bg-blue-100 text-blue-800 text-xs">
                                     {vendor.category}
                                   </Badge>
                                 )}
@@ -582,16 +582,16 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                     onClick={(e) => e.stopPropagation()}
                   >
                     {/* Header */}
-                    <div className="bg-gradient-to-r from-purple-50 to-purple-100 px-6 py-4 border-b border-purple-200">
+                    <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-4 border-b border-blue-200">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <div className="p-2 bg-purple-500 rounded-full">
+                          <div className="p-2 bg-[#243d8a] rounded-full">
                             <Store className="w-5 h-5 text-white" />
                           </div>
                           <div>
                             <h3 className="text-xl font-bold text-gray-900">{viewingVendor.company_name}</h3>
                             {viewingVendor.category && (
-                              <Badge className="mt-1 bg-purple-200 text-purple-900">{viewingVendor.category}</Badge>
+                              <Badge className="mt-1 bg-blue-200 text-blue-900">{viewingVendor.category}</Badge>
                             )}
                           </div>
                         </div>
@@ -601,7 +601,7 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                             setViewingVendor(null);
                             setViewingVendorProducts([]);
                           }}
-                          className="p-2 hover:bg-purple-200 rounded-lg transition-colors"
+                          className="p-2 hover:bg-blue-200 rounded-lg transition-colors"
                         >
                           <X className="w-5 h-5 text-gray-600" />
                         </button>
@@ -612,7 +612,7 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                     <div className="px-6 py-5 max-h-[60vh] overflow-y-auto">
                       {loadingVendorDetails ? (
                         <div className="flex items-center justify-center py-12">
-                          <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                          <div className="w-8 h-8 border-4 border-[#243d8a] border-t-transparent rounded-full animate-spin" />
                           <span className="ml-3 text-gray-600">Loading details...</span>
                         </div>
                       ) : (
@@ -673,17 +673,17 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                           {viewingVendorProducts.length > 0 && (
                             <div>
                               <h4 className="font-semibold text-gray-900 mb-3 text-sm flex items-center gap-2">
-                                <Package className="w-4 h-4 text-purple-600" />
+                                <Package className="w-4 h-4 text-blue-600" />
                                 Products/Services ({viewingVendorProducts.length})
                               </h4>
-                              <div className="overflow-x-auto rounded-lg border border-purple-200">
+                              <div className="overflow-x-auto rounded-lg border border-blue-200">
                                 <table className="w-full text-sm">
-                                  <thead className="bg-purple-50 border-b border-purple-200">
+                                  <thead className="bg-blue-50 border-b border-blue-200">
                                     <tr>
-                                      <th className="px-4 py-2 text-left font-semibold text-purple-900">Product Name</th>
-                                      <th className="px-4 py-2 text-left font-semibold text-purple-900">Category</th>
-                                      <th className="px-4 py-2 text-left font-semibold text-purple-900">Description</th>
-                                      <th className="px-4 py-2 text-right font-semibold text-purple-900">Price</th>
+                                      <th className="px-4 py-2 text-left font-semibold text-blue-900">Product Name</th>
+                                      <th className="px-4 py-2 text-left font-semibold text-blue-900">Category</th>
+                                      <th className="px-4 py-2 text-left font-semibold text-blue-900">Description</th>
+                                      <th className="px-4 py-2 text-right font-semibold text-blue-900">Price</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -691,15 +691,15 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                                       <tr
                                         key={product.product_id}
                                         className={`${
-                                          idx % 2 === 0 ? 'bg-white' : 'bg-purple-50/30'
-                                        } border-b border-purple-100 last:border-b-0 hover:bg-purple-50 transition-colors`}
+                                          idx % 2 === 0 ? 'bg-white' : 'bg-blue-50/30'
+                                        } border-b border-blue-100 last:border-b-0 hover:bg-blue-50 transition-colors`}
                                       >
                                         <td className="px-4 py-3 font-medium text-gray-900">
                                           {product.product_name}
                                         </td>
                                         <td className="px-4 py-3">
                                           {product.category ? (
-                                            <Badge className="bg-purple-200 text-purple-900 text-[10px]">
+                                            <Badge className="bg-blue-200 text-blue-900 text-[10px]">
                                               {product.category}
                                             </Badge>
                                           ) : (
@@ -713,7 +713,7 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                                             <span className="text-gray-400 text-xs">-</span>
                                           )}
                                         </td>
-                                        <td className="px-4 py-3 text-right font-semibold text-purple-900">
+                                        <td className="px-4 py-3 text-right font-semibold text-green-700">
                                           {product.unit_price ? (
                                             <div className="text-xs">
                                               <div>AED {product.unit_price.toLocaleString()}</div>
