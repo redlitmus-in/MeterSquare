@@ -221,7 +221,9 @@ export interface BOQ {
   pdf_url?: string;
   notes?: string;
   email_sent?: boolean; // Track if BOQ has been emailed to TD
+  client_status?: boolean; // Track if client has confirmed/approved the BOQ
   client_rejection_reason?: string; // Client rejection reason
+  pm_assigned?: boolean; // Track if PM has been assigned to this BOQ
 
   // Backend response fields
   items?: BOQItemDetailed[];

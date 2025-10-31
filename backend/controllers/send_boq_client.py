@@ -113,8 +113,9 @@ def send_boq_to_client():
         )
 
         if email_sent:
-            # Update BOQ flags: email_sent = TRUE, status = Sent_for_Confirmation
+            # Update BOQ flags: email_sent = TRUE, client_status = FALSE, status = Sent_for_Confirmation
             boq.email_sent = True
+            boq.client_status = False  # Not yet confirmed by client
             boq.status = "Sent_for_Confirmation"  # Waiting for client confirmation
 
             # Get current user (estimator)

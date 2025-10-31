@@ -1654,19 +1654,35 @@ const EstimatorHub: React.FC = () => {
               </button>
             </>
           ) : isApprovedByTD || isRevisionApproved ? (
-            /* Approved by TD - Can send to client */
-            <button
-              className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
-              style={{ backgroundColor: 'rgb(34, 197, 94)' }}
-              onClick={() => {
-                setBoqToEmail(boq);
-                setEmailMode('client');
-                setShowSendEmailModal(true);
-              }}
-            >
-              <Mail className="h-3.5 w-3.5" />
-              <span>{isRevisionApproved ? 'Send Revision to Client' : 'Send to Client'}</span>
-            </button>
+            /* Approved by TD - Check if client already confirmed */
+            boq.client_status ? (
+              /* Client already confirmed - show badge */
+              boq.pm_assigned ? (
+                <div className="col-span-2 flex items-center justify-center text-xs text-blue-700 font-medium">
+                  <UserIcon className="h-4 w-4 text-blue-600 mr-1" />
+                  PM Assigned
+                </div>
+              ) : (
+                <div className="col-span-2 flex items-center justify-center text-xs text-green-700 font-medium">
+                  <CheckCircle className="h-4 w-4 text-green-600 mr-1" />
+                  Client Approved
+                </div>
+              )
+            ) : (
+              /* Client not yet confirmed - Can send to client */
+              <button
+                className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-2"
+                style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+                onClick={() => {
+                  setBoqToEmail(boq);
+                  setEmailMode('client');
+                  setShowSendEmailModal(true);
+                }}
+              >
+                <Mail className="h-3.5 w-3.5" />
+                <span>{isRevisionApproved ? 'Send Revision to Client' : 'Send to Client'}</span>
+              </button>
+            )
           ) : null}
         </div>
       </div>
@@ -1847,6 +1863,21 @@ const EstimatorHub: React.FC = () => {
                         );
                       } else if (isApprovedByTD || boq.status?.toLowerCase() === 'revision_approved') {
                         const isRevApproved = boq.status?.toLowerCase() === 'revision_approved';
+                        // Check if client already confirmed
+                        if (boq.client_status) {
+                          return boq.pm_assigned ? (
+                            <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                              <UserIcon className="h-4 w-4" />
+                              PM Assigned
+                            </span>
+                          ) : (
+                            <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                              <CheckCircle className="h-4 w-4" />
+                              Client Approved
+                            </span>
+                          );
+                        }
+                        // Client not yet confirmed - show send to client button
                         return (
                           <>
                             <Button

@@ -35,6 +35,7 @@ def confirm_client_approval(boq_id):
 
         # Update status to Client_Confirmed
         boq.status = "Client_Confirmed"
+        boq.client_status = True
         boq.last_modified_at = datetime.utcnow()
 
         if current_user:
@@ -63,6 +64,7 @@ def confirm_client_approval(boq_id):
             "sender": "estimator",
             "receiver": client_name,
             "status": "Client_Confirmed",
+            "client_status":boq.client_status,
             "boq_name": boq.boq_name,
             "comments": comments or "Client has approved the BOQ",
             "timestamp": datetime.utcnow().isoformat(),
@@ -101,6 +103,7 @@ def confirm_client_approval(boq_id):
                 action=current_actions,
                 action_by=estimator_name,
                 boq_status="Client_Confirmed",
+                client_status=True,
                 sender=estimator_name,
                 receiver=client_name if client_name else (project.client if project else "Client"),
                 comments=comments or "Client has approved the BOQ",
@@ -118,6 +121,7 @@ def confirm_client_approval(boq_id):
             "message": "Client approval confirmed successfully",
             "boq_id": boq_id,
             "status": boq.status,
+            "client_status": True,
             "action_appended": True
         }), 200
 
@@ -149,6 +153,7 @@ def reject_client_approval(boq_id):
 
         # Update status to Client_Rejected
         boq.status = "Client_Rejected"
+        boq.client_status = False
         boq.client_rejection_reason = rejection_reason  # Store rejection reason in client_rejection_reason
         boq.last_modified_at = datetime.utcnow()
 
@@ -163,6 +168,7 @@ def reject_client_approval(boq_id):
             "message": "Client rejection recorded successfully",
             "boq_id": boq_id,
             "status": boq.status,
+            "client_status": False,
             "rejection_reason": rejection_reason
         }), 200
 
