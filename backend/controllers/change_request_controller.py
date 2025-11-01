@@ -160,15 +160,55 @@ def create_change_request():
         # Calculate percentage of item overhead - ONLY for NEW materials
         # Separate NEW materials from EXISTING materials for threshold calculation
         new_materials_cost = 0.0
+        has_new_materials = False
         for mat in materials_data:
             # New material if master_material_id is None
             if mat.get('master_material_id') is None:
                 new_materials_cost += mat.get('total_price', 0)
+                has_new_materials = True
 
         percentage_of_item_overhead = 0.0
-        if overhead_impact['original_overhead_allocated'] > 0:
-            # Calculate percentage based on NEW materials ONLY
-            percentage_of_item_overhead = (new_materials_cost / overhead_impact['original_overhead_allocated']) * 100
+
+        # For NEW materials, calculate percentage against item's overhead (miscellaneous) amount
+        # For EXISTING materials, calculate against total overhead_allocated
+        if has_new_materials and item_id:
+            # Get item overhead amount from BOQ item
+            item_overhead_amount = 0.0
+            boq_json = boq_details.boq_details or {}
+            items = boq_json.get('items', [])
+
+            for itm in items:
+                itm_id = itm.get('master_item_id') or f"item_{boq_id}_{items.index(itm) + 1}"
+                if str(itm_id) == str(item_id):
+                    # Try different field names for overhead amount
+                    item_overhead_amount = itm.get('overhead', 0) or itm.get('overhead_amount', 0) or itm.get('miscellaneous_amount', 0)
+
+                    # If overhead is 0, calculate from percentage
+                    if item_overhead_amount == 0:
+                        overhead_percentage = itm.get('overhead_percentage', 10)
+                        total_cost = itm.get('total_cost', 0)
+                        item_overhead_amount = (total_cost * overhead_percentage) / 100
+
+                    break
+
+            if item_overhead_amount > 0:
+                # Calculate percentage based on NEW materials cost vs item overhead amount
+                percentage_of_item_overhead = (new_materials_cost / item_overhead_amount) * 100
+                log.info(f"NEW materials: Cost={new_materials_cost}, Item Overhead={item_overhead_amount}, Percentage={percentage_of_item_overhead:.2f}%")
+            else:
+                # Fallback: If no item overhead, try using total overhead allocated
+                # This ensures we don't default to 100% unnecessarily
+                if overhead_impact['original_overhead_allocated'] > 0:
+                    percentage_of_item_overhead = (new_materials_cost / overhead_impact['original_overhead_allocated']) * 100
+                    log.warning(f"No item overhead found for item {item_id}, using total overhead allocated instead: Cost={new_materials_cost}, Overhead={overhead_impact['original_overhead_allocated']}, Percentage={percentage_of_item_overhead:.2f}%")
+                else:
+                    # Last resort fallback
+                    percentage_of_item_overhead = 100.0
+                    log.error(f"No item overhead or total overhead allocated found for item {item_id}, defaulting to 100%")
+        elif overhead_impact['original_overhead_allocated'] > 0:
+            # Existing materials - use total overhead allocated
+            percentage_of_item_overhead = (materials_total_cost / overhead_impact['original_overhead_allocated']) * 100
+            log.info(f"EXISTING materials: Cost={materials_total_cost}, Overhead={overhead_impact['original_overhead_allocated']}, Percentage={percentage_of_item_overhead:.2f}%")
 
         # DUPLICATE DETECTION: Check for similar requests within last 30 seconds
         # This prevents accidental double-clicks and form re-submissions

@@ -146,8 +146,31 @@ class ChangeRequest(db.Model):
     project = db.relationship("Project", backref=db.backref("change_requests", lazy=True))
     vendor = db.relationship("Vendor", backref=db.backref("change_requests", lazy=True))
 
+    def calculate_recommended_routing(self):
+        """
+        Calculate the recommended routing (TD or Estimator) based on business logic
+        Returns tuple: (route_to, percentage_used)
+
+        Uses the percentage_of_item_overhead that was calculated at creation time:
+        - For NEW materials: percentage is calculated against miscellaneous_amount
+        - For existing materials: percentage is calculated against overhead_allocated
+
+        Both calculations are done in the create_change_request controller
+        """
+        # Use the pre-calculated percentage_of_item_overhead
+        # This was calculated correctly at creation time based on material type
+        percentage = self.percentage_of_item_overhead or 0
+
+        if percentage > 40:
+            return 'technical_director', round(percentage, 2)
+        else:
+            return 'estimator', round(percentage, 2)
+
     def to_dict(self):
         """Convert to dictionary for JSON response"""
+        # Calculate recommended routing
+        recommended_route, routing_percentage = self.calculate_recommended_routing()
+
         return {
             'cr_id': self.cr_id,
             'boq_id': self.boq_id,
@@ -208,6 +231,10 @@ class ChangeRequest(db.Model):
             # Approval - Multi-stage
             'approval_required_from': self.approval_required_from,
             'current_approver_role': self.current_approver_role,
+
+            # Recommended routing (for UI to show correct button)
+            'recommended_next_approver': recommended_route,
+            'routing_percentage': routing_percentage,
 
             # PM Approval
             'pm_approved_by_user_id': self.pm_approved_by_user_id,

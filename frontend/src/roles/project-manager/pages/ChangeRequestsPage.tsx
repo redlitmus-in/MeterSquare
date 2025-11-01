@@ -353,14 +353,25 @@ const ChangeRequestsPage: React.FC = () => {
                         </Button>
                         <Button
                           size="sm"
-                          className={`${(request.percentage_of_item_overhead || 0) > 40 ? 'bg-orange-600 hover:bg-orange-700' : 'bg-purple-600 hover:bg-purple-700'}`}
+                          className={`${
+                            (request.recommended_next_approver === 'technical_director') ||
+                            (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
+                              ? 'bg-orange-600 hover:bg-orange-700'
+                              : 'bg-purple-600 hover:bg-purple-700'
+                          }`}
                           onClick={() => {
-                            const overheadPercent = request.percentage_of_item_overhead || 0;
-                            const routeTo = overheadPercent > 40 ? 'technical_director' : 'estimator';
+                            // Use recommended_next_approver if available, fallback to percentage check
+                            const routeTo = request.recommended_next_approver ||
+                                          ((request.routing_percentage || request.percentage_of_item_overhead || 0) > 40 ? 'technical_director' : 'estimator');
                             handleSendForReview(request.cr_id, routeTo);
                           }}
                         >
-                          Send {(request.percentage_of_item_overhead || 0) > 40 ? 'TD' : 'Est'}
+                          Send {
+                            (request.recommended_next_approver === 'technical_director') ||
+                            (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
+                              ? 'TD'
+                              : 'Est'
+                          }
                         </Button>
                       </>
                     )}
@@ -985,7 +996,7 @@ const ChangeRequestsPage: React.FC = () => {
                                   <span>Approve</span>
                                 </div>
                                 <span className="text-[9px] opacity-80">
-                                  → {(request.percentage_of_item_overhead || 0) > 40 ? 'TD' : 'Est'}
+                                  → {request.recommended_next_approver === 'technical_director' ? 'TD' : 'Est'}
                                 </span>
                               </button>
                               <button
@@ -1082,21 +1093,28 @@ const ChangeRequestsPage: React.FC = () => {
                                 <span>Edit</span>
                               </button>
                             </div>
-                            {/* Smart Send for Review button based on overhead percentage */}
+                            {/* Smart Send for Review button based on recommended routing */}
                             <button
                               onClick={() => {
-                                const overheadPercent = request.percentage_of_item_overhead || 0;
-                                const routeTo = overheadPercent > 40 ? 'technical_director' : 'estimator';
+                                // Use recommended_next_approver if available, fallback to routing_percentage check
+                                const routeTo = request.recommended_next_approver ||
+                                              ((request.routing_percentage || request.percentage_of_item_overhead || 0) > 40 ? 'technical_director' : 'estimator');
                                 handleSendForReview(request.cr_id, routeTo);
                               }}
                               className={`w-full text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold ${
-                                (request.percentage_of_item_overhead || 0) > 40
+                                (request.recommended_next_approver === 'technical_director') ||
+                                (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
                                   ? 'bg-orange-600 hover:bg-orange-700'
                                   : 'bg-purple-600 hover:bg-purple-700'
                               }`}
                             >
                               <Check className="h-4 w-4" />
-                              <span>Send for Review {(request.percentage_of_item_overhead || 0) > 40 ? '(TD)' : '(Est.)'}</span>
+                              <span>Send for Review {
+                                (request.recommended_next_approver === 'technical_director') ||
+                                (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
+                                  ? '(TD)'
+                                  : '(Est.)'
+                              }</span>
                             </button>
                           </div>
                         </motion.div>
