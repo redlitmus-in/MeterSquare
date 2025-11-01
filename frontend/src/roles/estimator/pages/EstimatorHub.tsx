@@ -420,12 +420,16 @@ const EstimatorHub: React.FC = () => {
             selling_price: boq.selling_price,
             estimatedSellingPrice: boq.estimatedSellingPrice,
             discount_percentage: boq.discount_percentage,
-            discount_amount: boq.discount_amount
+            discount_amount: boq.discount_amount,
+            preliminary_amount: boq.preliminaries?.cost_details?.amount
           });
 
           // IMPORTANT: Prioritize total_cost as it's the most reliable field after discount
-          const finalTotalCost = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
-          console.log(`💰 [EstimatorHub] BOQ ${boq.boq_id} - Final total_cost to display: ${finalTotalCost} (Prioritized: total_cost)`);
+          // Add preliminary amount to the total (items total + preliminary - discount = grand total)
+          const baseTotalCost = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
+          const preliminaryAmount = boq.preliminaries?.cost_details?.amount || 0;
+          const finalTotalCost = baseTotalCost + preliminaryAmount;
+          console.log(`💰 [EstimatorHub] BOQ ${boq.boq_id} - Final total_cost to display: ${finalTotalCost} (Base: ${baseTotalCost} + Preliminary: ${preliminaryAmount})`);
 
           return {
             ...boq,

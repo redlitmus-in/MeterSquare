@@ -2,7 +2,7 @@ from flask import request, jsonify, g
 from config.db import db
 from models.project import Project
 from models.boq import *
-from models.preliminary import BOQInternalRevision
+from models.preliminary import BOQInternalRevision, Preliminary
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils.boq_email_service import BOQEmailService
@@ -193,6 +193,34 @@ def get_all_td_boqs():
                 "last_modified_at": boq.last_modified_at.isoformat() if boq.last_modified_at else None,
                 "last_modified_by": boq.last_modified_by
             }
+
+            # Get preliminaries data for this project
+            try:
+                preliminary = Preliminary.query.filter_by(
+                    project_id=boq.project_id,
+                    is_deleted=False
+                ).first()
+
+                if preliminary:
+                    # Build preliminaries object with cost_details
+                    preliminaries_data = {
+                        "items": preliminary.description.get("items", []) if preliminary.description else [],
+                        "notes": preliminary.description.get("notes", "") if preliminary.description else "",
+                        "cost_details": {
+                            "quantity": preliminary.quantity or 1,
+                            "unit": preliminary.unit or "Nos",
+                            "rate": preliminary.rate or 0,
+                            "amount": preliminary.amount or 0
+                        }
+                    }
+                    # Include cost_analysis if available in description JSON
+                    if preliminary.description and "cost_analysis" in preliminary.description:
+                        preliminaries_data["cost_analysis"] = preliminary.description["cost_analysis"]
+
+                    boq_data["preliminaries"] = preliminaries_data
+                    log.info(f"📋 [TD] BOQ {boq.boq_id}: Added preliminaries data - amount: {preliminary.amount}")
+            except Exception as prelim_error:
+                log.warning(f"⚠️ Failed to fetch preliminaries for BOQ {boq.boq_id}: {str(prelim_error)}")
 
             # 🔍 DEBUG: Log the final values being sent to frontend
             log.info(f"📤 [TD API Response] BOQ {boq.boq_id} ({boq.boq_name}) - Sending to frontend: total_cost={final_total_cost}, selling_price={final_total_cost}, discount_percentage={discount_percentage}%, discount_amount={discount_amount}")

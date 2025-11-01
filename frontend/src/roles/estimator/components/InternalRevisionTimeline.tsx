@@ -494,7 +494,9 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   const calculateTotalFromSnapshot = (snapshot: any) => {
     // 🔥 First, check if total_cost is available in the snapshot (this includes discount)
     if (snapshot?.total_cost !== undefined && snapshot.total_cost !== null && snapshot.total_cost > 0) {
-      return snapshot.total_cost;
+      // Add preliminaries amount to total_cost
+      const preliminaryAmount = snapshot.preliminaries?.cost_details?.amount || 0;
+      return snapshot.total_cost + preliminaryAmount;
     }
 
     // Fallback: Calculate from items if total_cost not available
@@ -507,16 +509,20 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       return total + finalTotalPrice;
     }, 0);
 
-    // 🔥 Apply discount if available
+    // Add preliminaries amount to subtotal
+    const preliminaryAmount = snapshot.preliminaries?.cost_details?.amount || 0;
+    const combinedSubtotal = subtotal + preliminaryAmount;
+
+    // 🔥 Apply discount if available (discount applies to combined subtotal)
     const discountAmount = snapshot.discount_amount || 0;
     const discountPercentage = snapshot.discount_percentage || 0;
 
     let finalDiscount = discountAmount;
     if (discountPercentage > 0 && discountAmount === 0) {
-      finalDiscount = (subtotal * discountPercentage) / 100;
+      finalDiscount = (combinedSubtotal * discountPercentage) / 100;
     }
 
-    return subtotal - finalDiscount;
+    return combinedSubtotal - finalDiscount;
   };
 
   const calculateChange = (current: number, previous: number) => {

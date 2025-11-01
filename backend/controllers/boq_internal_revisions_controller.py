@@ -93,15 +93,19 @@ def get_all_internal_revision():
                                         item_amount += (sub_item.get('quantity', 0) or 0) * (sub_item.get('rate', 0) or 0)
                                 subtotal += item_amount
 
+                            # Add preliminaries amount to subtotal
+                            preliminary_amount = latest_revision_snapshot.get('preliminaries', {}).get('cost_details', {}).get('amount', 0) or 0
+                            combined_subtotal = subtotal + preliminary_amount
+
                             # Apply discount
                             discount_amount = latest_revision_snapshot.get('discount_amount', 0) or 0
                             discount_percentage = latest_revision_snapshot.get('discount_percentage', 0) or 0
 
                             if discount_percentage > 0 and discount_amount == 0:
-                                discount_amount = (subtotal * discount_percentage) / 100
+                                discount_amount = (combined_subtotal * discount_percentage) / 100
 
-                            latest_revision_total_cost = subtotal - discount_amount
-                            log.info(f"📊 BOQ {boq.boq_id}: Calculated - subtotal={subtotal}, discount={discount_amount}, total={latest_revision_total_cost}")
+                            latest_revision_total_cost = combined_subtotal - discount_amount
+                            log.info(f"📊 BOQ {boq.boq_id}: Calculated - subtotal={subtotal}, preliminary={preliminary_amount}, combined_subtotal={combined_subtotal}, discount={discount_amount}, total={latest_revision_total_cost}")
                         else:
                             # No items, use stored total_cost
                             latest_revision_total_cost = revision.changes_summary.get('total_cost', 0)
@@ -208,17 +212,21 @@ def get_internal_revisions(boq_id):
                                 item_amount += (sub_item.get('quantity', 0) or 0) * (sub_item.get('rate', 0) or 0)
                         subtotal += item_amount
 
+                    # Add preliminaries amount to subtotal
+                    preliminary_amount = changes_summary.get('preliminaries', {}).get('cost_details', {}).get('amount', 0) or 0
+                    combined_subtotal = subtotal + preliminary_amount
+
                     # Apply discount
                     discount_amount = changes_summary.get('discount_amount', 0) or 0
                     discount_percentage = changes_summary.get('discount_percentage', 0) or 0
 
                     if discount_percentage > 0 and discount_amount == 0:
-                        discount_amount = (subtotal * discount_percentage) / 100
+                        discount_amount = (combined_subtotal * discount_percentage) / 100
 
                     # Store corrected values
-                    changes_summary['total_cost_before_discount'] = subtotal
-                    changes_summary['total_cost'] = subtotal - discount_amount
-                    log.info(f"📊 Revision {rev.id}: Calculated - subtotal={subtotal}, discount={discount_amount}, total={changes_summary['total_cost']}")
+                    changes_summary['total_cost_before_discount'] = combined_subtotal
+                    changes_summary['total_cost'] = combined_subtotal - discount_amount
+                    log.info(f"📊 Revision {rev.id}: Calculated - subtotal={subtotal}, preliminary={preliminary_amount}, combined_subtotal={combined_subtotal}, discount={discount_amount}, total={changes_summary['total_cost']}")
                 else:
                     # No items, use existing total_cost
                     log.info(f"📊 Revision {rev.id}: No items, using stored total_cost")

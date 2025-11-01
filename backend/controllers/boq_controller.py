@@ -1053,14 +1053,21 @@ def create_boq():
         boq_discount_percentage = data.get("discount_percentage", 0) or 0
         boq_discount_amount = data.get("discount_amount", 0) or 0
 
+        # Get preliminary amount to include in discount calculation
+        preliminary_amount = preliminaries.get('cost_details', {}).get('amount', 0) if preliminaries else 0
+
+        # Combined subtotal = items total + preliminary amount
+        combined_subtotal = total_boq_cost + preliminary_amount
+
         # Calculate discount amount if only percentage is provided
-        if boq_discount_amount == 0 and boq_discount_percentage > 0 and total_boq_cost > 0:
-            boq_discount_amount = total_boq_cost * (boq_discount_percentage / 100)
+        # Discount should be calculated on combined subtotal (items + preliminaries)
+        if boq_discount_amount == 0 and boq_discount_percentage > 0 and combined_subtotal > 0:
+            boq_discount_amount = combined_subtotal * (boq_discount_percentage / 100)
 
         # Apply BOQ-level discount to get final total
-        final_boq_cost = total_boq_cost - boq_discount_amount if boq_discount_amount > 0 else total_boq_cost
+        final_boq_cost = combined_subtotal - boq_discount_amount if boq_discount_amount > 0 else combined_subtotal
 
-        log.info(f"BOQ {boq.boq_id} create totals - Before discount: {total_boq_cost}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), After discount: {final_boq_cost}")
+        log.info(f"BOQ {boq.boq_id} create totals - Items: {total_boq_cost}, Preliminaries: {preliminary_amount}, Combined: {combined_subtotal}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), Final: {final_boq_cost}")
 
         # Create BOQ details JSON
         boq_details_json = {
@@ -1836,6 +1843,34 @@ def get_all_boq():
                 "discount_amount": discount_amount
             })
 
+            # Get preliminaries data for this project
+            try:
+                preliminary = Preliminary.query.filter_by(
+                    project_id=boq.project_id,
+                    is_deleted=False
+                ).first()
+
+                if preliminary:
+                    # Build preliminaries object with cost_details
+                    preliminaries_data = {
+                        "items": preliminary.description.get("items", []) if preliminary.description else [],
+                        "notes": preliminary.description.get("notes", "") if preliminary.description else "",
+                        "cost_details": {
+                            "quantity": preliminary.quantity or 1,
+                            "unit": preliminary.unit or "Nos",
+                            "rate": preliminary.rate or 0,
+                            "amount": preliminary.amount or 0
+                        }
+                    }
+                    # Include cost_analysis if available in description JSON
+                    if preliminary.description and "cost_analysis" in preliminary.description:
+                        preliminaries_data["cost_analysis"] = preliminary.description["cost_analysis"]
+
+                    boq_summary["preliminaries"] = preliminaries_data
+                    log.info(f"📋 BOQ {boq.boq_id}: Added preliminaries data - amount: {preliminary.amount}")
+            except Exception as prelim_error:
+                log.warning(f"⚠️ Failed to fetch preliminaries for BOQ {boq.boq_id}: {str(prelim_error)}")
+
             # 🔍 DEBUG: Log the final values being sent to frontend
             log.info(f"📤 [API Response] BOQ {boq.boq_id} ({boq.boq_name}) - Sending to frontend: total_cost={boq_summary['total_cost']}, selling_price={boq_summary['selling_price']}, estimatedSellingPrice={boq_summary['estimatedSellingPrice']}, discount_percentage={discount_percentage}%, discount_amount={discount_amount}")
 
@@ -2181,14 +2216,21 @@ def update_boq(boq_id):
             boq_discount_percentage = data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)) or 0
             boq_discount_amount = data.get("discount_amount", old_boq_details_json.get("discount_amount", 0)) or 0
 
+            # Get preliminary amount to include in discount calculation
+            preliminary_amount = preliminaries.get('cost_details', {}).get('amount', 0) if preliminaries else 0
+
+            # Combined subtotal = items total + preliminary amount
+            combined_subtotal = total_boq_cost + preliminary_amount
+
             # Calculate discount amount if only percentage is provided
-            if boq_discount_amount == 0 and boq_discount_percentage > 0 and total_boq_cost > 0:
-                boq_discount_amount = total_boq_cost * (boq_discount_percentage / 100)
+            # Discount should be calculated on combined subtotal (items + preliminaries)
+            if boq_discount_amount == 0 and boq_discount_percentage > 0 and combined_subtotal > 0:
+                boq_discount_amount = combined_subtotal * (boq_discount_percentage / 100)
 
             # Apply BOQ-level discount to get final total
-            final_boq_cost = total_boq_cost - boq_discount_amount if boq_discount_amount > 0 else total_boq_cost
+            final_boq_cost = combined_subtotal - boq_discount_amount if boq_discount_amount > 0 else combined_subtotal
 
-            log.info(f"BOQ {boq.boq_id} update totals - Before discount: {total_boq_cost}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), After discount: {final_boq_cost}")
+            log.info(f"BOQ {boq.boq_id} update totals - Items: {total_boq_cost}, Preliminaries: {preliminary_amount}, Combined: {combined_subtotal}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), Final: {final_boq_cost}")
 
             # Update JSON structure
             updated_json = {
@@ -2876,14 +2918,21 @@ def revision_boq(boq_id):
             boq_discount_percentage = data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)) or 0
             boq_discount_amount = data.get("discount_amount", old_boq_details_json.get("discount_amount", 0)) or 0
 
+            # Get preliminary amount to include in discount calculation
+            preliminary_amount = preliminaries.get('cost_details', {}).get('amount', 0) if preliminaries else 0
+
+            # Combined subtotal = items total + preliminary amount
+            combined_subtotal = total_boq_cost + preliminary_amount
+
             # Calculate discount amount if only percentage is provided
-            if boq_discount_amount == 0 and boq_discount_percentage > 0 and total_boq_cost > 0:
-                boq_discount_amount = total_boq_cost * (boq_discount_percentage / 100)
+            # Discount should be calculated on combined subtotal (items + preliminaries)
+            if boq_discount_amount == 0 and boq_discount_percentage > 0 and combined_subtotal > 0:
+                boq_discount_amount = combined_subtotal * (boq_discount_percentage / 100)
 
             # Apply BOQ-level discount to get final total
-            final_boq_cost = total_boq_cost - boq_discount_amount if boq_discount_amount > 0 else total_boq_cost
+            final_boq_cost = combined_subtotal - boq_discount_amount if boq_discount_amount > 0 else combined_subtotal
 
-            log.info(f"BOQ {boq.boq_id} revision update totals - Before discount: {total_boq_cost}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), After discount: {final_boq_cost}")
+            log.info(f"BOQ {boq.boq_id} revision update totals - Items: {total_boq_cost}, Preliminaries: {preliminary_amount}, Combined: {combined_subtotal}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), Final: {final_boq_cost}")
 
             # Update JSON structure
             updated_json = {
