@@ -4709,6 +4709,10 @@ const ProjectApprovals: React.FC = () => {
                           }
                         });
 
+                        // Add Preliminaries amount to totalClientAmount (to match client version)
+                        const preliminaryAmount = (selectedEstimation as any).preliminaries?.cost_details?.amount || 0;
+                        totalClientAmount += preliminaryAmount;
+
                         // BOQ-level discount (overall discount applied to entire BOQ)
                         const overallDiscountAmount = (selectedEstimation as any).discount_amount || 0;
                         const overallDiscountPct = selectedEstimation.discountPercentage || 0;
