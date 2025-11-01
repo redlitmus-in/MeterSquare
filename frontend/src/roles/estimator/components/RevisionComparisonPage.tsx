@@ -312,7 +312,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
     return prevRevision.boq_details.items.find((item: any) => item.item_name === itemName);
   };
 
-  // Calculate grand total from items (quantity × rate - discount)
+  // Calculate grand total from items (quantity × rate - discount) + preliminaries
   const calculateTotalFromItems = (boqData: any) => {
     if (!boqData?.boq_details?.items || boqData.boq_details.items.length === 0) return 0;
 
@@ -328,26 +328,30 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
       return sum + (item.client_cost || 0);
     }, 0);
 
-    // Calculate discount
+    // Add preliminaries amount
+    const preliminariesAmount = boqData.boq_details?.preliminaries?.cost_details?.amount || 0;
+    const combinedSubtotal = clientCostBeforeDiscount + preliminariesAmount;
+
+    // Calculate discount on combined subtotal
     let totalDiscount = 0;
     if (boqData.boq_details?.discount_percentage && boqData.boq_details.discount_percentage > 0) {
-      totalDiscount = (clientCostBeforeDiscount * boqData.boq_details.discount_percentage) / 100;
+      totalDiscount = (combinedSubtotal * boqData.boq_details.discount_percentage) / 100;
     } else if (boqData.boq_details?.discount_amount && boqData.boq_details.discount_amount > 0) {
       totalDiscount = boqData.boq_details.discount_amount;
     }
 
     // Grand total after discount
-    return clientCostBeforeDiscount - totalDiscount;
+    return combinedSubtotal - totalDiscount;
   };
 
-  // Calculate Grand Total with discount from snapshot
+  // Calculate Grand Total with discount from snapshot + preliminaries
   const calculateGrandTotal = (snapshot: any): number => {
     if (!snapshot?.items || snapshot.items.length === 0) return 0;
 
     const allItems = snapshot.items || [];
 
     // Calculate subtotal (sum of all item client amounts)
-    const subtotal = allItems.reduce((sum: number, item: any) => {
+    const itemsSubtotal = allItems.reduce((sum: number, item: any) => {
       // Calculate client amount for each item
       let itemClientAmount = (item.quantity || 0) * (item.rate || 0);
       if (itemClientAmount === 0 && item.sub_items && item.sub_items.length > 0) {
@@ -359,16 +363,20 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
       return sum + itemClientAmount;
     }, 0);
 
-    // Get overall BOQ discount
+    // Add preliminaries amount
+    const preliminariesAmount = snapshot.preliminaries?.cost_details?.amount || 0;
+    const combinedSubtotal = itemsSubtotal + preliminariesAmount;
+
+    // Get overall BOQ discount on combined subtotal
     let overallDiscount = 0;
 
     if (snapshot.discount_percentage && snapshot.discount_percentage > 0) {
-      overallDiscount = (subtotal * snapshot.discount_percentage) / 100;
+      overallDiscount = (combinedSubtotal * snapshot.discount_percentage) / 100;
     } else if (snapshot.discount_amount && snapshot.discount_amount > 0) {
       overallDiscount = snapshot.discount_amount;
     }
 
-    const grandTotal = subtotal - overallDiscount;
+    const grandTotal = combinedSubtotal - overallDiscount;
     return grandTotal;
   };
 
@@ -642,7 +650,118 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
               </div>
             ) : currentRevisionData ? (
               <div className="p-6 space-y-4 max-h-[600px] overflow-y-auto">
-                {/* Items */}
+                {/* Preliminaries Section - Shown FIRST */}
+                {currentRevisionData.boq_details?.preliminaries && (
+                  <div className="mb-6 bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-5 border-2 border-purple-200 shadow-lg">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="p-2 bg-white rounded-lg shadow-sm">
+                        <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-purple-900">📋 Preliminaries & Approval Works</h3>
+                        <p className="text-sm text-purple-700">Selected conditions and terms</p>
+                      </div>
+                    </div>
+
+                    {/* Selected Items */}
+                    {currentRevisionData.boq_details.preliminaries.items && currentRevisionData.boq_details.preliminaries.items.length > 0 && (
+                      <div className="bg-white rounded-lg p-4 mb-4">
+                        <div className="space-y-2">
+                          {currentRevisionData.boq_details.preliminaries.items.map((item: any, idx: number) => {
+                            const itemText = typeof item === 'object' ? (item.description || item.name || item.text || '') : item;
+                            const isCustom = typeof item === 'object' && item.isCustom;
+                            return (
+                              <div key={idx} className="flex items-start gap-2 text-sm">
+                                <span className="text-purple-600 mt-0.5">✓</span>
+                                <span className="text-gray-700 flex-1">
+                                  {itemText}
+                                  {isCustom && <span className="ml-2 text-xs text-orange-600 font-semibold">(Custom)</span>}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Cost Summary */}
+                    {(() => {
+                      const costDetails = currentRevisionData.boq_details.preliminaries.cost_details || {};
+                      const amount = costDetails.amount || 0;
+
+                      return (
+                        <div className="bg-white rounded-lg p-4">
+                          <h5 className="text-sm font-semibold text-gray-900 mb-3">📊 Cost Summary</h5>
+                          <div className="grid grid-cols-4 gap-3 text-sm">
+                            <div>
+                              <span className="text-gray-600">Qty:</span>
+                              <p className="font-semibold text-gray-900">1</p>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Unit:</span>
+                              <p className="font-semibold text-gray-900">lot</p>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Rate:</span>
+                              <p className="font-semibold text-green-700">{formatCurrency(amount)}</p>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Amount:</span>
+                              <p className="font-bold text-purple-800">{formatCurrency(amount)}</p>
+                            </div>
+                          </div>
+
+                          {/* Internal Cost Summary */}
+                          {costDetails.internal_cost !== undefined && (
+                            <div className="mt-4 pt-4 border-t border-purple-200">
+                              <h5 className="text-sm font-semibold text-gray-900 mb-3">💰 Internal Cost Summary</h5>
+                              {(() => {
+                                const internalCostBase = costDetails.internal_cost || 0;
+                                const miscPct = costDetails.misc_percentage || 0;
+                                const overheadPct = costDetails.overhead_profit_percentage || 0;
+                                const transportPct = costDetails.transport_percentage || 0;
+
+                                const miscAmount = (amount * miscPct) / 100;
+                                const overheadAmount = (amount * overheadPct) / 100;
+                                const transportAmount = (amount * transportPct) / 100;
+                                const totalInternalCost = internalCostBase + miscAmount + overheadAmount + transportAmount;
+
+                                return (
+                                  <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Base Internal Cost:</span>
+                                      <span className="font-semibold text-gray-900">{formatCurrency(internalCostBase)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Miscellaneous ({miscPct}%):</span>
+                                      <span className="font-semibold text-yellow-700">{formatCurrency(miscAmount)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Overhead & Profit ({overheadPct}%):</span>
+                                      <span className="font-semibold text-indigo-600">{formatCurrency(overheadAmount)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Transport ({transportPct}%):</span>
+                                      <span className="font-semibold text-teal-600">{formatCurrency(transportAmount)}</span>
+                                    </div>
+                                    <div className="flex justify-between pt-2 border-t border-purple-200">
+                                      <span className="text-gray-900 font-bold">Total Internal Cost:</span>
+                                      <span className="font-bold text-red-600">{formatCurrency(totalInternalCost)}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* BOQ Items */}
                 {currentRevisionData.boq_details?.items?.map((item: any, index: number) => {
                   const prevRevision = getPreviousRevisionForComparison();
                   const prevItem = prevRevision ? findPreviousItem(item.item_name, prevRevision) : null;
@@ -1053,7 +1172,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                         const allItems = currentRevisionData.boq_details.items || [];
 
                         // Calculate subtotal (sum of all sub-item client amounts)
-                        const subtotal = allItems.reduce((sum: number, item: any) => {
+                        const boqItemsSubtotal = allItems.reduce((sum: number, item: any) => {
                           if (item.sub_items && item.sub_items.length > 0) {
                             return sum + item.sub_items.reduce((siSum: number, si: any) =>
                               siSum + ((si.quantity || 0) * (si.rate || 0)), 0
@@ -1062,8 +1181,12 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                           return sum + (item.client_cost || 0);
                         }, 0);
 
-                        // Calculate total internal cost
-                        const totalInternalCost = allItems.reduce((sum: number, item: any) => {
+                        // Add preliminaries amount to subtotal
+                        const preliminariesAmount = currentRevisionData.boq_details?.preliminaries?.cost_details?.amount || 0;
+                        const subtotal = boqItemsSubtotal + preliminariesAmount;
+
+                        // Calculate total internal cost from BOQ items
+                        const boqItemsInternalCost = allItems.reduce((sum: number, item: any) => {
                           if (item.sub_items && item.sub_items.length > 0) {
                             return sum + item.sub_items.reduce((siSum: number, si: any) => {
                               const matCost = si.materials?.reduce((m: number, mat: any) => m + (mat.total_price || mat.quantity * mat.unit_price), 0) || 0;
@@ -1077,6 +1200,22 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                           }
                           return sum + (item.internal_cost || 0);
                         }, 0);
+
+                        // Add preliminaries internal cost
+                        const preliminariesInternalCost = (() => {
+                          if (!currentRevisionData.boq_details?.preliminaries?.cost_details) return 0;
+                          const costDetails = currentRevisionData.boq_details.preliminaries.cost_details;
+                          const internalCostBase = costDetails.internal_cost || 0;
+                          const miscPct = costDetails.misc_percentage || 10;
+                          const overheadPct = costDetails.overhead_profit_percentage || 25;
+                          const transportPct = costDetails.transport_percentage || 5;
+                          const miscAmount = (preliminariesAmount * miscPct) / 100;
+                          const overheadAmount = (preliminariesAmount * overheadPct) / 100;
+                          const transportAmount = (preliminariesAmount * transportPct) / 100;
+                          return internalCostBase + miscAmount + overheadAmount + transportAmount;
+                        })();
+
+                        const totalInternalCost = boqItemsInternalCost + preliminariesInternalCost;
 
                         // Calculate profits
                         const totalActualProfit = subtotal - totalInternalCost;
@@ -1552,6 +1691,121 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                       {/* Expandable Details - Full Details with Soft Red Background */}
                       {isExpanded && revision.boq_details?.items && (
                         <div className="p-4 bg-gradient-to-br from-red-50 to-red-100 space-y-3 max-h-[500px] overflow-y-auto">
+                          {/* Preliminaries Section - Shown FIRST (Previous Revision) */}
+                          {revision.boq_details?.preliminaries && (
+                            <div className="mb-6 bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-5 border-2 border-purple-200 shadow-lg">
+                              <div className="flex items-center gap-3 mb-4">
+                                <div className="p-2 bg-white rounded-lg shadow-sm">
+                                  <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                </div>
+                                <div>
+                                  <h3 className="text-lg font-bold text-purple-900">📋 Preliminaries & Approval Works</h3>
+                                  <p className="text-sm text-purple-700">Selected conditions and terms</p>
+                                </div>
+                              </div>
+
+                              {(() => {
+                                const prelimData = revision.boq_details.preliminaries;
+                                const items = prelimData.items || [];
+                                const costDetails = prelimData.cost_details || {};
+                                const amount = costDetails.amount || 0;
+                                const miscPct = costDetails.misc_percentage || 10;
+                                const overheadPct = costDetails.overhead_profit_percentage || 25;
+                                const transportPct = costDetails.transport_percentage || 5;
+
+                                return (
+                                  <>
+                                    {/* Selected Items */}
+                                    {items.length > 0 && (
+                                      <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
+                                        <h5 className="text-sm font-semibold text-gray-900 mb-3">Selected Items:</h5>
+                                        <div className="space-y-2">
+                                          {items.map((item: any, idx: number) => (
+                                            <div key={idx} className="flex items-start gap-2">
+                                              <span className="text-green-600 font-bold mt-0.5">✓</span>
+                                              <div className="flex-1">
+                                                <p className="text-sm text-gray-800">{item.description}</p>
+                                                {item.custom_item && (
+                                                  <span className="inline-block mt-1 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
+                                                    Custom Item
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Cost Summary */}
+                                    <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
+                                      <h5 className="text-sm font-semibold text-gray-900 mb-3">Cost Summary</h5>
+                                      <div className="grid grid-cols-4 gap-4">
+                                        <div>
+                                          <p className="text-xs text-gray-600 mb-1">Quantity</p>
+                                          <p className="text-sm font-semibold text-gray-900">{costDetails.quantity || 1}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-gray-600 mb-1">Unit</p>
+                                          <p className="text-sm font-semibold text-gray-900">{costDetails.unit || 'lot'}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-gray-600 mb-1">Rate (AED)</p>
+                                          <p className="text-sm font-semibold text-gray-900">{formatCurrency(costDetails.rate || 0)}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-gray-600 mb-1">Amount (AED)</p>
+                                          <p className="text-sm font-bold text-purple-900">{formatCurrency(amount)}</p>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Internal Cost Summary */}
+                                    {costDetails.internal_cost !== undefined && (
+                                      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+                                        <h5 className="text-sm font-semibold text-gray-900 mb-3">Internal Cost Summary</h5>
+                                        {(() => {
+                                          const internalCostBase = costDetails.internal_cost || 0;
+                                          const miscAmount = (amount * miscPct) / 100;
+                                          const overheadAmount = (amount * overheadPct) / 100;
+                                          const transportAmount = (amount * transportPct) / 100;
+                                          const totalInternalCost = internalCostBase + miscAmount + overheadAmount + transportAmount;
+
+                                          return (
+                                            <div className="space-y-2 text-sm">
+                                              <div className="flex justify-between">
+                                                <span className="text-gray-700">Base Internal Cost:</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(internalCostBase)}</span>
+                                              </div>
+                                              <div className="flex justify-between">
+                                                <span className="text-gray-700">Miscellaneous ({miscPct}%):</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(miscAmount)}</span>
+                                              </div>
+                                              <div className="flex justify-between">
+                                                <span className="text-gray-700">Overhead & Profit ({overheadPct}%):</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(overheadAmount)}</span>
+                                              </div>
+                                              <div className="flex justify-between">
+                                                <span className="text-gray-700">Transport ({transportPct}%):</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(transportAmount)}</span>
+                                              </div>
+                                              <div className="flex justify-between pt-2 border-t-2 border-blue-300">
+                                                <span className="text-gray-900 font-bold">Total Internal Cost:</span>
+                                                <span className="font-bold text-red-600">{formatCurrency(totalInternalCost)}</span>
+                                              </div>
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          )}
+
                           {revision.boq_details.items.map((item: any, itemIdx: number) => {
                             // Calculate client amount - if rate is 0, calculate from sub-items
                             let clientAmount = (item.quantity || 0) * (item.rate || 0);

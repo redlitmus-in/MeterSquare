@@ -3386,11 +3386,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             <div className="space-y-2 text-sm">
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Client Cost:</span>
-                                <span className="font-semibold text-blue-700">{itemsSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                <span className="font-semibold text-blue-700">{itemsSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Internal Cost:</span>
-                                <span className="font-semibold text-red-600">{totalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                <span className="font-semibold text-red-600">{totalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between pt-2 border-t">
                                 <span className="text-gray-600">Planned Profit:</span>
@@ -3398,13 +3398,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                   {items.reduce((sum, item) => {
                                     const costs = calculateItemCost(item);
                                     return sum + costs.totalPlannedProfit;
-                                  }, 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                  }, 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                 </span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Negotiable Margins:</span>
                                 <span className={`font-semibold ${totalActualProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                  {totalActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                  {totalActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                 </span>
                               </div>
                             </div>
@@ -3418,20 +3418,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             <div className="space-y-2 text-sm">
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Client Amount:</span>
-                                <span className="font-semibold text-blue-700">{costAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                <span className="font-semibold text-blue-700">{costAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Internal Cost:</span>
-                                <span className="font-semibold text-red-600">{preliminaryTotalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                <span className="font-semibold text-red-600">{preliminaryTotalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between pt-2 border-t">
                                 <span className="text-gray-600">Planned Profit:</span>
-                                <span className="font-semibold text-indigo-600">{preliminaryPlannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                <span className="font-semibold text-indigo-600">{preliminaryPlannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Negotiable Margins:</span>
                                 <span className={`font-semibold ${preliminaryActualProfit >= preliminaryPlannedProfit ? 'text-green-600' : 'text-red-600'}`}>
-                                  {preliminaryActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                  {preliminaryActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                 </span>
                               </div>
                             </div>
@@ -3572,27 +3572,27 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             <span className="text-gray-600">Client Cost:</span>
                             <div className="flex items-center gap-2">
                               <span className="text-gray-500 line-through">
-                                {combinedSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                {combinedSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                               </span>
                               <span className="text-blue-700 font-bold">
-                                → {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                → {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                               </span>
                             </div>
                           </div>
                           <div className="flex justify-between items-center">
                             <span className="text-gray-600">Internal Cost:</span>
                             <span className="font-semibold text-red-600">
-                              {combinedInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                              {combinedInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                             </span>
                           </div>
                           <div className="flex justify-between items-center pt-2 border-t border-gray-300">
                             <span className="text-gray-700 font-medium">Negotiable Margins:</span>
                             <div className="flex items-center gap-2">
                               <span className="text-gray-500 line-through">
-                                {combinedActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                {combinedActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                               </span>
                               <span className={`font-bold ${negotiableMarginAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                                → {negotiableMarginAfterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                → {negotiableMarginAfterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                               </span>
                             </div>
                           </div>

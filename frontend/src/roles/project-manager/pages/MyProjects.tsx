@@ -24,6 +24,7 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
 import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
+import { ArrowRight } from 'lucide-react';
 import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
 import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
 import RejectedRequestsSection from '@/components/boq/RejectedRequestsSection';
@@ -134,12 +135,13 @@ const MyProjects: React.FC = () => {
   // Modal states - declared first to use in auto-refresh condition
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [showEditBOQModal, setShowEditBOQModal] = useState(false);
-  const [showBOQModal, setShowBOQModal] = useState(false);
+  const [showFullScreenBOQ, setShowFullScreenBOQ] = useState(false);
+  const [fullScreenBoqMode, setFullScreenBoqMode] = useState<'view' | 'edit'>('view');
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showCreateBOQModal, setShowCreateBOQModal] = useState(false);
 
   // Pause auto-refresh when any modal is open to prevent flickering during editing
-  const isAnyModalOpen = showEditBOQModal || showBOQModal || showAssignModal || showCreateBOQModal;
+  const isAnyModalOpen = showEditBOQModal || showAssignModal || showCreateBOQModal;
 
   // Real-time auto-sync for projects - disabled when editing
   const { data: projectsData, isLoading: loading, refetch } = useProjectsAutoSync(
@@ -414,7 +416,8 @@ const MyProjects: React.FC = () => {
         setApprovedChangeRequests([]);
         setRejectedChangeRequests([]);
 
-        setShowBOQModal(true);
+        setShowFullScreenBOQ(true);
+        setFullScreenBoqMode('view');
       } else {
         toast.error('Failed to load BOQ details');
       }
@@ -661,20 +664,22 @@ const MyProjects: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Header - Match Estimator/TD Style */}
-      <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
-              <BuildingOfficeIcon className="w-6 h-6 text-blue-600" />
+      {!showFullScreenBOQ && (
+        <>
+          {/* Header - Match Estimator/TD Style */}
+          <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
+            <div className="max-w-7xl mx-auto px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
+                  <BuildingOfficeIcon className="w-6 h-6 text-blue-600" />
+                </div>
+                <h1 className="text-2xl font-bold text-[#243d8a]">My Projects</h1>
+              </div>
             </div>
-            <h1 className="text-2xl font-bold text-[#243d8a]">My Projects</h1>
           </div>
-        </div>
-      </div>
 
-      {/* Search Bar and Controls */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          {/* Search Bar and Controls */}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
           {/* Search Bar */}
           <div className="relative flex-1 max-w-full sm:max-w-md">
@@ -928,10 +933,12 @@ const MyProjects: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           setSelectedProject(project);
                           if (project.boq_id) {
-                            loadBOQDetails(project.boq_id);
+                            await loadBOQDetails(project.boq_id);
+                            setFullScreenBoqMode('view');
+                            setShowFullScreenBOQ(true);
                           }
                         }}
                         className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
@@ -1137,10 +1144,12 @@ const MyProjects: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <div className="flex items-center gap-1">
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               setSelectedProject(project);
                               if (project.boq_id) {
-                                loadBOQDetails(project.boq_id);
+                                await loadBOQDetails(project.boq_id);
+                                setFullScreenBoqMode('view');
+                                setShowFullScreenBOQ(true);
                               }
                             }}
                             className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
@@ -1196,564 +1205,6 @@ const MyProjects: React.FC = () => {
           )}
         </div>
       </div>
-
-      {/* BOQ Details Modal - Using shared component */}
-      <BOQDetailsModal
-        isOpen={showBOQModal}
-        onClose={() => setShowBOQModal(false)}
-        boq={selectedProject ? { boq_id: selectedProject.boq_id, boq_name: selectedProject.projectName } : null}
-        onEdit={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? () => {
-          setShowEditBOQModal(true);
-          setShowBOQModal(false);
-        } : undefined}
-        onApprove={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? async () => {
-          // Reload BOQ details before showing approve modal to ensure fresh data
-          if (selectedProject?.boq_id) {
-            await loadBOQDetails(selectedProject.boq_id);
-          }
-          setShowApproveModal(true);
-          setShowBOQModal(false);
-        } : undefined}
-        onReject={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? () => {
-          setShowRejectModal(true);
-          setShowBOQModal(false);
-        } : undefined}
-        onRequestExtension={selectedProject?.boq_status?.toLowerCase() === 'approved' && selectedProject?.site_supervisor_id && selectedProject?.status?.toLowerCase() !== 'completed' ? () => {
-          setShowDayExtensionModal(true);
-          setShowBOQModal(false);
-        } : undefined}
-        showNewPurchaseItems={true}
-      />
-
-      {/* OLD BOQ Modal - TO BE REMOVED - keeping temporarily for reference */}
-      {false && showBOQModal && selectedProject && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden"
-          >
-            <div className="bg-blue-50 px-6 py-4 border-b border-blue-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-bold text-blue-900">BOQ Details - {selectedProject.project_name}</h2>
-                  <p className="text-sm text-blue-700 mt-1">
-                    {selectedProject.client} • {selectedProject.location} • {selectedProject.area}
-                  </p>
-                  <p className="text-xs text-blue-600 mt-1">Working Hours: {selectedProject.area || 'N/A'}</p>
-                </div>
-                <button
-                  onClick={() => setShowBOQModal(false)}
-                  className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
-                >
-                  <XMarkIcon className="w-6 h-6 text-blue-900" />
-                </button>
-              </div>
-            </div>
-
-            <div className="p-6 overflow-y-auto max-h-[75vh]">
-              {loadingBOQDetails ? (
-                <div className="text-center py-12">
-                  <ModernLoadingSpinners variant="pulse-wave" />
-                </div>
-              ) : (
-                <>
-                  {/* Overhead Budget Overview */}
-                  {(() => {
-                    const allRequests = [...pendingChangeRequests, ...approvedChangeRequests, ...rejectedChangeRequests];
-                    const sampleRequest = allRequests.find(r => r.overhead_analysis);
-                    if (!sampleRequest?.overhead_analysis) return null;
-
-                    const totalConsumedFromApproved = approvedChangeRequests.reduce((sum, req) => sum + (req.materials_total_cost || 0), 0);
-                    const overheadAnalysis = sampleRequest.overhead_analysis;
-                    const totalAllocated = overheadAnalysis.original_allocated || 0;
-                    const availableBudget = totalAllocated - totalConsumedFromApproved;
-                    const isOverBudget = availableBudget < 0;
-
-                    return (
-                      <div className="mb-6">
-                        <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-t-lg px-4 py-3">
-                          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                            </svg>
-                            Overhead Budget Overview
-                          </h3>
-                        </div>
-                        <div className="border-2 border-blue-200 rounded-b-lg p-4 bg-blue-50/30">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                            <div className="bg-white rounded-lg p-4 border border-blue-200 shadow-sm">
-                              <p className="text-xs text-gray-600 mb-1 font-medium">Total Overhead Allocated</p>
-                              <p className="text-xl font-bold text-blue-900">
-                                AED {totalAllocated.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                              </p>
-                              <p className="text-xs text-gray-500 mt-1">
-                                ({overheadAnalysis.overhead_percentage || 0}% of base cost)
-                              </p>
-                            </div>
-                            <div className="bg-white rounded-lg p-4 border border-orange-200 shadow-sm">
-                              <p className="text-xs text-gray-600 mb-1 font-medium">Already Consumed</p>
-                              <p className="text-xl font-bold text-orange-600">
-                                AED {totalConsumedFromApproved.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                              </p>
-                              <p className="text-xs text-gray-500 mt-1">
-                                From {approvedChangeRequests.length} approved request(s)
-                              </p>
-                            </div>
-                            <div className="bg-white rounded-lg p-4 border border-green-200 shadow-sm">
-                              <p className="text-xs text-gray-600 mb-1 font-medium">Available Overhead Budget</p>
-                              <p className={`text-xl font-bold ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
-                                AED {availableBudget.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                              </p>
-                              <p className="text-xs text-gray-500 mt-1">Remaining for extra materials</p>
-                            </div>
-                            <div className={`bg-white rounded-lg p-4 border shadow-sm ${isOverBudget ? 'border-red-200' : 'border-green-200'}`}>
-                              <p className="text-xs text-gray-600 mb-1 font-medium">Budget Status</p>
-                              <p className={`text-xl font-bold ${isOverBudget ? 'text-red-600' : 'text-green-600'}`}>
-                                {!isOverBudget ? '✓ Healthy' : '⚠ Over Budget'}
-                              </p>
-                              <p className="text-xs text-gray-500 mt-1">
-                                {!isOverBudget ? 'Sufficient funds available' : 'Exceeds allocated budget'}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="mt-4 p-3 bg-blue-100 border border-blue-300 rounded-lg">
-                            <p className="text-xs text-blue-800">
-                              <strong>Note:</strong> The overhead budget is used to cover additional material costs for change requests.
-                              Each approved extra material request will consume from this allocated budget.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Pending Change Requests */}
-                  <PendingRequestsSection
-                    requests={pendingChangeRequests}
-                    onViewDetails={async (crId) => {
-                      const response = await changeRequestService.getChangeRequestById(crId);
-                      if (response.success && response.data) {
-                        setSelectedChangeRequest(response.data);
-                        setShowChangeRequestModal(true);
-                      } else {
-                        toast.error('Failed to load change request details');
-                      }
-                    }}
-                    onStatusUpdate={async () => {
-                      if (selectedProject?.boq_id) {
-                        await loadBOQDetails(selectedProject.boq_id);
-                      }
-                    }}
-                  />
-
-                  {/* Approved Extra Materials */}
-                  {approvedChangeRequests.length > 0 && (
-                    <ApprovedExtraMaterialsSection
-                      materials={approvedChangeRequests.flatMap(cr =>
-                        cr.materials_data.map(mat => ({
-                          id: cr.cr_id,
-                          item_name: mat.material_name,
-                          quantity: mat.quantity,
-                          unit: mat.unit,
-                          unit_price: mat.unit_price,
-                          total_price: mat.total_price,
-                          change_request_id: cr.cr_id,
-                          related_item: mat.related_item,
-                          approval_date: cr.approval_date,
-                          approved_by_name: cr.approved_by_name
-                        }))
-                      )}
-                      onViewChangeRequest={(crId) => {
-                        setSelectedChangeRequestId(crId);
-                        setShowChangeRequestModal(true);
-                      }}
-                    />
-                  )}
-
-                  {/* Rejected Requests */}
-                  <RejectedRequestsSection
-                    requests={rejectedChangeRequests}
-                    onViewDetails={async (crId) => {
-                      const response = await changeRequestService.getChangeRequestById(crId);
-                      if (response.success && response.data) {
-                        setSelectedChangeRequest(response.data);
-                        setShowChangeRequestModal(true);
-                      } else {
-                        toast.error('Failed to load change request details');
-                      }
-                    }}
-                  />
-
-                  {/* Existing Purchase Section */}
-                  {selectedProject.existingPurchaseItems && selectedProject.existingPurchaseItems.length > 0 && (
-                    <div className="mb-8">
-                      <div className="bg-gradient-to-r from-purple-500 to-purple-600 rounded-t-lg px-4 py-3 flex items-center justify-between">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                          <DocumentTextIcon className="w-5 h-5" />
-                          Existing Purchase Items
-                        </h3>
-                        <span className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium text-white">
-                          {selectedProject.existingPurchaseItems.length} item{selectedProject.existingPurchaseItems.length > 1 ? 's' : ''}
-                        </span>
-                      </div>
-                      <div className="border-2 border-purple-200 rounded-b-lg p-4 bg-purple-50/30">
-                        <div className="space-y-4">
-                          {selectedProject.existingPurchaseItems.map((item, idx) => (
-                            <div key={`existing-${item.id}-${idx}`} className="bg-white border-2 border-purple-200 rounded-lg p-4 shadow-sm">
-                              <div className="flex items-start justify-between mb-3">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <h4 className="font-bold text-gray-900 text-lg">{item.description}</h4>
-                                    <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded">Existing</span>
-                                  </div>
-                                  {item.briefDescription && (
-                                    <p className="text-sm text-gray-600 mt-1">{item.briefDescription}</p>
-                                  )}
-                                </div>
-                                <div className="text-right ml-4">
-                                  <p className="text-sm text-gray-500">Qty: {item.quantity} {item.unit}</p>
-                                  <p className="text-sm text-gray-500">Rate: AED{(item.rate || 0).toLocaleString()}/{item.unit}</p>
-                                </div>
-                              </div>
-
-                              {item.materials?.length > 0 && (
-                                <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                                  <p className="text-sm font-medium text-blue-900 mb-2">+ Raw Materials</p>
-                                  <div className="space-y-1">
-                                    {item.materials.map((mat, matIdx) => (
-                                      <div key={matIdx} className="flex justify-between text-sm text-blue-800">
-                                        <span>{mat.name} ({mat.quantity} {mat.unit})</span>
-                                        <span className="font-medium">AED{(mat.amount || 0).toLocaleString()}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <p className="text-sm font-bold text-blue-900 mt-2 pt-2 border-t border-blue-200">
-                                    Total Materials: AED{item.materials.reduce((sum, m) => sum + (m.amount || 0), 0).toLocaleString()}
-                                  </p>
-                                </div>
-                              )}
-
-                              {item.labour?.length > 0 && (
-                                <div className="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
-                                  <p className="text-sm font-medium text-green-900 mb-2">+ Labour</p>
-                                  <div className="space-y-1">
-                                    {item.labour.map((lab, labIdx) => (
-                                      <div key={labIdx} className="flex justify-between text-sm text-green-800">
-                                        <span>{lab.type} ({lab.quantity} {lab.unit})</span>
-                                        <span className="font-medium">AED{(lab.amount || 0).toLocaleString()}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <p className="text-sm font-bold text-green-900 mt-2 pt-2 border-t border-green-200">
-                                    Total Labour: AED{(item.laborCost || 0).toLocaleString()}
-                                  </p>
-                                </div>
-                              )}
-
-                              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-3">
-                                <p className="text-sm font-medium text-orange-900 mb-2">+ Overheads & Profit</p>
-                                <div className="space-y-1 text-sm text-orange-800">
-                                  <div className="flex justify-between">
-                                    <span>Overhead ({selectedProject.boq_details?.overhead_percentage || 10}%)</span>
-                                    <span>AED{(item.amount * ((selectedProject.boq_details?.overhead_percentage || 10) / 100)).toLocaleString()}</span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span>Profit Margin ({selectedProject.boq_details?.profit_margin_percentage || 15}%)</span>
-                                    <span>AED{(item.amount * ((selectedProject.boq_details?.profit_margin_percentage || 15) / 100)).toLocaleString()}</span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-3">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm font-medium text-green-900">Estimated Selling Price:</span>
-                                  <span className="text-xl font-bold text-green-900">AED{(item.estimatedSellingPrice || 0).toLocaleString()}</span>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Existing Purchase Summary */}
-                        {selectedProject.boq_details?.boq_details?.existing_purchase?.summary && (
-                          <div className="mt-4 bg-white border-2 border-purple-300 rounded-lg p-4">
-                            <h4 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
-                              <DocumentTextIcon className="w-4 h-4" />
-                              Existing Purchase Summary
-                            </h4>
-                            <div className="space-y-2 text-sm">
-                              <div className="flex justify-between">
-                                <span className="text-blue-700">Total Material Cost:</span>
-                                <span className="font-bold text-blue-900">
-                                  AED{(selectedProject.boq_details.boq_details.existing_purchase.summary.total_material_cost || 0).toLocaleString()}
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-green-700">Total Labour Cost:</span>
-                                <span className="font-bold text-green-900">
-                                  AED{(selectedProject.boq_details.boq_details.existing_purchase.summary.total_labour_cost || 0).toLocaleString()}
-                                </span>
-                              </div>
-                              <div className="flex justify-between pt-2 mt-2 border-t-2 border-purple-300">
-                                <span className="text-purple-900 font-bold">Existing Purchase Total:</span>
-                                <span className="font-bold text-purple-900">
-                                  AED{(selectedProject.boq_details.boq_details.existing_purchase.summary.total_cost || 0).toLocaleString()}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* New Purchase Section */}
-                  {selectedProject.newPurchaseItems && selectedProject.newPurchaseItems.length > 0 && (
-                    <div className="mb-8">
-                      <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-t-lg px-4 py-3 flex items-center justify-between">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                          <DocumentTextIcon className="w-5 h-5" />
-                          New Purchase Items
-                        </h3>
-                        <span className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium text-white">
-                          {selectedProject.newPurchaseItems.length} item{selectedProject.newPurchaseItems.length > 1 ? 's' : ''}
-                        </span>
-                      </div>
-                      <div className="border-2 border-emerald-200 rounded-b-lg p-4 bg-emerald-50/30">
-                        <div className="space-y-4">
-                          {selectedProject.newPurchaseItems.map((item, idx) => (
-                            <div key={`new-${item.id}-${idx}`} className="bg-white border-2 border-emerald-200 rounded-lg p-4 shadow-sm">
-                              <div className="flex items-start justify-between mb-3">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <h4 className="font-bold text-gray-900 text-lg">{item.description}</h4>
-                                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-medium rounded">New</span>
-                                  </div>
-                                  {item.briefDescription && (
-                                    <p className="text-sm text-gray-600 mt-1">{item.briefDescription}</p>
-                                  )}
-                                </div>
-                                <div className="text-right ml-4">
-                                  <p className="text-sm text-gray-500">Qty: {item.quantity} {item.unit}</p>
-                                  <p className="text-sm text-gray-500">Rate: AED{(item.rate || 0).toLocaleString()}/{item.unit}</p>
-                                </div>
-                              </div>
-
-                              {item.materials?.length > 0 && (
-                                <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                                  <p className="text-sm font-medium text-blue-900 mb-2">+ Raw Materials</p>
-                                  <div className="space-y-1">
-                                    {item.materials.map((mat, matIdx) => (
-                                      <div key={matIdx} className="flex justify-between text-sm text-blue-800">
-                                        <span>{mat.name} ({mat.quantity} {mat.unit})</span>
-                                        <span className="font-medium">AED{(mat.amount || 0).toLocaleString()}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <p className="text-sm font-bold text-blue-900 mt-2 pt-2 border-t border-blue-200">
-                                    Total Materials: AED{item.materials.reduce((sum, m) => sum + (m.amount || 0), 0).toLocaleString()}
-                                  </p>
-                                </div>
-                              )}
-
-                              {item.labour?.length > 0 && (
-                                <div className="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
-                                  <p className="text-sm font-medium text-green-900 mb-2">+ Labour</p>
-                                  <div className="space-y-1">
-                                    {item.labour.map((lab, labIdx) => (
-                                      <div key={labIdx} className="flex justify-between text-sm text-green-800">
-                                        <span>{lab.type} ({lab.quantity} {lab.unit})</span>
-                                        <span className="font-medium">AED{(lab.amount || 0).toLocaleString()}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <p className="text-sm font-bold text-green-900 mt-2 pt-2 border-t border-green-200">
-                                    Total Labour: AED{(item.laborCost || 0).toLocaleString()}
-                                  </p>
-                                </div>
-                              )}
-
-                              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-3">
-                                <p className="text-sm font-medium text-orange-900 mb-2">+ Overheads & Profit</p>
-                                <div className="space-y-1 text-sm text-orange-800">
-                                  <div className="flex justify-between">
-                                    <span>Overhead ({selectedProject.boq_details?.boq_details?.new_purchase?.items?.[idx]?.overhead_percentage || 8}%)</span>
-                                    <span>AED{(selectedProject.boq_details?.boq_details?.new_purchase?.items?.[idx]?.overhead_amount || 0).toLocaleString()}</span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span>Profit Margin ({selectedProject.boq_details?.boq_details?.new_purchase?.items?.[idx]?.profit_margin_percentage || 12}%)</span>
-                                    <span>AED{(selectedProject.boq_details?.boq_details?.new_purchase?.items?.[idx]?.profit_margin_amount || 0).toLocaleString()}</span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-3">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm font-medium text-green-900">Estimated Selling Price:</span>
-                                  <span className="text-xl font-bold text-green-900">AED{(item.estimatedSellingPrice || 0).toLocaleString()}</span>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* New Purchase Summary */}
-                        {selectedProject.boq_details?.boq_details?.new_purchase?.summary && (
-                          <div className="mt-4 bg-white border-2 border-emerald-300 rounded-lg p-4">
-                            <h4 className="font-bold text-emerald-900 mb-3 flex items-center gap-2">
-                              <DocumentTextIcon className="w-4 h-4" />
-                              New Purchase Summary
-                            </h4>
-                            <div className="space-y-2 text-sm">
-                              <div className="flex justify-between">
-                                <span className="text-blue-700">Total Material Cost:</span>
-                                <span className="font-bold text-blue-900">
-                                  AED{(selectedProject.boq_details.boq_details.new_purchase.summary.total_material_cost || 0).toLocaleString()}
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-green-700">Total Labour Cost:</span>
-                                <span className="font-bold text-green-900">
-                                  AED{(selectedProject.boq_details.boq_details.new_purchase.summary.total_labour_cost || 0).toLocaleString()}
-                                </span>
-                              </div>
-                              <div className="flex justify-between pt-2 mt-2 border-t-2 border-emerald-300">
-                                <span className="text-emerald-900 font-bold">New Purchase Total:</span>
-                                <span className="font-bold text-emerald-900">
-                                  AED{(selectedProject.boq_details.boq_details.new_purchase.summary.total_cost || 0).toLocaleString()}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Combined Cost Summary */}
-                  <div className="mt-6 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-lg p-5 shadow-md">
-                    <h3 className="font-bold text-blue-900 mb-4 text-lg flex items-center gap-2">
-                      <DocumentTextIcon className="w-5 h-5" />
-                      Combined Cost Summary
-                    </h3>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-blue-700">Total Material Cost:</span>
-                        <span className="font-bold text-blue-900">AED{(selectedProject.boq_details?.total_materials || 0).toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-green-700">Total Labour Cost:</span>
-                        <span className="font-bold text-green-900">AED{(selectedProject.boq_details?.total_labour || 0).toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-orange-700">Overhead ({selectedProject.boq_details?.overhead_percentage || 10}%):</span>
-                        <span className="font-bold text-orange-900">
-                          AED{(selectedProject.boq_details?.boq_details?.combined_summary?.total_material_cost && selectedProject.boq_details?.boq_details?.combined_summary?.total_labour_cost
-                            ? ((selectedProject.boq_details.boq_details.combined_summary.total_material_cost + selectedProject.boq_details.boq_details.combined_summary.total_labour_cost) * ((selectedProject.boq_details?.overhead_percentage || 10) / 100))
-                            : (((selectedProject.boq_details?.total_materials || 0) + (selectedProject.boq_details?.total_labour || 0)) * ((selectedProject.boq_details?.overhead_percentage || 10) / 100))
-                          ).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-orange-700">Profit Margin ({selectedProject.boq_details?.profit_margin_percentage || 15}%):</span>
-                        <span className="font-bold text-orange-900">
-                          AED{(selectedProject.boq_details?.boq_details?.combined_summary?.total_material_cost && selectedProject.boq_details?.boq_details?.combined_summary?.total_labour_cost
-                            ? ((selectedProject.boq_details.boq_details.combined_summary.total_material_cost + selectedProject.boq_details.boq_details.combined_summary.total_labour_cost) * ((selectedProject.boq_details?.profit_margin_percentage || 15) / 100))
-                            : (((selectedProject.boq_details?.total_materials || 0) + (selectedProject.boq_details?.total_labour || 0)) * ((selectedProject.boq_details?.profit_margin_percentage || 15) / 100))
-                          ).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="flex justify-between pt-3 mt-3 border-t-2 border-blue-400">
-                        <span className="text-blue-900 font-bold text-lg">Grand Total:</span>
-                        <span className="font-bold text-blue-900 text-xl">AED{(selectedProject.boq_details?.total_cost || 0).toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex items-center justify-between">
-                    <div className="text-sm text-gray-600">
-                      Submitted by: Estimator on {formatDate(selectedProject.created_at)}
-                    </div>
-
-                    {/* Status Badge or Approve/Reject/Edit Buttons */}
-                    <div className="flex items-center gap-3">
-                      {selectedProject.boq_status?.toLowerCase() === 'approved' ? (
-                        <>
-                          <div className="px-6 py-2.5 bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-500 rounded-lg flex items-center gap-2">
-                            <CheckCircleIcon className="w-5 h-5 text-green-600" />
-                            <span className="font-semibold text-green-700">Approved</span>
-                          </div>
-                          {/* Show Request Extension button for assigned/active projects */}
-                          {selectedProject.site_supervisor_id && selectedProject.status?.toLowerCase() !== 'completed' && (
-                            <button
-                              onClick={() => setShowDayExtensionModal(true)}
-                              className="px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
-                            >
-                              <CalendarIcon className="w-4 h-4" />
-                              Request Extension
-                            </button>
-                          )}
-                        </>
-                      ) : selectedProject.boq_status?.toLowerCase() === 'rejected' ? (
-                        <div className="px-6 py-2.5 bg-gradient-to-r from-red-50 to-red-100 border-2 border-red-500 rounded-lg flex items-center gap-2">
-                          <XMarkIcon className="w-5 h-5 text-red-600" />
-                          <span className="font-semibold text-red-700">Rejected</span>
-                        </div>
-                      ) : selectedProject.boq_status?.toLowerCase() === 'assigned' ? (
-                        <div className="px-6 py-2.5 bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-500 rounded-lg flex items-center gap-2">
-                          <UserPlusIcon className="w-5 h-5 text-blue-600" />
-                          <span className="font-semibold text-blue-700">Assigned</span>
-                        </div>
-                      ) : selectedProject.boq_status?.toLowerCase() === 'completed' ? (
-                        <div className="px-6 py-2.5 bg-gradient-to-r from-purple-50 to-purple-100 border-2 border-purple-500 rounded-lg flex items-center gap-2">
-                          <CheckCircleIcon className="w-5 h-5 text-purple-600" />
-                          <span className="font-semibold text-purple-700">Completed</span>
-                        </div>
-                      ) : (['pending', 'pending_pm_approval', 'draft', 'pending_revision', 'under_revision'].includes(selectedProject.boq_status?.toLowerCase() || '')) ? (
-                        <>
-                          <button
-                            onClick={() => handleEditBOQ(selectedProject)}
-                            className="px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
-                          >
-                            <PencilIcon className="w-4 h-4" />
-                            Edit BOQ
-                          </button>
-                          <button
-                            onClick={async () => {
-                              // Reload BOQ details before showing approve modal to ensure fresh data
-                              if (selectedProject?.boq_id) {
-                                await loadBOQDetails(selectedProject.boq_id);
-                              }
-                              setShowApproveModal(true);
-                            }}
-                            className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
-                          >
-                            <CheckCircleIcon className="w-4 h-4" />
-                            Approve BOQ
-                          </button>
-                          <button
-                            onClick={() => setShowDayExtensionModal(true)}
-                            className="px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg font-medium transition-all shadow-sm flex items-center gap-1.5 text-sm"
-                          >
-                            <CalendarIcon className="w-4 h-4" />
-                            Request Extension
-                          </button>
-                        </>
-                      ) : (
-                        <div className="px-6 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 border-2 border-gray-500 rounded-lg flex items-center gap-2">
-                          <ClockIcon className="w-5 h-5 text-gray-600" />
-                          <span className="font-semibold text-gray-700">{selectedProject.boq_status || 'Unknown'}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </motion.div>
-        </div>
-      )}
 
       {/* Assign SE Modal - TD Style */}
       {showAssignModal && selectedProject && (
@@ -3177,6 +2628,42 @@ const MyProjects: React.FC = () => {
             </div>
           </motion.div>
         </div>
+      )}
+        </>
+      )}
+
+      {/* Full Screen BOQ View */}
+      {showFullScreenBOQ && selectedProject && fullScreenBoqMode === 'view' && (
+        <BOQDetailsModal
+          isOpen={showFullScreenBOQ}
+          fullScreen={true}
+          onClose={() => {
+            setShowFullScreenBOQ(false);
+            setSelectedProject(null);
+          }}
+          boq={{
+            boq_id: selectedProject.boq_id,
+            boq_name: selectedProject.projectName
+          }}
+          onEdit={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? () => {
+            setFullScreenBoqMode('edit');
+          } : undefined}
+          onApprove={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? async () => {
+            if (selectedProject?.boq_id) {
+              await loadBOQDetails(selectedProject.boq_id);
+            }
+            setShowApproveModal(true);
+            setShowFullScreenBOQ(false);
+          } : undefined}
+          onReject={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? () => {
+            setShowRejectModal(true);
+            setShowFullScreenBOQ(false);
+          } : undefined}
+          onRequestExtension={selectedProject?.boq_status?.toLowerCase() === 'approved' ? () => {
+            setShowDayExtensionModal(true);
+            setShowFullScreenBOQ(false);
+          } : undefined}
+        />
       )}
 
       {/* Day Extension Request Modal */}

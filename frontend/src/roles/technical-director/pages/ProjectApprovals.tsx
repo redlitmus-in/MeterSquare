@@ -30,7 +30,9 @@ import {
   Eye,
   Check,
   X as XIcon,
-  MapPin
+  MapPin,
+  ArrowRight,
+  ArrowLeft
 } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
@@ -223,6 +225,8 @@ const ProjectApprovals: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<'pending' | 'revisions' | 'approved' | 'sent' | 'assigned' | 'rejected'>('pending');
   const [revisionSubTab, setRevisionSubTab] = useState<'pending_approval' | 'revision_approved'>('pending_approval');
   const [showBOQModal, setShowBOQModal] = useState(false);
+  const [showFullScreenBOQ, setShowFullScreenBOQ] = useState(false);
+  const [fullScreenBoqMode, setFullScreenBoqMode] = useState<'view'>('view');
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [approvalNotes, setApprovalNotes] = useState('');
@@ -1061,16 +1065,26 @@ const ProjectApprovals: React.FC = () => {
   }), [sortedEstimations, filterStatus, selectedRevisionNumber]);
 
   const handleApproval = async (id: number, approved: boolean, notes?: string) => {
+    console.log('========== HANDLE APPROVAL DEBUG ==========');
+    console.log('approved:', approved);
+    console.log('isRevisionApproval:', isRevisionApproval);
+    console.log('selectedEstimation:', selectedEstimation);
+    console.log('===========================================');
+
     try {
       if (approved) {
         // For revision tab: directly approve without comparison modal
         if (isRevisionApproval) {
+          console.log('>>> Revision approval - direct approval');
           setShowApprovalModal(false);
           await handleFinalApproval();
           setIsRevisionApproval(false); // Reset flag
         } else {
           // For pending tab: show comparison modal before approval
+          console.log('>>> Pending approval - showing comparison modal');
+          console.log('>>> Setting showComparisonModal to TRUE');
           setShowApprovalModal(false);
+          setShowFullScreenBOQ(false); // Close BOQ Details view
           setShowComparisonModal(true);
         }
       } else {
@@ -1353,21 +1367,26 @@ const ProjectApprovals: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
-              <DocumentCheckIcon className="w-6 h-6 text-red-600" />
+      {!showFullScreenBOQ && !showComparisonModal && (
+        <>
+          {/* Header */}
+          <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
+            <div className="max-w-7xl mx-auto px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
+                  <DocumentCheckIcon className="w-6 h-6 text-red-600" />
+                </div>
+                <h1 className="text-2xl font-bold text-[#243d8a]">
+                  Project Approvals
+                </h1>
+              </div>
             </div>
-            <h1 className="text-2xl font-bold text-[#243d8a]">Project Approvals</h1>
           </div>
-        </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6">
-        {/* Filter Tabs and View Toggle */}
-        <div className="flex items-center justify-between mb-6">
+          {/* Page Content */}
+        <div className="max-w-7xl mx-auto px-6 py-6">
+          {/* Filter Tabs and View Toggle */}
+          <div className="flex items-center justify-between mb-6">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 inline-flex gap-1">
             {[
               { key: 'pending', label: 'Pending' },
@@ -1498,7 +1517,8 @@ const ProjectApprovals: React.FC = () => {
               }
 
               await loadBOQDetails(estimation.id, estimation);
-              setShowBOQModal(true);
+              setFullScreenBoqMode('view');
+              setShowFullScreenBOQ(true);
             }}
             onRefresh={async () => {
               await loadBOQs(false);
@@ -1776,7 +1796,8 @@ const ProjectApprovals: React.FC = () => {
                         const currentEstimation = estimation;
                         // Load full details with preserved client
                         await loadBOQDetails(currentEstimation.id, currentEstimation);
-                        setShowBOQModal(true);
+                        setFullScreenBoqMode('view');
+                        setShowFullScreenBOQ(true);
                       }}
                       className="p-2.5 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors group"
                       title="View BOQ Details"
@@ -1917,7 +1938,8 @@ const ProjectApprovals: React.FC = () => {
                               onClick={async () => {
                                 const currentEstimation = estimation;
                                 await loadBOQDetails(currentEstimation.id, currentEstimation);
-                                setShowBOQModal(true);
+                                setFullScreenBoqMode('view');
+                                setShowFullScreenBOQ(true);
                               }}
                               className="p-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors group"
                               title="View BOQ Details"
@@ -1989,136 +2011,7 @@ const ProjectApprovals: React.FC = () => {
             <p className="text-gray-500">No estimations found for the selected filter</p>
           </div>
         )}
-
-        {/* Approval Modal */}
-        {showApprovalModal && selectedEstimation && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-2xl shadow-md max-w-lg w-full"
-            >
-              <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-green-200">
-                <h2 className="text-xl font-bold text-green-900">Approve BOQ - {selectedEstimation.projectName}</h2>
-                <p className="text-sm text-green-700 mt-1">Confirm approval for estimator to send to client</p>
-              </div>
-
-              <div className="p-6">
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Approval Notes (Optional)
-                  </label>
-                  <textarea
-                    value={approvalNotes}
-                    onChange={(e) => setApprovalNotes(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                    rows={3}
-                    placeholder="Add any conditions, notes, or requirements for this approval..."
-                  />
-                </div>
-
-                <div className="flex items-center gap-3 justify-end">
-                  <button
-                    onClick={() => {
-                      setShowApprovalModal(false);
-                      setApprovalNotes('');
-                    }}
-                    className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => handleApproval(selectedEstimation.id, true, approvalNotes)}
-                    className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
-                  >
-                    <CheckCircleIcon className="w-5 h-5" />
-                    Approve Project
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
-        {/* Rejection Modal */}
-        {showRejectionModal && selectedEstimation && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-2xl shadow-md max-w-lg w-full"
-            >
-              <div className="bg-gradient-to-r from-red-50 to-red-100 px-6 py-4 border-b border-red-200">
-                <h2 className="text-xl font-bold text-red-900">Reject Project</h2>
-                <p className="text-sm text-red-700 mt-1">{selectedEstimation.projectName}</p>
-              </div>
-
-              <div className="p-6">
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Rejection Reason <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    value={rejectionReason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-                    rows={4}
-                    placeholder="Please provide a reason for rejection..."
-                    required
-                  />
-                </div>
-
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-                  <p className="text-sm text-yellow-800">
-                    <strong>Note:</strong> The rejection reason will be sent to the estimator for review and corrections.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-3 justify-end">
-                  <button
-                    onClick={() => {
-                      setShowRejectionModal(false);
-                      setRejectionReason('');
-                    }}
-                    className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (rejectionReason.trim()) {
-                        handleApproval(selectedEstimation.id, false, rejectionReason);
-                      } else {
-                        toast.error('Please provide a rejection reason');
-                      }
-                    }}
-                    disabled={isRejecting}
-                    className={`px-4 py-2 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ${
-                      isRejecting
-                        ? 'bg-red-400 cursor-not-allowed'
-                        : 'bg-red-500 hover:bg-red-600'
-                    }`}
-                  >
-                    {isRejecting ? (
-                      <>
-                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Rejecting...
-                      </>
-                    ) : (
-                      <>
-                        <XCircleIcon className="w-5 h-5" />
-                        Reject Project
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
+        </div>
 
         {/* BOQ Details Modal - Using shared component */}
         <BOQDetailsModal
@@ -2777,126 +2670,6 @@ const ProjectApprovals: React.FC = () => {
           </div>
         )}
 
-        {/* Download Format Selection Modal */}
-        {showFormatModal && selectedEstimation && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-2xl shadow-md max-w-md w-full"
-            >
-              <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-green-200">
-                <h2 className="text-xl font-bold text-green-900">Download BOQ</h2>
-                <p className="text-sm text-green-700 mt-1">{selectedEstimation.projectName}</p>
-              </div>
-
-              <div className="p-6">
-                {/* Comparison Tip */}
-                {selectedEstimation.status === 'pending' && (
-                  <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <div className="flex items-start gap-2">
-                      <div className="flex-shrink-0 mt-0.5">
-                        <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                        </svg>
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-xs text-blue-800 font-medium">Comparison Tip</p>
-                        <p className="text-xs text-blue-700 mt-1">
-                          Download both versions to compare what's visible internally vs what the client will see after estimator sends it.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Version Selection */}
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-3">
-                    Select Version:
-                  </label>
-                  <div className="space-y-2">
-                    <label className="flex items-center p-3 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
-                      <input
-                        type="radio"
-                        name="downloadType"
-                        value="internal"
-                        checked={downloadType === 'internal'}
-                        onChange={() => setDownloadType('internal')}
-                        className="w-4 h-4 text-green-600"
-                      />
-                      <div className="ml-3 flex-1">
-                        <span className="font-semibold text-gray-900">Internal Version</span>
-                        <p className="text-xs text-gray-600">With overhead & profit margins (complete breakdown)</p>
-                      </div>
-                    </label>
-                    <label className="flex items-center p-3 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
-                      <input
-                        type="radio"
-                        name="downloadType"
-                        value="client"
-                        checked={downloadType === 'client'}
-                        onChange={() => setDownloadType('client')}
-                        className="w-4 h-4 text-red-600"
-                      />
-                      <div className="ml-3 flex-1">
-                        <span className="font-semibold text-gray-900">Client Version</span>
-                        <p className="text-xs text-gray-600">Without overhead & profit (client-friendly)</p>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-
-                {/* Format Selection */}
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-3">
-                    Select Format:
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => handleDownload('excel')}
-                      className="p-4 border-2 border-green-200 rounded-lg hover:bg-green-50 hover:border-green-400 transition-all group"
-                    >
-                      <div className="text-center">
-                        <div className="w-12 h-12 bg-green-100 rounded-lg mx-auto mb-2 flex items-center justify-center group-hover:bg-green-200 transition-colors">
-                          <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                        </div>
-                        <span className="font-semibold text-gray-900">Excel</span>
-                        <p className="text-xs text-gray-600 mt-1">Multiple sheets with details</p>
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => handleDownload('pdf')}
-                      className="p-4 border-2 border-red-200 rounded-lg hover:bg-red-50 hover:border-red-400 transition-all group"
-                    >
-                      <div className="text-center">
-                        <div className="w-12 h-12 bg-red-100 rounded-lg mx-auto mb-2 flex items-center justify-center group-hover:bg-red-200 transition-colors">
-                          <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                          </svg>
-                        </div>
-                        <span className="font-semibold text-gray-900">PDF</span>
-                        <p className="text-xs text-gray-600 mt-1">Professional document</p>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 justify-end">
-                  <button
-                    onClick={() => setShowFormatModal(false)}
-                    className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
         {/* PM Assignment Modal - Modern Design */}
         {showAssignPMModal && selectedEstimation && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] p-4">
@@ -3307,41 +3080,134 @@ const ProjectApprovals: React.FC = () => {
           </div>
         )}
 
-        {/* BOQ Comparison Modal - Internal vs Client */}
-        {showComparisonModal && selectedEstimation && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-2xl shadow-2xl max-w-7xl w-full max-h-[90vh] overflow-hidden"
-            >
-              <div className="bg-gradient-to-r from-purple-50 to-blue-50 px-6 py-4 border-b border-gray-200">
-                <div className="flex items-center justify-between">
+        {/* BOQ Comparison - MOVED OUTSIDE WRAPPER - See line ~4384 */}
+        {false && showComparisonModal && selectedEstimation && (
+          <div className="fixed inset-0 bg-white z-50 flex flex-col">
+            {/* TEST BANNER - Remove after debugging */}
+            <div className="bg-red-500 text-white p-4 text-center text-xl font-bold">
+              COMPARISON MODAL IS RENDERING! BOQ Items: {(selectedEstimation.boqItems || []).length}
+            </div>
+
+            {/* Header - Fixed at top */}
+            <div className="bg-gradient-to-r from-purple-50 to-blue-50 px-6 py-4 border-b border-gray-200 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  {/* Back button on LEFT */}
+                  <button
+                    onClick={() => setShowComparisonModal(false)}
+                    className="p-2 text-gray-600 hover:bg-white/50 rounded-lg transition-colors"
+                    title="Go Back"
+                  >
+                    <ArrowLeft className="w-5 h-5" />
+                  </button>
                   <div>
                     <h2 className="text-xl font-bold text-gray-900">BOQ Comparison - {selectedEstimation.projectName}</h2>
                     <p className="text-sm text-gray-600 mt-1">Compare what TD sees vs what Client will receive</p>
                   </div>
-                  <button
-                    onClick={() => setShowComparisonModal(false)}
-                    className="p-2 hover:bg-white/50 rounded-lg transition-colors"
-                  >
-                    <XMarkIcon className="w-6 h-6 text-gray-700" />
-                  </button>
                 </div>
               </div>
+            </div>
 
-              <div className="grid grid-cols-2 gap-0 overflow-y-auto max-h-[calc(90vh-200px)]">
-                {/* Internal Version (Left) */}
-                <div className="p-6 bg-orange-50/30 border-r-2 border-orange-200">
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="px-3 py-1 bg-orange-100 border border-orange-300 rounded-lg">
-                      <span className="text-sm font-bold text-orange-800">INTERNAL VERSION</span>
-                    </div>
-                    <span className="text-xs text-gray-600">(What TD sees)</span>
+            {/* Content - Scrollable comparison grid */}
+            <div className="flex-1 overflow-y-auto">
+              <div className="grid grid-cols-2 gap-0 min-h-full">
+              {/* Internal Version (Left) */}
+              <div className="p-6 bg-orange-50/30 border-r-2 border-orange-200">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="px-3 py-1 bg-orange-100 border border-orange-300 rounded-lg">
+                    <span className="text-sm font-bold text-orange-800">INTERNAL VERSION</span>
                   </div>
+                  <span className="text-xs text-gray-600">(What TD sees)</span>
+                </div>
 
-                  {/* BOQ Items - Internal (with Sub-Items) */}
-                  <div className="space-y-3 mb-4">
+                {/* Preliminaries & Approval Works - Internal Version */}
+                {(selectedEstimation as any).preliminaries && (
+                  (selectedEstimation as any).preliminaries.items?.length > 0 ||
+                  (selectedEstimation as any).preliminaries.cost_details ||
+                  (selectedEstimation as any).preliminaries.notes
+                ) && (
+                  <div className="bg-white rounded-lg shadow-sm border border-orange-200 p-4 mb-4">
+                    <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-purple-600" />
+                      Preliminaries & Approval Works
+                    </h3>
+
+                    {/* Selected Items */}
+                    {(selectedEstimation as any).preliminaries.items && (selectedEstimation as any).preliminaries.items.length > 0 && (
+                      <div className="mb-3">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
+                        <div className="space-y-2">
+                          {(selectedEstimation as any).preliminaries.items.map((item: any, index: number) => (
+                            <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
+                              <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
+                                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                </svg>
+                              </div>
+                              <div className="flex-1 text-sm text-gray-700">
+                                {item.description}
+                                {item.isCustom && (
+                                  <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Cost Details Table */}
+                    {(selectedEstimation as any).preliminaries.cost_details && (
+                      (selectedEstimation as any).preliminaries.cost_details.quantity ||
+                      (selectedEstimation as any).preliminaries.cost_details.rate ||
+                      (selectedEstimation as any).preliminaries.cost_details.amount
+                    ) && (
+                      <div className="mb-3 bg-green-50/50 rounded-lg border border-green-200 p-3">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-green-300">
+                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Qty</th>
+                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Unit</th>
+                                <th className="text-right py-2 px-3 font-semibold text-gray-700">Rate</th>
+                                <th className="text-right py-2 px-3 font-semibold text-gray-700">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                <td className="py-2 px-3 font-medium text-gray-900">
+                                  {(selectedEstimation as any).preliminaries.cost_details.quantity || 0}
+                                </td>
+                                <td className="py-2 px-3 font-medium text-gray-900">
+                                  {(selectedEstimation as any).preliminaries.cost_details.unit || 'nos'}
+                                </td>
+                                <td className="py-2 px-3 font-medium text-gray-900 text-right">
+                                  {formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
+                                </td>
+                                <td className="py-2 px-3 font-bold text-orange-700 text-right">
+                                  {formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Additional Notes */}
+                    {(selectedEstimation as any).preliminaries.notes && (
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Additional Notes</h4>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                          {(selectedEstimation as any).preliminaries.notes}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* BOQ Items - Internal (with Sub-Items) */}
+                <div className="space-y-3 mb-4">
                     {(selectedEstimation.boqItems || []).map((item, index) => {
                       const hasSubItems = (item as any).sub_items && (item as any).sub_items.length > 0;
 
@@ -3698,103 +3564,105 @@ const ProjectApprovals: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Preliminaries & Approval Works - Internal Version */}
-                  {(selectedEstimation as any).preliminaries && (
-                    (selectedEstimation as any).preliminaries.items?.length > 0 ||
-                    (selectedEstimation as any).preliminaries.cost_details ||
-                    (selectedEstimation as any).preliminaries.notes
-                  ) && (
-                    <div className="bg-white rounded-lg shadow-sm border border-orange-200 p-4 mb-4">
-                      <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                        <FileText className="w-5 h-5 text-purple-600" />
-                        Preliminaries & Approval Works
-                      </h3>
+              </div>
 
-                      {/* Selected Items */}
-                      {(selectedEstimation as any).preliminaries.items?.filter((item: any) => item.checked).length > 0 && (
-                        <div className="mb-3">
-                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
-                          <div className="space-y-2">
-                            {(selectedEstimation as any).preliminaries.items.filter((item: any) => item.checked).map((item: any, index: number) => (
-                              <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
-                                <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
-                                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
-                                  </svg>
-                                </div>
-                                <div className="flex-1 text-sm text-gray-700">
-                                  {item.description}
-                                  {item.isCustom && (
-                                    <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Cost Details */}
-                      {(selectedEstimation as any).preliminaries.cost_details && (
-                        (selectedEstimation as any).preliminaries.cost_details.quantity ||
-                        (selectedEstimation as any).preliminaries.cost_details.rate ||
-                        (selectedEstimation as any).preliminaries.cost_details.amount
-                      ) && (
-                        <div className="mb-3 bg-orange-50 rounded-lg border border-orange-200 p-3">
-                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Cost Details</h4>
-                          <div className="grid grid-cols-4 gap-3 text-sm">
-                            <div>
-                              <p className="text-xs text-gray-600 mb-1">Quantity</p>
-                              <p className="font-medium text-gray-900">
-                                {(selectedEstimation as any).preliminaries.cost_details.quantity || 0}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-600 mb-1">Unit</p>
-                              <p className="font-medium text-gray-900">
-                                {(selectedEstimation as any).preliminaries.cost_details.unit || 'nos'}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-600 mb-1">Rate</p>
-                              <p className="font-medium text-gray-900">
-                                {formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-600 mb-1">Amount</p>
-                              <p className="font-semibold text-orange-700">
-                                {formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Additional Notes */}
-                      {(selectedEstimation as any).preliminaries.notes && (
-                        <div className="bg-gray-50 rounded-lg p-3">
-                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Additional Notes</h4>
-                          <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                            {(selectedEstimation as any).preliminaries.notes}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
+              {/* Client Version (Right) */}
+              <div className="p-6 bg-blue-50/30">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="px-3 py-1 bg-blue-100 border border-blue-300 rounded-lg">
+                    <span className="text-sm font-bold text-blue-800">CLIENT VERSION</span>
+                  </div>
+                  <span className="text-xs text-gray-600">(What Client sees)</span>
                 </div>
 
-                {/* Client Version (Right) */}
-                <div className="p-6 bg-blue-50/30">
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="px-3 py-1 bg-blue-100 border border-blue-300 rounded-lg">
-                      <span className="text-sm font-bold text-blue-800">CLIENT VERSION</span>
-                    </div>
-                    <span className="text-xs text-gray-600">(What Client sees)</span>
-                  </div>
+                {/* Preliminaries & Approval Works - Client Version */}
+                {(selectedEstimation as any).preliminaries && (
+                  (selectedEstimation as any).preliminaries.items?.length > 0 ||
+                  (selectedEstimation as any).preliminaries.cost_details ||
+                  (selectedEstimation as any).preliminaries.notes
+                ) && (
+                  <div className="bg-white rounded-lg shadow-sm border border-blue-200 p-4 mb-4">
+                    <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-purple-600" />
+                      Preliminaries & Approval Works
+                    </h3>
 
-                  {/* BOQ Items - Client (SIMPLIFIED - Match PDF Client Format) */}
-                  <div className="space-y-3 mb-4">
+                    {/* Selected Items */}
+                    {(selectedEstimation as any).preliminaries.items && (selectedEstimation as any).preliminaries.items.length > 0 && (
+                      <div className="mb-3">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
+                        <div className="space-y-2">
+                          {(selectedEstimation as any).preliminaries.items.map((item: any, index: number) => (
+                            <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
+                              <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
+                                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                </svg>
+                              </div>
+                              <div className="flex-1 text-sm text-gray-700">
+                                {item.description}
+                                {item.isCustom && (
+                                  <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Cost Details Table */}
+                    {(selectedEstimation as any).preliminaries.cost_details && (
+                      (selectedEstimation as any).preliminaries.cost_details.quantity ||
+                      (selectedEstimation as any).preliminaries.cost_details.rate ||
+                      (selectedEstimation as any).preliminaries.cost_details.amount
+                    ) && (
+                      <div className="mb-3 bg-green-50/50 rounded-lg border border-green-200 p-3">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-green-300">
+                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Qty</th>
+                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Unit</th>
+                                <th className="text-right py-2 px-3 font-semibold text-gray-700">Rate</th>
+                                <th className="text-right py-2 px-3 font-semibold text-gray-700">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                <td className="py-2 px-3 font-medium text-gray-900">
+                                  {(selectedEstimation as any).preliminaries.cost_details.quantity || 0}
+                                </td>
+                                <td className="py-2 px-3 font-medium text-gray-900">
+                                  {(selectedEstimation as any).preliminaries.cost_details.unit || 'nos'}
+                                </td>
+                                <td className="py-2 px-3 font-medium text-gray-900 text-right">
+                                  {formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
+                                </td>
+                                <td className="py-2 px-3 font-bold text-blue-700 text-right">
+                                  {formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Additional Notes */}
+                    {(selectedEstimation as any).preliminaries.notes && (
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Additional Notes</h4>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                          {(selectedEstimation as any).preliminaries.notes}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* BOQ Items - Client (SIMPLIFIED - Match PDF Client Format) */}
+                <div className="space-y-3 mb-4">
                     {(selectedEstimation.boqItems || []).map((item, index) => {
                       const hasSubItems = (item as any).sub_items && (item as any).sub_items.length > 0;
 
@@ -3870,6 +3738,10 @@ const ProjectApprovals: React.FC = () => {
                           }
                         });
 
+                        // Add Preliminaries amount to subtotal
+                        const preliminaryAmount = (selectedEstimation as any).preliminaries?.cost_details?.amount || 0;
+                        subtotal += preliminaryAmount;
+
                         // BOQ-level discount (overall discount applied to entire BOQ)
                         const overallDiscountAmount = (selectedEstimation as any).discount_amount || 0;
                         const overallDiscountPct = selectedEstimation.discountPercentage || 0;
@@ -3907,133 +3779,50 @@ const ProjectApprovals: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Preliminaries & Approval Works - Client Version */}
-                  {(selectedEstimation as any).preliminaries && (
-                    (selectedEstimation as any).preliminaries.items?.length > 0 ||
-                    (selectedEstimation as any).preliminaries.cost_details ||
-                    (selectedEstimation as any).preliminaries.notes
-                  ) && (
-                    <div className="bg-white rounded-lg shadow-sm border border-blue-200 p-4 mb-4">
-                      <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                        <FileText className="w-5 h-5 text-purple-600" />
-                        Preliminaries & Approval Works
-                      </h3>
+              </div>
+            </div>
+            </div>
 
-                      {/* Selected Items */}
-                      {(selectedEstimation as any).preliminaries.items?.filter((item: any) => item.checked).length > 0 && (
-                        <div className="mb-3">
-                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
-                          <div className="space-y-2">
-                            {(selectedEstimation as any).preliminaries.items.filter((item: any) => item.checked).map((item: any, index: number) => (
-                              <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
-                                <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
-                                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
-                                  </svg>
-                                </div>
-                                <div className="flex-1 text-sm text-gray-700">
-                                  {item.description}
-                                  {item.isCustom && (
-                                    <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Cost Details */}
-                      {(selectedEstimation as any).preliminaries.cost_details && (
-                        (selectedEstimation as any).preliminaries.cost_details.quantity ||
-                        (selectedEstimation as any).preliminaries.cost_details.rate ||
-                        (selectedEstimation as any).preliminaries.cost_details.amount
-                      ) && (
-                        <div className="mb-3 bg-blue-50 rounded-lg border border-blue-200 p-3">
-                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Cost Details</h4>
-                          <div className="grid grid-cols-4 gap-3 text-sm">
-                            <div>
-                              <p className="text-xs text-gray-600 mb-1">Quantity</p>
-                              <p className="font-medium text-gray-900">
-                                {(selectedEstimation as any).preliminaries.cost_details.quantity || 0}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-600 mb-1">Unit</p>
-                              <p className="font-medium text-gray-900">
-                                {(selectedEstimation as any).preliminaries.cost_details.unit || 'nos'}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-600 mb-1">Rate</p>
-                              <p className="font-medium text-gray-900">
-                                {formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-600 mb-1">Amount</p>
-                              <p className="font-semibold text-blue-700">
-                                {formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Additional Notes */}
-                      {(selectedEstimation as any).preliminaries.notes && (
-                        <div className="bg-gray-50 rounded-lg p-3">
-                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Additional Notes</h4>
-                          <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                            {(selectedEstimation as any).preliminaries.notes}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
+            {/* Footer - Fixed at bottom */}
+            <div className="bg-gradient-to-r from-gray-50 to-white border-t border-gray-200 px-6 py-4 shadow-lg flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-gray-600">
+                  <strong>Key Difference:</strong> Internal version shows sub-items with complete material & labour breakdown. Client version shows sub-items with final prices (misc/overhead/profit included), discount, and VAT only.
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      setShowComparisonModal(false);
+                      setApprovalNotes('');
+                    }}
+                    disabled={isApproving}
+                    className={`px-6 py-2.5 ${isApproving ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-500 hover:bg-gray-600'} text-white rounded-lg font-medium transition-colors`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleFinalApproval}
+                    disabled={isApproving}
+                    className={`px-6 py-2.5 ${isApproving ? 'bg-green-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600'} text-white rounded-lg font-medium transition-colors flex items-center gap-2`}
+                  >
+                    {isApproving ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Approving...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircleIcon className="w-5 h-5" />
+                        Approve
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
-
-              <div className="bg-gradient-to-r from-gray-50 to-white border-t border-gray-200 px-6 py-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-gray-600">
-                    <strong>Key Difference:</strong> Internal version shows sub-items with complete material & labour breakdown. Client version shows sub-items with final prices (misc/overhead/profit included), discount, and VAT only.
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => {
-                        setShowComparisonModal(false);
-                        setApprovalNotes('');
-                      }}
-                      disabled={isApproving}
-                      className={`px-6 py-2.5 ${isApproving ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-500 hover:bg-gray-600'} text-white rounded-lg font-medium transition-colors`}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleFinalApproval}
-                      disabled={isApproving}
-                      className={`px-6 py-2.5 ${isApproving ? 'bg-green-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600'} text-white rounded-lg font-medium transition-colors flex items-center gap-2`}
-                    >
-                      {isApproving ? (
-                        <>
-                          <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          Approving...
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircleIcon className="w-5 h-5" />
-                          Approve
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
+            </div>
           </div>
         )}
 
@@ -4293,7 +4082,1122 @@ const ProjectApprovals: React.FC = () => {
             extensionRequests={selectedDayExtension}
           />
         )}
-      </div>
+
+      {/* Approval Modal - MOVED OUTSIDE WRAPPER - See line ~4384 */}
+      {false && showApprovalModal && selectedEstimation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-md max-w-lg w-full"
+          >
+            <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-green-200">
+              <h2 className="text-xl font-bold text-green-900">Approve BOQ - {selectedEstimation.projectName}</h2>
+              <p className="text-sm text-green-700 mt-1">Confirm approval for estimator to send to client</p>
+            </div>
+
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Approval Notes (Optional)
+                </label>
+                <textarea
+                  value={approvalNotes}
+                  onChange={(e) => setApprovalNotes(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  rows={3}
+                  placeholder="Add any conditions, notes, or requirements for this approval..."
+                />
+              </div>
+
+              <div className="flex items-center gap-3 justify-end">
+                <button
+                  onClick={() => {
+                    setShowApprovalModal(false);
+                    setApprovalNotes('');
+                    setShowFullScreenBOQ(true);
+                  }}
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleApproval(selectedEstimation.id, true, approvalNotes)}
+                  disabled={isApproving}
+                  className={`px-4 py-2 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                    isApproving
+                      ? 'bg-green-400 cursor-not-allowed'
+                      : 'bg-green-500 hover:bg-green-600'
+                  }`}
+                >
+                  {isApproving ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Approving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircleIcon className="w-5 h-5" />
+                      Approve Project
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Rejection Modal - MOVED OUTSIDE WRAPPER - See line ~4384 */}
+      {false && showRejectionModal && selectedEstimation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-md max-w-lg w-full"
+          >
+            <div className="bg-gradient-to-r from-red-50 to-red-100 px-6 py-4 border-b border-red-200">
+              <h2 className="text-xl font-bold text-red-900">Reject Project</h2>
+              <p className="text-sm text-red-700 mt-1">{selectedEstimation.projectName}</p>
+            </div>
+
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Rejection Reason <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  rows={4}
+                  placeholder="Please provide a reason for rejection..."
+                  required
+                />
+              </div>
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                <p className="text-sm text-yellow-800">
+                  <strong>Note:</strong> The rejection reason will be sent to the estimator for review and corrections.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 justify-end">
+                <button
+                  onClick={() => {
+                    setShowRejectionModal(false);
+                    setRejectionReason('');
+                    setShowFullScreenBOQ(true);
+                  }}
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (rejectionReason.trim()) {
+                      handleApproval(selectedEstimation.id, false, rejectionReason);
+                    } else {
+                      toast.error('Please provide a rejection reason');
+                    }
+                  }}
+                  disabled={isRejecting}
+                  className={`px-4 py-2 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                    isRejecting
+                      ? 'bg-red-400 cursor-not-allowed'
+                      : 'bg-red-500 hover:bg-red-600'
+                  }`}
+                >
+                  {isRejecting ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Rejecting...
+                    </>
+                  ) : (
+                    <>
+                      <XCircleIcon className="w-5 h-5" />
+                      Reject Project
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+        </>
+      )}
+
+      {/* Full Screen BOQ View */}
+      {showFullScreenBOQ && selectedEstimation && !showApprovalModal && !showRejectionModal && (
+        <BOQDetailsModal
+          isOpen={showFullScreenBOQ}
+          fullScreen={true}
+          onClose={() => {
+            setShowFullScreenBOQ(false);
+            setSelectedEstimation(null);
+          }}
+          boq={{
+            boq_id: selectedEstimation.id,
+            boq_name: selectedEstimation.projectName
+          }}
+          showNewPurchaseItems={false}
+          refreshTrigger={boqDetailsRefreshTrigger}
+          onDownload={() => setShowFormatModal(true)}
+          onApprove={
+            (selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision')
+              ? () => {
+                  setShowApprovalModal(true);
+                  // Don't close full-screen BOQ yet - keep data for comparison modal
+                }
+              : undefined
+          }
+          onReject={
+            (selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision')
+              ? () => {
+                  setShowRejectionModal(true);
+                  // Don't close full-screen BOQ yet - keep data for rejection modal
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {/* ========== MODALS (OUTSIDE WRAPPER) ========== */}
+
+      {/* Download Format Selection Modal */}
+      {showFormatModal && selectedEstimation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[80] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-md max-w-md w-full"
+          >
+            <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-green-200">
+              <h2 className="text-xl font-bold text-green-900">Download BOQ</h2>
+              <p className="text-sm text-green-700 mt-1">{selectedEstimation.projectName}</p>
+            </div>
+
+            <div className="p-6">
+              {/* Comparison Tip */}
+              {selectedEstimation.status === 'pending' && (
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <div className="flex-shrink-0 mt-0.5">
+                      <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-xs text-blue-800 font-medium">Comparison Tip</p>
+                      <p className="text-xs text-blue-700 mt-1">
+                        Download both versions to compare what's visible internally vs what the client will see after estimator sends it.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Version Selection */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Select Version:
+                </label>
+                <div className="space-y-2">
+                  <label className="flex items-center p-3 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input
+                      type="radio"
+                      name="downloadType"
+                      value="internal"
+                      checked={downloadType === 'internal'}
+                      onChange={() => setDownloadType('internal')}
+                      className="w-4 h-4 text-green-600"
+                    />
+                    <div className="ml-3 flex-1">
+                      <span className="font-semibold text-gray-900">Internal Version</span>
+                      <p className="text-xs text-gray-600">With overhead & profit margins (complete breakdown)</p>
+                    </div>
+                  </label>
+                  <label className="flex items-center p-3 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input
+                      type="radio"
+                      name="downloadType"
+                      value="client"
+                      checked={downloadType === 'client'}
+                      onChange={() => setDownloadType('client')}
+                      className="w-4 h-4 text-red-600"
+                    />
+                    <div className="ml-3 flex-1">
+                      <span className="font-semibold text-gray-900">Client Version</span>
+                      <p className="text-xs text-gray-600">Without overhead & profit (client-friendly)</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Format Selection */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Select Format:
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => handleDownload('excel')}
+                    className="p-4 border-2 border-green-200 rounded-lg hover:bg-green-50 hover:border-green-400 transition-all group"
+                  >
+                    <div className="text-center">
+                      <div className="w-12 h-12 bg-green-100 rounded-lg mx-auto mb-2 flex items-center justify-center group-hover:bg-green-200 transition-colors">
+                        <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </div>
+                      <span className="font-semibold text-gray-900">Excel</span>
+                      <p className="text-xs text-gray-600 mt-1">Multiple sheets with details</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => handleDownload('pdf')}
+                    className="p-4 border-2 border-red-200 rounded-lg hover:bg-red-50 hover:border-red-400 transition-all group"
+                  >
+                    <div className="text-center">
+                      <div className="w-12 h-12 bg-red-100 rounded-lg mx-auto mb-2 flex items-center justify-center group-hover:bg-red-200 transition-colors">
+                        <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                      <span className="font-semibold text-gray-900">PDF</span>
+                      <p className="text-xs text-gray-600 mt-1">Professional document</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 justify-end">
+                <button
+                  onClick={() => setShowFormatModal(false)}
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Approval Modal */}
+      {showApprovalModal && selectedEstimation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-md max-w-lg w-full"
+          >
+            <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-green-200">
+              <h2 className="text-xl font-bold text-green-900">Approve BOQ - {selectedEstimation.projectName}</h2>
+              <p className="text-sm text-green-700 mt-1">Confirm approval for estimator to send to client</p>
+            </div>
+
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Approval Notes (Optional)
+                </label>
+                <textarea
+                  value={approvalNotes}
+                  onChange={(e) => setApprovalNotes(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  rows={3}
+                  placeholder="Add any conditions, notes, or requirements for this approval..."
+                />
+              </div>
+
+              <div className="flex items-center gap-3 justify-end">
+                <button
+                  onClick={() => {
+                    setShowApprovalModal(false);
+                    setApprovalNotes('');
+                  }}
+                  disabled={isApproving}
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleApproval(selectedEstimation.id, true, approvalNotes)}
+                  disabled={isApproving}
+                  className={`px-4 py-2 ${
+                    isApproving
+                      ? 'bg-green-400 cursor-not-allowed'
+                      : 'bg-green-500 hover:bg-green-600'
+                  } text-white rounded-lg font-medium transition-colors flex items-center gap-2`}
+                >
+                  {isApproving ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Approving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircleIcon className="w-5 h-5" />
+                      Approve Project
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* BOQ Comparison Full-Screen */}
+      {showComparisonModal && selectedEstimation && (
+        <div className="fixed inset-0 bg-white z-50 flex flex-col">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-purple-50 to-blue-50 px-6 py-4 border-b border-gray-200 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setShowComparisonModal(false)}
+                  className="p-2 text-gray-600 hover:bg-white/50 rounded-lg transition-colors"
+                  title="Go Back"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">BOQ Comparison - {selectedEstimation.projectName}</h2>
+                  <p className="text-sm text-gray-600 mt-1">Compare what TD sees vs what Client will receive</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Content - Scrollable comparison grid */}
+            <div className="flex-1 overflow-y-auto">
+              <div className="grid grid-cols-2 gap-0 min-h-full">
+              {/* Internal Version (Left) */}
+              <div className="p-6 bg-orange-50/30 border-r-2 border-orange-200">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="px-3 py-1 bg-orange-100 border border-orange-300 rounded-lg">
+                    <span className="text-sm font-bold text-orange-800">INTERNAL VERSION</span>
+                  </div>
+                  <span className="text-xs text-gray-600">(What TD sees)</span>
+                </div>
+
+                {/* Preliminaries & Approval Works - Internal Version */}
+                {(selectedEstimation as any).preliminaries && (
+                  (selectedEstimation as any).preliminaries.items?.length > 0 ||
+                  (selectedEstimation as any).preliminaries.cost_details ||
+                  (selectedEstimation as any).preliminaries.notes
+                ) && (
+                  <div className="bg-white rounded-lg shadow-sm border border-orange-200 p-4 mb-4">
+                    <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-purple-600" />
+                      Preliminaries & Approval Works
+                    </h3>
+
+                    {/* Selected Items */}
+                    {(selectedEstimation as any).preliminaries.items && (selectedEstimation as any).preliminaries.items.length > 0 && (
+                      <div className="mb-3">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
+                        <div className="space-y-2">
+                          {(selectedEstimation as any).preliminaries.items.map((item: any, index: number) => (
+                            <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
+                              <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
+                                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                </svg>
+                              </div>
+                              <div className="flex-1 text-sm text-gray-700">
+                                {item.description}
+                                {item.isCustom && (
+                                  <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Cost Details Table */}
+                    {(selectedEstimation as any).preliminaries.cost_details && (
+                      (selectedEstimation as any).preliminaries.cost_details.quantity ||
+                      (selectedEstimation as any).preliminaries.cost_details.rate ||
+                      (selectedEstimation as any).preliminaries.cost_details.amount
+                    ) && (
+                      <div className="mb-3 bg-green-50/50 rounded-lg border border-green-200 p-3">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-green-300">
+                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Qty</th>
+                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Unit</th>
+                                <th className="text-right py-2 px-3 font-semibold text-gray-700">Rate</th>
+                                <th className="text-right py-2 px-3 font-semibold text-gray-700">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                <td className="py-2 px-3 font-medium text-gray-900">
+                                  {(selectedEstimation as any).preliminaries.cost_details.quantity || 0}
+                                </td>
+                                <td className="py-2 px-3 font-medium text-gray-900">
+                                  {(selectedEstimation as any).preliminaries.cost_details.unit || 'nos'}
+                                </td>
+                                <td className="py-2 px-3 font-medium text-gray-900 text-right">
+                                  {formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
+                                </td>
+                                <td className="py-2 px-3 font-bold text-orange-700 text-right">
+                                  {formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Additional Notes */}
+                    {(selectedEstimation as any).preliminaries.notes && (
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Additional Notes</h4>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                          {(selectedEstimation as any).preliminaries.notes}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* BOQ Items - Internal (with Sub-Items) */}
+                <div className="space-y-3 mb-4">
+                    {(selectedEstimation.boqItems || []).map((item, index) => {
+                      const hasSubItems = (item as any).sub_items && (item as any).sub_items.length > 0;
+
+                      // Calculate item total from all sub-items (client amount = sum of sub-item qty × rate)
+                      let itemTotalCost = 0;
+                      if (hasSubItems) {
+                        itemTotalCost = (item as any).sub_items.reduce((sum: number, si: any) => {
+                          return sum + ((si.quantity || 0) * (si.rate || 0));
+                        }, 0);
+                      } else {
+                        itemTotalCost = (item as any).total_selling_price || (item as any).selling_price || (item as any).estimatedSellingPrice || item.amount || 0;
+                      }
+
+                      return (
+                        <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                          <div className="flex justify-between items-start mb-3">
+                            <h4 className="font-bold text-gray-900">{index + 1}. {(item as any).item_name || item.description}</h4>
+                            <span className="font-semibold text-orange-600">{formatCurrency(itemTotalCost)}</span>
+                          </div>
+
+                          {hasSubItems ? (
+                            /* Show Sub-Items with their materials and labour */
+                            <div className="space-y-3 ml-4">
+                              {(item as any).sub_items.map((subItem: any, sIdx: number) => {
+                                const subMaterialTotal = (subItem.materials || []).reduce((sum: number, m: any) => sum + (m.total_price || m.amount || 0), 0);
+                                const subLabourTotal = (subItem.labour || []).reduce((sum: number, l: any) => sum + (l.total_cost || l.amount || 0), 0);
+                                const subItemClientCost = (subItem.quantity || 0) * (subItem.rate || 0);
+
+                                return (
+                                  <div key={sIdx} className="bg-green-50/50 rounded-lg p-3 border border-green-200">
+                                    <div className="flex justify-between items-start mb-2">
+                                      <h5 className="font-semibold text-green-900 text-sm">
+                                        Sub Item {sIdx + 1}: {subItem.sub_item_name || subItem.scope}
+                                      </h5>
+                                      <div className="text-right">
+                                        <div className="text-xs text-gray-600">Client Amount</div>
+                                        <div className="font-bold text-green-700">{formatCurrency(subItemClientCost)}</div>
+                                      </div>
+                                    </div>
+                                    {subItem.scope && (
+                                      <p className="text-xs text-gray-600 mb-2"><strong>Scope:</strong> {subItem.scope}</p>
+                                    )}
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-600 mb-3">
+                                      {subItem.size && <div><span className="font-medium">Size:</span> {subItem.size}</div>}
+                                      {subItem.location && <div><span className="font-medium">Location:</span> {subItem.location}</div>}
+                                      {subItem.brand && <div><span className="font-medium">Brand:</span> {subItem.brand}</div>}
+                                      <div><span className="font-medium">Qty:</span> {subItem.quantity} {subItem.unit}</div>
+                                      {subItem.rate && <div><span className="font-medium">Rate:</span> {formatCurrency(subItem.rate)}/{subItem.unit}</div>}
+                                    </div>
+
+                                    {/* Sub-item Materials */}
+                                    {subItem.materials && subItem.materials.length > 0 && (
+                                      <div className="mb-2">
+                                        <p className="text-xs font-semibold text-blue-700 mb-1">+ RAW MATERIALS</p>
+                                        <div className="space-y-1">
+                                          {subItem.materials.map((mat: any, mIdx: number) => (
+                                            <div key={mIdx} className="flex justify-between text-xs">
+                                              <span className="text-gray-600">{mat.material_name} ({mat.quantity} {mat.unit})</span>
+                                              <span className="font-medium">{formatCurrency(mat.total_price || mat.amount || 0)}</span>
+                                            </div>
+                                          ))}
+                                          <div className="flex justify-between text-xs font-semibold pt-1 border-t border-blue-200">
+                                            <span>Total Materials:</span>
+                                            <span>{formatCurrency(subMaterialTotal)}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Sub-item Labour */}
+                                    {subItem.labour && subItem.labour.length > 0 && (
+                                      <div className="mb-2">
+                                        <p className="text-xs font-semibold text-purple-700 mb-1">+ LABOUR</p>
+                                        <div className="space-y-1">
+                                          {subItem.labour.map((lab: any, lIdx: number) => (
+                                            <div key={lIdx} className="flex justify-between text-xs">
+                                              <span className="text-gray-600">{lab.labour_role} ({lab.hours} hrs)</span>
+                                              <span className="font-medium">{formatCurrency(lab.total_cost || lab.amount || 0)}</span>
+                                            </div>
+                                          ))}
+                                          <div className="flex justify-between text-xs font-semibold pt-1 border-t border-purple-200">
+                                            <span>Total Labour:</span>
+                                            <span>{formatCurrency(subLabourTotal)}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            /* Fallback: Show item-level materials and labour if no sub-items */
+                            <>
+                              {item.materials && item.materials.length > 0 && (
+                                <div className="mb-3">
+                                  <p className="text-xs font-semibold text-gray-700 mb-1">+ RAW MATERIALS</p>
+                                  <div className="space-y-1">
+                                    {item.materials.map((mat, mIdx) => (
+                                      <div key={mIdx} className="flex justify-between text-xs">
+                                        <span className="text-gray-600">{mat.name} ({mat.quantity} {mat.unit})</span>
+                                        <span className="font-medium">{formatCurrency(mat.amount)}</span>
+                                      </div>
+                                    ))}
+                                    <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                      <span>Total Materials:</span>
+                                      <span>{formatCurrency(item.materials.reduce((sum, m) => sum + m.amount, 0))}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {item.labour && item.labour.length > 0 && (
+                                <div className="mb-2">
+                                  <p className="text-xs font-semibold text-gray-700 mb-1">+ LABOUR</p>
+                                  <div className="space-y-1">
+                                    {item.labour.map((lab, lIdx) => (
+                                      <div key={lIdx} className="flex justify-between text-xs">
+                                        <span className="text-gray-600">{lab.type} ({lab.quantity} {lab.unit})</span>
+                                        <span className="font-medium">{formatCurrency(lab.amount)}</span>
+                                      </div>
+                                    ))}
+                                    <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                                      <span>Total Labour:</span>
+                                      <span>{formatCurrency(item.laborCost)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Cost Summary - Internal (NEW FORMAT - Option C) */}
+                  <div className="bg-white rounded-lg shadow-sm border border-orange-300 border-2 p-4 mb-4">
+                    <h3 className="font-bold text-gray-900 mb-3">Overall Cost Summary</h3>
+                    <div className="space-y-3">
+                      {(() => {
+                        const materialCost = selectedEstimation.materialCost || 0;
+                        const labourCost = selectedEstimation.laborCost || 0;
+
+                        // Calculate totals from all sub-items
+                        let totalClientAmount = 0;
+                        let totalPlannedProfit = 0;
+                        let totalActualProfit = 0;
+                        let totalMiscCost = 0;
+                        let totalTransportCost = 0;
+
+                        (selectedEstimation.boqItems || []).forEach((item: any) => {
+                          if (item.sub_items && item.sub_items.length > 0) {
+                            item.sub_items.forEach((si: any) => {
+                              const clientAmt = (si.quantity || 0) * (si.rate || 0);
+                              const matCost = (si.materials || []).reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price || 0), 0);
+                              const labCost = (si.labour || []).reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour || 0), 0);
+                              const miscAmt = clientAmt * ((si.misc_percentage || 10) / 100);
+                              const transportAmt = clientAmt * ((si.transport_percentage || 5) / 100);
+                              const opAmt = clientAmt * ((si.overhead_profit_percentage || 25) / 100);
+
+                              const internalCost = matCost + labCost + miscAmt + opAmt + transportAmt;
+
+                              totalClientAmount += clientAmt;
+                              totalPlannedProfit += opAmt;
+                              totalMiscCost += miscAmt;
+                              totalTransportCost += transportAmt;
+                              // CORRECTED: Actual Profit = Client Amount - Internal Cost Total
+                              totalActualProfit += (clientAmt - internalCost);
+                            });
+                          }
+                        });
+
+                        // BOQ-level discount (overall discount applied to entire BOQ)
+                        const overallDiscountAmount = (selectedEstimation as any).discount_amount || 0;
+                        const overallDiscountPct = selectedEstimation.discountPercentage || 0;
+
+                        // Calculate discount amount from percentage if amount is not provided
+                        let totalDiscount = overallDiscountAmount;
+                        if (totalDiscount === 0 && overallDiscountPct > 0 && totalClientAmount > 0) {
+                          totalDiscount = totalClientAmount * (overallDiscountPct / 100);
+                        }
+
+                        const totalInternalCost = materialCost + labourCost + totalMiscCost + totalPlannedProfit + totalTransportCost;
+                        const projectMargin = totalClientAmount - totalInternalCost;
+                        const marginPercentage = totalClientAmount > 0 ? ((projectMargin / totalClientAmount) * 100) : 0;
+                        const profitVariance = totalActualProfit - totalPlannedProfit;
+                        const profitVariancePercentage = totalPlannedProfit > 0 ? ((profitVariance / totalPlannedProfit) * 100) : 0;
+                        const discountPercentage = totalClientAmount > 0 ? ((totalDiscount / totalClientAmount) * 100) : overallDiscountPct;
+                        const grandTotalAfterDiscount = totalClientAmount - totalDiscount;
+
+                        // Calculate profit after discount
+                        const actualProfitAfterDiscount = grandTotalAfterDiscount - totalInternalCost;
+                        const profitMarginPercentage = totalClientAmount > 0 ? (totalActualProfit / totalClientAmount) * 100 : 0;
+                        const profitMarginAfterDiscount = grandTotalAfterDiscount > 0 ? (actualProfitAfterDiscount / grandTotalAfterDiscount) * 100 : 0;
+
+                        return (
+                          <>
+                            {/* BOQ Financials */}
+                            <div className="bg-blue-50 rounded-lg p-3 border border-blue-300">
+                              <h4 className="font-bold text-blue-900 mb-2 text-sm">BOQ Financials</h4>
+                              <div className="space-y-2 text-sm">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-700">Client Amount:</span>
+                                  <span className="font-bold text-blue-700">{formatCurrency(totalClientAmount)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-700">Internal Cost:</span>
+                                  <span className="font-semibold text-orange-600">{formatCurrency(totalInternalCost)}</span>
+                                </div>
+                                <div className="ml-4 space-y-1 text-xs text-gray-600">
+                                  <div className="flex justify-between">
+                                    <span>Materials:</span>
+                                    <span>{formatCurrency(materialCost)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Labour:</span>
+                                    <span>{formatCurrency(labourCost)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Miscellaneous:</span>
+                                    <span>{formatCurrency(totalMiscCost)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Overhead & Profit:</span>
+                                    <span>{formatCurrency(totalPlannedProfit)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Transport:</span>
+                                    <span>{formatCurrency(totalTransportCost)}</span>
+                                  </div>
+                                </div>
+                                <div className="flex justify-between pt-2 border-t border-blue-300">
+                                  <span className="font-bold">Project Margin:</span>
+                                  <div className="text-right">
+                                    <div className={`font-bold ${projectMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                      {formatCurrency(projectMargin)}
+                                    </div>
+                                    <div className="text-xs">({marginPercentage.toFixed(1)}%)</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Profit Analysis */}
+                            <div className="bg-green-50 rounded-lg p-3 border border-green-300">
+                              <h4 className="font-bold text-green-900 mb-2 text-sm">Profit Analysis</h4>
+                              <div className="space-y-2 text-sm">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-700">Planned Profit (O&P):</span>
+                                  <span className="font-semibold text-blue-600">{formatCurrency(totalPlannedProfit)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-700">Actual Profit:</span>
+                                  <span className={`font-bold ${totalActualProfit >= totalPlannedProfit ? 'text-green-600' : 'text-orange-600'}`}>
+                                    {formatCurrency(totalActualProfit)}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between pt-2 border-t border-green-300">
+                                  <span className="font-bold">Variance:</span>
+                                  <div className="text-right">
+                                    <div className={`font-bold text-sm ${profitVariance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                      {profitVariance >= 0 ? '+' : ''}{formatCurrency(profitVariance)}
+                                    </div>
+                                    <div className="text-xs">({profitVariance >= 0 ? '+' : ''}{profitVariancePercentage.toFixed(1)}%)</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Grand Total */}
+                            <div className="bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-3 border-2 border-green-300">
+                              <div className="space-y-2">
+                                <div className="flex justify-between text-sm font-medium">
+                                  <span className="text-gray-800">Subtotal:</span>
+                                  <span className="font-semibold">{formatCurrency(totalClientAmount)}</span>
+                                </div>
+                                {totalDiscount > 0 && (
+                                  <div className="flex justify-between text-xs text-red-600">
+                                    <span>Discount ({discountPercentage.toFixed(1)}%):</span>
+                                    <span className="font-semibold">- {formatCurrency(totalDiscount)}</span>
+                                  </div>
+                                )}
+                                <div className="flex justify-between text-base font-bold pt-2 border-t border-green-400">
+                                  <span className="text-green-900">
+                                    Grand Total: <span className="text-xs font-normal text-gray-600">(Excluding VAT)</span>
+                                  </span>
+                                  <span className="text-green-700">{formatCurrency(grandTotalAfterDiscount)}</span>
+                                </div>
+
+                                {/* Show discount impact on profitability */}
+                                {totalDiscount > 0 && (
+                                  <div className="mt-3 pt-3 border-t border-green-300 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3">
+                                    <h6 className="text-xs font-bold text-gray-800 mb-3 flex items-center gap-2">
+                                      <TrendingUp className="w-3.5 h-3.5" />
+                                      Discount Impact on Profitability
+                                    </h6>
+                                    <div className="space-y-2 text-xs">
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-gray-600">Client Cost:</span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-gray-500 line-through">
+                                            {formatCurrency(totalClientAmount)}
+                                          </span>
+                                          <span className="text-blue-700 font-bold">
+                                            → {formatCurrency(grandTotalAfterDiscount)}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-gray-600">Internal Cost:</span>
+                                        <span className="font-semibold text-red-600">
+                                          {formatCurrency(totalInternalCost)}
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between items-center pt-2 border-t border-gray-300">
+                                        <span className="text-gray-700 font-medium">Actual Profit:</span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-gray-500 line-through">
+                                            {formatCurrency(totalActualProfit)}
+                                          </span>
+                                          <span className={`font-bold ${actualProfitAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                                            → {formatCurrency(actualProfitAfterDiscount)}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-between items-center bg-white/60 rounded px-2 py-1">
+                                        <span className="text-gray-700 font-medium">Profit Margin:</span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-gray-500 text-xs">
+                                            {profitMarginPercentage.toFixed(1)}%
+                                          </span>
+                                          <span className={`font-bold ${profitMarginAfterDiscount >= 15 ? 'text-emerald-700' : profitMarginAfterDiscount >= 10 ? 'text-orange-600' : 'text-red-600'}`}>
+                                            → {profitMarginAfterDiscount.toFixed(1)}%
+                                          </span>
+                                        </div>
+                                      </div>
+                                      {profitMarginAfterDiscount < 15 && (
+                                        <div className="mt-2 p-2 bg-orange-100 border border-orange-300 rounded text-orange-800 flex items-start gap-2">
+                                          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                          <span className="text-xs">
+                                            <strong>Warning:</strong> Profit margin is below recommended 15%. This discount significantly reduces profitability.
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+              </div>
+
+              {/* Client Version (Right) */}
+              <div className="p-6 bg-blue-50/30">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="px-3 py-1 bg-blue-100 border border-blue-300 rounded-lg">
+                    <span className="text-sm font-bold text-blue-800">CLIENT VERSION</span>
+                  </div>
+                  <span className="text-xs text-gray-600">(What Client sees)</span>
+                </div>
+
+                {/* Preliminaries & Approval Works - Client Version */}
+                {(selectedEstimation as any).preliminaries && (
+                  (selectedEstimation as any).preliminaries.items?.length > 0 ||
+                  (selectedEstimation as any).preliminaries.cost_details ||
+                  (selectedEstimation as any).preliminaries.notes
+                ) && (
+                  <div className="bg-white rounded-lg shadow-sm border border-blue-200 p-4 mb-4">
+                    <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-purple-600" />
+                      Preliminaries & Approval Works
+                    </h3>
+
+                    {/* Selected Items */}
+                    {(selectedEstimation as any).preliminaries.items && (selectedEstimation as any).preliminaries.items.length > 0 && (
+                      <div className="mb-3">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
+                        <div className="space-y-2">
+                          {(selectedEstimation as any).preliminaries.items.map((item: any, index: number) => (
+                            <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
+                              <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
+                                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                </svg>
+                              </div>
+                              <div className="flex-1 text-sm text-gray-700">
+                                {item.description}
+                                {item.isCustom && (
+                                  <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">Custom</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Cost Details Table */}
+                    {(selectedEstimation as any).preliminaries.cost_details && (
+                      (selectedEstimation as any).preliminaries.cost_details.quantity ||
+                      (selectedEstimation as any).preliminaries.cost_details.rate ||
+                      (selectedEstimation as any).preliminaries.cost_details.amount
+                    ) && (
+                      <div className="mb-3 bg-green-50/50 rounded-lg border border-green-200 p-3">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-green-300">
+                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Qty</th>
+                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Unit</th>
+                                <th className="text-right py-2 px-3 font-semibold text-gray-700">Rate</th>
+                                <th className="text-right py-2 px-3 font-semibold text-gray-700">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                <td className="py-2 px-3 font-medium text-gray-900">
+                                  {(selectedEstimation as any).preliminaries.cost_details.quantity || 0}
+                                </td>
+                                <td className="py-2 px-3 font-medium text-gray-900">
+                                  {(selectedEstimation as any).preliminaries.cost_details.unit || 'nos'}
+                                </td>
+                                <td className="py-2 px-3 font-medium text-gray-900 text-right">
+                                  {formatCurrency((selectedEstimation as any).preliminaries.cost_details.rate || 0)}
+                                </td>
+                                <td className="py-2 px-3 font-bold text-blue-700 text-right">
+                                  {formatCurrency((selectedEstimation as any).preliminaries.cost_details.amount || 0)}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Additional Notes */}
+                    {(selectedEstimation as any).preliminaries.notes && (
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Additional Notes</h4>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                          {(selectedEstimation as any).preliminaries.notes}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* BOQ Items - Client (SIMPLIFIED - Match PDF Client Format) */}
+                <div className="space-y-3 mb-4">
+                    {(selectedEstimation.boqItems || []).map((item, index) => {
+                      const hasSubItems = (item as any).sub_items && (item as any).sub_items.length > 0;
+
+                      // Calculate item total from all sub-items (client amount = sum of sub-item qty × rate)
+                      let itemTotal = 0;
+                      if (hasSubItems) {
+                        itemTotal = (item as any).sub_items.reduce((sum: number, si: any) => {
+                          return sum + ((si.quantity || 0) * (si.rate || 0));
+                        }, 0);
+                      }
+
+                      return (
+                        <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                          <div className="flex justify-between items-start mb-3">
+                            <h4 className="font-bold text-gray-900">{index + 1}. {(item as any).item_name || item.description}</h4>
+                            <span className="font-semibold text-blue-600">{formatCurrency(itemTotal)}</span>
+                          </div>
+
+                          {hasSubItems ? (
+                            /* Show Sub-Items - CLIENT VERSION (Scope, Size, Location, Brand, Qty, Rate, Total ONLY - No materials/labour) */
+                            <div className="space-y-2 ml-4">
+                              {(item as any).sub_items.map((subItem: any, sIdx: number) => {
+                                const subItemAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+
+                                return (
+                                  <div key={sIdx} className="bg-blue-50/30 rounded-lg p-3 border border-blue-200">
+                                    <h5 className="font-medium text-gray-900 text-sm mb-2">
+                                      Sub Item {sIdx + 1}: {subItem.sub_item_name || subItem.scope}
+                                    </h5>
+                                    {subItem.scope && (
+                                      <p className="text-xs text-gray-600 mb-2"><strong>Scope:</strong> {subItem.scope}</p>
+                                    )}
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs text-gray-600">
+                                      {subItem.size && <div><span className="font-medium">Size:</span> {subItem.size}</div>}
+                                      {subItem.location && <div><span className="font-medium">Location:</span> {subItem.location}</div>}
+                                      {subItem.brand && <div><span className="font-medium">Brand:</span> {subItem.brand}</div>}
+                                      <div><span className="font-medium">Qty:</span> {subItem.quantity} {subItem.unit}</div>
+                                      <div><span className="font-medium">Rate:</span> {formatCurrency(subItem.rate || 0)}</div>
+                                    </div>
+                                    <div className="mt-2 text-right">
+                                      <span className="text-sm font-semibold text-blue-700">Total: {formatCurrency(subItemAmount)}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            /* No sub-items: Just show brief item info */
+                            <div className="text-xs text-gray-600">
+                              {item.briefDescription && <p>{item.briefDescription}</p>}
+                              <p className="mt-1">Qty: {item.quantity} {item.unit}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Cost Summary - Client (SIMPLIFIED - Match PDF Client Version) */}
+                  <div className="bg-white rounded-lg shadow-sm border border-blue-300 border-2 p-4 mb-4">
+                    <h3 className="font-bold text-gray-900 mb-3">Cost Summary</h3>
+                    <div className="space-y-3">
+                      {(() => {
+                        // Client version - Calculate subtotal from sub-items (quantity × rate)
+                        let subtotal = 0;
+
+                        (selectedEstimation.boqItems || []).forEach((item: any) => {
+                          // Calculate subtotal from sub-items (client amount)
+                          if (item.sub_items && item.sub_items.length > 0) {
+                            item.sub_items.forEach((si: any) => {
+                              subtotal += (si.quantity || 0) * (si.rate || 0);
+                            });
+                          }
+                        });
+
+                        // Add Preliminaries amount to subtotal
+                        const preliminaryAmount = (selectedEstimation as any).preliminaries?.cost_details?.amount || 0;
+                        subtotal += preliminaryAmount;
+
+                        // BOQ-level discount (overall discount applied to entire BOQ)
+                        const overallDiscountAmount = (selectedEstimation as any).discount_amount || 0;
+                        const overallDiscountPct = selectedEstimation.discountPercentage || 0;
+
+                        // Calculate discount amount from percentage if amount is not provided
+                        let overallDiscount = overallDiscountAmount;
+                        if (overallDiscount === 0 && overallDiscountPct > 0 && subtotal > 0) {
+                          overallDiscount = subtotal * (overallDiscountPct / 100);
+                        }
+
+                        const grandTotal = subtotal - overallDiscount;
+                        const discountPercentage = subtotal > 0 ? ((overallDiscount / subtotal) * 100) : overallDiscountPct;
+
+                        return (
+                          <>
+                            <div className="flex justify-between text-base font-medium">
+                              <span className="text-gray-800">Subtotal:</span>
+                              <span className="font-semibold">{formatCurrency(subtotal)}</span>
+                            </div>
+                            {overallDiscount > 0 && (
+                              <div className="flex justify-between text-sm text-red-600">
+                                <span>Discount ({discountPercentage.toFixed(1)}%):</span>
+                                <span className="font-semibold">- {formatCurrency(overallDiscount)}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between pt-3 border-t-2 border-blue-300 text-lg font-bold">
+                              <span className="text-blue-900">
+                                Grand Total: <span className="text-xs font-normal text-gray-600">(Excluding VAT)</span>
+                              </span>
+                              <span className="text-green-600">{formatCurrency(grandTotal)}</span>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+              </div>
+            </div>
+            </div>
+
+          {/* Footer - Fixed at bottom */}
+          <div className="bg-gradient-to-r from-gray-50 to-white border-t border-gray-200 px-6 py-4 shadow-lg flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                <strong>Key Difference:</strong> Internal version shows sub-items with complete material & labour breakdown. Client version shows sub-items with final prices (misc/overhead/profit included), discount, and VAT only.
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setShowComparisonModal(false);
+                    setApprovalNotes('');
+                  }}
+                  disabled={isApproving}
+                  className={`px-6 py-2.5 ${isApproving ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-500 hover:bg-gray-600'} text-white rounded-lg font-medium transition-colors`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleFinalApproval}
+                  disabled={isApproving}
+                  className={`px-6 py-2.5 ${isApproving ? 'bg-green-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600'} text-white rounded-lg font-medium transition-colors flex items-center gap-2`}
+                >
+                  {isApproving ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Approving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircleIcon className="w-5 h-5" />
+                      Approve
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

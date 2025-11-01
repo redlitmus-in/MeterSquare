@@ -179,12 +179,55 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
     [],
     ['DETAILED BOQ ITEMS'],
     [],
+    ['S.No', 'Description', 'Qty', 'Unit', 'Rate (AED)', 'Amount (AED)'],
   ];
+
+  let itemSerialNumber = 1;
+
+  // Add Preliminaries as FIRST item (matching PDF format)
+  if (estimation.preliminaries) {
+    const prelim_data = estimation.preliminaries as any;
+    const prelim_items = prelim_data.items || [];
+    const prelim_notes = prelim_data.notes || '';
+    const cost_details = prelim_data.cost_details || {};
+    const preliminary_amount = cost_details.amount || 0;
+
+    // Build description from ALL items
+    let description = 'Preliminaries & Approval Works';
+    if (prelim_items && prelim_items.length > 0) {
+      const selected_items = prelim_items.map((item_data: any) => {
+        if (typeof item_data === 'object' && item_data !== null) {
+          const item_text = item_data.description || item_data.name || item_data.text || '';
+          const is_custom = item_data.isCustom;
+          return is_custom ? `✓ ${item_text} (Custom)` : `✓ ${item_text}`;
+        }
+        return `✓ ${item_data}`;
+      });
+      description += '\n' + selected_items.join('\n');
+    }
+    if (prelim_notes) {
+      description += `\nNote: ${prelim_notes}`;
+    }
+
+    // Add preliminaries row if there's content
+    if ((prelim_items.length > 0 || prelim_notes) && preliminary_amount > 0) {
+      allData.push([
+        itemSerialNumber,
+        description,
+        1,
+        'lot',
+        formatCurrency(preliminary_amount),
+        formatCurrency(preliminary_amount)
+      ]);
+      itemSerialNumber++;
+      allData.push([]); // Blank row after preliminaries
+    }
+  }
 
   // Add each BOQ item with full breakdown - INTERNAL VERSION
   (estimation.boqItems || []).forEach((item, itemIndex) => {
     // Item Header
-    allData.push([`${itemIndex + 1}. ${item.description}`, '', '', '']);
+    allData.push([`${itemSerialNumber}. ${item.description}`, '', '', '']);
     if (item.briefDescription) {
       allData.push([item.briefDescription, '', '', '']);
     }
@@ -340,6 +383,8 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
       allData.push([]);
       allData.push([]);
     }
+
+    itemSerialNumber++; // Increment serial number for next item
   });
 
   // Cost Summary at END
@@ -369,26 +414,7 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
   allData.push([]);
   allData.push(['GRAND TOTAL:', formatCurrency(grandTotal)]);
 
-  // Add Preliminaries & Approval Works Section (separate from grand total)
-  if (estimation.preliminaries && (estimation.preliminaries.items?.length > 0 || estimation.preliminaries.notes)) {
-    allData.push([]);
-    allData.push([]);
-    allData.push(['PRELIMINARIES & APPROVAL WORKS']);
-    allData.push(['Selected conditions and terms']);
-    allData.push([]);
-
-    if (estimation.preliminaries.items && estimation.preliminaries.items.length > 0) {
-      estimation.preliminaries.items.forEach((item: any) => {
-        allData.push([`✓ ${item.description || item}`]);
-      });
-    }
-
-    if (estimation.preliminaries.notes) {
-      allData.push([]);
-      allData.push(['Additional Notes']);
-      allData.push([estimation.preliminaries.notes]);
-    }
-  }
+  // Preliminaries are now shown at the TOP in table format (removed from bottom)
 
   const ws = XLSX.utils.aoa_to_sheet(allData);
   ws['!cols'] = [
@@ -467,12 +493,55 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
     [],
     ['SCOPE OF WORK'],
     [],
+    ['S.No', 'Description', 'Qty', 'Unit', 'Rate (AED)', 'Amount (AED)'],
   ];
+
+  let itemSerialNumber = 1;
+
+  // Add Preliminaries as FIRST item (matching PDF format)
+  if (estimation.preliminaries) {
+    const prelim_data = estimation.preliminaries as any;
+    const prelim_items = prelim_data.items || [];
+    const prelim_notes = prelim_data.notes || '';
+    const cost_details = prelim_data.cost_details || {};
+    const preliminary_amount = cost_details.amount || 0;
+
+    // Build description from ALL items
+    let description = 'Preliminaries & Approval Works';
+    if (prelim_items && prelim_items.length > 0) {
+      const selected_items = prelim_items.map((item_data: any) => {
+        if (typeof item_data === 'object' && item_data !== null) {
+          const item_text = item_data.description || item_data.name || item_data.text || '';
+          const is_custom = item_data.isCustom;
+          return is_custom ? `✓ ${item_text} (Custom)` : `✓ ${item_text}`;
+        }
+        return `✓ ${item_data}`;
+      });
+      description += '\n' + selected_items.join('\n');
+    }
+    if (prelim_notes) {
+      description += `\nNote: ${prelim_notes}`;
+    }
+
+    // Add preliminaries row if there's content
+    if ((prelim_items.length > 0 || prelim_notes) && preliminary_amount > 0) {
+      allData.push([
+        itemSerialNumber,
+        description,
+        1,
+        'lot',
+        formatCurrency(preliminary_amount),
+        formatCurrency(preliminary_amount)
+      ]);
+      itemSerialNumber++;
+      allData.push([]); // Blank row after preliminaries
+    }
+  }
 
   // Add each BOQ item - CLIENT VERSION (no materials/labour details)
   (estimation.boqItems || []).forEach((item, itemIndex) => {
     // Item Header
-    allData.push([`${itemIndex + 1}. ${item.description}`, '', '', '', '', '']);
+    allData.push([`${itemSerialNumber}. ${item.description}`, '', '', '', '', '']);
     if (item.briefDescription) {
       allData.push([item.briefDescription, '', '', '', '', '']);
     }
@@ -527,6 +596,8 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
     allData.push(['TOTAL:', '', '', '', '', formatCurrency(item.estimatedSellingPrice)]);
     allData.push([]);
     allData.push([]);
+
+    itemSerialNumber++; // Increment serial number for next item
   });
 
   // Cost Summary at END - CLIENT VERSION
@@ -559,26 +630,7 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
   allData.push([]);
   allData.push(['TOTAL PROJECT VALUE:', formatCurrency(grandTotal)]);
 
-  // Add Preliminaries & Approval Works Section (separate from grand total)
-  if (estimation.preliminaries && (estimation.preliminaries.items?.length > 0 || estimation.preliminaries.notes)) {
-    allData.push([]);
-    allData.push([]);
-    allData.push(['PRELIMINARIES & APPROVAL WORKS']);
-    allData.push(['Selected conditions and terms']);
-    allData.push([]);
-
-    if (estimation.preliminaries.items && estimation.preliminaries.items.length > 0) {
-      estimation.preliminaries.items.forEach((item: any) => {
-        allData.push([`✓ ${item.description || item}`]);
-      });
-    }
-
-    if (estimation.preliminaries.notes) {
-      allData.push([]);
-      allData.push(['Additional Notes']);
-      allData.push([estimation.preliminaries.notes]);
-    }
-  }
+  // Preliminaries are now shown at the TOP in table format (removed from bottom)
 
   const ws = XLSX.utils.aoa_to_sheet(allData);
   ws['!cols'] = [

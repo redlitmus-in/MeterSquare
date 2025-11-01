@@ -330,6 +330,10 @@ const EstimatorHub: React.FC = () => {
   const [isRevisionEdit, setIsRevisionEdit] = useState(false);
   const [isSendingToTD, setIsSendingToTD] = useState(false);
 
+  // Full-screen BOQ view states
+  const [showFullScreenBOQ, setShowFullScreenBOQ] = useState(false);
+  const [fullScreenBoqMode, setFullScreenBoqMode] = useState<'view' | 'create' | 'edit'>('view');
+
   // Dynamic Revision Tabs States
   const [revisionTabs, setRevisionTabs] = useState<Array<{
     revision_number: number;
@@ -348,6 +352,19 @@ const EstimatorHub: React.FC = () => {
   const [selectedPM, setSelectedPM] = useState<number | null>(null);
   const [isSendingToPM, setIsSendingToPM] = useState(false);
   const [loadingPMs, setLoadingPMs] = useState(false);
+
+  // Debug full-screen state changes
+  useEffect(() => {
+    console.log('🔍 Full Screen State Changed:', {
+      showFullScreenBOQ,
+      fullScreenBoqMode,
+      hasEditingBoq: !!editingBoq,
+      editingBoqId: editingBoq?.boq_id,
+      hasSelectedBoq: !!selectedBoqForDetails,
+      hasSelectedProject: !!selectedProjectForBOQ,
+      projectId: selectedProjectForBOQ?.project_id
+    });
+  }, [showFullScreenBOQ, fullScreenBoqMode, editingBoq, selectedBoqForDetails, selectedProjectForBOQ]);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -703,12 +720,13 @@ const EstimatorHub: React.FC = () => {
 
   const handleCreateBOQ = (project: any) => {
     setSelectedProjectForBOQ(project);
-    setShowBOQCreationDialog(true);
+    setFullScreenBoqMode('create');
+    setShowFullScreenBOQ(true);
   };
 
   const handleBOQCreated = (boqId: number) => {
     toast.success('BOQ created successfully!');
-    setShowBOQCreationDialog(false);
+    setShowFullScreenBOQ(false);
     setSelectedProjectForBOQ(null);
     setActiveTab('projects'); // Show pending projects tab
     loadBOQs(); // Refresh the BOQ list
@@ -1265,7 +1283,8 @@ const EstimatorHub: React.FC = () => {
                 className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
                 onClick={() => {
                   setSelectedBoqForDetails(boq);
-                  setShowBoqDetails(true);
+                  setFullScreenBoqMode('view');
+                  setShowFullScreenBOQ(true);
                 }}
                 title="View Details"
               >
@@ -1275,8 +1294,16 @@ const EstimatorHub: React.FC = () => {
                 <button
                   className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-all"
                   onClick={() => {
+                    console.log('✏️ Edit button clicked:', {
+                      boqId: boq.boq_id,
+                      hasProject: !!boq.project,
+                      project: boq.project
+                    });
                     setEditingBoq(boq);
-                    setShowBoqEdit(true);
+                    setSelectedProjectForBOQ(boq.project);
+                    setFullScreenBoqMode('edit');
+                    setShowFullScreenBOQ(true);
+                    console.log('✏️ States set - should see useEffect log next');
                   }}
                   title="Edit BOQ"
                 >
@@ -1343,7 +1370,8 @@ const EstimatorHub: React.FC = () => {
             style={{ backgroundColor: 'rgb(36, 61, 138)' }}
             onClick={() => {
               setSelectedBoqForDetails(boq);
-              setShowBoqDetails(true);
+              setFullScreenBoqMode('view');
+              setShowFullScreenBOQ(true);
             }}
           >
             <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1383,7 +1411,9 @@ const EstimatorHub: React.FC = () => {
                 }}
                 onClick={() => {
                   setEditingBoq(boq);
-                  setShowBoqEdit(true);
+                  setSelectedProjectForBOQ(boq.project);
+                  setFullScreenBoqMode('edit');
+                  setShowFullScreenBOQ(true);
                 }}
               >
                 <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1417,7 +1447,9 @@ const EstimatorHub: React.FC = () => {
                 style={{ backgroundColor: 'rgb(34, 197, 94)' }}
                 onClick={() => {
                   setEditingBoq(boq);
-                  setShowBoqEdit(true);
+                  setSelectedProjectForBOQ(boq.project);
+                  setFullScreenBoqMode('edit');
+                  setShowFullScreenBOQ(true);
                 }}
               >
                 <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1466,8 +1498,10 @@ const EstimatorHub: React.FC = () => {
                 style={{ backgroundColor: 'rgb(34, 197, 94)' }}
                 onClick={() => {
                   setEditingBoq(boq);
+                  setSelectedProjectForBOQ(boq.project);
                   setIsRevisionEdit(true); // Set flag for revision edit
-                  setShowBoqEdit(true);
+                  setFullScreenBoqMode('edit');
+                  setShowFullScreenBOQ(true);
                 }}
               >
                 <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1557,7 +1591,9 @@ const EstimatorHub: React.FC = () => {
                 style={{ backgroundColor: 'rgb(34, 197, 94)' }}
                 onClick={() => {
                   setEditingBoq(boq);
-                  setShowBoqEdit(true);
+                  setSelectedProjectForBOQ(boq.project);
+                  setFullScreenBoqMode('edit');
+                  setShowFullScreenBOQ(true);
                 }}
               >
                 <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1607,8 +1643,11 @@ const EstimatorHub: React.FC = () => {
               className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
               style={{ backgroundColor: 'rgb(34, 197, 94)' }}
               onClick={() => {
+                console.log('✏️ TD Rejected - Edit BOQ clicked');
                 setEditingBoq(boq);
-                setShowBoqEdit(true);
+                setSelectedProjectForBOQ(boq.project);
+                setFullScreenBoqMode('edit');
+                setShowFullScreenBOQ(true);
               }}
             >
               <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1623,7 +1662,9 @@ const EstimatorHub: React.FC = () => {
                 style={{ backgroundColor: 'rgb(34, 197, 94)' }}
                 onClick={() => {
                   setEditingBoq(boq);
-                  setShowBoqEdit(true);
+                  setSelectedProjectForBOQ(boq.project);
+                  setFullScreenBoqMode('edit');
+                  setShowFullScreenBOQ(true);
                 }}
               >
                 <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1733,7 +1774,8 @@ const EstimatorHub: React.FC = () => {
                       size="sm"
                       onClick={() => {
                         setSelectedBoqForDetails(boq);
-                        setShowBoqDetails(true);
+                        setFullScreenBoqMode('view');
+                        setShowFullScreenBOQ(true);
                       }}
                       className="h-8 w-8 p-0"
                       title="View BOQ Details"
@@ -1769,7 +1811,7 @@ const EstimatorHub: React.FC = () => {
                       } else if (isUnderRevision) {
                         return (
                           <>
-                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setIsRevisionEdit(true); setShowBoqEdit(true); }} className="h-8 w-8 p-0" title="Edit Again">
+                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setIsRevisionEdit(true); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }} className="h-8 w-8 p-0" title="Edit Again">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={async () => {
@@ -1788,7 +1830,7 @@ const EstimatorHub: React.FC = () => {
                       } else if (isClientRejected) {
                         return (
                           <>
-                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setShowBoqEdit(true); }} className="h-8 w-8 p-0" title="Revise BOQ">
+                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }} className="h-8 w-8 p-0" title="Revise BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('td'); setShowSendEmailModal(true); }} className="h-8 w-8 p-0" title="Send Revision to TD">
@@ -1802,7 +1844,7 @@ const EstimatorHub: React.FC = () => {
                       } else if (isDraft) {
                         return (
                           <>
-                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setShowBoqEdit(true); }} className="h-8 w-8 p-0" title="Edit BOQ">
+                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }} className="h-8 w-8 p-0" title="Edit BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('td'); setShowSendEmailModal(true); }} className="h-8 w-8 p-0" title="Send to TD">
@@ -1816,7 +1858,7 @@ const EstimatorHub: React.FC = () => {
                       } else if (isSentToClient) {
                         return (
                           <>
-                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setShowBoqEdit(true); }} className="h-8 w-8 p-0" title="Edit BOQ">
+                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }} className="h-8 w-8 p-0" title="Edit BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { toast.success(result.message); loadBOQs(); } else { toast.error(result.message); } }} className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Client Approved">
@@ -1852,7 +1894,7 @@ const EstimatorHub: React.FC = () => {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => { setEditingBoq(boq); setIsRevisionEdit(isRevApproved); setShowBoqEdit(true); }}
+                              onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setIsRevisionEdit(isRevApproved); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }}
                               className="h-8 w-8 p-0"
                               title="Edit BOQ"
                             >
@@ -1897,15 +1939,211 @@ const EstimatorHub: React.FC = () => {
       <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center gap-3">
+            {showFullScreenBOQ && (
+              <button
+                onClick={() => {
+                  setShowFullScreenBOQ(false);
+                  setSelectedBoqForDetails(null);
+                  setEditingBoq(null);
+                  setSelectedProjectForBOQ(null);
+                }}
+                className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                <ArrowRight className="w-6 h-6 text-gray-600 transform rotate-180" />
+              </button>
+            )}
             <div className="p-2 bg-gradient-to-br from-red-50 to-red-100 rounded-lg">
               <FolderOpen className="w-6 h-6 text-red-600" />
             </div>
-            <h1 className="text-2xl font-bold text-[#243d8a]">Projects & BOQ Management</h1>
+            <h1 className="text-2xl font-bold text-[#243d8a]">
+              {showFullScreenBOQ
+                ? fullScreenBoqMode === 'create'
+                  ? 'Create BOQ'
+                  : fullScreenBoqMode === 'edit'
+                    ? 'Edit BOQ'
+                    : 'BOQ Details'
+                : 'Projects & BOQ Management'}
+            </h1>
           </div>
         </div>
       </div>
 
+      {/* Full Screen BOQ View/Create/Edit */}
+      {showFullScreenBOQ && (
+        <div className="w-full min-h-screen relative">
+          {/* Custom wrapper to override modal styling */}
+          <style>{`
+            .full-screen-boq-wrapper .fixed.inset-0.z-50 {
+              position: relative !important;
+              z-index: auto !important;
+              min-height: 100vh !important;
+            }
+            .full-screen-boq-wrapper .fixed.inset-0 {
+              position: relative !important;
+              min-height: 100vh !important;
+            }
+            .full-screen-boq-wrapper .bg-black\\/50,
+            .full-screen-boq-wrapper .bg-black\\/60 {
+              display: none !important;
+            }
+            .full-screen-boq-wrapper .max-w-6xl,
+            .full-screen-boq-wrapper .max-w-7xl {
+              max-width: 100% !important;
+              min-height: 100vh !important;
+            }
+            .full-screen-boq-wrapper .max-h-\\[90vh\\],
+            .full-screen-boq-wrapper .max-h-\\[95vh\\] {
+              max-height: none !important;
+              min-height: 100vh !important;
+            }
+            .full-screen-boq-wrapper .rounded-xl,
+            .full-screen-boq-wrapper .rounded-2xl {
+              border-radius: 0 !important;
+            }
+            .full-screen-boq-wrapper > div > div:first-child {
+              align-items: flex-start !important;
+              min-height: 100vh !important;
+              padding: 0 !important;
+            }
+            .full-screen-boq-wrapper > div > div:first-child > div:last-child {
+              position: relative !important;
+              margin: 0 !important;
+              max-width: 100% !important;
+              width: 100% !important;
+              max-height: none !important;
+              min-height: 100vh !important;
+              box-shadow: none !important;
+            }
+            /* Hide internal form header - keep only main page header */
+            /* Target the header section with gradient background */
+            .full-screen-boq-wrapper [class*="bg-gradient-to-r"][class*="border-b"][class*="border-blue-100"] {
+              display: flex !important;
+              justify-content: flex-end !important;
+              background: transparent !important;
+              border: none !important;
+              padding: 1rem !important;
+            }
+            /* Hide the BOQ title and icon in header, but keep action buttons */
+            .full-screen-boq-wrapper [class*="bg-gradient-to-r"][class*="border-b"] > div:first-child > div:first-child {
+              display: none !important;
+            }
+            /* Hide the close (X) button in header */
+            .full-screen-boq-wrapper [class*="bg-gradient-to-r"][class*="border-b"] button[title="Close"] {
+              display: none !important;
+            }
+            /* Also hide by direct structure - flex-shrink-0 for form headers */
+            .full-screen-boq-wrapper .flex-shrink-0:first-of-type {
+              display: none !important;
+            }
+            /* Hide the close (X) button in top-right corner for forms */
+            .full-screen-boq-wrapper button.absolute[class*="top-4"][class*="right-4"] {
+              display: none !important;
+            }
+            .full-screen-boq-wrapper [aria-label="Close dialog"] {
+              display: none !important;
+            }
+            /* Ensure content fills full height */
+            .full-screen-boq-wrapper .overflow-y-auto {
+              padding-top: 0 !important;
+              min-height: 100vh !important;
+            }
+            /* Make wrapper fill height */
+            .full-screen-boq-wrapper {
+              min-height: 100vh !important;
+            }
+          `}</style>
+          <div className="full-screen-boq-wrapper">
+            {/* View Mode */}
+            {fullScreenBoqMode === 'view' && selectedBoqForDetails && (
+              <BOQDetailsModal
+                isOpen={true}
+                onClose={() => {
+                  setShowFullScreenBOQ(false);
+                  setSelectedBoqForDetails(null);
+                }}
+                boq={selectedBoqForDetails}
+                showNewPurchaseItems={false}
+                refreshTrigger={boqDetailsRefreshTrigger}
+                onEdit={() => {
+                  if (selectedBoqForDetails) {
+                    setEditingBoq(selectedBoqForDetails);
+                    setSelectedProjectForBOQ(selectedBoqForDetails.project);
+                    setFullScreenBoqMode('edit');
+                  }
+                }}
+                onDownload={() => {
+                  if (selectedBoqForDetails) {
+                    handleDownloadBOQ(selectedBoqForDetails);
+                  }
+                }}
+              />
+            )}
+
+            {/* Create Mode */}
+            {fullScreenBoqMode === 'create' && (
+              <BOQCreationForm
+                isOpen={true}
+                onClose={() => {
+                  setShowFullScreenBOQ(false);
+                  setSelectedProjectForBOQ(null);
+                }}
+                onSubmit={handleBOQCreated}
+                selectedProject={selectedProjectForBOQ}
+                hideTemplate={true}
+              />
+            )}
+
+            {/* Edit Mode */}
+            {fullScreenBoqMode === 'edit' && editingBoq && (
+              <BOQCreationForm
+                isOpen={true}
+                onClose={() => {
+                  setShowFullScreenBOQ(false);
+                  setEditingBoq(null);
+                  setIsRevisionEdit(false);
+                }}
+                editMode={!isRevisionEdit}
+                isRevision={isRevisionEdit}
+                existingBoqData={editingBoq}
+                onSubmit={async (boqId) => {
+                  await loadBOQs();
+                  setBoqDetailsRefreshTrigger(prev => prev + 1);
+
+                  const boqToSend = editingBoq;
+                  setEditingBoq(null);
+                  setIsRevisionEdit(false);
+
+                  if (boqToSend && (boqToSend.status?.toLowerCase() === 'rejected' || boqToSend.status?.toLowerCase() === 'client_rejected')) {
+                    setBoqToSendToTD(boqToSend);
+                    setShowSendToTDPopup(true);
+                  }
+
+                  // Go back to view mode
+                  setFullScreenBoqMode('view');
+                  const updatedBoq = boqs.find(b => b.boq_id === boqId);
+                  if (updatedBoq) {
+                    setSelectedBoqForDetails(updatedBoq);
+                  } else {
+                    setShowFullScreenBOQ(false);
+                  }
+                }}
+                selectedProject={selectedProjectForBOQ}
+                hideTemplate={true}
+              />
+            )}
+
+            {/* Fallback - show if no mode matches */}
+            {!['view', 'create', 'edit'].includes(fullScreenBoqMode) && (
+              <div className="p-8 text-center">
+                <p className="text-red-600">Unknown mode: {fullScreenBoqMode}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
+      {!showFullScreenBOQ && (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
         {/* Search Bar with Controls */}
         <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
@@ -2648,12 +2886,15 @@ const EstimatorHub: React.FC = () => {
                 }}
                 onEdit={(boq) => {
                   setEditingBoq(boq);
+                  setSelectedProjectForBOQ(boq.project);
                   setIsRevisionEdit(true);
-                  setShowBoqEdit(true);
+                  setFullScreenBoqMode('edit');
+                  setShowFullScreenBOQ(true);
                 }}
                 onViewDetails={(boq) => {
                   setSelectedBoqForDetails(boq);
-                  setShowBoqDetails(true);
+                  setFullScreenBoqMode('view');
+                  setShowFullScreenBOQ(true);
                 }}
                 onCompare={(currentBoq, previousRevision) => {
                   setSelectedBoqForComparison(currentBoq);
@@ -2900,6 +3141,7 @@ const EstimatorHub: React.FC = () => {
           </Tabs>
         </div>
       </div>
+      )}
 
       {/* Dialogs remain the same */}
       <Dialog open={showPreviewDialog} onOpenChange={setShowPreviewDialog}>
@@ -3147,7 +3389,8 @@ const EstimatorHub: React.FC = () => {
                                 style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                                 onClick={() => {
                                   setSelectedBoqForDetails(boq);
-                                  setShowBoqDetails(true);
+                                  setFullScreenBoqMode('view');
+                                  setShowFullScreenBOQ(true);
                                   setViewingProject(null);
                                 }}
                               >
@@ -3159,8 +3402,11 @@ const EstimatorHub: React.FC = () => {
                                 variant="outline"
                                 className="text-green-600 hover:text-green-700 hover:bg-green-50 border-green-300"
                                 onClick={() => {
+                                  console.log('✏️ Project View - Edit BOQ clicked');
                                   setEditingBoq(boq);
-                                  setShowBoqEdit(true);
+                                  setSelectedProjectForBOQ(boq.project);
+                                  setFullScreenBoqMode('edit');
+                                  setShowFullScreenBOQ(true);
                                   setViewingProject(null);
                                 }}
                               >
@@ -3572,9 +3818,12 @@ const EstimatorHub: React.FC = () => {
                 if (selectedBoqForRevision?.boq_id) {
                   const result = await estimatorService.getBOQById(selectedBoqForRevision.boq_id);
                   if (result.success && result.data) {
+                    console.log('✏️ Revision Modal - Make Revision clicked');
                     setEditingBoq(result.data);
+                    setSelectedProjectForBOQ(result.data.project || selectedBoqForRevision.project);
                     setIsRevisionEdit(true); // Set flag for revision edit
-                    setShowBoqEdit(true);
+                    setFullScreenBoqMode('edit');
+                    setShowFullScreenBOQ(true);
                   } else {
                     toast.error('Failed to load BOQ details');
                   }
@@ -3609,75 +3858,6 @@ const EstimatorHub: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* BOQ Creation Dialog */}
-      <BOQCreationForm
-        isOpen={showBOQCreationDialog}
-        onClose={() => {
-          setShowBOQCreationDialog(false);
-          setSelectedProjectForBOQ(null);
-        }}
-        onSubmit={handleBOQCreated}
-        selectedProject={selectedProjectForBOQ}
-        hideTemplate={true}
-      />
-
-      {/* BOQ Details Modal */}
-      <BOQDetailsModal
-        isOpen={showBoqDetails}
-        onClose={() => {
-          setShowBoqDetails(false);
-          setSelectedBoqForDetails(null);
-        }}
-        boq={selectedBoqForDetails}
-        showNewPurchaseItems={false} // Projects page should NOT show new_purchase items
-        refreshTrigger={boqDetailsRefreshTrigger}
-        onEdit={() => {
-          if (selectedBoqForDetails) {
-            setShowBoqDetails(false);
-            setEditingBoq(selectedBoqForDetails);
-            setShowBoqEdit(true);
-          }
-        }}
-        onDownload={() => {
-          if (selectedBoqForDetails) {
-            handleDownloadBOQ(selectedBoqForDetails);
-          }
-        }}
-      />
-
-      {/* BOQ Edit Modal - Using BOQCreationForm in edit mode */}
-      <BOQCreationForm
-        isOpen={showBoqEdit}
-        onClose={() => {
-          setShowBoqEdit(false);
-          setEditingBoq(null);
-          setIsRevisionEdit(false); // Reset revision flag
-        }}
-        editMode={!isRevisionEdit} // Edit mode when not creating revision
-        isRevision={isRevisionEdit} // Revision mode flag
-        existingBoqData={editingBoq}
-        onSubmit={async (boqId) => {
-          await loadBOQs(); // Refresh the list
-          setBoqDetailsRefreshTrigger(prev => prev + 1); // Trigger BOQ details modal refresh
-          setShowBoqEdit(false);
-
-          // Show Send to TD popup after save
-          const boqToSend = editingBoq;
-          setEditingBoq(null);
-          setIsRevisionEdit(false); // Reset revision flag
-
-          // Show popup with slight delay to ensure edit modal is closed
-          if (boqToSend) {
-            setTimeout(() => {
-              setBoqToSendToTD(boqToSend);
-              setShowSendToTDPopup(true);
-            }, 200);
-          }
-        }}
-        hideBulkUpload={true}
-        hideTemplate={true}
-      />
 
       {/* Send BOQ Email Modal */}
       {boqToEmail && (

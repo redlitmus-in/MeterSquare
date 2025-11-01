@@ -298,16 +298,20 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
       return sum + (item.client_cost || 0);
     }, 0);
 
-    // Calculate discount
+    // Add preliminaries amount to the subtotal
+    const preliminariesAmount = boqData.boq_details?.preliminaries?.cost_details?.amount || 0;
+    const combinedSubtotal = clientCostBeforeDiscount + preliminariesAmount;
+
+    // Calculate discount on combined subtotal (BOQ items + Preliminaries)
     let totalDiscount = 0;
     if (boqData.boq_details?.discount_percentage && boqData.boq_details.discount_percentage > 0) {
-      totalDiscount = (clientCostBeforeDiscount * boqData.boq_details.discount_percentage) / 100;
+      totalDiscount = (combinedSubtotal * boqData.boq_details.discount_percentage) / 100;
     } else if (boqData.boq_details?.discount_amount && boqData.boq_details.discount_amount > 0) {
       totalDiscount = boqData.boq_details.discount_amount;
     }
 
     // Grand total after discount
-    return clientCostBeforeDiscount - totalDiscount;
+    return combinedSubtotal - totalDiscount;
   };
 
   // Calculate Grand Total with discount from snapshot
@@ -329,16 +333,20 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
       return sum + itemClientAmount;
     }, 0);
 
-    // Get overall BOQ discount
+    // Add preliminaries amount to the subtotal
+    const preliminariesAmount = snapshot.preliminaries?.cost_details?.amount || 0;
+    const combinedSubtotal = subtotal + preliminariesAmount;
+
+    // Get overall BOQ discount (apply to combined subtotal)
     let overallDiscount = 0;
 
     if (snapshot.discount_percentage && snapshot.discount_percentage > 0) {
-      overallDiscount = (subtotal * snapshot.discount_percentage) / 100;
+      overallDiscount = (combinedSubtotal * snapshot.discount_percentage) / 100;
     } else if (snapshot.discount_amount && snapshot.discount_amount > 0) {
       overallDiscount = snapshot.discount_amount;
     }
 
-    const grandTotal = subtotal - overallDiscount;
+    const grandTotal = combinedSubtotal - overallDiscount;
     return grandTotal;
   };
 
@@ -614,6 +622,121 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
               </div>
             ) : currentRevisionData ? (
               <div className="p-6 space-y-4 max-h-[600px] overflow-y-auto">
+                {/* Preliminaries Section - Shown FIRST */}
+                {currentRevisionData.boq_details?.preliminaries && (
+                  <div className="mb-6 bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-5 border-2 border-purple-200 shadow-lg">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="p-2 bg-white rounded-lg shadow-sm">
+                        <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-purple-900">📋 Preliminaries & Approval Works</h3>
+                        <p className="text-sm text-purple-700">Selected conditions and terms</p>
+                      </div>
+                    </div>
+
+                    {(() => {
+                      const prelimData = currentRevisionData.boq_details.preliminaries;
+                      const items = prelimData.items || [];
+                      const costDetails = prelimData.cost_details || {};
+                      const amount = costDetails.amount || 0;
+                      const miscPct = costDetails.misc_percentage || 10;
+                      const overheadPct = costDetails.overhead_profit_percentage || 25;
+                      const transportPct = costDetails.transport_percentage || 5;
+
+                      return (
+                        <>
+                          {/* Selected Items */}
+                          {items.length > 0 && (
+                            <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
+                              <h5 className="text-sm font-semibold text-gray-900 mb-3">Selected Items:</h5>
+                              <div className="space-y-2">
+                                {items.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-start gap-2">
+                                    <span className="text-green-600 font-bold mt-0.5">✓</span>
+                                    <div className="flex-1">
+                                      <p className="text-sm text-gray-800">{item.description}</p>
+                                      {item.custom_item && (
+                                        <span className="inline-block mt-1 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
+                                          Custom Item
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Cost Summary */}
+                          <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
+                            <h5 className="text-sm font-semibold text-gray-900 mb-3">Cost Summary</h5>
+                            <div className="grid grid-cols-4 gap-4">
+                              <div>
+                                <p className="text-xs text-gray-600 mb-1">Quantity</p>
+                                <p className="text-sm font-semibold text-gray-900">{costDetails.quantity || 1}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 mb-1">Unit</p>
+                                <p className="text-sm font-semibold text-gray-900">{costDetails.unit || 'lot'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 mb-1">Rate (AED)</p>
+                                <p className="text-sm font-semibold text-gray-900">{formatCurrency(costDetails.rate || 0)}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 mb-1">Amount (AED)</p>
+                                <p className="text-sm font-bold text-purple-900">{formatCurrency(amount)}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Internal Cost Summary */}
+                          {costDetails.internal_cost !== undefined && (
+                            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+                              <h5 className="text-sm font-semibold text-gray-900 mb-3">Internal Cost Summary</h5>
+                              {(() => {
+                                const internalCostBase = costDetails.internal_cost || 0;
+                                const miscAmount = (amount * miscPct) / 100;
+                                const overheadAmount = (amount * overheadPct) / 100;
+                                const transportAmount = (amount * transportPct) / 100;
+                                const totalInternalCost = internalCostBase + miscAmount + overheadAmount + transportAmount;
+
+                                return (
+                                  <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-700">Base Internal Cost:</span>
+                                      <span className="font-semibold text-gray-900">{formatCurrency(internalCostBase)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-700">Miscellaneous ({miscPct}%):</span>
+                                      <span className="font-semibold text-gray-900">{formatCurrency(miscAmount)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-700">Overhead & Profit ({overheadPct}%):</span>
+                                      <span className="font-semibold text-gray-900">{formatCurrency(overheadAmount)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-700">Transport ({transportPct}%):</span>
+                                      <span className="font-semibold text-gray-900">{formatCurrency(transportAmount)}</span>
+                                    </div>
+                                    <div className="flex justify-between pt-2 border-t-2 border-blue-300">
+                                      <span className="text-gray-900 font-bold">Total Internal Cost:</span>
+                                      <span className="font-bold text-red-600">{formatCurrency(totalInternalCost)}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+
                 {/* Items */}
                 {currentRevisionData.boq_details?.items?.map((item: any, index: number) => {
                   const prevRevision = getPreviousRevisionForComparison();
@@ -1091,7 +1214,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                   const allItems = currentRevisionData.boq_details?.items || [];
 
                   // Calculate subtotal (sum of all sub-item client amounts using quantity × rate)
-                  const clientCostBeforeDiscount = allItems.reduce((sum: number, item: any) => {
+                  const boqItemsSubtotal = allItems.reduce((sum: number, item: any) => {
                     if (item.sub_items && item.sub_items.length > 0) {
                       return sum + item.sub_items.reduce((siSum: number, si: any) =>
                         siSum + ((si.quantity || 0) * (si.rate || 0)), 0
@@ -1099,6 +1222,10 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                     }
                     return sum + (item.client_cost || 0);
                   }, 0);
+
+                  // Add preliminaries amount to subtotal
+                  const preliminariesAmount = currentRevisionData.boq_details?.preliminaries?.cost_details?.amount || 0;
+                  const clientCostBeforeDiscount = boqItemsSubtotal + preliminariesAmount;
 
                   // Overall discount - Priority 1: Check for overall BOQ-level discount
                   let totalDiscount = 0;
@@ -1141,8 +1268,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                   // Grand total after discount
                   const grandTotal = clientCostBeforeDiscount - totalDiscount;
 
-                  // Calculate total internal cost (same as Estimator)
-                  const totalInternalCost = allItems.reduce((sum: number, item: any) => {
+                  // Calculate total internal cost from BOQ items
+                  const boqItemsInternalCost = allItems.reduce((sum: number, item: any) => {
                     if (item.sub_items && item.sub_items.length > 0) {
                       return sum + item.sub_items.reduce((siSum: number, si: any) => {
                         const matCost = si.materials?.reduce((m: number, mat: any) => m + (mat.total_price || mat.quantity * mat.unit_price), 0) || 0;
@@ -1156,6 +1283,22 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                     }
                     return sum + (item.internal_cost || 0);
                   }, 0);
+
+                  // Add preliminaries internal cost
+                  const preliminariesInternalCost = (() => {
+                    if (!currentRevisionData.boq_details?.preliminaries?.cost_details) return 0;
+                    const costDetails = currentRevisionData.boq_details.preliminaries.cost_details;
+                    const internalCostBase = costDetails.internal_cost || 0;
+                    const miscPct = costDetails.misc_percentage || 10;
+                    const overheadPct = costDetails.overhead_profit_percentage || 25;
+                    const transportPct = costDetails.transport_percentage || 5;
+                    const miscAmount = (preliminariesAmount * miscPct) / 100;
+                    const overheadAmount = (preliminariesAmount * overheadPct) / 100;
+                    const transportAmount = (preliminariesAmount * transportPct) / 100;
+                    return internalCostBase + miscAmount + overheadAmount + transportAmount;
+                  })();
+
+                  const totalInternalCost = boqItemsInternalCost + preliminariesInternalCost;
 
                   // Calculate profits
                   const totalActualProfit = clientCostBeforeDiscount - totalInternalCost;
@@ -1462,6 +1605,121 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                       {/* Expandable Details - Full Details with Soft Red Background */}
                       {isExpanded && revision.boq_details?.items && (
                         <div className="p-4 bg-gradient-to-br from-red-50 to-red-100 space-y-3 max-h-[500px] overflow-y-auto">
+                          {/* Preliminaries Section - Shown FIRST (Previous Revision) */}
+                          {revision.boq_details?.preliminaries && (
+                            <div className="mb-6 bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-5 border-2 border-purple-200 shadow-lg">
+                              <div className="flex items-center gap-3 mb-4">
+                                <div className="p-2 bg-white rounded-lg shadow-sm">
+                                  <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                </div>
+                                <div>
+                                  <h3 className="text-lg font-bold text-purple-900">📋 Preliminaries & Approval Works</h3>
+                                  <p className="text-sm text-purple-700">Selected conditions and terms</p>
+                                </div>
+                              </div>
+
+                              {(() => {
+                                const prelimData = revision.boq_details.preliminaries;
+                                const items = prelimData.items || [];
+                                const costDetails = prelimData.cost_details || {};
+                                const amount = costDetails.amount || 0;
+                                const miscPct = costDetails.misc_percentage || 10;
+                                const overheadPct = costDetails.overhead_profit_percentage || 25;
+                                const transportPct = costDetails.transport_percentage || 5;
+
+                                return (
+                                  <>
+                                    {/* Selected Items */}
+                                    {items.length > 0 && (
+                                      <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
+                                        <h5 className="text-sm font-semibold text-gray-900 mb-3">Selected Items:</h5>
+                                        <div className="space-y-2">
+                                          {items.map((item: any, idx: number) => (
+                                            <div key={idx} className="flex items-start gap-2">
+                                              <span className="text-green-600 font-bold mt-0.5">✓</span>
+                                              <div className="flex-1">
+                                                <p className="text-sm text-gray-800">{item.description}</p>
+                                                {item.custom_item && (
+                                                  <span className="inline-block mt-1 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
+                                                    Custom Item
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Cost Summary */}
+                                    <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
+                                      <h5 className="text-sm font-semibold text-gray-900 mb-3">Cost Summary</h5>
+                                      <div className="grid grid-cols-4 gap-4">
+                                        <div>
+                                          <p className="text-xs text-gray-600 mb-1">Quantity</p>
+                                          <p className="text-sm font-semibold text-gray-900">{costDetails.quantity || 1}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-gray-600 mb-1">Unit</p>
+                                          <p className="text-sm font-semibold text-gray-900">{costDetails.unit || 'lot'}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-gray-600 mb-1">Rate (AED)</p>
+                                          <p className="text-sm font-semibold text-gray-900">{formatCurrency(costDetails.rate || 0)}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-gray-600 mb-1">Amount (AED)</p>
+                                          <p className="text-sm font-bold text-purple-900">{formatCurrency(amount)}</p>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Internal Cost Summary */}
+                                    {costDetails.internal_cost !== undefined && (
+                                      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+                                        <h5 className="text-sm font-semibold text-gray-900 mb-3">Internal Cost Summary</h5>
+                                        {(() => {
+                                          const internalCostBase = costDetails.internal_cost || 0;
+                                          const miscAmount = (amount * miscPct) / 100;
+                                          const overheadAmount = (amount * overheadPct) / 100;
+                                          const transportAmount = (amount * transportPct) / 100;
+                                          const totalInternalCost = internalCostBase + miscAmount + overheadAmount + transportAmount;
+
+                                          return (
+                                            <div className="space-y-2 text-sm">
+                                              <div className="flex justify-between">
+                                                <span className="text-gray-700">Base Internal Cost:</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(internalCostBase)}</span>
+                                              </div>
+                                              <div className="flex justify-between">
+                                                <span className="text-gray-700">Miscellaneous ({miscPct}%):</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(miscAmount)}</span>
+                                              </div>
+                                              <div className="flex justify-between">
+                                                <span className="text-gray-700">Overhead & Profit ({overheadPct}%):</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(overheadAmount)}</span>
+                                              </div>
+                                              <div className="flex justify-between">
+                                                <span className="text-gray-700">Transport ({transportPct}%):</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(transportAmount)}</span>
+                                              </div>
+                                              <div className="flex justify-between pt-2 border-t-2 border-blue-300">
+                                                <span className="text-gray-900 font-bold">Total Internal Cost:</span>
+                                                <span className="font-bold text-red-600">{formatCurrency(totalInternalCost)}</span>
+                                              </div>
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          )}
+
                           {revision.boq_details.items.map((item: any, itemIdx: number) => (
                             <div key={itemIdx} className="bg-white rounded-lg p-4 shadow-sm border border-red-200">
                               <h5 className="font-semibold text-gray-900 mb-2 text-sm">{item.item_name}</h5>
