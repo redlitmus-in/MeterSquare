@@ -1668,6 +1668,7 @@ def get_all_boq():
                 "floor": project.floor_name if project else None,
                 "hours": project.working_hours if project else None,
                 "status": display_status,
+                "client_status":boq.client_status,
                 "revision_number": getattr(boq, 'revision_number', 0) or 0,
                 "client_rejection_reason": boq.client_rejection_reason,
                 "email_sent" : boq.email_sent,

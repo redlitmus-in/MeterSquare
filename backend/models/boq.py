@@ -20,6 +20,7 @@ class BOQ(db.Model):
     last_modified_by = db.Column(db.String(255), nullable=True)
     is_deleted = db.Column(db.Boolean, default=False)
     email_sent = db.Column(db.Boolean, default=False)
+    client_status = db.Column(db.Boolean, default=False)
 
     project = db.relationship("Project", backref=db.backref("boqs", lazy=True))
 
