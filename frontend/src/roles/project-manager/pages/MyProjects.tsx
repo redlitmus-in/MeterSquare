@@ -531,7 +531,6 @@ const MyProjects: React.FC = () => {
 
   const handleEditBOQ = (project: Project) => {
     setSelectedProject(project);
-    setShowBOQModal(false);
     setShowEditBOQModal(true);
     // BOQCreationForm will fetch full BOQ details using the boq_id from existingBoqData
   };
@@ -2479,7 +2478,6 @@ const MyProjects: React.FC = () => {
 
                     toast.success('BOQ approved and sent to estimator');
                     setShowComparisonModal(false);
-                    setShowBOQModal(false);
                     setApprovalComments('');
                     refetch();
                   } catch (error: any) {
@@ -2504,7 +2502,8 @@ const MyProjects: React.FC = () => {
         isOpen={showEditBOQModal}
         onClose={() => {
           setShowEditBOQModal(false);
-          setShowBOQModal(true);
+          setShowFullScreenBOQ(true);
+          setFullScreenBoqMode('view');
         }}
         onSubmit={async (data: any) => {
           setShowEditBOQModal(false);
@@ -2518,8 +2517,9 @@ const MyProjects: React.FC = () => {
           // Refresh projects list in background
           refetch();
 
-          // Reopen view modal with fresh data
-          setShowBOQModal(true);
+          // Return to full-screen view
+          setShowFullScreenBOQ(true);
+          setFullScreenBoqMode('view');
         }}
         editMode={true}
         selectedProject={selectedProject ? {
@@ -2676,7 +2676,8 @@ const MyProjects: React.FC = () => {
             boq_name: selectedProject.projectName
           }}
           onEdit={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? () => {
-            setFullScreenBoqMode('edit');
+            setShowFullScreenBOQ(false);
+            setShowEditBOQModal(true);
           } : undefined}
           onApprove={selectedProject?.boq_status?.toLowerCase() === 'pending_pm_approval' || selectedProject?.boq_status?.toLowerCase() === 'pending' ? async () => {
             if (selectedProject?.boq_id) {
