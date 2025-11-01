@@ -93,6 +93,10 @@ export interface ChangeRequestItem {
   };
   percentage_of_item_overhead?: number;
 
+  // Recommended routing (calculated by backend)
+  recommended_next_approver?: 'technical_director' | 'estimator';
+  routing_percentage?: number;
+
   // Vendor Selection Fields
   selected_vendor_id?: number | null;
   selected_vendor_name?: string | null;
