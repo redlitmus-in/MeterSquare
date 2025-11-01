@@ -1288,6 +1288,7 @@ def complete_purchase_and_merge_to_boq(cr_id):
 
         # Return success without modifying BOQ
         return jsonify({
+            "success": True,
             "message": "Purchase marked as complete successfully",
             "cr_id": cr_id,
             "status": change_request.status,
@@ -1709,10 +1710,10 @@ def get_boq_change_requests(boq_id):
 
             # Add budget impact
             request_data['budget_impact'] = {
-                'original_total': cr.new_base_cost - cr.materials_total_cost if cr.new_base_cost else 0,
-                'new_total_if_approved': cr.new_total_cost,
-                'increase_amount': cr.cost_increase_amount,
-                'increase_percentage': cr.cost_increase_percentage
+                'original_total': cr.new_base_cost if cr.new_base_cost else 0,
+                'new_total_if_approved': cr.new_total_cost if cr.new_total_cost else 0,
+                'increase_amount': cr.cost_increase_amount if cr.cost_increase_amount else 0,
+                'increase_percentage': cr.cost_increase_percentage if cr.cost_increase_percentage else 0
             }
 
             requests_data.append(request_data)

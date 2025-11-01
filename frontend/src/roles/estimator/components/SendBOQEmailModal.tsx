@@ -8,8 +8,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 import { estimatorService } from '../services/estimatorService';
-import { exportBOQToExcelClient, exportBOQToPDFClient } from '@/utils/boqExportUtils';
 import { downloadClientBOQPDF } from '@/services/boqPdfService';
+import { downloadClientBOQExcel } from '@/services/boqExcelService';
 
 interface SendBOQEmailModalProps {
   isOpen: boolean;
@@ -399,13 +399,9 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                           <div className="flex gap-3">
                             <button
                               onClick={async () => {
-                                if (!boqData) {
-                                  toast.error('BOQ data not loaded');
-                                  return;
-                                }
                                 try {
                                   toast.loading('Generating Excel file...');
-                                  await exportBOQToExcelClient(boqData);
+                                  await downloadClientBOQExcel(boqId);
                                   toast.dismiss();
                                   toast.success('Excel file downloaded successfully');
                                 } catch (error) {
@@ -414,7 +410,7 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                                   console.error('Excel download error:', error);
                                 }
                               }}
-                              disabled={isSending || loadingBOQ || !boqData}
+                              disabled={isSending}
                               className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
                             >
                               <FileSpreadsheet className="w-4 h-4" />
@@ -422,14 +418,9 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                             </button>
                             <button
                               onClick={async () => {
-                                if (!boqData) {
-                                  toast.error('BOQ data not loaded');
-                                  return;
-                                }
                                 try {
                                   toast.loading('Generating PDF file...');
-                                  // Use backend API for PDF generation (modern template with correct port)
-                                  await downloadClientBOQPDF(boqData.id);
+                                  await downloadClientBOQPDF(boqId);
                                   toast.dismiss();
                                   toast.success('PDF file downloaded successfully');
                                 } catch (error) {
@@ -438,7 +429,7 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                                   console.error('PDF download error:', error);
                                 }
                               }}
-                              disabled={isSending || loadingBOQ || !boqData}
+                              disabled={isSending}
                               className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
                             >
                               <FileText className="w-4 h-4" />

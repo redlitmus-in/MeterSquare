@@ -292,13 +292,8 @@ export const projectManagerService = {
     rejection_reason?: string;
     comments?: string;
   }): Promise<any> {
-    try {
-      const response = await apiClient.post('/boq/send_estimator', data);
-      return response.data;
-    } catch (error) {
-      console.error('Error sending BOQ to estimator:', error);
-      throw error;
-    }
+    const response = await apiClient.post('/boq/send_estimator', data);
+    return response.data;
   },
 
   // Alias for deleteSiteSupervisor for backward compatibility

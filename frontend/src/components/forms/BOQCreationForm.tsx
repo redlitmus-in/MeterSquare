@@ -140,29 +140,30 @@ interface MasterLabour {
 
 // Unit options for materials
 const UNIT_OPTIONS = [
-  { value: 'nos', label: 'Nos' },
-  { value: 'kgs', label: 'Kgs' },
-  { value: 'ltr', label: 'Ltr' },
-  { value: 'mtrs', label: 'Mtrs' },
-  { value: 'sq.m', label: 'Sq.m' },
-  { value: 'cu.m', label: 'Cu.m' },
-  { value: 'box', label: 'Box' },
   { value: 'bag', label: 'Bag' },
-  { value: 'pcs', label: 'Pcs' },
+  { value: 'box', label: 'Box' },
   { value: 'bundle', label: 'Bundle' },
-  { value: 'roll', label: 'Roll' },
-  { value: 'sheet', label: 'Sheet' },
-  { value: 'tons', label: 'Tons' },
-  { value: 'gms', label: 'Gms' },
-  { value: 'ml', label: 'Ml' },
-  { value: 'ft', label: 'Ft' },
-  { value: 'R.ft', label: 'R.ft' },
-  { value: 'sq.ft', label: 'Sq.ft' },
-  { value: 'set', label: 'Set' },
-  { value: 'pair', label: 'Pair' },
+  { value: 'can', label: 'Can' },
   { value: 'carton', label: 'Carton' },
+  { value: 'cu.m', label: 'Cu.m' },
   { value: 'drum', label: 'Drum' },
-  { value: 'can', label: 'Can' }
+  { value: 'ft', label: 'Ft' },
+  { value: 'gms', label: 'Gms' },
+  { value: 'kgs', label: 'Kgs' },
+  { value: 'ls', label: 'LS' },
+  { value: 'ltr', label: 'Ltr' },
+  { value: 'ml', label: 'Ml' },
+  { value: 'mtrs', label: 'Mtrs' },
+  { value: 'nos', label: 'Nos' },
+  { value: 'pair', label: 'Pair' },
+  { value: 'pcs', label: 'Pcs' },
+  { value: 'R.ft', label: 'R.ft' },
+  { value: 'roll', label: 'Roll' },
+  { value: 'set', label: 'Set' },
+  { value: 'sheet', label: 'Sheet' },
+  { value: 'sq.ft', label: 'Sq.ft' },
+  { value: 'sq.m', label: 'Sq.m' },
+  { value: 'tons', label: 'Tons' }
 ];
 
 // Predefined Preliminaries & Approval Works
@@ -436,7 +437,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 labour_role: lab.labour_role,
                 hours: lab.hours || 8,
                 rate_per_hour: lab.rate_per_hour || 0,
-                work_type: lab.work_type || 'contract',
+                work_type: lab.work_type || 'daily_wages',
                 master_labour_id: lab.master_labour_id,
                 is_from_master: !!lab.master_labour_id,
                 is_new: !lab.master_labour_id
@@ -462,7 +463,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               labour_role: lab.labour_role,
               hours: lab.hours || 8,
               rate_per_hour: lab.rate_per_hour || 0,
-              work_type: lab.work_type || 'contract',
+              work_type: lab.work_type || 'daily_wages',
               master_labour_id: lab.master_labour_id,
               is_from_master: !!lab.master_labour_id,
               is_new: !lab.master_labour_id
@@ -475,7 +476,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               quantity: item.quantity || 1,
               unit: item.unit || 'nos',
               rate: item.rate || 0,
-              work_type: item.work_type || 'contract',
+              work_type: item.work_type || 'daily_wages',
               sub_items: subItems,
               materials,
               labour,
@@ -529,7 +530,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       quantity: 1,
       unit: 'nos',
       rate: 0,
-      work_type: 'contract',
+      work_type: 'daily_wages',
       sub_items: [],
       materials: [],
       labour: [
@@ -538,7 +539,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           labour_role: '',
           hours: 8,
           rate_per_hour: 0,
-          work_type: 'contract',
+          work_type: 'daily_wages',
           is_new: true
         }
       ],
@@ -597,7 +598,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             master_labour_id: lab.labour_id,
             is_from_master: true,
             is_new: false,
-            work_type: (lab.work_type || 'contract') as 'piece_rate' | 'contract' | 'daily_wages'
+            work_type: (lab.work_type || 'daily_wages') as 'piece_rate' | 'contract' | 'daily_wages'
           }))
         }));
 
@@ -706,7 +707,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           labour_role: '',
           hours: 8,
           rate_per_hour: 0,
-          work_type: 'contract',
+          work_type: 'daily_wages',
           is_new: true
         }
       ]
@@ -926,7 +927,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       labour_role: '',
       hours: 1,
       rate_per_hour: 0,
-      work_type: 'piece_rate', // Default to piece rate
+      work_type: 'daily_wages', // Default to daily wages
       is_new: true
     };
 
@@ -2825,7 +2826,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               disabled={isSubmitting}
                                             />
                                             <select
-                                              value={labour.work_type || 'piece_rate'}
+                                              value={labour.work_type || 'daily_wages'}
                                               onChange={(e) => {
                                                 setItems(items.map(itm =>
                                                   itm.id === item.id
@@ -3151,7 +3152,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           {/* Alert if actual < planned */}
                                           {subItemCalc.negotiableMargin < subItemCalc.plannedProfit && (
                                             <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-red-800">
-                                              <strong>⚠️ Warning:</strong> Actual profit is lower than planned! Review material/labour costs.
+                                              <strong>⚠️ Warning:</strong> Negotiable Margins is lower than planned! Review material/labour costs.
                                             </div>
                                           )}
                                         </div>

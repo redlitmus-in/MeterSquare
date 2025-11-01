@@ -493,15 +493,15 @@ const PurchaseOrders: React.FC = () => {
                           variant="outline"
                           size="sm"
                           className="h-7 text-xs border-gray-300 hover:bg-gray-50 px-2 py-1"
-                          disabled={purchase.status === 'completed' || purchase.vendor_selection_pending_td_approval}
+                          disabled={purchase.status === 'completed' || purchase.vendor_selection_pending_td_approval || purchase.vendor_email_sent}
                         >
                           <Edit className="w-3 h-3 mr-1" />
                           Edit
                         </Button>
                       </div>
 
-                      {/* Third Row: Mark as Complete - Only for ongoing, not pending approval */}
-                      {purchase.status === 'pending' && !purchase.vendor_selection_pending_td_approval && (
+                      {/* Third Row: Mark as Complete - Only show after email is sent */}
+                      {purchase.status === 'pending' && !purchase.vendor_selection_pending_td_approval && purchase.vendor_id && purchase.vendor_email_sent && (
                         <Button
                           onClick={() => handleMarkAsComplete(purchase.cr_id)}
                           disabled={completingPurchaseId === purchase.cr_id}
@@ -626,32 +626,35 @@ const PurchaseOrders: React.FC = () => {
                             )}
 
                             {purchase.status === 'pending' && (
-                              <>
-                                <Button
-                                  onClick={() => handleEditPurchase(purchase)}
-                                  variant="outline"
-                                  size="sm"
-                                  className="px-2 py-1 h-auto text-xs border-gray-300"
-                                >
-                                  <Edit className="w-3 h-3 sm:mr-1" />
-                                  <span className="hidden xl:inline">Edit</span>
-                                </Button>
-                                <Button
-                                  onClick={() => handleMarkAsComplete(purchase.cr_id)}
-                                  disabled={completingPurchaseId === purchase.cr_id}
-                                  size="sm"
-                                  className="px-2 py-1 h-auto text-xs bg-green-600 hover:bg-green-700 text-white"
-                                >
-                                  {completingPurchaseId === purchase.cr_id ? (
-                                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                  ) : (
-                                    <>
-                                      <Check className="w-3 h-3 sm:mr-1" />
-                                      <span className="hidden sm:inline">Complete</span>
-                                    </>
-                                  )}
-                                </Button>
-                              </>
+                              <Button
+                                onClick={() => handleEditPurchase(purchase)}
+                                variant="outline"
+                                size="sm"
+                                className="px-2 py-1 h-auto text-xs border-gray-300"
+                                disabled={purchase.vendor_selection_pending_td_approval || purchase.vendor_email_sent}
+                              >
+                                <Edit className="w-3 h-3 sm:mr-1" />
+                                <span className="hidden xl:inline">Edit</span>
+                              </Button>
+                            )}
+
+                            {/* Mark as Complete - Only show after email is sent */}
+                            {purchase.status === 'pending' && !purchase.vendor_selection_pending_td_approval && purchase.vendor_id && purchase.vendor_email_sent && (
+                              <Button
+                                onClick={() => handleMarkAsComplete(purchase.cr_id)}
+                                disabled={completingPurchaseId === purchase.cr_id}
+                                size="sm"
+                                className="px-2 py-1 h-auto text-xs bg-green-600 hover:bg-green-700 text-white"
+                              >
+                                {completingPurchaseId === purchase.cr_id ? (
+                                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <>
+                                    <Check className="w-3 h-3 sm:mr-1" />
+                                    <span className="hidden sm:inline">Complete</span>
+                                  </>
+                                )}
+                              </Button>
                             )}
                           </div>
                         </td>

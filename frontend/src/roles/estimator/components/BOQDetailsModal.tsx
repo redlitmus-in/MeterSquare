@@ -695,7 +695,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                       {subItem.labour.map((labour: any, lIndex: number) => (
                                                         <tr key={lIndex} className={`border-b border-orange-100 ${lIndex % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
                                                           <td className="py-1.5 px-2 text-gray-900">{labour.labour_role}</td>
-                                                          <td className="py-1.5 px-2 text-center text-gray-700 capitalize">{labour.work_type?.replace('_', ' ') || 'Contract'}</td>
+                                                          <td className="py-1.5 px-2 text-center text-gray-700 capitalize">{labour.work_type?.replace('_', ' ') || 'Daily Wages'}</td>
                                                           <td className="py-1.5 px-2 text-center text-gray-700">{labour.hours} hrs</td>
                                                           <td className="py-1.5 px-2 text-right text-gray-700">{formatCurrency(labour.rate_per_hour)}</td>
                                                           <td className="py-1.5 px-2 text-right font-semibold text-orange-700">{formatCurrency(labour.total_cost || labour.hours * labour.rate_per_hour)}</td>
@@ -1033,7 +1033,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                               {item.labour.map((labour, lIndex) => (
                                                 <tr key={lIndex} className={`border-b border-orange-100 ${lIndex % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
                                                   <td className="py-2.5 px-3 text-gray-900">{labour.labour_role}</td>
-                                                  <td className="py-2.5 px-3 text-center text-gray-700 capitalize">{labour.work_type?.replace('_', ' ') || 'Contract'}</td>
+                                                  <td className="py-2.5 px-3 text-center text-gray-700 capitalize">{labour.work_type?.replace('_', ' ') || 'Daily Wages'}</td>
                                                   <td className="py-2.5 px-3 text-center text-gray-700">{labour.hours} hrs</td>
                                                   <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(labour.rate_per_hour)}</td>
                                                   <td className="py-2.5 px-3 text-right font-semibold text-orange-700">{formatCurrency(labour.total_cost)}</td>
@@ -1232,7 +1232,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                   {subItem.labour.map((labour: any, lIndex: number) => (
                                                     <tr key={lIndex} className={`border-b border-orange-100 ${lIndex % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
                                                       <td className="py-1.5 px-2 text-gray-900">{labour.labour_role}</td>
-                                                      <td className="py-1.5 px-2 text-center text-gray-700 capitalize">{labour.work_type?.replace('_', ' ') || 'Contract'}</td>
+                                                      <td className="py-1.5 px-2 text-center text-gray-700 capitalize">{labour.work_type?.replace('_', ' ') || 'Daily Wages'}</td>
                                                       <td className="py-1.5 px-2 text-center text-gray-700">{labour.hours} hrs</td>
                                                       <td className="py-1.5 px-2 text-right text-gray-700">{formatCurrency(labour.rate_per_hour)}</td>
                                                       <td className="py-1.5 px-2 text-right font-semibold text-orange-700">{formatCurrency(labour.total_cost || labour.hours * labour.rate_per_hour)}</td>

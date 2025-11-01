@@ -2102,23 +2102,38 @@ const MyProjects: React.FC = () => {
                       return;
                     }
 
+                    setProcessingBOQ(true);
+
                     try {
-                      setProcessingBOQ(true);
-                      await projectManagerService.sendBOQToEstimator({
+                      const response = await projectManagerService.sendBOQToEstimator({
                         boq_id: selectedProject.boq_id,
                         boq_status: 'rejected',
                         rejection_reason: rejectionReason,
                       });
 
-                      toast.success('BOQ rejected and sent to estimator');
+                      // Check backend response
+                      if (!response || response.success === false) {
+                        toast.error(response?.message || 'Failed to reject BOQ');
+                        setProcessingBOQ(false);
+                        return;
+                      }
+
+                      // Success - show toast and close modals
+                      toast.success(response.message || 'BOQ rejected and sent to estimator');
+
                       setShowRejectModal(false);
-                      setShowBOQModal(false);
                       setRejectionReason('');
-                      refetch();
-                    } catch (error: any) {
-                      toast.error(error.response?.data?.error || 'Failed to reject BOQ');
-                    } finally {
                       setProcessingBOQ(false);
+
+                      // Refetch data in background
+                      setTimeout(() => {
+                        refetch().catch(err => console.error('Refetch error (non-critical):', err));
+                      }, 300);
+
+                    } catch (error: any) {
+                      console.error('Rejection error:', error);
+                      setProcessingBOQ(false);
+                      toast.error(error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to reject BOQ');
                     }
                   }}
                   disabled={processingBOQ || !rejectionReason.trim()}
@@ -2190,23 +2205,38 @@ const MyProjects: React.FC = () => {
                 </button>
                 <button
                   onClick={async () => {
+                    setProcessingBOQ(true);
+
                     try {
-                      setProcessingBOQ(true);
-                      await projectManagerService.sendBOQToEstimator({
+                      const response = await projectManagerService.sendBOQToEstimator({
                         boq_id: selectedProject.boq_id,
                         boq_status: 'approved',
                         comments: approvalComments || '',
                       });
 
-                      toast.success('BOQ approved and sent to estimator');
+                      // Check backend response
+                      if (!response || response.success === false) {
+                        toast.error(response?.message || 'Failed to approve BOQ');
+                        setProcessingBOQ(false);
+                        return;
+                      }
+
+                      // Success - show toast and close modals
+                      toast.success(response.message || 'BOQ approved and sent to estimator');
+
                       setShowApproveModal(false);
-                      setShowBOQModal(false);
                       setApprovalComments('');
-                      refetch();
-                    } catch (error: any) {
-                      toast.error(error.response?.data?.error || 'Failed to approve BOQ');
-                    } finally {
                       setProcessingBOQ(false);
+
+                      // Refetch data in background
+                      setTimeout(() => {
+                        refetch().catch(err => console.error('Refetch error (non-critical):', err));
+                      }, 300);
+
+                    } catch (error: any) {
+                      console.error('Approval error:', error);
+                      setProcessingBOQ(false);
+                      toast.error(error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to approve BOQ');
                     }
                   }}
                   disabled={processingBOQ}

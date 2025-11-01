@@ -21,13 +21,9 @@ import {
   Eye,
   Check,
   X,
-  TrendingUp,
-  AlertCircle,
   FileText,
   Package,
-  DollarSign,
   Calendar,
-  FolderOpen,
   LayoutGrid,
   List,
   Pencil
@@ -173,10 +169,6 @@ const ChangeRequestsPage: React.FC = () => {
     }
   };
 
-  const formatCurrency = (value: number) => {
-    return `AED ${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-  };
-
   const getStatusColor = (status: string) => {
     const colors = {
       pending: 'bg-yellow-100 text-yellow-800',
@@ -185,12 +177,6 @@ const ChangeRequestsPage: React.FC = () => {
       rejected: 'bg-red-100 text-red-800'
     };
     return colors[status as keyof typeof colors] || colors.pending;
-  };
-
-  const getPercentageColor = (percentage: number) => {
-    if (percentage <= 10) return 'text-green-600';
-    if (percentage <= 20) return 'text-yellow-600';
-    return 'text-red-600';
   };
 
   const filteredRequests = changeRequests.filter(req => {
@@ -231,8 +217,6 @@ const ChangeRequestsPage: React.FC = () => {
             <TableHead>Requested By</TableHead>
             <TableHead>Date</TableHead>
             <TableHead>New Items</TableHead>
-            <TableHead>Additional Cost</TableHead>
-            <TableHead>Increase %</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -244,12 +228,6 @@ const ChangeRequestsPage: React.FC = () => {
               <TableCell>{request.requested_by_name}</TableCell>
               <TableCell>{new Date(request.created_at).toLocaleDateString()}</TableCell>
               <TableCell>{request.materials_data?.length || 0}</TableCell>
-              <TableCell className="font-semibold">{formatCurrency(request.materials_total_cost)}</TableCell>
-              <TableCell>
-                <span className={`font-semibold ${getPercentageColor(request.budget_impact?.increase_percentage || 0)}`}>
-                  +{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%
-                </span>
-              </TableCell>
               <TableCell>
                 <Badge className={getStatusColor(request.status)}>
                   {request.status.toUpperCase()}
@@ -427,39 +405,7 @@ const ChangeRequestsPage: React.FC = () => {
                           <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                         </div>
 
-                        {/* Budget Comparison - Always Visible */}
-                        <div className="px-4 pb-3">
-                          <div className="bg-gradient-to-r from-purple-50 to-purple-100 rounded-lg p-3 border border-purple-200">
-                            <div className="space-y-2 text-xs">
-                              <div className="flex justify-between">
-                                <span className="text-purple-700 font-medium">Original Budget:</span>
-                                <span className="font-bold text-purple-900">{formatCurrency(request.budget_impact?.original_total)}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-purple-700 font-medium">New Total:</span>
-                                <span className="font-bold text-purple-900">{formatCurrency(request.budget_impact?.new_total_if_approved)}</span>
-                              </div>
-                              <div className="border-t border-purple-300 pt-2 flex justify-between">
-                                <span className="text-red-600 font-semibold">Additional Cost:</span>
-                                <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">Increase:</span>
-                                <span className={`font-bold ${getPercentageColor((request.budget_impact?.increase_percentage || 0))}`}>
-                                  +{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%
-                                </span>
-                              </div>
-                              {((request.budget_impact?.increase_percentage || 0) > 15) && (
-                                <div className="mt-2 pt-2 border-t border-purple-300">
-                                  <div className="flex items-center gap-1 text-orange-600">
-                                    <AlertCircle className="h-3 w-3" />
-                                    <span className="text-xs font-semibold">Client Approval Needed (&gt;15%)</span>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+                        {/* Budget Comparison - Hidden */}
 
                         {/* Actions */}
                         <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
@@ -554,17 +500,6 @@ const ChangeRequestsPage: React.FC = () => {
                           <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                         </div>
 
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Additional Cost:</span>
-                            <span className="font-bold text-green-600">{formatCurrency(request.materials_total_cost)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Cost Increase:</span>
-                            <span className="font-semibold text-green-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
-                          </div>
-                        </div>
-
                         <div className="border-t border-gray-200 p-2 sm:p-3">
                           <button
                             onClick={() => handleReview(request.cr_id)}
@@ -625,17 +560,6 @@ const ChangeRequestsPage: React.FC = () => {
                           <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
                         </div>
 
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Additional Cost:</span>
-                            <span className="font-bold text-blue-600">{formatCurrency(request.materials_total_cost)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Cost Increase:</span>
-                            <span className="font-semibold text-blue-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
-                          </div>
-                        </div>
-
                         <div className="border-t border-gray-200 p-2 sm:p-3">
                           <button
                             onClick={() => handleReview(request.cr_id)}
@@ -694,17 +618,6 @@ const ChangeRequestsPage: React.FC = () => {
                         <div className="px-4 pb-3 text-center text-sm">
                           <span className="font-bold text-red-600 text-lg">{(request.materials_data?.length || 0)}</span>
                           <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
-                        </div>
-
-                        <div className="px-4 pb-3 space-y-1.5 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Additional Cost:</span>
-                            <span className="font-bold text-red-600">{formatCurrency(request.materials_total_cost)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Cost Increase:</span>
-                            <span className="font-semibold text-red-600">+{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%</span>
-                          </div>
                         </div>
 
                         <div className="border-t border-gray-200 p-2 sm:p-3">

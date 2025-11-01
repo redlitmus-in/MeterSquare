@@ -199,7 +199,7 @@ class ChangeRequest(db.Model):
 
             # Budget impact
             'budget_impact': {
-                'original_total': round(self.new_total_cost - self.cost_increase_amount, 2) if self.new_total_cost and self.cost_increase_amount else 0,
+                'original_total': round(self.new_base_cost, 2) if self.new_base_cost else 0,
                 'new_total_if_approved': round(self.new_total_cost, 2) if self.new_total_cost else 0,
                 'increase_amount': round(self.cost_increase_amount, 2) if self.cost_increase_amount else 0,
                 'increase_percentage': round(self.cost_increase_percentage, 2) if self.cost_increase_percentage else 0

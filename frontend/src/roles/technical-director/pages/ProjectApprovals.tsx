@@ -48,13 +48,8 @@ import BOQRevisionHistory from '@/roles/estimator/components/BOQRevisionHistory'
 import TDRevisionComparisonPage from '@/roles/technical-director/components/TDRevisionComparisonPage';
 import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
 import DayExtensionApprovalModal from '@/roles/technical-director/components/DayExtensionApprovalModal';
-import {
-  exportBOQToExcelInternal,
-  exportBOQToExcelClient,
-  exportBOQToPDFInternal,
-  exportBOQToPDFClient
-} from '@/utils/boqExportUtils';
 import { downloadInternalBOQPDF, downloadClientBOQPDF } from '@/services/boqPdfService';
+import { downloadInternalBOQExcel, downloadClientBOQExcel } from '@/services/boqExcelService';
 import {
   Table,
   TableHeader,
@@ -1223,14 +1218,14 @@ const ProjectApprovals: React.FC = () => {
 
       toast.loading(`Generating ${typeName} ${formatName} file...`);
 
+      // Use backend API for both Excel and PDF generation (ensures data consistency)
       if (format === 'excel') {
         if (isInternal) {
-          await exportBOQToExcelInternal(selectedEstimation);
+          await downloadInternalBOQExcel(selectedEstimation.id);
         } else {
-          await exportBOQToExcelClient(selectedEstimation);
+          await downloadClientBOQExcel(selectedEstimation.id);
         }
       } else {
-        // Use backend API for PDF generation (modern template with correct port)
         if (isInternal) {
           await downloadInternalBOQPDF(selectedEstimation.id);
         } else {

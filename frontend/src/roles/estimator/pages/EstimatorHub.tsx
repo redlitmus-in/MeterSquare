@@ -64,13 +64,8 @@ import { format } from 'date-fns';
 import { Label } from '@/components/ui/label';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import {
-  exportBOQToExcelInternal,
-  exportBOQToExcelClient,
-  exportBOQToPDFInternal,
-  exportBOQToPDFClient
-} from '@/utils/boqExportUtils';
 import { downloadInternalBOQPDF, downloadClientBOQPDF } from '@/services/boqPdfService';
+import { downloadInternalBOQExcel, downloadClientBOQExcel } from '@/services/boqExcelService';
 
 // Project Creation Form Component
 const ProjectCreationForm: React.FC<{
@@ -928,14 +923,14 @@ const EstimatorHub: React.FC = () => {
 
       toast.loading(`Generating ${typeName} ${formatName} file...`);
 
+      // Use backend API for both Excel and PDF generation (ensures data consistency)
       if (format === 'excel') {
         if (isInternal) {
-          await exportBOQToExcelInternal(boqToDownload);
+          await downloadInternalBOQExcel(boqToDownload.id);
         } else {
-          await exportBOQToExcelClient(boqToDownload);
+          await downloadClientBOQExcel(boqToDownload.id);
         }
       } else {
-        // Use backend API for PDF generation (modern template with correct port)
         if (isInternal) {
           await downloadInternalBOQPDF(boqToDownload.id);
         } else {
