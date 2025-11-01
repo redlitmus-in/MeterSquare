@@ -356,8 +356,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
 
     const allItems = snapshot.items || [];
 
-    // Calculate subtotal
-    const subtotal = allItems.reduce((sum: number, item: any) => {
+    // Calculate items subtotal
+    const itemsSubtotal = allItems.reduce((sum: number, item: any) => {
       let itemClientAmount = (item.quantity || 0) * (item.rate || 0);
       if (itemClientAmount === 0 && item.sub_items && item.sub_items.length > 0) {
         itemClientAmount = item.sub_items.reduce((siSum: number, si: any) =>
@@ -367,7 +367,11 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
       return sum + itemClientAmount;
     }, 0);
 
-    // Get overall BOQ discount
+    // Add preliminaries amount
+    const preliminaryAmount = snapshot.preliminaries?.cost_details?.amount || 0;
+    const subtotal = itemsSubtotal + preliminaryAmount;
+
+    // Get overall BOQ discount (applied to combined subtotal)
     let overallDiscount = 0;
     let overallDiscountPercentage = 0;
 
@@ -386,10 +390,27 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
         <h4 className="font-bold text-green-900 mb-3 text-sm">📊 Grand Total Summary</h4>
 
         <div className="space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-800">Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
-            <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
-          </div>
+          {preliminaryAmount > 0 ? (
+            <>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-700">Items Subtotal:</span>
+                <span className="font-semibold">AED {itemsSubtotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-700">Preliminaries:</span>
+                <span className="font-semibold">AED {preliminaryAmount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm font-medium border-t border-green-300 pt-2">
+                <span className="text-gray-800">Combined Subtotal {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
+                <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-800">Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
+              <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
+            </div>
+          )}
 
           {overallDiscount > 0 && (
             <>

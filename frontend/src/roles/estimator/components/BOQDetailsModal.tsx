@@ -685,6 +685,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                     <thead className="bg-orange-100 border-b border-orange-200">
                                                       <tr>
                                                         <th className="text-left py-1.5 px-2 font-semibold text-orange-900">Role</th>
+                                                        <th className="text-center py-1.5 px-2 font-semibold text-orange-900">Work Type</th>
                                                         <th className="text-center py-1.5 px-2 font-semibold text-orange-900">Hours</th>
                                                         <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Rate/hr</th>
                                                         <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Total</th>
@@ -694,13 +695,14 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                       {subItem.labour.map((labour: any, lIndex: number) => (
                                                         <tr key={lIndex} className={`border-b border-orange-100 ${lIndex % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
                                                           <td className="py-1.5 px-2 text-gray-900">{labour.labour_role}</td>
+                                                          <td className="py-1.5 px-2 text-center text-gray-700 capitalize">{labour.work_type?.replace('_', ' ') || 'Contract'}</td>
                                                           <td className="py-1.5 px-2 text-center text-gray-700">{labour.hours} hrs</td>
                                                           <td className="py-1.5 px-2 text-right text-gray-700">{formatCurrency(labour.rate_per_hour)}</td>
                                                           <td className="py-1.5 px-2 text-right font-semibold text-orange-700">{formatCurrency(labour.total_cost || labour.hours * labour.rate_per_hour)}</td>
                                                         </tr>
                                                       ))}
                                                       <tr className="bg-orange-200 border-t-2 border-orange-400">
-                                                        <td colSpan={3} className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">Labour Total:</td>
+                                                        <td colSpan={4} className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">Labour Total:</td>
                                                         <td className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">
                                                           {formatCurrency(subItem.labour.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0))}
                                                         </td>
@@ -1021,6 +1023,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                             <thead className="bg-orange-100 border-b border-orange-200">
                                               <tr>
                                                 <th className="text-left py-2 px-3 font-semibold text-orange-900">Labour Role</th>
+                                                <th className="text-center py-2 px-3 font-semibold text-orange-900">Work Type</th>
                                                 <th className="text-center py-2 px-3 font-semibold text-orange-900">Working Hours</th>
                                                 <th className="text-right py-2 px-3 font-semibold text-orange-900">Rate/Hour</th>
                                                 <th className="text-right py-2 px-3 font-semibold text-orange-900">Amount</th>
@@ -1030,13 +1033,14 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                               {item.labour.map((labour, lIndex) => (
                                                 <tr key={lIndex} className={`border-b border-orange-100 ${lIndex % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
                                                   <td className="py-2.5 px-3 text-gray-900">{labour.labour_role}</td>
+                                                  <td className="py-2.5 px-3 text-center text-gray-700 capitalize">{labour.work_type?.replace('_', ' ') || 'Contract'}</td>
                                                   <td className="py-2.5 px-3 text-center text-gray-700">{labour.hours} hrs</td>
                                                   <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(labour.rate_per_hour)}</td>
                                                   <td className="py-2.5 px-3 text-right font-semibold text-orange-700">{formatCurrency(labour.total_cost)}</td>
                                                 </tr>
                                               ))}
                                               <tr className="bg-orange-200 border-t-2 border-orange-400">
-                                                <td colSpan={3} className="py-2.5 px-3 font-bold text-orange-900 text-right">Total Labour:</td>
+                                                <td colSpan={4} className="py-2.5 px-3 font-bold text-orange-900 text-right">Total Labour:</td>
                                                 <td className="py-2.5 px-3 font-bold text-orange-900 text-right">
                                                   {formatCurrency(item.labour.reduce((sum, l) => sum + (l.total_cost || 0), 0))}
                                                 </td>
@@ -1218,6 +1222,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                 <thead className="bg-orange-100 border-b border-orange-200">
                                                   <tr>
                                                     <th className="text-left py-1.5 px-2 font-semibold text-orange-900">Role</th>
+                                                    <th className="text-center py-1.5 px-2 font-semibold text-orange-900">Work Type</th>
                                                     <th className="text-center py-1.5 px-2 font-semibold text-orange-900">Hours</th>
                                                     <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Rate/hr</th>
                                                     <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Total</th>
@@ -1227,13 +1232,14 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                   {subItem.labour.map((labour: any, lIndex: number) => (
                                                     <tr key={lIndex} className={`border-b border-orange-100 ${lIndex % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}`}>
                                                       <td className="py-1.5 px-2 text-gray-900">{labour.labour_role}</td>
+                                                      <td className="py-1.5 px-2 text-center text-gray-700 capitalize">{labour.work_type?.replace('_', ' ') || 'Contract'}</td>
                                                       <td className="py-1.5 px-2 text-center text-gray-700">{labour.hours} hrs</td>
                                                       <td className="py-1.5 px-2 text-right text-gray-700">{formatCurrency(labour.rate_per_hour)}</td>
                                                       <td className="py-1.5 px-2 text-right font-semibold text-orange-700">{formatCurrency(labour.total_cost || labour.hours * labour.rate_per_hour)}</td>
                                                     </tr>
                                                   ))}
                                                   <tr className="bg-orange-200 border-t-2 border-orange-400">
-                                                    <td colSpan={3} className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">Labour Total:</td>
+                                                    <td colSpan={4} className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">Labour Total:</td>
                                                     <td className="py-1.5 px-2 font-bold text-orange-900 text-right text-xs">
                                                       {formatCurrency(subItem.labour.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0))}
                                                     </td>

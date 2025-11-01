@@ -1334,7 +1334,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           const costs = calculateItemCost(item);
           return sum + costs.sellingPrice;
         }, 0);
-        const discountAmount = subtotal * (overallDiscount / 100);
+        // Add preliminary amount to subtotal before calculating discount
+        const combinedSubtotal = subtotal + costAmount;
+        const discountAmount = combinedSubtotal * (overallDiscount / 100);
 
         const revisionPayload = {
           boq_name: boqName,
@@ -1442,7 +1444,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           const costs = calculateItemCost(item);
           return sum + costs.sellingPrice;
         }, 0);
-        const discountAmount = subtotal * (overallDiscount / 100);
+        // Add preliminary amount to subtotal before calculating discount
+        const combinedSubtotal = subtotal + costAmount;
+        const discountAmount = combinedSubtotal * (overallDiscount / 100);
 
         // Calculate combined summary for all items
         let totalMaterialCost = 0;
@@ -1540,7 +1544,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         });
 
         // Calculate total cost after discount
-        const totalCostAfterDiscount = subtotal - discountAmount;
+        const totalCostAfterDiscount = combinedSubtotal - discountAmount;
 
         // Calculate total item amount (sum of all item selling prices before overall discount)
         const totalItemAmount = items.reduce((sum, item) => {
@@ -1693,7 +1697,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           const costs = calculateItemCost(item);
           return sum + costs.sellingPrice;
         }, 0);
-        const discountAmount = subtotal * (overallDiscount / 100);
+        // Add preliminary amount to subtotal before calculating discount
+        const combinedSubtotal = subtotal + costAmount;
+        const discountAmount = combinedSubtotal * (overallDiscount / 100);
 
         const payload: BOQCreatePayload = {
           project_id: selectedProjectId,

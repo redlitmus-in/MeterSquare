@@ -508,7 +508,10 @@ const ProjectApprovals: React.FC = () => {
     const status = mapBOQStatus(boq.status);
 
     // IMPORTANT: Prioritize total_cost as it's the most reliable field after discount
-    const totalValue = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
+    // Add preliminary amount to the total (items total + preliminary - discount = grand total)
+    const baseTotalCost = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
+    const preliminaryAmount = boq.preliminaries?.cost_details?.amount || 0;
+    const totalValue = baseTotalCost + preliminaryAmount;
     const laborCost = boq.total_labour_cost || 0;
     const materialCost = boq.total_material_cost || 0;
     const itemCount = boq.items_count || 0;
@@ -519,9 +522,10 @@ const ProjectApprovals: React.FC = () => {
       selling_price: boq.selling_price,
       estimatedSellingPrice: boq.estimatedSellingPrice,
       discount_percentage: boq.discount_percentage,
-      discount_amount: boq.discount_amount
+      discount_amount: boq.discount_amount,
+      preliminary_amount: preliminaryAmount
     });
-    console.log(`💰 [TD ProjectApprovals] BOQ ${boq.boq_id} - Final totalValue: ${totalValue}`);
+    console.log(`💰 [TD ProjectApprovals] BOQ ${boq.boq_id} - Final totalValue: ${totalValue} (Base: ${baseTotalCost} + Preliminary: ${preliminaryAmount})`);
 
     return {
       id: boq.boq_id,
@@ -1111,6 +1115,15 @@ const ProjectApprovals: React.FC = () => {
         if (response.success) {
           toast.success('BOQ rejected successfully');
 
+          // Update selectedEstimation status to 'rejected' immediately
+          if (selectedEstimation?.id === id) {
+            setSelectedEstimation({
+              ...selectedEstimation,
+              status: 'rejected',
+              rejectionReason: notes
+            });
+          }
+
           // Refresh BOQ details BEFORE closing modal to show updated data
           if (showBOQModal && selectedEstimation?.id) {
             await loadBOQDetails(selectedEstimation.id);
@@ -1161,6 +1174,15 @@ const ProjectApprovals: React.FC = () => {
         : await tdService.approveBOQ(selectedEstimation.id, approvalNotes);
       if (response.success) {
         toast.success('BOQ approved successfully');
+
+        // Update selectedEstimation status to 'approved' or 'revision_approved' immediately
+        if (selectedEstimation?.id) {
+          setSelectedEstimation({
+            ...selectedEstimation,
+            status: filterStatus === 'revisions' ? 'revision_approved' : 'approved',
+            approvalNotes: approvalNotes
+          });
+        }
 
         // Refresh BOQ details BEFORE closing modal to show updated data
         if (showBOQModal && selectedEstimation?.id) {
@@ -4083,154 +4105,6 @@ const ProjectApprovals: React.FC = () => {
           />
         )}
 
-      {/* Approval Modal - MOVED OUTSIDE WRAPPER - See line ~4384 */}
-      {false && showApprovalModal && selectedEstimation && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-2xl shadow-md max-w-lg w-full"
-          >
-            <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-green-200">
-              <h2 className="text-xl font-bold text-green-900">Approve BOQ - {selectedEstimation.projectName}</h2>
-              <p className="text-sm text-green-700 mt-1">Confirm approval for estimator to send to client</p>
-            </div>
-
-            <div className="p-6">
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Approval Notes (Optional)
-                </label>
-                <textarea
-                  value={approvalNotes}
-                  onChange={(e) => setApprovalNotes(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                  rows={3}
-                  placeholder="Add any conditions, notes, or requirements for this approval..."
-                />
-              </div>
-
-              <div className="flex items-center gap-3 justify-end">
-                <button
-                  onClick={() => {
-                    setShowApprovalModal(false);
-                    setApprovalNotes('');
-                    setShowFullScreenBOQ(true);
-                  }}
-                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => handleApproval(selectedEstimation.id, true, approvalNotes)}
-                  disabled={isApproving}
-                  className={`px-4 py-2 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ${
-                    isApproving
-                      ? 'bg-green-400 cursor-not-allowed'
-                      : 'bg-green-500 hover:bg-green-600'
-                  }`}
-                >
-                  {isApproving ? (
-                    <>
-                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Approving...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircleIcon className="w-5 h-5" />
-                      Approve Project
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* Rejection Modal - MOVED OUTSIDE WRAPPER - See line ~4384 */}
-      {false && showRejectionModal && selectedEstimation && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-2xl shadow-md max-w-lg w-full"
-          >
-            <div className="bg-gradient-to-r from-red-50 to-red-100 px-6 py-4 border-b border-red-200">
-              <h2 className="text-xl font-bold text-red-900">Reject Project</h2>
-              <p className="text-sm text-red-700 mt-1">{selectedEstimation.projectName}</p>
-            </div>
-
-            <div className="p-6">
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Rejection Reason <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  value={rejectionReason}
-                  onChange={(e) => setRejectionReason(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-                  rows={4}
-                  placeholder="Please provide a reason for rejection..."
-                  required
-                />
-              </div>
-
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-                <p className="text-sm text-yellow-800">
-                  <strong>Note:</strong> The rejection reason will be sent to the estimator for review and corrections.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 justify-end">
-                <button
-                  onClick={() => {
-                    setShowRejectionModal(false);
-                    setRejectionReason('');
-                    setShowFullScreenBOQ(true);
-                  }}
-                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    if (rejectionReason.trim()) {
-                      handleApproval(selectedEstimation.id, false, rejectionReason);
-                    } else {
-                      toast.error('Please provide a rejection reason');
-                    }
-                  }}
-                  disabled={isRejecting}
-                  className={`px-4 py-2 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ${
-                    isRejecting
-                      ? 'bg-red-400 cursor-not-allowed'
-                      : 'bg-red-500 hover:bg-red-600'
-                  }`}
-                >
-                  {isRejecting ? (
-                    <>
-                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Rejecting...
-                    </>
-                  ) : (
-                    <>
-                      <XCircleIcon className="w-5 h-5" />
-                      Reject Project
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      )}
         </>
       )}
 
@@ -4450,6 +4324,87 @@ const ProjectApprovals: React.FC = () => {
                     <>
                       <CheckCircleIcon className="w-5 h-5" />
                       Approve Project
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Rejection Modal */}
+      {showRejectionModal && selectedEstimation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-md max-w-lg w-full"
+          >
+            <div className="bg-gradient-to-r from-red-50 to-red-100 px-6 py-4 border-b border-red-200">
+              <h2 className="text-xl font-bold text-red-900">Reject Project</h2>
+              <p className="text-sm text-red-700 mt-1">{selectedEstimation.projectName}</p>
+            </div>
+
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Rejection Reason <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  rows={4}
+                  placeholder="Please provide a reason for rejection..."
+                  required
+                />
+              </div>
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                <p className="text-sm text-yellow-800">
+                  <strong>Note:</strong> The rejection reason will be sent to the estimator for review and corrections.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 justify-end">
+                <button
+                  onClick={() => {
+                    setShowRejectionModal(false);
+                    setRejectionReason('');
+                  }}
+                  disabled={isRejecting}
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (rejectionReason.trim()) {
+                      handleApproval(selectedEstimation.id, false, rejectionReason);
+                    } else {
+                      toast.error('Please provide a rejection reason');
+                    }
+                  }}
+                  disabled={isRejecting}
+                  className={`px-4 py-2 text-white rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                    isRejecting
+                      ? 'bg-red-400 cursor-not-allowed'
+                      : 'bg-red-500 hover:bg-red-600'
+                  }`}
+                >
+                  {isRejecting ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Rejecting...
+                    </>
+                  ) : (
+                    <>
+                      <XCircleIcon className="w-5 h-5" />
+                      Reject Project
                     </>
                   )}
                 </button>
@@ -4753,6 +4708,10 @@ const ProjectApprovals: React.FC = () => {
                             });
                           }
                         });
+
+                        // Add Preliminaries amount to totalClientAmount (to match client version)
+                        const preliminaryAmount = (selectedEstimation as any).preliminaries?.cost_details?.amount || 0;
+                        totalClientAmount += preliminaryAmount;
 
                         // BOQ-level discount (overall discount applied to entire BOQ)
                         const overallDiscountAmount = (selectedEstimation as any).discount_amount || 0;

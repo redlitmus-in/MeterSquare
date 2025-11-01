@@ -492,8 +492,10 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
   // Calculate total from items using API response values
   const calculateTotalFromSnapshot = (snapshot: any) => {
-    // 🔥 First, check if total_cost is available in the snapshot (this includes discount)
+    // 🔥 First, check if total_cost is available in the snapshot (this includes discount AND preliminaries from backend)
     if (snapshot?.total_cost !== undefined && snapshot.total_cost !== null && snapshot.total_cost > 0) {
+      // Backend already calculated: (items + preliminaries - discount)
+      // So just return it as-is, DON'T add preliminaries again!
       return snapshot.total_cost;
     }
 
@@ -507,16 +509,20 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       return total + finalTotalPrice;
     }, 0);
 
-    // 🔥 Apply discount if available
+    // Add preliminaries amount to subtotal
+    const preliminaryAmount = snapshot.preliminaries?.cost_details?.amount || 0;
+    const combinedSubtotal = subtotal + preliminaryAmount;
+
+    // 🔥 Apply discount if available (discount applies to combined subtotal)
     const discountAmount = snapshot.discount_amount || 0;
     const discountPercentage = snapshot.discount_percentage || 0;
 
     let finalDiscount = discountAmount;
     if (discountPercentage > 0 && discountAmount === 0) {
-      finalDiscount = (subtotal * discountPercentage) / 100;
+      finalDiscount = (combinedSubtotal * discountPercentage) / 100;
     }
 
-    return subtotal - finalDiscount;
+    return combinedSubtotal - finalDiscount;
   };
 
   const calculateChange = (current: number, previous: number) => {
@@ -584,7 +590,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     const allItems = snapshot.items || [];
 
     // Calculate subtotal (sum of all item client amounts)
-    const subtotal = allItems.reduce((sum: number, item: any) => {
+    const itemsSubtotal = allItems.reduce((sum: number, item: any) => {
       // Calculate client amount for each item
       let itemClientAmount = (item.quantity || 0) * (item.rate || 0);
       if (itemClientAmount === 0 && item.sub_items && item.sub_items.length > 0) {
@@ -596,7 +602,11 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       return sum + itemClientAmount;
     }, 0);
 
-    // Get overall BOQ discount
+    // Add preliminaries amount to subtotal
+    const preliminaryAmount = snapshot.preliminaries?.cost_details?.amount || 0;
+    const subtotal = itemsSubtotal + preliminaryAmount;
+
+    // Get overall BOQ discount (applied to combined subtotal including preliminaries)
     let overallDiscount = 0;
     let overallDiscountPercentage = 0;
 
@@ -611,7 +621,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     const grandTotal = subtotal - overallDiscount;
 
     // Calculate internal cost for profitability analysis
-    const totalInternalCost = allItems.reduce((sum: number, item: any) => {
+    const itemsInternalCost = allItems.reduce((sum: number, item: any) => {
       if (item.sub_items && item.sub_items.length > 0) {
         return sum + item.sub_items.reduce((siSum: number, si: any) => {
           const materials = si.materials?.reduce((m: number, mat: any) => m + (mat.total_price || mat.quantity * mat.unit_price || 0), 0) || 0;
@@ -625,15 +635,36 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       return sum + (item.internal_cost || 0);
     }, 0);
 
+    // Add preliminary internal cost
+    const preliminaryInternalCost = snapshot.preliminaries?.cost_details?.internal_cost || 0;
+    const totalInternalCost = itemsInternalCost + preliminaryInternalCost;
+
     const negotiableMarginAfterDiscount = grandTotal - totalInternalCost;
 
     return (
       <div className="mt-4 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg p-4 border-2 border-green-300">
         <div className="space-y-2">
-          <div className="flex justify-between text-sm font-medium">
-            <span className="text-gray-800">Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
-            <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
-          </div>
+          {preliminaryAmount > 0 ? (
+            <>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-700">Items Subtotal:</span>
+                <span className="font-semibold">AED {itemsSubtotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-700">Preliminaries:</span>
+                <span className="font-semibold">AED {preliminaryAmount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm font-medium border-t border-green-300 pt-2">
+                <span className="text-gray-800">Combined Subtotal {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
+                <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex justify-between text-sm font-medium">
+              <span className="text-gray-800">Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
+              <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
+            </div>
+          )}
           {overallDiscount > 0 && (
             <div className="flex justify-between text-sm text-red-600">
               <span>Overall Discount ({overallDiscountPercentage.toFixed(1)}%):</span>
@@ -2101,6 +2132,13 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   const isExpanded = expandedRevisionIndices.has(actualIndex);
                   const change = calculateChange(currentTotal, revisionTotal);
 
+                  // Find the revision that came BEFORE this one (by internal_revision_number)
+                  const currentRevNum = revision.internal_revision_number;
+                  const previousRevisionForComparison = currentRevNum > 0
+                    ? internalRevisions.find(r => r.internal_revision_number === currentRevNum - 1)?.changes_summary ||
+                      originalBOQ?.boq_details || null
+                    : null; // Original BOQ has nothing before it
+
                   return (
                     <motion.div
                       key={revision.id}
@@ -2273,7 +2311,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                             </div>
                           )}
 
-                          {renderBOQItemsComparison(revision.changes_summary, null)}
+                          {renderBOQItemsComparison(revision.changes_summary, previousRevisionForComparison)}
                           {renderGrandTotalSection(revision.changes_summary)}
                         </div>
                       )}
