@@ -593,7 +593,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                           <span className="font-medium text-gray-900">{formatCurrency(item.actual.profit_before_discount || 0)}</span>
                         </div>
                         <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">Negotiable Margins (After Discount):</span>
+                          <span className="text-gray-600">Actual Profit (After Discount):</span>
                           <span className={`font-medium ${item.actual.actual_profit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
                             {formatCurrency(item.actual.actual_profit || 0)}
                           </span>
@@ -725,7 +725,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                 </div>
                 <div className="flex justify-between py-1 text-gray-600">
                   <span className="flex items-center gap-1">
-                    <span className="text-lg">+</span> Negotiable Margins:
+                    <span className="text-lg">+</span> Overhead & Profit/Loss:
                   </span>
                   <span className={`font-medium ${
                     (data.summary.total_actual_profit || 0) < 0 ? 'text-red-600' : 'text-green-600'
@@ -853,7 +853,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   </p>
                 </div>
                 <div className="text-center p-4 bg-gray-50 rounded-lg border border-gray-200">
-                  <p className="text-xs text-gray-600 mb-1">Negotiable Margins Variance:</p>
+                  <p className="text-xs text-gray-600 mb-1">Overhead & Profit/Loss Variance:</p>
                   <p className={`text-lg font-bold ${
                     (data.summary.total_actual_profit || 0) - (data.summary.total_planned_profit || 0) < 0
                       ? 'text-red-600'

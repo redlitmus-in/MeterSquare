@@ -1442,19 +1442,13 @@ def get_boq(boq_id):
         # Get preliminaries from database table (preferred) or fallback to BOQ JSON
         preliminaries = {}
         preliminary_record = Preliminary.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
-
-        # Get saved preliminary items for this project (no merging with defaults)
         if preliminary_record and preliminary_record.description:
             preliminaries = preliminary_record.description
-            # Add cost_details alias for cost_analysis (backward compatibility)
-            if isinstance(preliminaries, dict):
-                if 'cost_analysis' in preliminaries and 'cost_details' not in preliminaries:
-                    preliminaries['cost_details'] = preliminaries['cost_analysis']
-            log.info(f"Retrieved preliminaries from database for project {boq.project_id}: {preliminaries}")
+            log.info(f"Retrieved preliminaries from database for project {boq.project_id}")
         elif boq_details.boq_details:
             # Fallback to JSON if not in database
             preliminaries = boq_details.boq_details.get("preliminaries", {})
-            log.info(f"Using preliminaries from BOQ JSON (fallback): {preliminaries}")
+            log.info(f"Using preliminaries from BOQ JSON (fallback)")
 
         # Get discount values from boq_details JSON
         discount_percentage = boq_details.boq_details.get("discount_percentage", 0) if boq_details.boq_details else 0

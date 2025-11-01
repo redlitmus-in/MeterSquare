@@ -1171,9 +1171,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                           <FileText className="w-6 h-6 text-white" />
                           <div className="text-left">
                             <h3 className="text-lg font-bold text-white">Preliminaries & Approval Works</h3>
-                            <p className="text-xs text-white/80">
-                              {preliminaries.items?.filter((p: any) => p.checked).length || 0} / {preliminaries.items?.length || 0} selected
-                            </p>
+                            <p className="text-xs text-white/80">Selected conditions and terms</p>
                           </div>
                         </div>
                         {preliminariesExpanded ? (
@@ -1191,17 +1189,9 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                             <div className="p-4 space-y-2">
                               {preliminaries.items.map((item: any, index: number) => (
                                 <div key={index} className="bg-white rounded-lg p-3 border border-amber-200 flex items-start gap-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={item.checked || false}
-                                    onChange={(e) => {
-                                      const updatedItems = [...preliminaries.items];
-                                      updatedItems[index] = { ...updatedItems[index], checked: e.target.checked };
-                                      setPreliminaries({ ...preliminaries, items: updatedItems });
-                                    }}
-                                    className="w-5 h-5 text-amber-600 border-gray-300 rounded focus:ring-amber-500 mt-0.5 flex-shrink-0"
-                                    disabled={isSaving}
-                                  />
+                                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center">
+                                    {index + 1}
+                                  </span>
                                   <p className="text-sm text-gray-800 flex-1">{item.description}</p>
                                   {item.isCustom && (
                                     <span className="px-2 py-0.5 text-xs bg-amber-100 text-amber-700 rounded-full">

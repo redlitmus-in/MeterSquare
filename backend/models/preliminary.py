@@ -22,8 +22,7 @@ class Preliminary(db.Model):
     unit = db.Column(db.String(50), nullable=True)
     rate = db.Column(db.Float, nullable=True)
     amount = db.Column(db.Float, nullable=True)
-    project_id = db.Column(db.Integer, nullable=True)  # Keep for backward compatibility
-    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id", ondelete="CASCADE"), nullable=True)  # Link to specific BOQ
+    project_id = db.Column(db.Integer, nullable=True)
     is_default = db.Column(db.Boolean, default=False)
     is_deleted = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
