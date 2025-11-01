@@ -1341,9 +1341,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           discount_percentage: overallDiscount,
           discount_amount: discountAmount,
           preliminaries: {
-            items: preliminaries.filter(p => p.checked === true).map(p => ({
+            items: preliminaries.map(p => ({
               id: p.id,
               description: p.description,
+              checked: p.checked || false,
               isCustom: p.isCustom || false
             })),
             cost_details: {
@@ -1553,9 +1554,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           discount_percentage: overallDiscount,
           discount_amount: discountAmount,
           preliminaries: {
-            items: preliminaries.filter(p => p.checked === true).map(p => ({
+            items: preliminaries.map(p => ({
               id: p.id,
               description: p.description,
+              checked: p.checked || false,
               isCustom: p.isCustom || false
             })),
             cost_details: {
@@ -1701,9 +1703,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           discount_percentage: overallDiscount,
           discount_amount: discountAmount,
           preliminaries: {
-            items: preliminaries.filter(p => p.checked === true).map(p => ({
+            items: preliminaries.map(p => ({
               id: p.id,
               description: p.description,
+              checked: p.checked || false,
               isCustom: p.isCustom || false
             })),
             cost_details: {

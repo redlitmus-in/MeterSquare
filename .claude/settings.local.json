@@ -12,7 +12,8 @@
       "Bash(awk:*)",
       "Bash(cat:*)",
       "Bash(PGPASSWORD=postgres psql:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(curl -s http://127.0.0.1:5000/api/boq/469)"
     ],
     "deny": [],
     "ask": []
