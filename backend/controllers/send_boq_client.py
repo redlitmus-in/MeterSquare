@@ -17,6 +17,7 @@ log = get_logger()
 def send_boq_to_client():
     """
     Send BOQ to client with Excel and PDF attachments
+    Supports multiple email addresses (comma or semicolon separated)
     """
     try:
         data = request.get_json()
@@ -25,12 +26,29 @@ def send_boq_to_client():
             return jsonify({"success": False, "error": "No data provided"}), 400
 
         boq_id = data.get('boq_id')
-        client_email = data.get('client_email')
+        client_emails_raw = data.get('client_email') or data.get('client_emails')
         message = data.get('message', 'Please review the attached BOQ for your project.')
         formats = data.get('formats', ['excel', 'pdf'])
 
-        if not boq_id or not client_email:
+        if not boq_id or not client_emails_raw:
             return jsonify({"success": False, "error": "boq_id and client_email are required"}), 400
+
+        # Parse multiple emails (support comma, semicolon, or list)
+        if isinstance(client_emails_raw, list):
+            client_emails = [email.strip() for email in client_emails_raw if email.strip()]
+        else:
+            # Split by comma or semicolon
+            client_emails = [email.strip() for email in client_emails_raw.replace(';', ',').split(',') if email.strip()]
+
+        if not client_emails:
+            return jsonify({"success": False, "error": "At least one valid email address is required"}), 400
+
+        # Validate email format (basic check)
+        import re
+        email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+        invalid_emails = [email for email in client_emails if not email_pattern.match(email)]
+        if invalid_emails:
+            return jsonify({"success": False, "error": f"Invalid email format: {', '.join(invalid_emails)}"}), 400
 
         # Fetch BOQ
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
@@ -99,20 +117,36 @@ def send_boq_to_client():
             pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json)
             pdf_file = (pdf_filename, pdf_data)
 
-        # Send email - Pass selling price (overhead/profit distributed)
+        # Send email to all recipients - Pass selling price (overhead/profit distributed)
         email_service = BOQEmailService()
-        email_sent = email_service.send_boq_to_client(
-            boq_data=boq_data,
-            project_data=project_data,
-            client_email=client_email,
-            message=message,
-            total_value=client_total_value,  # CLIENT VERSION: Same total, distributed markup
-            item_count=len(items),
-            excel_file=excel_file,
-            pdf_file=pdf_file
-        )
 
-        if email_sent:
+        # Track successful and failed sends
+        successful_sends = []
+        failed_sends = []
+
+        for client_email in client_emails:
+            try:
+                email_sent = email_service.send_boq_to_client(
+                    boq_data=boq_data,
+                    project_data=project_data,
+                    client_email=client_email,
+                    message=message,
+                    total_value=client_total_value,  # CLIENT VERSION: Same total, distributed markup
+                    item_count=len(items),
+                    excel_file=excel_file,
+                    pdf_file=pdf_file
+                )
+
+                if email_sent:
+                    successful_sends.append(client_email)
+                else:
+                    failed_sends.append(client_email)
+            except Exception as e:
+                failed_sends.append(client_email)
+                log.error(f"Error sending BOQ to {client_email}: {str(e)}")
+
+        # Check if at least one email was sent successfully
+        if successful_sends:
             # Update BOQ flags: email_sent = TRUE, client_status = FALSE, status = Sent_for_Confirmation
             boq.email_sent = True
             boq.client_status = False  # Not yet confirmed by client
@@ -144,7 +178,7 @@ def send_boq_to_client():
             else:
                 current_actions = []
 
-            # Prepare new action for sending BOQ to client
+            # Prepare new action for sending BOQ to client(s)
             new_action = {
                 "role": "estimator",
                 "type": "sent_to_client",
@@ -160,38 +194,53 @@ def send_boq_to_client():
                 "item_count": len(items),
                 "project_name": project.project_name,
                 "client_name": project.client,
-                "client_email": client_email
+                "client_emails": successful_sends,  # List of all successful recipients
+                "failed_emails": failed_sends if failed_sends else None  # Track failures
             }
 
             # Append new action to existing list
             current_actions.append(new_action)
 
             # Create or update history record
+            recipients_str = ', '.join(successful_sends)
             if existing_history:
                 # Update existing history with new action added to list
                 existing_history.action = current_actions
                 existing_history.action_date = datetime.utcnow()
-                existing_history.comment = f"BOQ sent to client at {client_email}"
+                existing_history.comment = f"BOQ sent to {len(successful_sends)} client(s): {recipients_str}"
             else:
                 # Create new history entry with action as list
                 new_history = BOQHistory(
                     boq_id=boq_id,
                     action=current_actions,  # Store as list
                     action_date=datetime.utcnow(),
-                    comment=f"BOQ sent to client at {client_email}"
+                    comment=f"BOQ sent to {len(successful_sends)} client(s): {recipients_str}"
                 )
                 db.session.add(new_history)
 
             db.session.commit()
 
+            # Prepare response message
+            response_message = f"BOQ sent successfully to {len(successful_sends)} recipient(s): {recipients_str}"
+            if failed_sends:
+                response_message += f". Failed to send to: {', '.join(failed_sends)}"
+
             return jsonify({
                 "success": True,
-                "message": f"BOQ sent successfully to {client_email}",
+                "message": response_message,
                 "boq_id": boq_id,
-                "status": boq.status
+                "status": boq.status,
+                "successful_sends": successful_sends,
+                "failed_sends": failed_sends,
+                "total_sent": len(successful_sends),
+                "total_failed": len(failed_sends)
             }), 200
         else:
-            return jsonify({"success": False, "error": "Failed to send email"}), 500
+            return jsonify({
+                "success": False,
+                "error": f"Failed to send email to all recipients. Attempted: {', '.join(client_emails)}",
+                "failed_emails": failed_sends
+            }), 500
 
     except Exception as e:
         import traceback

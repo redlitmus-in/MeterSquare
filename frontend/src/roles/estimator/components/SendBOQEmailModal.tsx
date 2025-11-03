@@ -35,6 +35,8 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
   const [comments, setComments] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
+  const [sentToCount, setSentToCount] = useState(0);
+  const [failedCount, setFailedCount] = useState(0);
   const [boqData, setBoqData] = useState<any>(null);
   const [loadingBOQ, setLoadingBOQ] = useState(false);
 
@@ -171,12 +173,21 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
       let response;
 
       if (isClientMode) {
-        // Send to client
+        // Send to client - support multiple emails
         response = await estimatorService.sendBOQToClient(boqId, {
           client_email: recipientEmail.trim() || undefined,
           message: comments.trim() || undefined,
           formats: ['excel', 'pdf']
         });
+
+        // Track sent/failed counts from response
+        if (response.success && response.total_sent !== undefined) {
+          setSentToCount(response.total_sent);
+          setFailedCount(response.total_failed || 0);
+        } else {
+          setSentToCount(1);
+          setFailedCount(0);
+        }
       } else {
         // Send to TD
         const params: { td_email?: string; full_name?: string; comments?: string } = {};
@@ -188,6 +199,9 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
           boqId,
           Object.keys(params).length > 0 ? params : undefined
         );
+
+        setSentToCount(1);
+        setFailedCount(0);
       }
 
       if (response.success) {
@@ -222,9 +236,24 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
+  // Parse multiple emails from input
+  const parseEmails = (emailString: string): string[] => {
+    return emailString
+      .split(/[,;\n]/) // Split by comma, semicolon, or newline
+      .map(e => e.trim())
+      .filter(e => e.length > 0);
+  };
+
+  // Check if all emails are valid
+  const areAllEmailsValid = (emailString: string): boolean => {
+    if (!emailString.trim()) return false;
+    const emails = parseEmails(emailString);
+    return emails.length > 0 && emails.every(email => isValidEmail(email));
+  };
+
   const canSend = isClientMode
-    ? (recipientEmail && isValidEmail(recipientEmail)) // Client mode: email required and must be valid
-    : (!recipientEmail || isValidEmail(recipientEmail)); // TD mode: email optional but must be valid if provided
+    ? (recipientEmail && areAllEmailsValid(recipientEmail)) // Client mode: at least one valid email required
+    : (!recipientEmail || areAllEmailsValid(recipientEmail)); // TD mode: email optional but must be valid if provided
 
   if (!isOpen) return null;
 
@@ -257,7 +286,7 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                     <h3 className="text-2xl font-bold text-gray-900 mb-2">Email Sent!</h3>
                     <p className="text-gray-600 mb-6">
                       {isClientMode
-                        ? 'BOQ has been successfully sent to the client.'
+                        ? `BOQ has been successfully sent to ${sentToCount} recipient${sentToCount > 1 ? 's' : ''}.${failedCount > 0 ? ` (${failedCount} failed)` : ''}`
                         : 'BOQ review email has been successfully sent to the Technical Director.'
                       }
                     </p>
@@ -265,6 +294,11 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                       <p className="text-sm text-green-800">
                         <strong>{boqName}</strong> for project <strong>{projectName}</strong> {isClientMode ? 'sent to client' : 'is now pending TD review'}.
                       </p>
+                      {isClientMode && sentToCount > 1 && (
+                        <p className="text-sm text-green-700 mt-2">
+                          ✓ Successfully sent to {sentToCount} email{sentToCount > 1 ? 's' : ''}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -326,23 +360,55 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                     <div className="space-y-2">
                       <Label htmlFor="recipient_email" className="flex items-center gap-2">
                         <Mail className="w-4 h-4 text-gray-500" />
-                        {isClientMode ? 'Client Email *' : 'Technical Director Email (Optional)'}
+                        {isClientMode ? 'Client Email(s) *' : 'Technical Director Email (Optional)'}
                       </Label>
-                      <Input
-                        id="recipient_email"
-                        type="email"
-                        placeholder={isClientMode ? 'Enter client email address' : 'Enter TD email or leave blank for default'}
-                        value={recipientEmail}
-                        onChange={(e) => setRecipientEmail(e.target.value)}
-                        disabled={isSending}
-                        required={isClientMode}
-                        className={`${recipientEmail && !isValidEmail(recipientEmail) ? 'border-red-300 focus:border-red-500' : ''}`}
-                      />
-                      {recipientEmail && !isValidEmail(recipientEmail) && (
-                        <p className="text-sm text-red-600">Please enter a valid email address</p>
+                      {isClientMode ? (
+                        <>
+                          <Textarea
+                            id="recipient_email"
+                            placeholder="Enter email addresses (separate multiple emails with commas, semicolons, or new lines)&#10;Example:&#10;client1@example.com, client2@example.com&#10;or&#10;client1@example.com;client2@example.com"
+                            value={recipientEmail}
+                            onChange={(e) => setRecipientEmail(e.target.value)}
+                            disabled={isSending}
+                            required={isClientMode}
+                            rows={4}
+                            className={`resize-none ${recipientEmail && !areAllEmailsValid(recipientEmail) ? 'border-red-300 focus:border-red-500' : ''}`}
+                          />
+                          {recipientEmail && parseEmails(recipientEmail).length > 0 && (
+                            <div className="flex items-center gap-2 text-sm">
+                              <span className="text-gray-600">
+                                {parseEmails(recipientEmail).length} email{parseEmails(recipientEmail).length > 1 ? 's' : ''} entered
+                              </span>
+                              {areAllEmailsValid(recipientEmail) ? (
+                                <span className="text-green-600 flex items-center gap-1">
+                                  <CheckCircle className="w-4 h-4" />
+                                  All valid
+                                </span>
+                              ) : (
+                                <span className="text-red-600 flex items-center gap-1">
+                                  <AlertCircle className="w-4 h-4" />
+                                  Some emails invalid
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <Input
+                          id="recipient_email"
+                          type="email"
+                          placeholder="Enter TD email or leave blank for default"
+                          value={recipientEmail}
+                          onChange={(e) => setRecipientEmail(e.target.value)}
+                          disabled={isSending}
+                          className={`${recipientEmail && !isValidEmail(recipientEmail) ? 'border-red-300 focus:border-red-500' : ''}`}
+                        />
+                      )}
+                      {recipientEmail && !areAllEmailsValid(recipientEmail) && (
+                        <p className="text-sm text-red-600">Please enter valid email address(es)</p>
                       )}
                       {isClientMode && !recipientEmail && (
-                        <p className="text-sm text-gray-500">Client email is required to send BOQ</p>
+                        <p className="text-sm text-gray-500">At least one client email is required to send BOQ</p>
                       )}
                     </div>
 
