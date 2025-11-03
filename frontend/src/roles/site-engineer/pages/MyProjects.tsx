@@ -468,14 +468,14 @@ const MyProjects: React.FC = () => {
                       >
                         <EyeIcon className="w-5 h-5" />
                       </button>
-                      {/* Assign to Buyer button - Hidden for Site Engineer role */}
+                      {/* Assign to Procurement button - Hidden for Site Engineer role */}
                       {/* {project.boq_ids && project.boq_ids.length > 0 && (
                         <>
                           {project.boq_assigned_to_buyer ? (
                             <div className="px-4 py-2 bg-green-100 border-2 border-green-400 rounded-lg flex items-center gap-2">
                               <CheckCircleIcon className="w-5 h-5 text-green-600" />
                               <div>
-                                <span className="text-sm font-bold text-green-900">Assigned to Buyer</span>
+                                <span className="text-sm font-bold text-green-900">Assigned to Procurement</span>
                                 {project.assigned_buyer_name && (
                                   <p className="text-xs text-green-700">{project.assigned_buyer_name}</p>
                                 )}
@@ -488,10 +488,10 @@ const MyProjects: React.FC = () => {
                                 setShowAssignBuyerModal(true);
                               }}
                               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2 text-sm font-medium shadow-sm"
-                              title="Assign to Buyer"
+                              title="Assign to Procurement"
                             >
                               <UserGroupIcon className="w-5 h-5" />
-                              Assign to Buyer
+                              Assign to Procurement
                             </button>
                           )}
                         </>

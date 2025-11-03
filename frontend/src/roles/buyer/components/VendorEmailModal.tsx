@@ -7,7 +7,9 @@ import {
   Send,
   AlertCircle,
   CheckCircle,
-  Loader2
+  Loader2,
+  Edit3,
+  Save
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +32,8 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const [step, setStep] = useState<'input' | 'preview' | 'success'>('input');
   const [vendorEmail, setVendorEmail] = useState('');
   const [emailPreview, setEmailPreview] = useState('');
+  const [editedEmailContent, setEditedEmailContent] = useState('');
+  const [isEditMode, setIsEditMode] = useState(false);
   const [vendorName, setVendorName] = useState('');
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
@@ -62,22 +66,40 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       return;
     }
 
-    // Basic email validation
+    // Parse comma-separated emails and validate each
+    const emailList = vendorEmail.split(',').map(email => email.trim()).filter(email => email);
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(vendorEmail)) {
-      toast.error('Please enter a valid email address');
+
+    const invalidEmails = emailList.filter(email => !emailRegex.test(email));
+    if (invalidEmails.length > 0) {
+      toast.error(`Invalid email address: ${invalidEmails[0]}`);
       return;
     }
 
+    if (emailList.length === 0) {
+      toast.error('Please enter at least one valid email address');
+      return;
+    }
+
+    setEditedEmailContent(emailPreview);
     setStep('preview');
   };
 
   const handleSendEmail = async () => {
     try {
       setIsSendingEmail(true);
-      await buyerService.sendVendorEmail(purchase.cr_id, { vendor_email: vendorEmail });
+      const emailContent = isEditMode ? editedEmailContent : emailPreview;
+      await buyerService.sendVendorEmail(purchase.cr_id, {
+        vendor_email: vendorEmail,
+        custom_email_body: emailContent
+      });
       setStep('success');
-      toast.success('Purchase order email sent to vendor successfully!');
+
+      const emailCount = vendorEmail.split(',').map(e => e.trim()).filter(e => e).length;
+      const message = emailCount > 1
+        ? `Purchase order email sent to ${emailCount} recipients successfully!`
+        : 'Purchase order email sent to vendor successfully!';
+      toast.success(message);
 
       setTimeout(() => {
         onEmailSent?.();
@@ -91,15 +113,29 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     }
   };
 
+  const handleToggleEdit = () => {
+    if (isEditMode) {
+      // Save changes
+      setIsEditMode(false);
+      toast.success('Changes saved');
+    } else {
+      // Enter edit mode
+      setIsEditMode(true);
+    }
+  };
+
   const handleClose = () => {
     setStep('input');
     setVendorEmail('');
     setEmailPreview('');
+    setEditedEmailContent('');
+    setIsEditMode(false);
     setVendorName('');
     onClose();
   };
 
   const handleBack = () => {
+    setIsEditMode(false);
     setStep('input');
   };
 
@@ -185,12 +221,20 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                           </label>
                           <Input
                             id="vendor-email"
-                            type="email"
+                            type="text"
                             value={vendorEmail}
                             onChange={(e) => setVendorEmail(e.target.value)}
-                            placeholder="vendor@example.com"
+                            placeholder="vendor@example.com, vendor2@example.com"
                             className="text-base"
                           />
+                          <p className="text-xs text-gray-500 mt-2">
+                            Separate multiple email addresses with commas
+                          </p>
+                          {vendorEmail && vendorEmail.includes(',') && (
+                            <div className="mt-2 text-xs text-blue-600">
+                              {vendorEmail.split(',').map(e => e.trim()).filter(e => e).length} recipient(s)
+                            </div>
+                          )}
                         </div>
 
                         <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
@@ -213,17 +257,44 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                   <div className="space-y-4">
                     <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
                       <Eye className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
-                      <div className="text-sm text-green-900">
+                      <div className="text-sm text-green-900 flex-1">
                         <p className="font-medium mb-1">Email Preview</p>
                         <p>Review the email content below before sending to <span className="font-semibold">{vendorEmail}</span></p>
                       </div>
+                      <Button
+                        onClick={handleToggleEdit}
+                        variant="outline"
+                        size="sm"
+                        className="flex-shrink-0"
+                      >
+                        {isEditMode ? (
+                          <>
+                            <Save className="w-4 h-4 mr-2" />
+                            Save
+                          </>
+                        ) : (
+                          <>
+                            <Edit3 className="w-4 h-4 mr-2" />
+                            Edit
+                          </>
+                        )}
+                      </Button>
                     </div>
 
                     <div className="border border-gray-300 rounded-lg overflow-hidden">
-                      <div
-                        className="bg-white p-6 max-h-[500px] overflow-y-auto"
-                        dangerouslySetInnerHTML={{ __html: emailPreview }}
-                      />
+                      {isEditMode ? (
+                        <textarea
+                          value={editedEmailContent}
+                          onChange={(e) => setEditedEmailContent(e.target.value)}
+                          className="w-full h-[500px] p-6 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Edit email content..."
+                        />
+                      ) : (
+                        <div
+                          className="bg-white p-6 max-h-[500px] overflow-y-auto"
+                          dangerouslySetInnerHTML={{ __html: editedEmailContent || emailPreview }}
+                        />
+                      )}
                     </div>
                   </div>
                 )}
@@ -241,7 +312,11 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                     </motion.div>
                     <h3 className="text-2xl font-bold text-gray-900 mb-2">Email Sent Successfully!</h3>
                     <p className="text-gray-600 text-center max-w-md">
-                      Purchase order has been sent to <span className="font-semibold">{vendorEmail}</span>
+                      {vendorEmail.includes(',') ? (
+                        <>Purchase order has been sent to <span className="font-semibold">{vendorEmail.split(',').length} recipients</span></>
+                      ) : (
+                        <>Purchase order has been sent to <span className="font-semibold">{vendorEmail}</span></>
+                      )}
                     </p>
                   </div>
                 )}

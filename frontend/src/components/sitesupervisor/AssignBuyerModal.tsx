@@ -107,7 +107,7 @@ const AssignBuyerModal: React.FC<AssignBuyerModalProps> = ({
                   </div>
                   <div>
                     <h2 className="text-2xl font-bold text-white">
-                      Assign BOQ to Buyer
+                      Assign BOQ to Procurement
                     </h2>
                     <p className="text-sm text-white/90 mt-1">
                       {boqName} {projectName && ` - ${projectName}`}
@@ -135,7 +135,7 @@ const AssignBuyerModal: React.FC<AssignBuyerModalProps> = ({
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <User className="w-4 h-4" />
-                      Select Buyer <span className="text-red-500">*</span>
+                      Select Procurement <span className="text-red-500">*</span>
                     </label>
                     {buyers.length === 0 ? (
                       <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
@@ -179,15 +179,15 @@ const AssignBuyerModal: React.FC<AssignBuyerModalProps> = ({
                       </div>
                     )}
                     <p className="text-xs text-gray-500 mt-2">
-                      The selected buyer will receive all BOQ materials for purchase
+                      The selected procurement team will receive all BOQ materials for purchase
                     </p>
                   </div>
 
                   {/* Info Box */}
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <p className="text-sm text-blue-800">
-                      <strong>Note:</strong> All BOQ materials will be sent to the selected buyer.
-                      The buyer will then select vendors and get TD approval before completing the purchase.
+                      <strong>Note:</strong> All BOQ materials will be sent to the selected procurement team.
+                      The procurement team will then select vendors and get TD approval before completing the purchase.
                     </p>
                   </div>
                 </div>
@@ -216,7 +216,7 @@ const AssignBuyerModal: React.FC<AssignBuyerModalProps> = ({
                 ) : (
                   <>
                     <Send className="w-4 h-4" />
-                    Assign to Buyer
+                    Assign to Procurement
                   </>
                 )}
               </button>

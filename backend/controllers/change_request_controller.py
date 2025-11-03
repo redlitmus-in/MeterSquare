@@ -103,7 +103,8 @@ def create_change_request():
                 'unit_price': unit_price,
                 'total_price': total_price,
                 'master_material_id': mat.get('master_material_id'),  # Optional
-                'justification': mat.get('justification', '')  # Per-material justification
+                'justification': mat.get('justification', ''),  # Per-material justification
+                'reason': mat.get('reason', '')  # Reason for new material (used in routing logic)
             })
 
         # Calculate overhead impact
@@ -480,8 +481,8 @@ def send_for_review(cr_id):
             has_new_materials = False
             if change_request.materials_data:
                 for mat in change_request.materials_data:
-                    # New material if master_material_id is None or if there's a reason (indicating new material)
-                    if mat.get('master_material_id') is None or mat.get('reason'):
+                    # New material if master_material_id is None
+                    if mat.get('master_material_id') is None:
                         has_new_materials = True
                         break
 
@@ -534,12 +535,17 @@ def send_for_review(cr_id):
             else:
                 # Auto-route based on 40% threshold of miscellaneous amount ONLY
                 # Check if this request contains NEW materials
+                log.info(f"PM auto-routing - DEBUG: materials_data = {change_request.materials_data}")
                 has_new_materials = False
                 if change_request.materials_data:
                     for mat in change_request.materials_data:
-                        if mat.get('master_material_id') is None or mat.get('reason'):
+                        master_mat_id = mat.get('master_material_id')
+                        log.info(f"PM auto-routing - DEBUG: Checking material '{mat.get('material_name')}' - master_material_id = {master_mat_id} (type: {type(master_mat_id)})")
+                        if mat.get('master_material_id') is None:
                             has_new_materials = True
                             break
+
+                log.info(f"PM auto-routing - DEBUG: has_new_materials = {has_new_materials}")
 
                 if has_new_materials:
                     # NEW materials - check 40% threshold against miscellaneous amount ONLY

@@ -143,7 +143,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <User className="w-4 h-4" />
-                      Assign to Buyer <span className="text-red-500">*</span>
+                      Assign to Procurement <span className="text-red-500">*</span>
                     </label>
                     {buyers.length === 0 ? (
                       <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
@@ -254,7 +254,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
                       </div>
                     )}
                     <p className="text-xs text-gray-500 mt-2">
-                      The selected buyer will be notified to complete the purchase
+                      The selected procurement team will be notified to complete the purchase
                     </p>
                   </div>
 
@@ -275,7 +275,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
                   {/* Info Box */}
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <p className="text-sm text-blue-800">
-                      <strong>Note:</strong> Approving this request will assign it to the selected buyer for purchase and merge the materials into the BOQ.
+                      <strong>Note:</strong> Approving this request will assign it to the selected procurement team for purchase and merge the materials into the BOQ.
                     </p>
                   </div>
                 </div>

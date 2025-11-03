@@ -87,6 +87,7 @@ export interface PreviewVendorEmailResponse {
 
 export interface SendVendorEmailRequest {
   vendor_email: string;
+  custom_email_body?: string;
 }
 
 export interface SendVendorEmailResponse {
@@ -333,9 +334,14 @@ class BuyerService {
   // Send email to vendor
   async sendVendorEmail(crId: number, data: SendVendorEmailRequest): Promise<SendVendorEmailResponse> {
     try {
+      const payload: any = { vendor_email: data.vendor_email };
+      if (data.custom_email_body) {
+        payload.custom_email_body = data.custom_email_body;
+      }
+
       const response = await axios.post<SendVendorEmailResponse>(
         `${API_URL}/buyer/purchase/${crId}/send-vendor-email`,
-        { vendor_email: data.vendor_email },
+        payload,
         { headers: this.getAuthHeaders() }
       );
 

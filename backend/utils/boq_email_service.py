@@ -1825,16 +1825,8 @@ class BOQEmailService:
                                         <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">CR-{cr_id}</td>
                                     </tr>
                                     <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Project Name:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{project_name}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Client:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{client}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Location:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{location}</td>
+                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Vendor:</td>
+                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{vendor_name}</td>
                                     </tr>
                                     <tr>
                                         <td style="color: #000000; font-size: 14px; font-weight: bold;">Total Items:</td>
@@ -1946,40 +1938,53 @@ class BOQEmailService:
 
         return wrap_email_content(email_body)
 
-    def send_vendor_purchase_order(self, vendor_email, vendor_data, purchase_data, buyer_data, project_data):
+    def send_vendor_purchase_order(self, vendor_email, vendor_data, purchase_data, buyer_data, project_data, custom_email_body=None):
         """
         Send purchase order email to Vendor with embedded logo
 
         Args:
-            vendor_email: Vendor's email address
+            vendor_email: Vendor's email address (can be a list for multiple recipients)
             vendor_data: Dictionary containing vendor information
             purchase_data: Dictionary containing purchase order details
             buyer_data: Dictionary containing buyer contact information
             project_data: Dictionary containing project information
+            custom_email_body: Optional custom HTML body for the email
 
         Returns:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Generate email content with embedded logo
-            email_html = self.generate_vendor_purchase_order_email(
-                vendor_data, purchase_data, buyer_data, project_data
-            )
+            # Handle both single email and list of emails
+            if isinstance(vendor_email, str):
+                email_list = [vendor_email]
+            else:
+                email_list = vendor_email
+
+            # Use custom body if provided, otherwise generate default template
+            if custom_email_body:
+                email_html = custom_email_body
+            else:
+                # Generate email content with embedded logo
+                email_html = self.generate_vendor_purchase_order_email(
+                    vendor_data, purchase_data, buyer_data, project_data
+                )
 
             # Create subject
             project_name = project_data.get('project_name', 'Project')
             cr_id = purchase_data.get('cr_id', 'N/A')
             subject = f"Purchase Order CR-{cr_id} - {project_name}"
 
-            # Send email (logo is embedded in HTML as base64)
-            success = self.send_email(vendor_email, subject, email_html)
+            # Send email to all recipients
+            all_sent = True
+            for email in email_list:
+                success = self.send_email(email, subject, email_html)
+                if success:
+                    log.info(f"Purchase order email sent successfully to vendor {email}")
+                else:
+                    log.error(f"Failed to send purchase order email to vendor {email}")
+                    all_sent = False
 
-            if success:
-                log.info(f"Purchase order email sent successfully to vendor {vendor_email}")
-            else:
-                log.error(f"Failed to send purchase order email to vendor {vendor_email}")
-
-            return success
+            return all_sent
 
         except Exception as e:
             log.error(f"Error sending purchase order to vendor: {e}")
