@@ -61,7 +61,7 @@ const availableRoles = [
   { value: 'estimator', label: 'Estimator', icon: FileText },
   { value: 'projectManager', label: 'Project Manager', icon: Users },
   { value: 'siteEngineer', label: 'Site Engineer', icon: HardHat },
-  { value: 'buyer', label: 'Buyer', icon: Package },
+  { value: 'buyer', label: 'Procurement', icon: Package },
 ];
 
 type LoginFormData = z.infer<typeof loginSchema>;
