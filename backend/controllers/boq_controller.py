@@ -1604,12 +1604,13 @@ def get_all_boq():
         # Get effective user context (handles admin viewing as other roles)
         context = get_effective_user_context()
 
-        # Build base query
+        # Build base query with optimized ordering (most recent first)
         query = (
             db.session.query(BOQ, BOQDetails, Project)
             .join(BOQDetails, BOQ.boq_id == BOQDetails.boq_id)
             .join(Project, BOQ.project_id == Project.project_id)
             .filter(BOQ.is_deleted == False)
+            .order_by(BOQ.created_at.desc())  # Most recent first
         )
 
         # Admin sees all BOQs, estimators see only their assigned BOQs
@@ -1617,11 +1618,37 @@ def get_all_boq():
             query = query.filter(Project.estimator_id == user_id)
 
         boqs = query.all()
+        log.info(f"📊 Processing {len(boqs)} BOQs for user {user_id} (role: {user_role})")
+
+        # OPTIMIZATION: Fetch all BOQ histories at once to avoid N+1 queries
+        boq_ids = [boq.boq_id for boq, _, _ in boqs]
+        all_histories = BOQHistory.query.filter(BOQHistory.boq_id.in_(boq_ids)).order_by(BOQHistory.boq_id, BOQHistory.created_at.desc()).all() if boq_ids else []
+
+        # Group histories by boq_id for quick lookup
+        history_by_boq = {}
+        for hist in all_histories:
+            if hist.boq_id not in history_by_boq:
+                history_by_boq[hist.boq_id] = []
+            history_by_boq[hist.boq_id].append(hist)
+
+        log.info(f"⚡ Loaded {len(all_histories)} history records for {len(boq_ids)} BOQs")
+
+        # OPTIMIZATION: Fetch all preliminaries at once to avoid N+1 queries
+        project_ids = list(set([project.project_id for _, _, project in boqs if project]))
+        all_preliminaries = Preliminary.query.filter(
+            Preliminary.project_id.in_(project_ids),
+            Preliminary.is_deleted == False
+        ).all() if project_ids else []
+
+        # Group preliminaries by project_id for quick lookup
+        prelim_by_project = {p.project_id: p for p in all_preliminaries}
+        log.info(f"⚡ Loaded {len(all_preliminaries)} preliminaries for {len(project_ids)} projects")
+
         complete_boqs = []
         for boq, boq_detail, project in boqs:
             # Check BOQ history for sender and receiver roles
             display_status = boq.status
-            boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.created_at.desc()).first()
+            boq_history = history_by_boq.get(boq.boq_id, [None])[0]  # Get first (most recent)
 
             if boq_history and boq_history.sender_role and boq_history.receiver_role:
                 sender_role = boq_history.sender_role.lower().replace('_', '').replace(' ', '')
@@ -1645,7 +1672,8 @@ def get_all_boq():
             has_pending_day_extension = False
             pending_day_extension_count = 0
             if project and project.user_id:  # Only check if PM is assigned
-                pending_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).all()
+                # OPTIMIZATION: Reuse already-fetched histories instead of querying again
+                pending_history = history_by_boq.get(boq.boq_id, [])
                 for hist in pending_history:
                     if hist.action and isinstance(hist.action, list):
                         for action in hist.action:
@@ -1845,10 +1873,8 @@ def get_all_boq():
 
             # Get preliminaries data for this project
             try:
-                preliminary = Preliminary.query.filter_by(
-                    project_id=boq.project_id,
-                    is_deleted=False
-                ).first()
+                # OPTIMIZATION: Use pre-fetched preliminaries instead of querying
+                preliminary = prelim_by_project.get(boq.project_id)
 
                 if preliminary:
                     # Build preliminaries object with cost_details

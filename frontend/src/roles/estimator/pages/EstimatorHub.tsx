@@ -379,14 +379,15 @@ const EstimatorHub: React.FC = () => {
 
     fetchData();
 
-    // Set up auto-refresh polling every 2 seconds for instant updates
-    const intervalId = setInterval(() => {
-      loadBOQs(false); // Auto-refresh BOQs in background without showing loading spinner
-    }, 2000); // 2 seconds for instant updates
+    // DISABLED: Auto-refresh polling to prevent multiple overlapping requests
+    // TODO: Re-enable with longer interval (30s+) after backend optimization
+    // const intervalId = setInterval(() => {
+    //   loadBOQs(false); // Auto-refresh BOQs in background without showing loading spinner
+    // }, 2000); // 2 seconds for instant updates
 
     return () => {
       abortController.abort();
-      clearInterval(intervalId);
+      // clearInterval(intervalId);
     };
   }, [currentPage]);
 

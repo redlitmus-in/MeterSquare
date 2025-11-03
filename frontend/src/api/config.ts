@@ -25,7 +25,7 @@ export const supabase = createClient(envConfig.supabase.url, envConfig.supabase.
 // Axios instance with enhanced error handling
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000, // Increased timeout for production
+  timeout: 60000, // Increased timeout to 60s for large dataset queries
   headers: {
     'Content-Type': 'application/json',
   },
