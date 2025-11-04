@@ -66,6 +66,26 @@ ROLE_HIERARCHY = {
         'color': '#f97316',
         'icon': 'ShoppingCart'
     },
+    'procurement': {
+        'level': 3,
+        'tier': 'Operations',
+        'approval_limit': 0,
+        'can_approve': [],
+        'can_initiate': ['purchase_order'],
+        'permissions': [
+            'view_boq_materials',
+            'view_project_materials',
+            'create_purchase_orders',
+            'manage_purchase_orders',
+            'track_deliveries',
+            'manage_vendors',
+            'view_approved_change_requests',
+            'update_material_status'
+        ],
+        'description': 'Procurement - Material procurement and vendor management',
+        'color': '#f97316',
+        'icon': 'ShoppingCart'
+    },
     'siteSupervisor': {
         'level': 3,
         'tier': 'Operations',
@@ -247,6 +267,7 @@ ROLE_DEPARTMENTS = {
     'admin': 'Executive',
     'siteEngineer': 'Operations',
     'buyer': 'Operations',
+    'procurement': 'Operations',
     'siteSupervisor': 'Operations',
     'mepSupervisor': 'Operations',
     'projectManager': 'Management',
