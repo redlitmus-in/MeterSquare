@@ -8,6 +8,7 @@ class Project(db.Model):
     # __table_args__ = {'schema': 'public'}  # Explicitly set schema
 
     project_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    project_code = db.Column(db.String(50), unique=True, nullable=False)  # Auto-generated unique code like Proj01
     project_name = db.Column(db.String(255), nullable=False)  # Required
     # user_id is a project manager id in a user table
     user_id = db.Column(db.Integer, nullable=True)
@@ -52,6 +53,7 @@ class Project(db.Model):
 
         return {
             'project_id': self.project_id,
+            'project_code': self.project_code,
             'project_name': self.project_name,
             'user_id': self.user_id,
             'estimator_id' : self.estimator_id,

@@ -2352,7 +2352,12 @@ const EstimatorHub: React.FC = () => {
                       {/* Header */}
                       <div className="p-4">
                         <div className="flex items-start justify-between mb-2">
-                          <h3 className="font-semibold text-gray-900 text-base flex-1">{project.project_name}</h3>
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-gray-900 text-base">{project.project_name}</h3>
+                            {project.project_code && (
+                              <p className="text-xs text-gray-500 mt-0.5">Project Code: {project.project_code}</p>
+                            )}
+                          </div>
                           <div className="flex items-center gap-1">
                             <button
                               className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"

@@ -214,6 +214,7 @@ def get_all_pm_boqs():
                 project_details = {
                     "project_id": boq.project.project_id,
                     "project_name": boq.project.project_name,
+                    "project_code": boq.project.project_code if boq.project else None,
                     "user_id": boq.project.user_id,
                     "user_name": pm_name,
                     "site_supervisor_id": boq.project.site_supervisor_id,

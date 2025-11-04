@@ -9,6 +9,8 @@ from utils.boq_email_service import BOQEmailService
 from models.user import User
 from models.role import Role
 from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
+from sqlalchemy import func, and_, or_
+
 
 log = get_logger()
 
@@ -306,160 +308,6 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                 db.session.flush()
 
     return master_sub_item_ids
-
-
-def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
-    """Add sub-items to master tables with their materials and labour"""
-    master_sub_item_ids = []
-
-    for sub_item in sub_items:
-        sub_item_name = sub_item.get("sub_item_name")
-
-        # Check if sub-item already exists for this master item
-        master_sub_item = MasterSubItem.query.filter_by(
-            item_id=master_item_id,
-            sub_item_name=sub_item_name
-        ).first()
-
-        if not master_sub_item:
-            master_sub_item = MasterSubItem(
-                item_id=master_item_id,
-                sub_item_name=sub_item_name,
-                description=sub_item.get("scope"),
-                size=sub_item.get("size"),
-                location=sub_item.get("location"),
-                brand=sub_item.get("brand"),
-                unit=sub_item.get("unit"),
-                quantity=sub_item.get("quantity"),
-                per_unit_cost=sub_item.get("per_unit_cost"),
-                sub_item_total_cost=sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None,
-
-                # Per-sub-item percentages
-                misc_percentage=sub_item.get("misc_percentage", 10.0),
-                misc_amount=sub_item.get("misc_amount", 0.0),
-                overhead_profit_percentage=sub_item.get("overhead_profit_percentage", 25.0),
-                overhead_profit_amount=sub_item.get("overhead_profit_amount", 0.0),
-                transport_percentage=sub_item.get("transport_percentage", 5.0),
-                transport_amount=sub_item.get("transport_amount", 0.0),
-
-                # Cost breakdown
-                material_cost=sub_item.get("material_cost", 0.0),
-                labour_cost=sub_item.get("labour_cost", 0.0),
-                internal_cost=sub_item.get("internal_cost", 0.0),
-                planned_profit=sub_item.get("planned_profit", 0.0),
-                negotiable_margin=sub_item.get("negotiable_margin", 0.0),
-
-                created_by=created_by
-            )
-            db.session.add(master_sub_item)
-            db.session.flush()
-        else:
-            # Update existing sub-item
-            master_sub_item.description = sub_item.get("scope")
-            master_sub_item.size = sub_item.get("size")
-            master_sub_item.location = sub_item.get("location")
-            master_sub_item.brand = sub_item.get("brand")
-            master_sub_item.unit = sub_item.get("unit")
-            master_sub_item.quantity = sub_item.get("quantity")
-            master_sub_item.per_unit_cost = sub_item.get("per_unit_cost")
-            master_sub_item.sub_item_total_cost = sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None
-
-            # Update percentages
-            master_sub_item.misc_percentage = sub_item.get("misc_percentage", 10.0)
-            master_sub_item.misc_amount = sub_item.get("misc_amount", 0.0)
-            master_sub_item.overhead_profit_percentage = sub_item.get("overhead_profit_percentage", 25.0)
-            master_sub_item.overhead_profit_amount = sub_item.get("overhead_profit_amount", 0.0)
-            master_sub_item.transport_percentage = sub_item.get("transport_percentage", 5.0)
-            master_sub_item.transport_amount = sub_item.get("transport_amount", 0.0)
-
-            # Update cost breakdown
-            master_sub_item.material_cost = sub_item.get("material_cost", 0.0)
-            master_sub_item.labour_cost = sub_item.get("labour_cost", 0.0)
-            master_sub_item.internal_cost = sub_item.get("internal_cost", 0.0)
-            master_sub_item.planned_profit = sub_item.get("planned_profit", 0.0)
-            master_sub_item.negotiable_margin = sub_item.get("negotiable_margin", 0.0)
-
-            db.session.flush()
-
-        master_sub_item_ids.append(master_sub_item.sub_item_id)
-
-        # Add materials for this sub-item
-        for mat_data in sub_item.get("materials", []):
-            material_name = mat_data.get("material_name")
-            quantity = mat_data.get("quantity", 0.0)
-            unit_price = mat_data.get("unit_price", 0.0)
-            total_price = mat_data.get("total_price", quantity * unit_price)
-            vat_percentage = mat_data.get("vat_percentage", 0.0)
-            vat_amount = mat_data.get("vat_amount", 0.0)
-
-            master_material = MasterMaterial.query.filter_by(material_name=material_name).first()
-            if not master_material:
-                master_material = MasterMaterial(
-                    material_name=material_name,
-                    item_id=master_item_id,
-                    sub_item_id=master_sub_item.sub_item_id,
-                    description=mat_data.get("description"),
-                    quantity=quantity,
-                    default_unit=mat_data.get("unit", "nos"),
-                    current_market_price=unit_price,
-                    total_price=total_price,
-                    vat_percentage=vat_percentage,
-                    vat_amount=vat_amount,
-                    created_by=created_by,
-                    last_modified_by=created_by
-                )
-                db.session.add(master_material)
-                db.session.flush()
-            else:
-                # Update existing material
-                if master_material.sub_item_id is None:
-                    master_material.sub_item_id = master_sub_item.sub_item_id
-                if master_material.item_id is None:
-                    master_material.item_id = master_item_id
-                master_material.description = mat_data.get("description")
-                master_material.quantity = quantity
-                master_material.current_market_price = unit_price
-                master_material.total_price = total_price
-                master_material.vat_percentage = vat_percentage
-                master_material.vat_amount = vat_amount
-                master_material.default_unit = mat_data.get("unit", "nos")
-                master_material.last_modified_by = created_by
-                db.session.flush()
-
-        # Add labour for this sub-item
-        for labour_data in sub_item.get("labour", []):
-            labour_role = labour_data.get("labour_role")
-            rate_per_hour = labour_data.get("rate_per_hour", 0.0)
-            hours = labour_data.get("hours", 0.0)
-            labour_amount = float(rate_per_hour) * float(hours)
-
-            master_labour = MasterLabour.query.filter_by(labour_role=labour_role).first()
-            if not master_labour:
-                master_labour = MasterLabour(
-                    labour_role=labour_role,
-                    item_id=master_item_id,
-                    sub_item_id=master_sub_item.sub_item_id,
-                    work_type="contract",
-                    hours=float(hours),
-                    rate_per_hour=float(rate_per_hour),
-                    amount=labour_amount,
-                    created_by=created_by
-                )
-                db.session.add(master_labour)
-                db.session.flush()
-            else:
-                # Update existing labour
-                if master_labour.sub_item_id is None:
-                    master_labour.sub_item_id = master_sub_item.sub_item_id
-                if master_labour.item_id is None:
-                    master_labour.item_id = master_item_id
-                master_labour.hours = float(hours)
-                master_labour.rate_per_hour = float(rate_per_hour)
-                master_labour.amount = labour_amount
-                db.session.flush()
-
-    return master_sub_item_ids
-
 
 def clean_numeric_value(value):
     """Clean numeric values that might come wrapped in {source, parsedValue} objects"""
@@ -1606,98 +1454,29 @@ def get_all_boq():
 
         # Build base query with optimized ordering (most recent first)
         query = (
-            db.session.query(BOQ, BOQDetails, Project)
-            .join(BOQDetails, BOQ.boq_id == BOQDetails.boq_id)
+            db.session.query(BOQ, Project)
             .join(Project, BOQ.project_id == Project.project_id)
             .filter(BOQ.is_deleted == False)
             .order_by(BOQ.created_at.desc())  # Most recent first
         )
 
-        # Admin sees all BOQs, estimators see only their assigned BOQs
+        # Admin sees all BOQs, estimators see BOQs for their assigned projects OR projects with no estimator (backward compatibility)
         if user_role != 'admin' and should_apply_role_filter(context):
             query = query.filter(Project.estimator_id == user_id)
 
         boqs = query.all()
-        log.info(f"📊 Processing {len(boqs)} BOQs for user {user_id} (role: {user_role})")
-
-        # OPTIMIZATION: Fetch all BOQ histories at once to avoid N+1 queries
-        boq_ids = [boq.boq_id for boq, _, _ in boqs]
-        all_histories = BOQHistory.query.filter(BOQHistory.boq_id.in_(boq_ids)).order_by(BOQHistory.boq_id, BOQHistory.created_at.desc()).all() if boq_ids else []
-
-        # Group histories by boq_id for quick lookup
-        history_by_boq = {}
-        for hist in all_histories:
-            if hist.boq_id not in history_by_boq:
-                history_by_boq[hist.boq_id] = []
-            history_by_boq[hist.boq_id].append(hist)
-
-        log.info(f"⚡ Loaded {len(all_histories)} history records for {len(boq_ids)} BOQs")
-
-        # OPTIMIZATION: Fetch all preliminaries at once to avoid N+1 queries
-        project_ids = list(set([project.project_id for _, _, project in boqs if project]))
-        all_preliminaries = Preliminary.query.filter(
-            Preliminary.project_id.in_(project_ids),
-            Preliminary.is_deleted == False
-        ).all() if project_ids else []
-
-        # Group preliminaries by project_id for quick lookup
-        prelim_by_project = {p.project_id: p for p in all_preliminaries}
-        log.info(f"⚡ Loaded {len(all_preliminaries)} preliminaries for {len(project_ids)} projects")
-
+        
         complete_boqs = []
-        for boq, boq_detail, project in boqs:
+        for boq, project in boqs:
             # Check BOQ history for sender and receiver roles
             display_status = boq.status
-            boq_history = history_by_boq.get(boq.boq_id, [None])[0]  # Get first (most recent)
-
-            if boq_history and boq_history.sender_role and boq_history.receiver_role:
-                sender_role = boq_history.sender_role.lower().replace('_', '').replace(' ', '')
-                receiver_role = boq_history.receiver_role.lower().replace('_', '').replace(' ', '')
-
-                # Don't override if BOQ has a definitive status (PM_Approved, PM_Rejected, etc.)
-                if sender_role == 'projectmanager' and receiver_role == 'estimator':
-                    # Only set to pending if status is not already PM_Approved or PM_Rejected
-                    if boq.status not in ['PM_Approved', 'PM_Rejected', 'day_request_send_td', 'Approved', 'Rejected']:
-                        display_status = 'pending'
-                elif sender_role == 'technicaldirector' and receiver_role == 'projectmanager':
-                    display_status = 'Client_Confirmed'
-                elif sender_role == 'projectmanager' and receiver_role == 'siteengineer':
-                    display_status = 'Client_Confirmed'
-                elif sender_role == 'siteengineer' and receiver_role == 'projectmanager':
-                    display_status = 'Client_Confirmed'
-            elif boq.status in ['new_purchase_create', 'sent_for_review', 'new_purchase_approved', 'new_purchase_rejected', 'approved']:
-                display_status = 'Client_Confirmed'
-
-            # Check for pending day extension requests
-            has_pending_day_extension = False
-            pending_day_extension_count = 0
-            if project and project.user_id:  # Only check if PM is assigned
-                # OPTIMIZATION: Reuse already-fetched histories instead of querying again
-                pending_history = history_by_boq.get(boq.boq_id, [])
-                for hist in pending_history:
-                    if hist.action and isinstance(hist.action, list):
-                        for action in hist.action:
-                            action_type = action.get('type', '').lower()
-                            action_status = action.get('status', '').lower()
-                            if (action_type == 'day_extension_requested' and
-                                action_status in ['day_request_send_td', 'edited_by_td']):
-                                has_pending_day_extension = True
-                                pending_day_extension_count += 1
-
-            # Calculate end_date if not stored
-            end_date = None
-            if project:
-                if project.end_date:
-                    end_date = project.end_date.isoformat()
-                elif project.start_date and project.duration_days:
-                    from datetime import timedelta
-                    end_date = (project.start_date + timedelta(days=project.duration_days)).isoformat()
-
+           
             boq_summary = {
                 "boq_id": boq.boq_id,
                 "boq_name": boq.boq_name,
                 "project_id": boq.project_id,
                 "project_name": project.project_name if project else None,
+                "project_code": project.project_code if project else None,
                 "client": project.client if project else None,
                 "location": project.location if project else None,
                 "floor": project.floor_name if project else None,
@@ -1705,200 +1484,11 @@ def get_all_boq():
                 "status": display_status,
                 "client_status":boq.client_status,
                 "revision_number": getattr(boq, 'revision_number', 0) or 0,
-                "client_rejection_reason": boq.client_rejection_reason,
                 "email_sent" : boq.email_sent,
                 "user_id": project.user_id if project else None,  # PM assignment indicator
-                "items_count": boq_detail.total_items,
-                "material_count": boq_detail.total_materials,
-                "labour_count": boq_detail.total_labour,
-                "total_cost": boq_detail.total_cost,
-                "selling_price": boq_detail.total_cost,
-                "estimatedSellingPrice": boq_detail.total_cost,
                 "created_at": boq.created_at.isoformat() if boq.created_at else None,
                 "created_by": boq.created_by,
-                # Project timeline fields
-                "start_date": project.start_date.isoformat() if project and project.start_date else None,
-                "end_date": end_date,
-                "duration_days": project.duration_days if project else None,
-                # Day extension status
-                "has_pending_day_extension": has_pending_day_extension,
-                "pending_day_extension_count": pending_day_extension_count
             }
-
-            # Add items from JSON - handle both old and new formats
-            items_list = []
-            total_material_cost = 0
-            total_labour_cost = 0
-            total_selling_price = 0
-            overhead_percentage = 0
-            profit_margin = 0
-
-            if boq_detail.boq_details and "items" in boq_detail.boq_details:
-                items = boq_detail.boq_details["items"]
-                items_list = items
-
-                # Calculate totals from items
-                for item in items:
-                    item_materials_cost = 0
-                    item_labour_cost = 0
-                    item_client_amount = 0  # CLIENT SELLING PRICE
-
-                    # Check if item has sub_items (new format)
-                    if "sub_items" in item and item.get("sub_items"):
-                        # NEW FORMAT: Client amount comes from sub_item quantity × rate
-                        for sub_item in item.get("sub_items", []):
-                            # Calculate CLIENT AMOUNT (what client pays) = quantity × rate
-                            sub_quantity = sub_item.get("quantity", 0)
-                            sub_rate = sub_item.get("rate", 0)
-                            sub_client_amount = sub_quantity * sub_rate
-                            item_client_amount += sub_client_amount
-
-                            # Sum up materials cost from sub_item (for internal tracking)
-                            materials = sub_item.get("materials", [])
-                            for mat in materials:
-                                mat_cost = mat.get("total_price", 0)
-                                total_material_cost += mat_cost
-                                item_materials_cost += mat_cost
-                            # Sum up labour cost from sub_item (for internal tracking)
-                            labour = sub_item.get("labour", [])
-                            for lab in labour:
-                                lab_cost = lab.get("total_cost", 0)
-                                total_labour_cost += lab_cost
-                                item_labour_cost += lab_cost
-                    else:
-                        # OLD FORMAT: materials/labour are at item level
-                        materials = item.get("materials", [])
-                        for mat in materials:
-                            mat_cost = mat.get("total_price", 0)
-                            total_material_cost += mat_cost
-                            item_materials_cost += mat_cost
-                        labour = item.get("labour", [])
-                        for lab in labour:
-                            lab_cost = lab.get("total_cost", 0)
-                            total_labour_cost += lab_cost
-                            item_labour_cost += lab_cost
-
-                    # Determine item selling price (client amount)
-                    item_selling_price = 0
-
-                    # For NEW FORMAT with sub_items, use calculated client amount
-                    if item_client_amount > 0:
-                        item_selling_price = item_client_amount
-                    else:
-                        # For OLD FORMAT or if no sub_items, try to get from item fields
-                        item_selling_price = item.get("selling_price", 0) or item.get("estimatedSellingPrice", 0)
-
-                        # If still no selling price, calculate from base cost + markup
-                        if not item_selling_price or item_selling_price == 0:
-                            item_base_cost = item_materials_cost + item_labour_cost
-                            item_overhead = item.get("overhead_amount", 0)
-                            item_profit = item.get("profit_margin_amount", 0)
-                            item_misc = item.get("miscellaneous_amount", 0)
-
-                            # If amounts are not present, calculate from percentages
-                            if item_overhead == 0 and item.get("overhead_percentage", 0) > 0:
-                                item_overhead = item_base_cost * (item.get("overhead_percentage", 0) / 100)
-                            if item_profit == 0 and item.get("profit_margin_percentage", 0) > 0:
-                                item_profit = item_base_cost * (item.get("profit_margin_percentage", 0) / 100)
-                            if item_misc == 0 and item.get("miscellaneous_percentage", 0) > 0:
-                                item_misc = item_base_cost * (item.get("miscellaneous_percentage", 0) / 100)
-
-                            item_selling_price = item_base_cost + item_overhead + item_profit + item_misc
-
-                    total_selling_price += item_selling_price
-
-                    log.debug(f"Item '{item.get('item_name', 'Unknown')}': client_amount={item_client_amount}, selling_price={item_selling_price}, materials={item_materials_cost}, labour={item_labour_cost}")
-
-                    # Get overhead and profit from first item
-                    if overhead_percentage == 0:
-                        overhead_percentage = item.get("overhead_percentage", 0)
-                    if profit_margin == 0:
-                        profit_margin = item.get("profit_margin", 0) or item.get("profit_margin_percentage", 0)
-
-            # Add summary from JSON if available (this will override calculated values if present)
-            if boq_detail.boq_details and "summary" in boq_detail.boq_details:
-                summary = boq_detail.boq_details["summary"]
-                if summary.get("total_material_cost", 0) > 0:
-                    total_material_cost = summary.get("total_material_cost", 0)
-                if summary.get("total_labour_cost", 0) > 0:
-                    total_labour_cost = summary.get("total_labour_cost", 0)
-                if summary.get("overhead_percentage", 0) > 0:
-                    overhead_percentage = summary.get("overhead_percentage", 0)
-                if summary.get("profit_margin", 0) > 0:
-                    profit_margin = summary.get("profit_margin", 0)
-                # Also check for selling price in summary
-                if summary.get("selling_price", 0) > 0 or summary.get("estimatedSellingPrice", 0) > 0:
-                    total_selling_price = summary.get("selling_price", 0) or summary.get("estimatedSellingPrice", 0) or summary.get("grandTotal", 0)
-
-            # Update total_cost if we calculated a selling price from items
-            pre_discount_total = boq_summary["total_cost"]  # Store original value
-            if total_selling_price > 0:
-                boq_summary["total_cost"] = total_selling_price
-                boq_summary["selling_price"] = total_selling_price
-                boq_summary["estimatedSellingPrice"] = total_selling_price
-                pre_discount_total = total_selling_price
-
-            # IMPORTANT: Apply discount if present in BOQ details
-            # This ensures discount is applied whether we calculated from items OR used database value
-            discount_percentage = 0
-            discount_amount = 0
-            if boq_detail.boq_details:
-                discount_percentage = boq_detail.boq_details.get("discount_percentage", 0) or 0
-                discount_amount = boq_detail.boq_details.get("discount_amount", 0) or 0
-
-                # Calculate discount amount if only percentage is provided
-                current_total = boq_summary["total_cost"]
-                if discount_amount == 0 and discount_percentage > 0 and current_total > 0:
-                    discount_amount = current_total * (discount_percentage / 100)
-
-                # Apply discount to ALL three fields: total_cost, selling_price, estimatedSellingPrice
-                if discount_amount > 0:
-                    final_total_after_discount = current_total - discount_amount
-                    boq_summary["total_cost"] = final_total_after_discount
-                    boq_summary["selling_price"] = final_total_after_discount
-                    boq_summary["estimatedSellingPrice"] = final_total_after_discount
-                    log.info(f"✅ BOQ {boq.boq_id}: Applied discount {discount_percentage}% (AED {discount_amount}). Before: {pre_discount_total}, After: {final_total_after_discount}")
-                else:
-                    log.info(f"ℹ️ BOQ {boq.boq_id}: No discount to apply. Total: {current_total}")
-
-            boq_summary.update({
-                "items": items_list,
-                "total_material_cost": total_material_cost,
-                "total_labour_cost": total_labour_cost,
-                "overhead_percentage": overhead_percentage,
-                "profit_margin": profit_margin,
-                "discount_percentage": discount_percentage,
-                "discount_amount": discount_amount
-            })
-
-            # Get preliminaries data for this project
-            try:
-                # OPTIMIZATION: Use pre-fetched preliminaries instead of querying
-                preliminary = prelim_by_project.get(boq.project_id)
-
-                if preliminary:
-                    # Build preliminaries object with cost_details
-                    preliminaries_data = {
-                        "items": preliminary.description.get("items", []) if preliminary.description else [],
-                        "notes": preliminary.description.get("notes", "") if preliminary.description else "",
-                        "cost_details": {
-                            "quantity": preliminary.quantity or 1,
-                            "unit": preliminary.unit or "Nos",
-                            "rate": preliminary.rate or 0,
-                            "amount": preliminary.amount or 0
-                        }
-                    }
-                    # Include cost_analysis if available in description JSON
-                    if preliminary.description and "cost_analysis" in preliminary.description:
-                        preliminaries_data["cost_analysis"] = preliminary.description["cost_analysis"]
-
-                    boq_summary["preliminaries"] = preliminaries_data
-                    log.info(f"📋 BOQ {boq.boq_id}: Added preliminaries data - amount: {preliminary.amount}")
-            except Exception as prelim_error:
-                log.warning(f"⚠️ Failed to fetch preliminaries for BOQ {boq.boq_id}: {str(prelim_error)}")
-
-            # 🔍 DEBUG: Log the final values being sent to frontend
-            log.info(f"📤 [API Response] BOQ {boq.boq_id} ({boq.boq_name}) - Sending to frontend: total_cost={boq_summary['total_cost']}, selling_price={boq_summary['selling_price']}, estimatedSellingPrice={boq_summary['estimatedSellingPrice']}, discount_percentage={discount_percentage}%, discount_amount={discount_amount}")
 
             complete_boqs.append(boq_summary)
 

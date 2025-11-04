@@ -166,6 +166,7 @@ def get_all_td_boqs():
                 "project_id": boq.project_id,
                 "boq_name": boq.boq_name,
                 "project_name": boq.project.project_name if boq.project else None,
+                "project_code": boq.project.project_code if boq.project else None,
                 "client": boq.project.client if boq.project else None,
                 "location": boq.project.location if boq.project else None,
                 "area": boq.project.area if boq.project else None,

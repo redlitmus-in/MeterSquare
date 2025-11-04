@@ -245,7 +245,8 @@ def get_all_sitesupervisor():
                 project_data = {
                     "project_id": project.project_id,
                     "project_name": project.project_name if hasattr(project, "project_name") else None,
-                    "status": project.status
+                    "status": project.status,
+                    "project_code": project.project_code if project else None,
                 }
 
                 if project_status == 'completed':

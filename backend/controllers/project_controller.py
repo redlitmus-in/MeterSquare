@@ -72,8 +72,30 @@ def create_project():
             from datetime import timedelta
             end_date = start_date + timedelta(days=duration_days)
 
+        # Generate unique project_code
+        last_project = Project.query.filter(
+            Project.project_code.like('MSQ%')
+        ).order_by(Project.project_code.desc()).first()
+
+        if last_project and last_project.project_code:
+            try:
+                last_number = int(last_project.project_code.replace('MSQ', ''))
+                new_number = last_number + 1
+            except ValueError:
+                new_number = 1
+        else:
+            new_number = 1
+
+        project_code = f"MSQ{new_number:02d}"
+
+        # Ensure uniqueness
+        while Project.query.filter_by(project_code=project_code).first():
+            new_number += 1
+            project_code = f"MSQ{new_number:02d}"
+
         # Create new project
         new_project = Project(
+            project_code=project_code,
             project_name=data['project_name'],
             description=data.get('description'),
             location=data.get('location'),
@@ -128,9 +150,17 @@ def get_all_projects():
         search = request.args.get('search', '')
         status = request.args.get('status', '')
         work_type = request.args.get('work_type', '')
+        project_code = request.args.get('project_code', '')
 
-        # Build query
-        query = Project.query.filter_by(is_deleted=False,estimator_id=user_id)
+        # Build query - show projects assigned to this estimator OR projects with no estimator (for backward compatibility)
+        query = Project.query.filter(
+            Project.is_deleted == False
+        ).filter(
+            or_(
+                Project.estimator_id == user_id,
+                Project.estimator_id == None
+            )
+        )
 
         # Apply filters
         if search:
@@ -140,7 +170,8 @@ def get_all_projects():
                     Project.project_name.ilike(search_filter),
                     Project.client.ilike(search_filter),
                     Project.location.ilike(search_filter),
-                    Project.description.ilike(search_filter)
+                    Project.description.ilike(search_filter),
+                    Project.project_code.ilike(search_filter)
                 )
             )
 
@@ -149,6 +180,9 @@ def get_all_projects():
 
         if work_type:
             query = query.filter(func.lower(Project.work_type) == work_type.lower())
+
+        if project_code:
+            query = query.filter(Project.project_code.ilike(f"%{project_code}%"))
 
         # Order by most recent first
         query = query.order_by(Project.created_at.desc())
