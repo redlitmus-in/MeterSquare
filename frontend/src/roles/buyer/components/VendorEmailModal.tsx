@@ -259,7 +259,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
           <h3 style="font-weight: bold; color: #1F2937; margin-bottom: 12px; font-size: 16px;">Contact Person</h3>
           <div style="background-color: #F3F4F6; padding: 12px; border-radius: 6px;">
             <div style="margin-bottom: 8px;">
-              <span style="font-weight: 600; color: #4B5563;">Buyer Name:</span>
+              <span style="font-weight: 600; color: #4B5563;">Procurement Name:</span>
               <span style="margin-left: 8px; color: #1F2937;">${editedBuyerName}</span>
             </div>
             <div style="margin-bottom: 8px;">
@@ -600,7 +600,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                               <h3 className="font-bold text-gray-900 mb-3 text-base">Contact Person</h3>
                               <div className="bg-gray-50 p-3 rounded border border-gray-200 space-y-2">
                                 <div className="flex justify-between">
-                                  <span className="text-xs text-gray-600">Buyer Name:</span>
+                                  <span className="text-xs text-gray-600">Procurement Name:</span>
                                   <span className="text-sm text-gray-900 font-medium">{editedBuyerName}</span>
                                 </div>
                                 <div className="flex justify-between">

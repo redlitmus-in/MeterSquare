@@ -1884,7 +1884,7 @@ class BOQEmailService:
                                 <h2 style="color: #000000; font-size: 20px; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Contact Person</h2>
                                 <table width="100%" cellpadding="10" cellspacing="0" border="0" style="background: #f0f9ff; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
                                     <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold; width: 30%;">Buyer Name:</td>
+                                        <td style="color: #000000; font-size: 14px; font-weight: bold; width: 30%;">Procurement Name:</td>
                                         <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{buyer_name}</td>
                                     </tr>
                                     <tr>
