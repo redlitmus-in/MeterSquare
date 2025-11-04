@@ -38,7 +38,7 @@ class BOQEmailService:
         Send email using SMTP
 
         Args:
-            recipient_email: Email address of recipient
+            recipient_email: Email address of recipient (string) or list of emails
             subject: Email subject
             html_content: HTML formatted email content
             attachments: List of tuples (filename, file_data, mime_type)
@@ -51,11 +51,25 @@ class BOQEmailService:
             if not self.sender_email or not self.sender_password:
                 error_msg = "Email configuration missing: SENDER_EMAIL or SENDER_EMAIL_PASSWORD not set in environment"
                 raise ValueError(error_msg)
+
+            # Handle multiple recipients - convert string to list if needed
+            if isinstance(recipient_email, str):
+                # Split comma-separated emails and clean them
+                recipient_list = [email.strip() for email in recipient_email.split(',') if email.strip()]
+            elif isinstance(recipient_email, list):
+                recipient_list = [email.strip() for email in recipient_email if email.strip()]
+            else:
+                recipient_list = [str(recipient_email).strip()]
+
+            if not recipient_list:
+                raise ValueError("No valid recipient email addresses provided")
+
             # Create message
             message = MIMEMultipart('mixed')
             sender_name = "MeterSquare ERP"
             message["From"] = formataddr((str(Header(sender_name, 'utf-8')), self.sender_email))
-            message["To"] = recipient_email
+            # For multiple recipients, join with comma for the To header
+            message["To"] = ", ".join(recipient_list)
             message["Subject"] = subject
 
             # Attach HTML body
@@ -76,13 +90,16 @@ class BOQEmailService:
                     with smtplib.SMTP(self.email_host, self.email_port, timeout=30) as server:
                         server.starttls()
                         server.login(self.sender_email, self.sender_password)
-                        server.sendmail(self.sender_email, recipient_email, message.as_string())
+                        # Send to all recipients in one call
+                        server.sendmail(self.sender_email, recipient_list, message.as_string())
                 else:
                     # For SSL (like Gmail on port 465)
                     with smtplib.SMTP_SSL(self.email_host, self.email_port, timeout=30) as server:
                         server.login(self.sender_email, self.sender_password)
-                        server.sendmail(self.sender_email, recipient_email, message.as_string())
+                        # Send to all recipients in one call
+                        server.sendmail(self.sender_email, recipient_list, message.as_string())
 
+                log.info(f"Email sent successfully to {len(recipient_list)} recipient(s): {', '.join(recipient_list)}")
                 return True
 
             except smtplib.SMTPAuthenticationError as e:
@@ -1943,26 +1960,26 @@ class BOQEmailService:
         Send purchase order email to Vendor with embedded logo
 
         Args:
-            vendor_email: Vendor's email address (can be a list for multiple recipients)
+            vendor_email: Vendor's email address (string with comma-separated emails or list)
             vendor_data: Dictionary containing vendor information
             purchase_data: Dictionary containing purchase order details
             buyer_data: Dictionary containing buyer contact information
             project_data: Dictionary containing project information
-            custom_email_body: Optional custom HTML body for the email
+            custom_email_body: Optional custom HTML body for the email (complete HTML document)
 
         Returns:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Handle both single email and list of emails
-            if isinstance(vendor_email, str):
-                email_list = [vendor_email]
-            else:
-                email_list = vendor_email
-
             # Use custom body if provided, otherwise generate default template
             if custom_email_body:
-                email_html = custom_email_body
+                # Custom body is already a complete HTML document from frontend
+                # Check if it's already wrapped (has <!DOCTYPE or <html> tag)
+                if '<!DOCTYPE' in custom_email_body or '<html' in custom_email_body:
+                    email_html = custom_email_body
+                else:
+                    # If not wrapped, wrap it
+                    email_html = wrap_email_content(custom_email_body)
             else:
                 # Generate email content with embedded logo
                 email_html = self.generate_vendor_purchase_order_email(
@@ -1974,17 +1991,15 @@ class BOQEmailService:
             cr_id = purchase_data.get('cr_id', 'N/A')
             subject = f"Purchase Order CR-{cr_id} - {project_name}"
 
-            # Send email to all recipients
-            all_sent = True
-            for email in email_list:
-                success = self.send_email(email, subject, email_html)
-                if success:
-                    log.info(f"Purchase order email sent successfully to vendor {email}")
-                else:
-                    log.error(f"Failed to send purchase order email to vendor {email}")
-                    all_sent = False
+            # Send email (send_email handles multiple recipients)
+            success = self.send_email(vendor_email, subject, email_html)
 
-            return all_sent
+            if success:
+                log.info(f"Purchase order email sent successfully to vendor(s)")
+            else:
+                log.error(f"Failed to send purchase order email to vendor(s)")
+
+            return success
 
         except Exception as e:
             log.error(f"Error sending purchase order to vendor: {e}")

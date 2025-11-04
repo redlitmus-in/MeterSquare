@@ -36,6 +36,8 @@ export interface Purchase {
   purchase_notes?: string;
   vendor_id?: number | null;
   vendor_name?: string | null;
+  vendor_phone?: string | null;
+  vendor_contact_person?: string | null;
   vendor_selection_pending_td_approval?: boolean;
   vendor_email_sent?: boolean;
 }
@@ -82,12 +84,17 @@ export interface PreviewVendorEmailResponse {
   email_preview: string;
   vendor_email: string;
   vendor_name: string;
+  vendor_contact_person?: string;
+  vendor_phone?: string;
   error?: string;
 }
 
 export interface SendVendorEmailRequest {
   vendor_email: string;
   custom_email_body?: string;
+  vendor_company_name?: string;
+  vendor_contact_person?: string;
+  vendor_phone?: string;
 }
 
 export interface SendVendorEmailResponse {
@@ -337,6 +344,15 @@ class BuyerService {
       const payload: any = { vendor_email: data.vendor_email };
       if (data.custom_email_body) {
         payload.custom_email_body = data.custom_email_body;
+      }
+      if (data.vendor_company_name) {
+        payload.vendor_company_name = data.vendor_company_name;
+      }
+      if (data.vendor_contact_person) {
+        payload.vendor_contact_person = data.vendor_contact_person;
+      }
+      if (data.vendor_phone) {
+        payload.vendor_phone = data.vendor_phone;
       }
 
       const response = await axios.post<SendVendorEmailResponse>(

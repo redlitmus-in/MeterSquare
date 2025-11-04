@@ -48,7 +48,7 @@ def create_buyer():
 
         return jsonify({
             "success": True,
-            "message": "Buyer created successfully",
+            "message": "Procurement created successfully",
             "user_id": new_buyer.user_id,
             "buyer": {
                 "user_id": new_buyer.user_id,
@@ -113,8 +113,8 @@ def get_all_buyers():
         }), 200
 
     except Exception as e:
-        log.error(f"Error fetching Buyers: {str(e)}")
-        return jsonify({"error": f"Failed to fetch Buyers: {str(e)}"}), 500
+        log.error(f"Error fetching Procurement: {str(e)}")
+        return jsonify({"error": f"Failed to fetch Procurement: {str(e)}"}), 500
 
 
 def get_buyer_id(user_id):
@@ -149,8 +149,8 @@ def get_buyer_id(user_id):
         }), 200
 
     except Exception as e:
-        log.error(f"Error fetching Buyer {user_id}: {str(e)}")
-        return jsonify({"error": f"Failed to fetch Buyer: {str(e)}"}), 500
+        log.error(f"Error fetching Procurement {user_id}: {str(e)}")
+        return jsonify({"error": f"Failed to fetch Procurement: {str(e)}"}), 500
 
 
 def update_buyer(user_id):
@@ -183,7 +183,7 @@ def update_buyer(user_id):
 
         return jsonify({
             "success": True,
-            "message": "Buyer updated successfully",
+            "message": "Procurement updated successfully",
             "buyer": {
                 "user_id": buyer.user_id,
                 "full_name": buyer.full_name,
@@ -194,8 +194,8 @@ def update_buyer(user_id):
 
     except Exception as e:
         db.session.rollback()
-        log.error(f"Error updating Buyer {user_id}: {str(e)}")
-        return jsonify({"error": f"Failed to update Buyer: {str(e)}"}), 500
+        log.error(f"Error updating Procurement {user_id}: {str(e)}")
+        return jsonify({"error": f"Failed to update Procurement: {str(e)}"}), 500
 
 
 def delete_buyer(user_id):
@@ -203,7 +203,7 @@ def delete_buyer(user_id):
     try:
         buyer = User.query.filter_by(user_id=user_id, is_deleted=False).first()
         if not buyer:
-            return jsonify({"error": "Buyer not found"}), 404
+            return jsonify({"error": "Procurement not found"}), 404
 
         # Check assigned projects
         assigned_projects = Project.query.filter_by(buyer_id=user_id, is_deleted=False).all()
@@ -214,7 +214,7 @@ def delete_buyer(user_id):
             ]
             return jsonify({
                 "success": False,
-                "message": "Cannot delete Buyer. They are assigned to one or more projects.",
+                "message": "Cannot delete Procurement. They are assigned to one or more projects.",
                 "assigned_projects": projects_list
             }), 400
 
@@ -226,13 +226,13 @@ def delete_buyer(user_id):
 
         return jsonify({
             "success": True,
-            "message": "Buyer deleted successfully"
+            "message": "Procurement deleted successfully"
         }), 200
 
     except Exception as e:
         db.session.rollback()
-        log.error(f"Error deleting Buyer {user_id}: {str(e)}")
-        return jsonify({"error": f"Failed to delete Buyer: {str(e)}"}), 500
+        log.error(f"Error deleting Procurement {user_id}: {str(e)}")
+        return jsonify({"error": f"Failed to delete Procurement: {str(e)}"}), 500
 
 
 def get_buyer_boq_materials():
@@ -301,7 +301,7 @@ def get_buyer_boq_materials():
         }), 200
 
     except Exception as e:
-        log.error(f"Error fetching buyer BOQ materials: {str(e)}")
+        log.error(f"Error fetching Procurement BOQ materials: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to fetch BOQ materials: {str(e)}"}), 500
@@ -375,7 +375,7 @@ def get_buyer_dashboard():
         }), 200
 
     except Exception as e:
-        log.error(f"Error fetching buyer dashboard: {str(e)}")
+        log.error(f"Error fetching Procurement dashboard: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to fetch dashboard: {str(e)}"}), 500
@@ -471,6 +471,20 @@ def get_buyer_pending_purchases():
                 cr.vendor_selection_status == 'pending_td_approval'
             )
 
+            # Get vendor phone from Vendor table if vendor is selected
+            vendor_phone = None
+            vendor_contact_person = None
+            if cr.selected_vendor_id:
+                from models.vendor import Vendor
+                vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
+                if vendor:
+                    # Combine phone_code and phone if both exist
+                    if vendor.phone_code and vendor.phone:
+                        vendor_phone = f"{vendor.phone_code} {vendor.phone}"
+                    elif vendor.phone:
+                        vendor_phone = vendor.phone
+                    vendor_contact_person = vendor.contact_person_name
+
             pending_purchases.append({
                 "cr_id": cr.cr_id,
                 "project_id": project.project_id,
@@ -491,6 +505,8 @@ def get_buyer_pending_purchases():
                 "created_at": cr.created_at.isoformat() if cr.created_at else None,
                 "vendor_id": cr.selected_vendor_id,
                 "vendor_name": cr.selected_vendor_name,
+                "vendor_phone": vendor_phone,
+                "vendor_contact_person": vendor_contact_person,
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
                 "vendor_email_sent": cr.vendor_email_sent or False
             })
@@ -589,6 +605,20 @@ def get_buyer_completed_purchases():
                 cr.vendor_selection_status == 'pending_td_approval'
             )
 
+            # Get vendor phone from Vendor table if vendor is selected
+            vendor_phone = None
+            vendor_contact_person = None
+            if cr.selected_vendor_id:
+                from models.vendor import Vendor
+                vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
+                if vendor:
+                    # Combine phone_code and phone if both exist
+                    if vendor.phone_code and vendor.phone:
+                        vendor_phone = f"{vendor.phone_code} {vendor.phone}"
+                    elif vendor.phone:
+                        vendor_phone = vendor.phone
+                    vendor_contact_person = vendor.contact_person_name
+
             completed_purchases.append({
                 "cr_id": cr.cr_id,
                 "project_id": project.project_id,
@@ -614,6 +644,8 @@ def get_buyer_completed_purchases():
                 "purchase_notes": cr.purchase_notes,
                 "vendor_id": cr.selected_vendor_id,
                 "vendor_name": cr.selected_vendor_name,
+                "vendor_phone": vendor_phone,
+                "vendor_contact_person": vendor_contact_person,
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval
             })
 
@@ -800,8 +832,25 @@ def get_purchase_by_id(cr_id):
             "purchase_notes": cr.purchase_notes,
             "vendor_id": cr.selected_vendor_id,
             "vendor_name": cr.selected_vendor_name,
-            "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval
+            "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
+            "vendor_email_sent": cr.vendor_email_sent or False
         }
+
+        # If vendor is selected, add vendor contact details (with overrides)
+        if cr.selected_vendor_id:
+            from models.vendor import Vendor
+            vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
+            if vendor:
+                # Use vendor table values
+                purchase["vendor_contact_person"] = vendor.contact_person_name
+                purchase["vendor_phone"] = vendor.phone
+                purchase["vendor_email"] = vendor.email
+            else:
+                # Fallback if vendor not found
+                purchase["vendor_contact_person"] = None
+                purchase["vendor_phone"] = None
+                purchase["vendor_email"] = None
+        
 
         return jsonify({
             "success": True,
@@ -1465,11 +1514,14 @@ def preview_vendor_email(cr_id):
             vendor_data, purchase_data, buyer_data, project_data
         )
 
+        # Use vendor table values
         return jsonify({
             "success": True,
             "email_preview": email_html,
             "vendor_email": vendor.email,
-            "vendor_name": vendor.company_name
+            "vendor_name": vendor.company_name,
+            "vendor_contact_person": vendor.contact_person_name,
+            "vendor_phone": vendor.phone
         }), 200
 
     except Exception as e:
@@ -1487,6 +1539,10 @@ def send_vendor_email(cr_id):
 
         data = request.get_json()
         vendor_email = data.get('vendor_email')
+        custom_email_body = data.get('custom_email_body')  # Optional custom HTML body
+        vendor_company_name = data.get('vendor_company_name')  # Update company name
+        vendor_contact_person = data.get('vendor_contact_person')  # Update contact person
+        vendor_phone = data.get('vendor_phone')  # Update phone
 
         if not vendor_email:
             return jsonify({"error": "Vendor email is required"}), 400
@@ -1517,6 +1573,28 @@ def send_vendor_email(cr_id):
         if not vendor:
             return jsonify({"error": "Vendor not found"}), 404
 
+        # Update vendor details in vendors table if provided
+        if vendor_company_name and vendor_company_name != vendor.company_name:
+            vendor.company_name = vendor_company_name
+        if vendor_contact_person and vendor_contact_person != vendor.contact_person_name:
+            vendor.contact_person_name = vendor_contact_person
+        if vendor_phone and vendor_phone != vendor.phone:
+            # Sanitize phone number: remove duplicate country codes and limit to 20 chars
+            sanitized_phone = vendor_phone.strip()
+            # Remove duplicate +971 prefixes
+            while sanitized_phone.count('+971') > 1:
+                sanitized_phone = sanitized_phone.replace('+971 ', '', 1)
+            # Limit to 20 characters to fit database constraint
+            sanitized_phone = sanitized_phone[:20]
+            vendor.phone = sanitized_phone
+        if vendor_email and vendor_email != vendor.email:
+            vendor.email = vendor_email
+
+        # Get buyer details
+        buyer = User.query.filter_by(user_id=buyer_id).first()
+        if not buyer:
+            return jsonify({"error": "Buyer not found"}), 404
+
         # Get project details
         project = Project.query.get(cr.project_id)
         if not project:
@@ -1526,9 +1604,6 @@ def send_vendor_email(cr_id):
         boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
-
-        # Get buyer details
-        buyer = User.query.filter_by(user_id=buyer_id).first()
 
         # Process materials
         sub_items_data = cr.sub_items_data or cr.materials_data or []
@@ -1599,11 +1674,11 @@ def send_vendor_email(cr_id):
             'location': project.location or 'N/A'
         }
 
-        # Send email to vendor
+        # Send email to vendor (with optional custom body)
         from utils.boq_email_service import BOQEmailService
         email_service = BOQEmailService()
         email_sent = email_service.send_vendor_purchase_order(
-            vendor_email, vendor_data, purchase_data, buyer_data, project_data
+            vendor_email, vendor_data, purchase_data, buyer_data, project_data, custom_email_body
         )
 
         if email_sent:
@@ -1614,10 +1689,16 @@ def send_vendor_email(cr_id):
             cr.updated_at = datetime.utcnow()
             db.session.commit()
 
-            log.info(f"Purchase order email sent to vendor {vendor_email} for CR-{cr_id}")
+            # Count recipients for response message
+            if isinstance(vendor_email, str):
+                recipient_count = len([e.strip() for e in vendor_email.split(',') if e.strip()])
+            else:
+                recipient_count = len(vendor_email) if isinstance(vendor_email, list) else 1
+
+            log.info(f"Purchase order email sent to {recipient_count} vendor(s) for CR-{cr_id}")
             return jsonify({
                 "success": True,
-                "message": "Purchase order email sent to vendor successfully"
+                "message": f"Purchase order email sent to {recipient_count} recipient(s) successfully"
             }), 200
         else:
             return jsonify({
