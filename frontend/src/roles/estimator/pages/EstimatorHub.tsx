@@ -1327,6 +1327,9 @@ const EstimatorHub: React.FC = () => {
               <Building2 className="h-3.5 w-3.5 text-gray-400" />
               <span className="truncate">{boq.project?.name || 'No project'}</span>
             </div>
+            <div className="flex items-center gap-1.5 text-xs text-gray-500">
+              <span>Project Code: {boq.project_code || 'N/A'}</span>
+            </div>
             <div className="flex items-center gap-1.5">
               <Users className="h-3.5 w-3.5 text-gray-400" />
               <span className="truncate">{boq.project?.client || 'No client'}</span>
@@ -2354,9 +2357,7 @@ const EstimatorHub: React.FC = () => {
                         <div className="flex items-start justify-between mb-2">
                           <div className="flex-1">
                             <h3 className="font-semibold text-gray-900 text-base">{project.project_name}</h3>
-                            {project.project_code && (
-                              <p className="text-xs text-gray-500 mt-0.5">Project Code: {project.project_code}</p>
-                            )}
+                            <p className="text-xs text-gray-500 mt-0.5">Project Code: {project.project_code || 'N/A'}</p>
                           </div>
                           <div className="flex items-center gap-1">
                             <button
