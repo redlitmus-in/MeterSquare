@@ -78,9 +78,10 @@ def get_all_pm_boqs():
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 10, type=int), 100)
 
-        # Get all projects assigned to this project manager (admin sees all)
+        # Get all projects assigned to this project manager (admin sees all projects with PM assigned)
         if user_role == 'admin' or not should_apply_role_filter(context):
             assigned_projects = db.session.query(Project.project_id).filter(
+                Project.user_id.isnot(None),  # Only projects with PM assigned
                 Project.is_deleted == False
             ).all()
         else:
@@ -122,11 +123,17 @@ def get_all_pm_boqs():
 
         # Build query - get all BOQs for assigned projects OR sent for approval
         # Handle empty lists by providing a fallback
-        # Admin sees ALL BOQs
+        # Admin sees BOQs only for projects with PM assigned
         if user_role == 'admin':
+            # Admin sees BOQs for projects with PM assigned OR BOQs with Pending_PM_Approval status
             query = db.session.query(BOQ).filter(
                 BOQ.is_deleted == False,
-                BOQ.email_sent == True
+                BOQ.email_sent == True,
+                db.or_(
+                    BOQ.project_id.in_(project_ids) if project_ids else False,  # BOQs for projects with PM assigned
+                    BOQ.status == 'Pending_PM_Approval',  # OR BOQs with Pending_PM_Approval status
+                    BOQ.status == 'PM_Approved'
+                )
             ).order_by(BOQ.created_at.desc())
         elif not project_ids and not boq_ids_for_approval:
             # No projects assigned and no approval requests

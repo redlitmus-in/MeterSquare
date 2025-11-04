@@ -1457,12 +1457,18 @@ def get_all_boq():
             db.session.query(BOQ, Project)
             .join(Project, BOQ.project_id == Project.project_id)
             .filter(BOQ.is_deleted == False)
+            .filter(Project.is_deleted == False)
             .order_by(BOQ.created_at.desc())  # Most recent first
         )
 
         # Admin sees all BOQs, estimators see BOQs for their assigned projects OR projects with no estimator (backward compatibility)
         if user_role != 'admin' and should_apply_role_filter(context):
-            query = query.filter(Project.estimator_id == user_id)
+            query = query.filter(
+                or_(
+                    Project.estimator_id == user_id,
+                    Project.estimator_id == None
+                )
+            )
 
         boqs = query.all()
         
@@ -3347,8 +3353,15 @@ def get_estimator_dashboard():
             all_boqs = BOQ.query.filter_by(is_deleted=False).all()
             projects = Project.query.filter_by(is_deleted=False).all()
         else:
-            # Estimators see only their assigned projects
-            projects = Project.query.filter_by(estimator_id=user_id, is_deleted=False).all()
+            # Estimators see their assigned projects OR projects with no estimator
+            projects = Project.query.filter(
+                Project.is_deleted == False
+            ).filter(
+                or_(
+                    Project.estimator_id == user_id,
+                    Project.estimator_id == None
+                )
+            ).all()
             project_ids = [p.project_id for p in projects]
             if project_ids:
                 all_boqs = BOQ.query.filter(BOQ.project_id.in_(project_ids), BOQ.is_deleted == False).all()

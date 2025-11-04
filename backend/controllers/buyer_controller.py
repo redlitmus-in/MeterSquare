@@ -240,14 +240,22 @@ def get_buyer_boq_materials():
     try:
         current_user = g.user
         buyer_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
 
         # Get projects where BOTH buyer AND site_supervisor (SE) are assigned
         # Only show materials when both buyer and SE are assigned to the project
-        projects = Project.query.filter(
-            Project.buyer_id == buyer_id,
-            Project.site_supervisor_id.isnot(None),  # SE must be assigned
-            Project.is_deleted == False
-        ).all()
+        # Admin sees all projects
+        if user_role == 'admin':
+            projects = Project.query.filter(
+                Project.site_supervisor_id.isnot(None),  # SE must be assigned
+                Project.is_deleted == False
+            ).all()
+        else:
+            projects = Project.query.filter(
+                Project.buyer_id == buyer_id,
+                Project.site_supervisor_id.isnot(None),  # SE must be assigned
+                Project.is_deleted == False
+            ).all()
 
         materials_list = []
         total_cost = 0
@@ -312,13 +320,21 @@ def get_buyer_dashboard():
     try:
         current_user = g.user
         buyer_id = current_user['user_id']
+        user_role = current_user.get('role', '').lower()
 
         # Get projects where BOTH buyer AND site_supervisor (SE) are assigned
-        projects = Project.query.filter(
-            Project.buyer_id == buyer_id,
-            Project.site_supervisor_id.isnot(None),
-            Project.is_deleted == False
-        ).all()
+        # Admin sees all projects
+        if user_role == 'admin':
+            projects = Project.query.filter(
+                Project.site_supervisor_id.isnot(None),
+                Project.is_deleted == False
+            ).all()
+        else:
+            projects = Project.query.filter(
+                Project.buyer_id == buyer_id,
+                Project.site_supervisor_id.isnot(None),
+                Project.is_deleted == False
+            ).all()
 
         pending_purchases = []
         total_cost = 0

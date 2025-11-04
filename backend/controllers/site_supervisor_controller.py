@@ -75,9 +75,10 @@ def get_all_sitesupervisor_boqs():
         # Get effective user context (handles admin viewing as other roles)
         context = get_effective_user_context()
 
-        # Get all projects assigned to this site engineer (admin sees all)
+        # Get all projects assigned to this site engineer (admin sees all projects with site supervisor assigned)
         if user_role == 'admin' or not should_apply_role_filter(context):
             projects = Project.query.filter(
+                Project.site_supervisor_id.isnot(None),  # Only projects with site supervisor assigned
                 Project.is_deleted == False
             ).all()
         else:
@@ -176,9 +177,10 @@ def get_sitesupervisor_dashboard():
         # Get effective user context (handles admin viewing as other roles)
         context = get_effective_user_context()
 
-        # Get all projects assigned to this site engineer (admin sees all)
+        # Get all projects assigned to this site engineer (admin sees all projects with site supervisor assigned)
         if user_role == 'admin' or not should_apply_role_filter(context):
             projects = Project.query.filter(
+                Project.site_supervisor_id.isnot(None),  # Only projects with site supervisor assigned
                 Project.is_deleted == False
             ).all()
         else:

@@ -152,15 +152,18 @@ def get_all_projects():
         work_type = request.args.get('work_type', '')
         project_code = request.args.get('project_code', '')
 
-        # Build query - show projects assigned to this estimator OR projects with no estimator (for backward compatibility)
-        query = Project.query.filter(
-            Project.is_deleted == False
-        ).filter(
-            or_(
-                Project.estimator_id == user_id,
-                Project.estimator_id == None
+        # Build query - Admin sees all projects, Estimators see only their assigned projects
+        query = Project.query.filter(Project.is_deleted == False)
+
+        # Apply role-based filtering
+        if user_role != 'admin':
+            # Non-admin users only see projects assigned to them OR projects with no estimator
+            query = query.filter(
+                or_(
+                    Project.estimator_id == user_id,
+                    Project.estimator_id == None
+                )
             )
-        )
 
         # Apply filters
         if search:
