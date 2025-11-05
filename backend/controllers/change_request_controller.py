@@ -786,6 +786,7 @@ def get_all_change_requests():
             # Add project name
             if cr.project:
                 cr_dict['project_name'] = cr.project.project_name
+                cr_dict['project_code'] = cr.project.project_code
                 cr_dict['project_location'] = cr.project.location
                 cr_dict['project_client'] = cr.project.client
                 cr_dict['area'] = cr.project.area
@@ -827,6 +828,7 @@ def get_change_request_by_id(cr_id):
         # Add project and BOQ details
         if change_request.project:
             result['project_name'] = change_request.project.project_name
+            result['project_code'] = change_request.project.project_code
             result['project_location'] = change_request.project.location
             result['project_client'] = change_request.project.client
 

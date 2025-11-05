@@ -443,7 +443,7 @@ const MyProjects: React.FC = () => {
                       <div className="flex items-center gap-3 mb-2">
                         <h3 className="text-xl font-bold text-gray-900">{project.project_name}</h3>
                         {project.project_code && (
-                          <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
+                          <span className="px-3 py-1.5 rounded-md text-sm font-bold bg-[#243d8a] text-white">
                             {project.project_code}
                           </span>
                         )}

@@ -1738,6 +1738,7 @@ const EstimatorHub: React.FC = () => {
       <Table>
         <TableHeader>
           <TableRow className="border-gray-200">
+            <TableHead className="text-gray-600">Code</TableHead>
             <TableHead className="text-gray-600">BOQ Title</TableHead>
             <TableHead className="text-gray-600">Project</TableHead>
             <TableHead className="text-gray-600">Client</TableHead>
@@ -1751,7 +1752,7 @@ const EstimatorHub: React.FC = () => {
         <TableBody>
           {boqList.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={8} className="text-center py-12 text-gray-500">
+              <TableCell colSpan={9} className="text-center py-12 text-gray-500">
                 <div className="flex flex-col items-center">
                   <FileText className="h-12 w-12 text-gray-300 mb-3" />
                   <p className="text-base">No BOQs found</p>
@@ -1761,6 +1762,11 @@ const EstimatorHub: React.FC = () => {
           ) : (
             boqList.map((boq) => (
               <TableRow key={boq.boq_id} className="border-gray-200 hover:bg-gray-50/50">
+                <TableCell>
+                  <span className="text-xs font-semibold text-black">
+                    {boq.project_code || '-'}
+                  </span>
+                </TableCell>
                 <TableCell className="font-medium">
                   <div className="flex items-center gap-2">
                     <span>{boq.title}</span>
@@ -2543,6 +2549,7 @@ const EstimatorHub: React.FC = () => {
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-red-50/50 border-b-2 border-red-100">
+                          <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[80px]">Code</TableHead>
                           <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[200px]">Project</TableHead>
                           <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[180px]">Client & Location</TableHead>
                           <TableHead className="text-black font-bold text-xs uppercase tracking-wider py-4 px-6 min-w-[140px]">Work Type</TableHead>
@@ -2555,7 +2562,7 @@ const EstimatorHub: React.FC = () => {
                       <TableBody>
                         {filteredProjects.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center py-12 text-gray-500">
+                            <TableCell colSpan={8} className="text-center py-12 text-gray-500">
                               <div className="flex flex-col items-center">
                                 <FolderOpen className="h-12 w-12 text-gray-300 mb-3" />
                                 <p className="text-base">No projects found</p>
@@ -2585,6 +2592,11 @@ const EstimatorHub: React.FC = () => {
 
                             return (
                               <TableRow key={project.project_id} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors duration-150">
+                                <TableCell className="py-5 px-6">
+                                  <span className="text-xs font-semibold text-black">
+                                    {project.project_code || '-'}
+                                  </span>
+                                </TableCell>
                                 <TableCell className="py-5 px-6">
                                   <div className="flex items-center gap-3">
                                     <div className="p-2 bg-blue-50 rounded-lg">

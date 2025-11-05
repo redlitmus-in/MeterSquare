@@ -203,6 +203,7 @@ export interface BOQProject {
 export interface BOQ {
   boq_id?: number;
   project: BOQProject;
+  project_code?: string; // Project code like MS004, MS005, etc.
   title: string;
   boq_name?: string; // Backend uses boq_name
   raised_by?: string;

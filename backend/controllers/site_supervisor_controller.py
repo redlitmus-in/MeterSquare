@@ -137,6 +137,7 @@ def get_all_sitesupervisor_boqs():
             projects_list.append({
                 "project_id": project.project_id,
                 "project_name": project.project_name,
+                "project_code": project.project_code if hasattr(project, 'project_code') else None,
                 "client": project.client,
                 "location": project.location,
                 "start_date": project.start_date.isoformat() if project.start_date else None,

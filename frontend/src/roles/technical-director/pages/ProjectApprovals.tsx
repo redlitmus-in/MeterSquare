@@ -523,10 +523,12 @@ const ProjectApprovals: React.FC = () => {
     });
     console.log(`💰 [TD ProjectApprovals] BOQ ${boq.boq_id} - Final totalValue: ${totalValue} (Base: ${baseTotalCost} + Preliminary: ${preliminaryAmount})`);
 
+    const projectCode = boq.project_code || boq.project_details?.project_code || boq.project?.project_code;
+
     return {
       id: boq.boq_id,
       projectName: projectName,
-      projectCode: boq.project_code || boq.project_details?.project_code || boq.project?.project_code,
+      projectCode: projectCode,
       clientName: clientName,
       estimator: boq.created_by || boq.created_by_name || 'Unknown',
       totalValue: totalValue,
@@ -1894,6 +1896,7 @@ const ProjectApprovals: React.FC = () => {
               <Table>
                 <TableHeader>
                   <TableRow className="border-gray-200">
+                    <TableHead className="text-gray-600">Code</TableHead>
                     <TableHead className="text-gray-600">Project</TableHead>
                     <TableHead className="text-gray-600">Client</TableHead>
                     <TableHead className="text-gray-600">Submitted</TableHead>
@@ -1907,7 +1910,7 @@ const ProjectApprovals: React.FC = () => {
                 <TableBody>
                   {filteredEstimations.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-12 text-gray-500">
+                      <TableCell colSpan={9} className="text-center py-12 text-gray-500">
                         <div className="flex flex-col items-center">
                           <DocumentTextIcon className="h-12 w-12 text-gray-300 mb-3" />
                           <p className="text-base">No estimations found</p>
@@ -1917,16 +1920,14 @@ const ProjectApprovals: React.FC = () => {
                   ) : (
                     filteredEstimations.map((estimation) => (
                       <TableRow key={estimation.id} className="border-gray-200 hover:bg-gray-50/50">
+                        <TableCell>
+                          <span className="text-xs font-semibold text-black">
+                            {estimation.projectCode || '-'}
+                          </span>
+                        </TableCell>
                         <TableCell className="font-medium">
                           <div className="flex flex-col">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-gray-900">{estimation.projectName}</span>
-                              {estimation.projectCode && (
-                                <span className="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
-                                  {estimation.projectCode}
-                                </span>
-                              )}
-                            </div>
+                            <span className="font-bold text-gray-900">{estimation.projectName}</span>
                             <span className="text-xs text-gray-500">{estimation.location}</span>
                           </div>
                         </TableCell>

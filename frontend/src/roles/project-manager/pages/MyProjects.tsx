@@ -160,6 +160,7 @@ const MyProjects: React.FC = () => {
         return {
           project_id: boq.project_details?.project_id || boq.project_id,
           project_name: boq.project_details?.project_name || boq.project_name,
+          project_code: boq.project_details?.project_code || boq.project_code,
           client: boq.project_details?.client,
           location: boq.project_details?.location,
           area: boq.project_details?.working_hours,
@@ -862,7 +863,7 @@ const MyProjects: React.FC = () => {
                       <div className="flex items-center gap-3 mb-2">
                         <h3 className="text-xl font-bold text-gray-900">{project.project_name}</h3>
                         {project.project_code && (
-                          <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
+                          <span className="px-3 py-1.5 rounded-md text-sm font-bold bg-[#243d8a] text-white">
                             {project.project_code}
                           </span>
                         )}
@@ -1045,6 +1046,9 @@ const MyProjects: React.FC = () => {
                 <thead className="bg-gray-50">
                   <tr>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Code
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Project
                     </th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1070,6 +1074,11 @@ const MyProjects: React.FC = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredProjects.map((project) => (
                     <tr key={project.project_id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-xs font-semibold text-black">
+                          {project.project_code || '-'}
+                        </span>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{project.project_name}</div>
                         <div className="text-xs text-gray-500">{project.location || 'N/A'}</div>

@@ -26,6 +26,7 @@ interface ExtraMaterialRequest {
   id: number;
   project_id: number;
   project_name: string;
+  project_code?: string; // Project code like MS001, MS002, etc.
   area_id: number;
   area_name: string;
   boq_item_id: string;
@@ -120,6 +121,7 @@ const ExtraMaterialPage: React.FC = () => {
           id: cr.cr_id,
           project_id: cr.project_id,
           project_name: cr.project_name,
+          project_code: cr.project_code,
           area_id: cr.area_id,
           area_name: cr.area_name,
           boq_item_id: cr.item_id,
@@ -157,6 +159,7 @@ const ExtraMaterialPage: React.FC = () => {
           id: cr.cr_id,
           project_id: cr.project_id,
           project_name: cr.project_name,
+          project_code: cr.project_code,
           area_id: cr.area_id,
           area_name: cr.area_name,
           boq_item_id: cr.item_id,
@@ -190,6 +193,7 @@ const ExtraMaterialPage: React.FC = () => {
           id: cr.cr_id,
           project_id: cr.project_id,
           project_name: cr.project_name,
+          project_code: cr.project_code,
           area_id: cr.area_id,
           area_name: cr.area_name,
           boq_item_id: cr.item_id,
@@ -226,6 +230,7 @@ const ExtraMaterialPage: React.FC = () => {
           id: cr.cr_id,
           project_id: cr.project_id,
           project_name: cr.project_name,
+          project_code: cr.project_code,
           area_id: cr.area_id,
           area_name: cr.area_name,
           boq_item_id: cr.item_id,
@@ -568,7 +573,14 @@ const ExtraMaterialPage: React.FC = () => {
                   >
                     <div className="p-4">
                       <div className="flex items-start justify-between mb-2">
-                        <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                          {request.project_code && (
+                            <span className="text-xs font-semibold text-black">
+                              {request.project_code}
+                            </span>
+                          )}
+                        </div>
                         {getStatusBadge(request.status)}
                       </div>
 
@@ -632,6 +644,9 @@ const ExtraMaterialPage: React.FC = () => {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Code
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Request ID
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -654,6 +669,11 @@ const ExtraMaterialPage: React.FC = () => {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {pendingMaterials.map((request) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="text-xs font-semibold text-black">
+                              {request.project_code || '-'}
+                            </span>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             EM-{request.id}
                           </td>
@@ -734,7 +754,14 @@ const ExtraMaterialPage: React.FC = () => {
                   >
                     <div className="p-4">
                       <div className="flex items-start justify-between mb-2">
-                        <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                          {request.project_code && (
+                            <span className="text-xs font-semibold text-black">
+                              {request.project_code}
+                            </span>
+                          )}
+                        </div>
                         {getStatusBadge(request.status)}
                       </div>
 
@@ -780,6 +807,9 @@ const ExtraMaterialPage: React.FC = () => {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Code
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Request ID
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -808,6 +838,11 @@ const ExtraMaterialPage: React.FC = () => {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {underReviewMaterials.map((request) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="text-xs font-semibold text-black">
+                              {request.project_code || '-'}
+                            </span>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             EM-{request.id}
                           </td>
@@ -933,7 +968,14 @@ const ExtraMaterialPage: React.FC = () => {
                   >
                     <div className="p-4">
                       <div className="flex items-start justify-between mb-2">
-                        <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                          {request.project_code && (
+                            <span className="text-xs font-semibold text-black">
+                              {request.project_code}
+                            </span>
+                          )}
+                        </div>
                         {getStatusBadge(request.status)}
                       </div>
 
@@ -971,6 +1013,9 @@ const ExtraMaterialPage: React.FC = () => {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Code
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Request ID
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -993,6 +1038,11 @@ const ExtraMaterialPage: React.FC = () => {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {approvedMaterials.map((request) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="text-xs font-semibold text-black">
+                              {request.project_code || '-'}
+                            </span>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             EM-{request.id}
                           </td>
@@ -1051,7 +1101,14 @@ const ExtraMaterialPage: React.FC = () => {
                   >
                     <div className="p-4">
                       <div className="flex items-start justify-between mb-2">
-                        <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-gray-900 text-base">EM-{request.id}</h3>
+                          {request.project_code && (
+                            <span className="text-xs font-semibold text-black">
+                              {request.project_code}
+                            </span>
+                          )}
+                        </div>
                         {getStatusBadge(request.status)}
                       </div>
 
@@ -1107,6 +1164,9 @@ const ExtraMaterialPage: React.FC = () => {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Code
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Request ID
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1135,6 +1195,11 @@ const ExtraMaterialPage: React.FC = () => {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {rejectedMaterials.map((request) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="text-xs font-semibold text-black">
+                              {request.project_code || '-'}
+                            </span>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             EM-{request.id}
                           </td>
@@ -1274,6 +1339,9 @@ const ExtraMaterialPage: React.FC = () => {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Code
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Request ID
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1302,6 +1370,11 @@ const ExtraMaterialPage: React.FC = () => {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {completedMaterials.map((request) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="text-xs font-semibold text-black">
+                              {request.project_code || '-'}
+                            </span>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             EM-{request.id}
                           </td>
