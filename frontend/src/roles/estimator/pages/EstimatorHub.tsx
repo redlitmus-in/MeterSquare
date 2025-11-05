@@ -2136,14 +2136,31 @@ const EstimatorHub: React.FC = () => {
                   setEditingBoq(null);
                   setIsRevisionEdit(false);
                 }}
-                editMode={!isRevisionEdit}
-                isRevision={isRevisionEdit}
+                editMode={true}
                 existingBoqData={editingBoq}
+                isRevision={isRevisionEdit}
                 onSubmit={async (boqId) => {
+                  const savedBoqId = boqId || editingBoq?.boq_id;
+                  const boqToSend = editingBoq;
+
+                  // Reload BOQ list
                   await loadBOQs();
+
+                  // Fetch fresh BOQ details from API
+                  if (savedBoqId) {
+                    try {
+                      const response = await estimatorService.getBOQById(savedBoqId);
+                      if (response.success && response.data) {
+                        setSelectedBoqForDetails(response.data);
+                      }
+                    } catch (error) {
+                      console.error('Failed to fetch updated BOQ details:', error);
+                    }
+                  }
+
+                  // Trigger refresh
                   setBoqDetailsRefreshTrigger(prev => prev + 1);
 
-                  const boqToSend = editingBoq;
                   setEditingBoq(null);
                   setIsRevisionEdit(false);
 
@@ -2154,15 +2171,7 @@ const EstimatorHub: React.FC = () => {
 
                   // Go back to view mode
                   setFullScreenBoqMode('view');
-                  const updatedBoq = boqs.find(b => b.boq_id === boqId);
-                  if (updatedBoq) {
-                    setSelectedBoqForDetails(updatedBoq);
-                  } else {
-                    setShowFullScreenBOQ(false);
-                  }
                 }}
-                selectedProject={selectedProjectForBOQ}
-                hideTemplate={true}
               />
             )}
 
@@ -2901,7 +2910,7 @@ const EstimatorHub: React.FC = () => {
                 boqList={filteredBOQs}
                 onSendToTD={async (boq) => {
                   // Send directly to TD without email modal
-                  // Note: revision_boq endpoint is used during BOQ editing (in BOQEditModal)
+                  // Note: revision_boq endpoint is used during BOQ editing (in BOQCreationForm)
                   // This sendBOQEmail just notifies TD after the revision is saved
                   const result = await estimatorService.sendBOQEmail(boq.boq_id!, {
                     comments: (boq.revision_number || 0) > 0
@@ -3743,8 +3752,8 @@ const EstimatorHub: React.FC = () => {
           setSelectedPM(null);
         }
       }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
+        <DialogContent className="max-w-md max-h-[85vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle className="flex items-center gap-2 text-blue-600">
               <Users className="h-5 w-5" />
               Send BOQ to Project Manager
@@ -3754,7 +3763,7 @@ const EstimatorHub: React.FC = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 mt-4">
+          <div className="space-y-4 mt-4 flex-1 overflow-y-auto min-h-0">
             {loadingPMs ? (
               <div className="flex items-center justify-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -3766,9 +3775,9 @@ const EstimatorHub: React.FC = () => {
                 <p>No Project Managers found</p>
               </div>
             ) : (
-              <>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Select Project Manager</label>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 block sticky top-0 bg-white pb-2">Select Project Manager</label>
+                <div className="space-y-2 pr-2">
                   {projectManagers.map((pm) => (
                     <button
                       key={pm.user_id}
@@ -3792,40 +3801,42 @@ const EstimatorHub: React.FC = () => {
                     </button>
                   ))}
                 </div>
-
-                <div className="flex gap-2 pt-4">
-                  <Button
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-                    onClick={handleConfirmSendToPM}
-                    disabled={!selectedPM || isSendingToPM}
-                  >
-                    {isSendingToPM ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        Sending...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="h-4 w-4 mr-2" />
-                        Send to PM
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowPMSelectionModal(false);
-                      setProjectToSendToPM(null);
-                      setSelectedPM(null);
-                    }}
-                    disabled={isSendingToPM}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </>
+              </div>
             )}
           </div>
+
+          {!loadingPMs && projectManagers.length > 0 && (
+            <div className="flex gap-2 pt-4 border-t flex-shrink-0 bg-white">
+              <Button
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={handleConfirmSendToPM}
+                disabled={!selectedPM || isSendingToPM}
+              >
+                {isSendingToPM ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4 mr-2" />
+                    Send to PM
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowPMSelectionModal(false);
+                  setProjectToSendToPM(null);
+                  setSelectedPM(null);
+                }}
+                disabled={isSendingToPM}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

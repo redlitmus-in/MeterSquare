@@ -96,26 +96,33 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
         ws[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
         row += 1
 
-        # Show all preliminary items (already filtered to selected only)
-        for idx, prelim_item in enumerate(prelim_items, 1):
+        # Show only checked preliminary items
+        item_counter = 1
+        for prelim_item in prelim_items:
             if isinstance(prelim_item, dict):
+                # Check if item is selected/checked
+                is_selected = prelim_item.get('is_selected', prelim_item.get('selected', prelim_item.get('checked', False)))
+                if not is_selected:
+                    continue
+
                 desc = prelim_item.get('description', prelim_item.get('name', prelim_item.get('text', '')))
             else:
                 desc = str(prelim_item)
 
             if desc:
                 ws.merge_cells(f'A{row}:F{row}')
-                ws[f'A{row}'] = f"{idx}. {desc}"
+                ws[f'A{row}'] = f"{item_counter}. {desc}"
                 ws[f'A{row}'].font = normal_font
                 ws[f'A{row}'].fill = PatternFill(start_color="FFFBEB", end_color="FFFBEB", fill_type="solid")
                 ws[f'A{row}'].border = thin_border
 
                 # Add custom badge if applicable
-                if prelim_item.get('isCustom'):
+                if isinstance(prelim_item, dict) and prelim_item.get('isCustom'):
                     ws[f'G{row}'] = "Custom"
                     ws[f'G{row}'].font = Font(size=8, color="D97706", italic=True)
                     ws[f'G{row}'].border = thin_border
                 row += 1
+                item_counter += 1
 
         # Cost Summary
         cost_details = preliminaries.get('cost_details', {})

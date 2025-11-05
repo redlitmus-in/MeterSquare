@@ -2,7 +2,6 @@ from flask import request, jsonify, g
 from config.db import db
 from models.project import Project
 from models.boq import *
-from models.preliminary import Preliminary
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils.boq_email_service import BOQEmailService
@@ -876,26 +875,30 @@ def create_boq():
                     })
 
         # Get preliminaries from request data
-        preliminaries = data.get("preliminaries", {})
+        from models.preliminary_master import BOQPreliminary
 
-        # Save preliminaries to database table (single row with full JSON)
+        preliminaries = data.get("preliminaries", {})
         preliminary_id = None
-        if preliminaries and (preliminaries.get('items') or preliminaries.get('cost_details')):
-            cost_details = preliminaries.get('cost_details', {})
-            preliminary_record = Preliminary(
-                description=preliminaries,  # Save entire preliminaries JSON
-                project_id=project_id,
-                quantity=cost_details.get('quantity', 1),
-                unit=cost_details.get('unit', 'Nos'),
-                rate=cost_details.get('rate', 0),
-                amount=cost_details.get('amount', 0),
-                is_default=False,
-                created_by=created_by
-            )
-            db.session.add(preliminary_record)
-            db.session.flush()  # Get preliminary_id
-            preliminary_id = preliminary_record.preliminary_id
-            log.info(f"Saved preliminaries to database with ID: {preliminary_id}")
+
+        # Prepare preliminary selections to save to boq_preliminaries junction table
+        preliminary_selections_to_save = []
+        if preliminaries and preliminaries.get('items'):
+            preliminary_items = preliminaries.get('items', [])
+            log.info(f"Processing {len(preliminary_items)} preliminary items from request")
+
+            for item in preliminary_items:
+                prelim_id = item.get('prelim_id')
+                is_checked = item.get('checked', False) or item.get('selected', False)
+
+                log.info(f"Preliminary item: prelim_id={prelim_id}, checked={is_checked}, item={item}")
+
+                if prelim_id:
+                    preliminary_selections_to_save.append({
+                        'prelim_id': prelim_id,
+                        'is_checked': is_checked
+                    })
+
+            log.info(f"Prepared {len(preliminary_selections_to_save)} preliminary selections for saving: {preliminary_selections_to_save}")
 
         # Apply BOQ-level discount to total
         boq_discount_percentage = data.get("discount_percentage", 0) or 0
@@ -948,8 +951,23 @@ def create_boq():
             created_by=created_by
         )
         db.session.add(boq_details)
+        db.session.flush()  # Flush to get IDs
+
+        # Save preliminary selections to boq_preliminaries junction table
+        if preliminary_selections_to_save:
+            for selection in preliminary_selections_to_save:
+                boq_prelim = BOQPreliminary(
+                    boq_id=boq.boq_id,
+                    prelim_id=selection['prelim_id'],
+                    is_checked=selection['is_checked']
+                )
+                db.session.add(boq_prelim)
+
+            log.info(f"Saved {len(preliminary_selections_to_save)} preliminary selections to boq_preliminaries for BOQ {boq.boq_id}")
 
         db.session.commit()
+
+        log.info(f"BOQ {boq.boq_id} created successfully with {len(boq_items)} items and {len(preliminary_selections_to_save)} preliminary selections")
 
         return jsonify({
             "message": "BOQ created successfully",
@@ -1287,16 +1305,53 @@ def get_boq(boq_id):
         if boq.status == "new_purchase_approved" and user_role in ['technicaldirector', 'technical_director']:
             display_status = "approved"
 
-        # Get preliminaries from database table (preferred) or fallback to BOQ JSON
+        # Get preliminaries from NEW boq_preliminaries junction table
+        from models.preliminary_master import BOQPreliminary, PreliminaryMaster
+
         preliminaries = {}
-        preliminary_record = Preliminary.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
-        if preliminary_record and preliminary_record.description:
-            preliminaries = preliminary_record.description
-            log.info(f"Retrieved preliminaries from database for project {boq.project_id}")
-        elif boq_details.boq_details:
-            # Fallback to JSON if not in database
-            preliminaries = boq_details.boq_details.get("preliminaries", {})
-            log.info(f"Using preliminaries from BOQ JSON (fallback)")
+        try:
+            # Fetch selected preliminaries for this BOQ
+            boq_prelims = db.session.query(
+                BOQPreliminary, PreliminaryMaster
+            ).join(
+                PreliminaryMaster, BOQPreliminary.prelim_id == PreliminaryMaster.prelim_id
+            ).filter(
+                BOQPreliminary.boq_id == boq.boq_id,
+                BOQPreliminary.is_checked == True
+            ).order_by(PreliminaryMaster.display_order.asc()).all()
+
+            # Build preliminaries data with selected items (both master and custom)
+            items = []
+            for boq_prelim, prelim_master in boq_prelims:
+                # Mark as custom if display_order is 9999 (our custom indicator)
+                is_custom = prelim_master.display_order == 9999
+
+                items.append({
+                    'id': f'prelim-{prelim_master.prelim_id}',
+                    'prelim_id': prelim_master.prelim_id,
+                    'description': prelim_master.description,
+                    'name': prelim_master.name,
+                    'checked': True,
+                    'selected': True,
+                    'isCustom': is_custom
+                })
+
+            # Get cost details and notes from JSON
+            stored_preliminaries = boq_details.boq_details.get("preliminaries", {}) if boq_details.boq_details else {}
+
+            preliminaries = {
+                'items': items,
+                'cost_details': stored_preliminaries.get("cost_details", {}),
+                'notes': stored_preliminaries.get("notes", "")
+            }
+
+            custom_count = len([i for i in items if i.get('isCustom')])
+            master_count = len(items) - custom_count
+            log.info(f"Retrieved {len(items)} preliminaries ({master_count} master + {custom_count} custom) for BOQ {boq.boq_id}")
+        except Exception as e:
+            log.error(f"Error fetching preliminaries for BOQ {boq.boq_id}: {str(e)}")
+            # Fallback to empty
+            preliminaries = {'items': [], 'cost_details': {}, 'notes': ''}
 
         # Get discount values from boq_details JSON
         discount_percentage = boq_details.boq_details.get("discount_percentage", 0) if boq_details.boq_details else 0
@@ -1438,6 +1493,7 @@ def get_boq(boq_id):
         return jsonify(response_data), 200
 
     except Exception as e:
+        db.session.rollback()
         log.error(f"Error fetching BOQ: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
@@ -1471,7 +1527,25 @@ def get_all_boq():
             )
 
         boqs = query.all()
-        
+        log.info(f"📊 Processing {len(boqs)} BOQs for user {user_id} (role: {user_role})")
+
+        # OPTIMIZATION: Fetch all BOQ histories at once to avoid N+1 queries
+        boq_ids = [boq.boq_id for boq, _ in boqs]
+        all_histories = BOQHistory.query.filter(BOQHistory.boq_id.in_(boq_ids)).order_by(BOQHistory.boq_id, BOQHistory.created_at.desc()).all() if boq_ids else []
+
+        # Group histories by boq_id for quick lookup
+        history_by_boq = {}
+        for hist in all_histories:
+            if hist.boq_id not in history_by_boq:
+                history_by_boq[hist.boq_id] = []
+            history_by_boq[hist.boq_id].append(hist)
+
+        log.info(f"⚡ Loaded {len(all_histories)} history records for {len(boq_ids)} BOQs")
+
+        # Note: Old preliminary system removed - now using preliminaries_master + boq_preliminaries tables
+        # Preliminary data is now fetched per-BOQ through boq_preliminaries junction table
+        prelim_by_project = {}  # Empty dict for compatibility
+
         complete_boqs = []
         for boq, project in boqs:
             # Check BOQ history for sender and receiver roles
@@ -1505,6 +1579,7 @@ def get_all_boq():
         }), 200
 
     except Exception as e:
+        db.session.rollback()
         log.error(f"Error retrieving BOQs: {str(e)}")
         return jsonify({
             'error': 'Failed to retrieve BOQs',
@@ -1799,40 +1874,16 @@ def update_boq(boq_id):
                     total_labour += labour_count
 
 
-            # Get preliminaries from request data
+            # Get preliminaries from request data (for discount calculation only)
             preliminaries = data.get("preliminaries", {})
 
-            # Save/update preliminaries to database table
+            # NOTE: Preliminary updates are now handled by dedicated /preliminary/{project_id} endpoint
+            # to prevent race conditions and data conflicts. This section only reads preliminary data
+            # for discount calculations, it does not save/update preliminary records.
             preliminary_id = old_boq_details_json.get("preliminary_id") if old_boq_details_json else None
-            if preliminaries and (preliminaries.get('items') or preliminaries.get('cost_details')):
-                cost_details = preliminaries.get('cost_details', {})
-                # Check if preliminary record exists
-                preliminary_record = Preliminary.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
-                if preliminary_record:
-                    # Update existing
-                    preliminary_record.description = preliminaries
-                    preliminary_record.quantity = cost_details.get('quantity', 1)
-                    preliminary_record.unit = cost_details.get('unit', 'Nos')
-                    preliminary_record.rate = cost_details.get('rate', 0)
-                    preliminary_record.amount = cost_details.get('amount', 0)
-                    preliminary_record.last_modified_by = created_by
-                    log.info(f"Updated preliminaries in database with ID: {preliminary_record.preliminary_id}")
-                else:
-                    # Create new
-                    preliminary_record = Preliminary(
-                        description=preliminaries,
-                        project_id=boq.project_id,
-                        quantity=cost_details.get('quantity', 1),
-                        unit=cost_details.get('unit', 'Nos'),
-                        rate=cost_details.get('rate', 0),
-                        amount=cost_details.get('amount', 0),
-                        is_default=False,
-                        created_by=created_by
-                    )
-                    db.session.add(preliminary_record)
-                    db.session.flush()
-                    log.info(f"Created new preliminaries in database with ID: {preliminary_record.preliminary_id}")
-                preliminary_id = preliminary_record.preliminary_id
+
+            # Note: Old preliminary system removed - preliminary_id no longer used
+            # preliminary_id = None  # Kept for backward compatibility but not used
 
             # Apply BOQ-level discount to total
             boq_discount_percentage = data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)) or 0
@@ -2067,6 +2118,73 @@ def update_boq(boq_id):
                 created_by=user_name
             )
             db.session.add(boq_history)
+
+        # Update preliminary selections in boq_preliminaries junction table
+        preliminaries = data.get("preliminaries", {})
+        if preliminaries and preliminaries.get('items'):
+            from models.preliminary_master import BOQPreliminary, PreliminaryMaster
+
+            preliminary_items = preliminaries.get('items', [])
+            log.info(f"[UPDATE_BOQ] Processing {len(preliminary_items)} preliminary items for BOQ {boq_id}")
+
+            # Delete all existing preliminary selections for this BOQ
+            BOQPreliminary.query.filter_by(boq_id=boq_id).delete()
+            log.info(f"[UPDATE_BOQ] Deleted existing preliminary selections for BOQ {boq_id}")
+
+            # Insert new selections
+            preliminary_selections_saved = 0
+            custom_preliminaries_created = 0
+
+            for item in preliminary_items:
+                prelim_id = item.get('prelim_id')
+                is_checked = item.get('checked', False) or item.get('selected', False)
+                is_custom = item.get('isCustom', False)
+
+                log.info(f"[UPDATE_BOQ] Preliminary item: prelim_id={prelim_id}, checked={is_checked}, isCustom={is_custom}")
+
+                # Handle custom preliminaries - create new row in preliminaries_master
+                if is_custom and not prelim_id:
+                    description = item.get('description', '')
+                    name = item.get('name', description[:50] if description else 'Custom Item')
+
+                    if description:  # Only create if there's a description
+                        # Check if this custom preliminary already exists (by description)
+                        existing_custom = PreliminaryMaster.query.filter_by(
+                            description=description,
+                            created_by=user_name
+                        ).first()
+
+                        if existing_custom:
+                            prelim_id = existing_custom.prelim_id
+                            log.info(f"[UPDATE_BOQ] Found existing custom preliminary: prelim_id={prelim_id}")
+                        else:
+                            # Create new custom preliminary in master table
+                            new_custom_prelim = PreliminaryMaster(
+                                name=name,
+                                description=description,
+                                unit='nos',
+                                rate=0,
+                                is_active=True,
+                                display_order=9999,  # Custom items appear at the end
+                                created_by=user_name,
+                                updated_by=user_name
+                            )
+                            db.session.add(new_custom_prelim)
+                            db.session.flush()  # Get the prelim_id
+                            prelim_id = new_custom_prelim.prelim_id
+                            custom_preliminaries_created += 1
+                            log.info(f"[UPDATE_BOQ] Created new custom preliminary: prelim_id={prelim_id}, description={description}")
+
+                if prelim_id:
+                    boq_prelim = BOQPreliminary(
+                        boq_id=boq_id,
+                        prelim_id=prelim_id,
+                        is_checked=is_checked
+                    )
+                    db.session.add(boq_prelim)
+                    preliminary_selections_saved += 1
+
+            log.info(f"[UPDATE_BOQ] Created {custom_preliminaries_created} custom preliminaries, saved {preliminary_selections_saved} selections to boq_preliminaries for BOQ {boq_id}")
 
         db.session.commit()
 
@@ -2501,40 +2619,16 @@ def revision_boq(boq_id):
                     total_materials += len(materials_data)
                     total_labour += len(labour_data)
 
-            # Get preliminaries from request data
+            # Get preliminaries from request data (for discount calculation only)
             preliminaries = data.get("preliminaries", {})
 
-            # Save/update preliminaries to database table
+            # NOTE: Preliminary updates are now handled by dedicated /preliminary/{project_id} endpoint
+            # to prevent race conditions and data conflicts. This section only reads preliminary data
+            # for discount calculations, it does not save/update preliminary records.
             preliminary_id = old_boq_details_json.get("preliminary_id") if old_boq_details_json else None
-            if preliminaries and (preliminaries.get('items') or preliminaries.get('cost_details')):
-                cost_details = preliminaries.get('cost_details', {})
-                # Check if preliminary record exists
-                preliminary_record = Preliminary.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
-                if preliminary_record:
-                    # Update existing
-                    preliminary_record.description = preliminaries
-                    preliminary_record.quantity = cost_details.get('quantity', 1)
-                    preliminary_record.unit = cost_details.get('unit', 'Nos')
-                    preliminary_record.rate = cost_details.get('rate', 0)
-                    preliminary_record.amount = cost_details.get('amount', 0)
-                    preliminary_record.last_modified_by = created_by
-                    log.info(f"Updated preliminaries in database with ID: {preliminary_record.preliminary_id}")
-                else:
-                    # Create new
-                    preliminary_record = Preliminary(
-                        description=preliminaries,
-                        project_id=boq.project_id,
-                        quantity=cost_details.get('quantity', 1),
-                        unit=cost_details.get('unit', 'Nos'),
-                        rate=cost_details.get('rate', 0),
-                        amount=cost_details.get('amount', 0),
-                        is_default=False,
-                        created_by=created_by
-                    )
-                    db.session.add(preliminary_record)
-                    db.session.flush()
-                    log.info(f"Created new preliminaries in database with ID: {preliminary_record.preliminary_id}")
-                preliminary_id = preliminary_record.preliminary_id
+
+            # Note: Old preliminary system removed - preliminary_id no longer used
+            # preliminary_id = None  # Kept for backward compatibility but not used
 
             # Apply BOQ-level discount to total
             boq_discount_percentage = data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)) or 0
@@ -2867,6 +2961,7 @@ def get_sub_item_material(sub_item_id):
         }), 200
 
     except Exception as e:
+        db.session.rollback()
         log.error(f"Error fetching materials for sub_item {sub_item_id}: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
@@ -2936,6 +3031,7 @@ def get_sub_item_labours(sub_item_id):
         }), 200
 
     except Exception as e:
+        db.session.rollback()
         log.error(f"Error fetching labour for sub_item {sub_item_id}: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
@@ -2963,6 +3059,7 @@ def get_all_item():
         }), 200
 
     except Exception as e:
+        db.session.rollback()
         log.error(f"Error fetching item: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
@@ -3331,6 +3428,7 @@ def get_boq_history(boq_id):
             "boq_history": history_list
         }), 200
     except Exception as e:
+        db.session.rollback()
         log.error(f"Error fetching BOQ history: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
@@ -3515,6 +3613,7 @@ def get_estimator_dashboard():
             "recent_activities": recent_activities
         }), 200
     except Exception as e:
+        db.session.rollback()
         log.error(f"Error fetching Estimator dashboard: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
@@ -3611,6 +3710,7 @@ def get_sub_item(item_id):
         }), 200
 
     except Exception as e:
+        db.session.rollback()
         log.error(f"Error fetching sub-items for item {item_id}: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")

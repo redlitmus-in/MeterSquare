@@ -5,7 +5,6 @@ before sending to client for the first time
 """
 
 from flask import request, jsonify, g
-from models.preliminary import *
 from config.db import db
 from config.logging import get_logger
 from models.boq import *

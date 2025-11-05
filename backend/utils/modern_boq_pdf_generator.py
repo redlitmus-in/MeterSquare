@@ -250,17 +250,21 @@ class ModernBOQPDFGenerator:
             cost_details = prelim_data.get('cost_details', {})
             preliminary_amount = cost_details.get('amount', 0) or 0
 
-            # Build description from ALL items (not just checked ones)
+            # Build description from selected items only (client-facing)
             selected_items = []
             if prelim_items:
                 for item_data in prelim_items:
                     if isinstance(item_data, dict):
                         item_text = item_data.get('description', item_data.get('name', item_data.get('text', '')))
+                        is_selected = item_data.get('is_selected', item_data.get('selected', item_data.get('checked', False)))
+                        # Skip unchecked items for client-facing PDFs
+                        if not is_selected:
+                            continue
                     else:
                         item_text = str(item_data)
 
                     if item_text:
-                        # Add checkmark if item is marked as custom
+                        # Add checkmark and mark custom items
                         if isinstance(item_data, dict) and item_data.get('isCustom'):
                             selected_items.append(f'✓ {item_text} <font size="6" color="#D97706"><i>(Custom)</i></font>')
                         else:
@@ -491,17 +495,21 @@ class ModernBOQPDFGenerator:
             cost_details = prelim_data.get('cost_details', {})
             preliminary_amount = cost_details.get('amount', 0) or 0
 
-            # Build description from ALL items (not just checked ones)
+            # Build description from selected items only (client-facing)
             selected_items = []
             if prelim_items:
                 for item_data in prelim_items:
                     if isinstance(item_data, dict):
                         item_text = item_data.get('description', item_data.get('name', item_data.get('text', '')))
+                        is_selected = item_data.get('is_selected', item_data.get('selected', item_data.get('checked', False)))
+                        # Skip unchecked items for client-facing PDFs
+                        if not is_selected:
+                            continue
                     else:
                         item_text = str(item_data)
 
                     if item_text:
-                        # Add checkmark if item is marked as custom
+                        # Add checkmark and mark custom items
                         if isinstance(item_data, dict) and item_data.get('isCustom'):
                             selected_items.append(f'✓ {item_text} <font size="6" color="#D97706"><i>(Custom)</i></font>')
                         else:

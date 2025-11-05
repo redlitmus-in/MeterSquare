@@ -39,6 +39,7 @@ const ProjectManagerHub: React.FC = () => {
         projectMap.set(boq.project_id, {
           project_id: boq.project_id,
           project_name: boq.project_name || 'Unknown Project',
+          project_code: boq.project_code,
           // Calculate progress as percentage of approved BOQs for this project
           progress: 0
         });
@@ -333,7 +334,14 @@ const ProjectManagerHub: React.FC = () => {
                     }`} />
                     <div>
                       <p className="text-sm font-medium text-gray-900">{boq.boq_name}</p>
-                      <p className="text-xs text-gray-500">{boq.project_name || 'Unknown Project'}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs text-gray-500">{boq.project_name || 'Unknown Project'}</p>
+                        {boq.project_code && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-700 border border-gray-300">
+                            {boq.project_code}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="text-right">

@@ -134,6 +134,7 @@ interface BOQItem {
 interface EstimationItem {
   id: number;
   projectName: string;
+  projectCode?: string;
   clientName: string;
   estimator: string;
   totalValue: number;
@@ -525,6 +526,7 @@ const ProjectApprovals: React.FC = () => {
     return {
       id: boq.boq_id,
       projectName: projectName,
+      projectCode: boq.project_code || boq.project_details?.project_code || boq.project?.project_code,
       clientName: clientName,
       estimator: boq.created_by || boq.created_by_name || 'Unknown',
       totalValue: totalValue,
@@ -1730,6 +1732,11 @@ const ProjectApprovals: React.FC = () => {
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <h3 className="text-lg font-bold text-gray-900">{estimation.projectName}</h3>
+                      {estimation.projectCode && (
+                        <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
+                          {estimation.projectCode}
+                        </span>
+                      )}
                       <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getPriorityColor(estimation.priority)}`}>
                         {estimation.priority} priority
                       </span>
@@ -1912,7 +1919,14 @@ const ProjectApprovals: React.FC = () => {
                       <TableRow key={estimation.id} className="border-gray-200 hover:bg-gray-50/50">
                         <TableCell className="font-medium">
                           <div className="flex flex-col">
-                            <span className="font-bold text-gray-900">{estimation.projectName}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-gray-900">{estimation.projectName}</span>
+                              {estimation.projectCode && (
+                                <span className="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
+                                  {estimation.projectCode}
+                                </span>
+                              )}
+                            </div>
                             <span className="text-xs text-gray-500">{estimation.location}</span>
                           </div>
                         </TableCell>
@@ -2141,7 +2155,9 @@ const ProjectApprovals: React.FC = () => {
                         {(selectedEstimation as any).preliminaries.items &&
                          (selectedEstimation as any).preliminaries.items.length > 0 && (
                           <div className="space-y-2 mb-4">
-                            {(selectedEstimation as any).preliminaries.items.filter((item: any) => item.checked).map((item: any, index: number) => (
+                            {(selectedEstimation as any).preliminaries.items
+                              .filter((item: any) => item.checked || item.selected)
+                              .map((item: any, index: number) => (
                               <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
                                 <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
                                   <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2943,9 +2959,18 @@ const ProjectApprovals: React.FC = () => {
                             statusBg = 'bg-red-50 border-red-200';
                           }
 
+                          const isSelected = selectedPMId === pm.user_id;
+
                           return (
                             <div key={pm.user_id}>
-                              <div className="border-2 border-gray-200 bg-gray-50 rounded-md px-3 py-2 cursor-not-allowed opacity-60">
+                              <div
+                                onClick={() => setSelectedPMId(pm.user_id)}
+                                className={`border rounded-md px-3 py-2 cursor-pointer transition-all ${
+                                  isSelected
+                                    ? 'border-[#243d8a] bg-blue-50 shadow-sm'
+                                    : `border-gray-200 hover:border-gray-300 hover:shadow-sm ${statusBg}`
+                                }`}
+                              >
                                 <div className="flex items-center gap-3">
                                   {/* Avatar with Offline Status */}
                                   <div className="relative flex-shrink-0">
@@ -2960,7 +2985,7 @@ const ProjectApprovals: React.FC = () => {
 
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
-                                      <h4 className="font-semibold text-gray-700 text-sm">{pm.pm_name || pm.full_name}</h4>
+                                      <h4 className="font-semibold text-gray-900 text-sm">{pm.pm_name || pm.full_name}</h4>
                                       <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-gray-200 text-gray-700">
                                         <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
                                         Offline
@@ -2970,19 +2995,60 @@ const ProjectApprovals: React.FC = () => {
                                       </span>
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-3 text-xs text-gray-500 flex-shrink-0">
+                                  <div className="flex items-center gap-3 text-xs text-gray-600 flex-shrink-0">
                                     <span className="max-w-[200px] truncate">{pm.email}</span>
                                     <span className="whitespace-nowrap">{pm.phone}</span>
                                   </div>
                                   <div className="flex items-center gap-2 flex-shrink-0">
                                     <div className="flex items-center gap-1">
                                       <BuildingOfficeIcon className="w-4 h-4 text-gray-400" />
-                                      <span className="font-medium text-gray-600 text-sm">{projectCount}</span>
-                                      <span className="text-gray-400 text-xs">{projectCount === 1 ? 'project' : 'projects'}</span>
+                                      <span className="font-medium text-gray-700 text-sm">{projectCount}</span>
+                                      <span className="text-gray-500 text-xs">{projectCount === 1 ? 'project' : 'projects'}</span>
                                     </div>
+                                    {projectCount > 0 && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setExpandedPMId(expandedPMId === pm.user_id ? null : pm.user_id);
+                                        }}
+                                        className="text-xs text-[#243d8a] hover:underline font-medium whitespace-nowrap"
+                                      >
+                                        {expandedPMId === pm.user_id ? 'Hide' : 'View'}
+                                      </button>
+                                    )}
+                                    {/* Only show delete button for PMs with no assigned projects */}
+                                    {projectCount === 0 && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDeletePM(pm.user_id, pm.pm_name || pm.full_name);
+                                        }}
+                                        className="p-1.5 rounded-lg hover:bg-red-100 text-red-600 transition-colors"
+                                        title="Delete PM"
+                                      >
+                                        <TrashIcon className="w-4 h-4" />
+                                      </button>
+                                    )}
+                                    {isSelected && (
+                                      <CheckCircleIcon className="w-5 h-5 text-[#243d8a] flex-shrink-0" />
+                                    )}
                                   </div>
                                 </div>
                               </div>
+
+                              {expandedPMId === pm.user_id && pm.projects && pm.projects.length > 0 && (
+                                <div className="ml-4 mt-1 mb-2 p-2 bg-gray-50 rounded border-l-2 border-gray-300">
+                                  <p className="text-xs font-semibold text-gray-600 mb-1">Assigned Projects:</p>
+                                  <ul className="space-y-0.5">
+                                    {pm.projects.map((project: any, idx: number) => (
+                                      <li key={idx} className="text-xs text-gray-700 flex items-start gap-1">
+                                        <span className="text-gray-400">•</span>
+                                        <span>{project.project_name}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -3154,7 +3220,9 @@ const ProjectApprovals: React.FC = () => {
                       <div className="mb-3">
                         <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
                         <div className="space-y-2">
-                          {(selectedEstimation as any).preliminaries.items.map((item: any, index: number) => (
+                          {(selectedEstimation as any).preliminaries.items
+                            .filter((item: any) => item.checked || item.selected)
+                            .map((item: any, index: number) => (
                             <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
                               <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
                                 <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3609,7 +3677,9 @@ const ProjectApprovals: React.FC = () => {
                       <div className="mb-3">
                         <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
                         <div className="space-y-2">
-                          {(selectedEstimation as any).preliminaries.items.map((item: any, index: number) => (
+                          {(selectedEstimation as any).preliminaries.items
+                            .filter((item: any) => item.checked || item.selected)
+                            .map((item: any, index: number) => (
                             <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
                               <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
                                 <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4460,7 +4530,9 @@ const ProjectApprovals: React.FC = () => {
                       <div className="mb-3">
                         <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
                         <div className="space-y-2">
-                          {(selectedEstimation as any).preliminaries.items.map((item: any, index: number) => (
+                          {(selectedEstimation as any).preliminaries.items
+                            .filter((item: any) => item.checked || item.selected)
+                            .map((item: any, index: number) => (
                             <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
                               <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
                                 <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4919,7 +4991,9 @@ const ProjectApprovals: React.FC = () => {
                       <div className="mb-3">
                         <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected conditions and terms</h4>
                         <div className="space-y-2">
-                          {(selectedEstimation as any).preliminaries.items.map((item: any, index: number) => (
+                          {(selectedEstimation as any).preliminaries.items
+                            .filter((item: any) => item.checked || item.selected)
+                            .map((item: any, index: number) => (
                             <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-purple-200">
                               <div className="mt-0.5 w-4 h-4 rounded border-2 border-purple-500 bg-purple-500 flex items-center justify-center flex-shrink-0">
                                 <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

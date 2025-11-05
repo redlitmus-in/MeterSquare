@@ -352,6 +352,9 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
         has_sub_items = item.get('has_sub_items', False)
         sub_items = item.get('sub_items', [])
 
+        # Initialize item total (used later in line 438)
+        item_total_calculated = 0
+
         if has_sub_items and sub_items:
             # Sub-items table header
             headers = ['Sub-Item Description', 'Scope / Size', 'Qty', 'Unit', 'Rate (AED)', 'Amount (AED)']
@@ -365,7 +368,6 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
             row += 1
 
             # Calculate item total from sub-items (clean calculation)
-            item_total_calculated = 0
 
             # Sub-items data (CLEAN CLIENT VIEW - just qty × rate)
             for sub_item in sub_items:
@@ -588,18 +590,19 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
         row += 2
 
         for prelim_item in prelim_items:
-            # Filter only selected preliminaries (same as PDF fix)
+            # Show all preliminaries (both selected and unselected)
             if isinstance(prelim_item, dict):
-                is_selected = prelim_item.get('is_selected', prelim_item.get('selected', prelim_item.get('checked', False)))
-                if not is_selected:
-                    continue
                 desc = prelim_item.get('description', prelim_item.get('name', prelim_item.get('text', '')))
+                is_selected = prelim_item.get('is_selected', prelim_item.get('selected', prelim_item.get('checked', False)))
+                # Use checkmark for selected, circle for unselected
+                prefix = "✓ " if is_selected else "○ "
             else:
                 desc = str(prelim_item)
+                prefix = "✓ "
 
             if desc:  # Only add if text exists
                 ws.merge_cells(f'A{row}:F{row}')
-                ws[f'A{row}'] = f"✓ {desc}"
+                ws[f'A{row}'] = f"{prefix}{desc}"
                 ws[f'A{row}'].font = normal_font
                 row += 1
 

@@ -674,7 +674,9 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                             <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
                               <h5 className="text-sm font-semibold text-gray-900 mb-3">Selected Items:</h5>
                               <div className="space-y-2">
-                                {items.map((item: any, idx: number) => (
+                                {items
+                                  .filter((item: any) => item.checked || item.selected)
+                                  .map((item: any, idx: number) => (
                                   <div key={idx} className="flex items-start gap-2">
                                     <span className="text-green-600 font-bold mt-0.5">✓</span>
                                     <div className="flex-1">

@@ -452,7 +452,9 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                           {boqData.preliminaries.items && boqData.preliminaries.items.length > 0 && (
                             <div className="bg-white border-x border-gray-300 p-4">
                               <div className="space-y-2">
-                                {boqData.preliminaries.items.map((item: any, index: number) => (
+                                {boqData.preliminaries.items
+                                  .filter((item: any) => item.checked || item.selected)
+                                  .map((item: any, index: number) => (
                                   <div key={index} className="bg-gray-50 rounded-lg p-3 border border-gray-200 hover:shadow-sm transition-shadow">
                                     <div className="flex items-start gap-3">
                                       <span className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-600 text-white flex items-center justify-center text-xs font-bold">

@@ -739,11 +739,10 @@ def get_all_project_managers():
         if not pm_role:
             return jsonify({"error": "Project Manager role not found"}), 404
 
-        # Get all users with projectManager role
+        # Get all users with projectManager role (including offline/disabled)
         project_managers = User.query.filter_by(
             role_id=pm_role.role_id,
-            is_deleted=False,
-            is_active=True
+            is_deleted=False
         ).all()
 
         pm_list = []
@@ -793,11 +792,10 @@ def get_all_site_engineers():
         if not se_role:
             return jsonify({"error": "Site Engineer role not found"}), 404
 
-        # Get all users with siteEngineer role
+        # Get all users with siteEngineer role (including offline/disabled)
         site_engineers = User.query.filter_by(
             role_id=se_role.role_id,
-            is_deleted=False,
-            is_active=True
+            is_deleted=False
         ).all()
 
         se_list = []

@@ -8,2265 +8,1279 @@ import {
   FileText,
   Package,
   Users,
-  Calculator,
-  AlertCircle,
-  Loader2,
-  Wrench,
-  DollarSign,
-  Search,
-  PlusCircle,
+  Building2,
+  Calendar,
+  Clock,
   ChevronDown,
   ChevronRight
 } from 'lucide-react';
-import { toast } from 'sonner';
-import { BOQ, BOQItemDetailed, BOQUpdatePayload, BOQMaterial, BOQLabour, WorkType } from '../types';
 import { estimatorService } from '../services/estimatorService';
-import { ModernSelect } from '@/components/ui/modern-select';
-
-// Master data interfaces
-interface MasterItem {
-  item_id: number;
-  item_name: string;
-  description?: string;
-  default_overhead_percentage?: number;
-  default_profit_percentage?: number;
-}
-
-interface MasterMaterial {
-  material_id: number;
-  material_name: string;
-  current_market_price: number;
-  default_unit: string;
-}
-
-interface MasterLabour {
-  labour_id: number;
-  labour_role: string;
-  amount: number;
-  work_type: string;
-}
+import { toast } from 'sonner';
+import ModernLoadingSpinners from '../../../components/ui/ModernLoadingSpinners';
 
 interface BOQEditModalProps {
   isOpen: boolean;
   onClose: () => void;
-  boq: BOQ | null;
-  onSave: () => void;
-  isRevision?: boolean; // Flag to indicate this is a client-facing revision edit
-  isInternalRevision?: boolean; // Flag to indicate this is an internal revision edit
+  boqId: number;
+  onSaveSuccess?: () => void;
 }
 
-// Unit options for materials
-const UNIT_OPTIONS = [
-  { value: 'nos', label: 'Nos' },
-  { value: 'kgs', label: 'Kgs' },
-  { value: 'ltr', label: 'Ltr' },
-  { value: 'mtrs', label: 'Mtrs' },
-  { value: 'sq.m', label: 'Sq.m' },
-  { value: 'cu.m', label: 'Cu.m' },
-  { value: 'box', label: 'Box' },
-  { value: 'bag', label: 'Bag' },
-  { value: 'pcs', label: 'Pcs' },
-  { value: 'bundle', label: 'Bundle' },
-  { value: 'roll', label: 'Roll' },
-  { value: 'sheet', label: 'Sheet' },
-  { value: 'tons', label: 'Tons' },
-  { value: 'gms', label: 'Gms' },
-  { value: 'ml', label: 'Ml' },
-  { value: 'ft', label: 'Ft' },
-  { value: 'sq.ft', label: 'Sq.ft' },
-  { value: 'set', label: 'Set' },
-  { value: 'pair', label: 'Pair' },
-  { value: 'carton', label: 'Carton' },
-  { value: 'drum', label: 'Drum' },
-  { value: 'can', label: 'Can' }
-];
+interface Material {
+  material_name: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  total_price: number;
+  brand?: string;
+  description?: string;
+  location?: string;
+  vat_percentage?: number;
+}
+
+interface Labour {
+  labour_role: string;
+  hours: number;
+  rate_per_hour: number;
+  total_cost: number;
+}
+
+interface SubItem {
+  sub_item_name: string;
+  scope: string;
+  location: string;
+  brand: string;
+  size: string;
+  quantity: number;
+  unit: string;
+  rate: number;
+  base_total: number;
+  materials: Material[];
+  labour: Labour[];
+  materials_cost: number;
+  labour_cost: number;
+  description?: string;
+}
+
+interface BOQItem {
+  item_name: string;
+  description: string;
+  work_type: string;
+  unit: string;
+  quantity: number;
+  rate: number;
+  has_sub_items: boolean;
+  sub_items: SubItem[];
+  materials?: Material[];
+  labour?: Labour[];
+  overhead_percentage: number;
+  profit_margin_percentage: number;
+  discount_percentage: number;
+  discount_amount: number;
+  vat_percentage: number;
+  vat_amount: number;
+}
+
+interface PreliminaryItem {
+  id?: string;
+  prelim_id?: number;
+  name: string;
+  description: string;
+  checked: boolean;
+  selected: boolean;
+  isCustom?: boolean;
+}
+
+interface PreliminaryCostDetails {
+  quantity: number;
+  unit: string;
+  rate: string | number;
+  amount: number;
+  internal_cost: number;
+  misc_percentage: number;
+  misc_amount: number;
+  overhead_profit_percentage: number;
+  overhead_profit_amount: number;
+  transport_percentage: number;
+  transport_amount: number;
+  planned_profit: number;
+  actual_profit: number;
+}
+
+interface ProjectDetails {
+  project_name: string;
+  location: string;
+  floor: string;
+  hours: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  duration_days: number;
+}
 
 const BOQEditModal: React.FC<BOQEditModalProps> = ({
   isOpen,
   onClose,
-  boq,
-  onSave,
-  isRevision = false,
-  isInternalRevision = false
+  boqId,
+  onSaveSuccess
 }) => {
-  const [editedBoq, setEditedBoq] = useState<BOQUpdatePayload | null>(null);
-  const [originalBoq, setOriginalBoq] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'items' | 'summary'>('items');
-  const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
+  const [activeTab, setActiveTab] = useState<'details' | 'timeline'>('details');
 
-  // Preliminaries state
-  const [preliminaries, setPreliminaries] = useState<any>(null);
-  const [preliminariesExpanded, setPreliminariesExpanded] = useState(true);
+  // BOQ Basic Info
+  const [boqName, setBoqName] = useState('');
+  const [status, setStatus] = useState('Draft');
+  const [createdAt, setCreatedAt] = useState('');
 
-  // VAT mode state - tracks which items use per-material VAT
-  const [useMaterialVAT, setUseMaterialVAT] = useState<Record<number, boolean>>({});
+  // Project Details
+  const [projectDetails, setProjectDetails] = useState<ProjectDetails>({
+    project_name: '',
+    location: '',
+    floor: '',
+    hours: '',
+    status: 'active',
+    start_date: '',
+    end_date: '',
+    duration_days: 0
+  });
 
-  // Master data states
-  const [masterItems, setMasterItems] = useState<MasterItem[]>([]);
-  const [itemMaterials, setItemMaterials] = useState<Record<number, MasterMaterial[]>>({});
-  const [itemLabours, setItemLabours] = useState<Record<number, MasterLabour[]>>({});
-  const [isLoadingMasterData, setIsLoadingMasterData] = useState(false);
+  // BOQ Items
+  const [items, setItems] = useState<BOQItem[]>([]);
 
-  // Search/dropdown states
-  const [itemSearchTerms, setItemSearchTerms] = useState<Record<number, string>>({});
-  const [itemDropdownOpen, setItemDropdownOpen] = useState<Record<number, boolean>>({});
-  const [loadingItemData, setLoadingItemData] = useState<Record<number, boolean>>({});
+  // Preliminaries
+  const [preliminaryItems, setPreliminaryItems] = useState<PreliminaryItem[]>([]);
+  const [preliminaryCostDetails, setPreliminaryCostDetails] = useState<PreliminaryCostDetails>({
+    quantity: 1,
+    unit: 'nos',
+    rate: '0',
+    amount: 0,
+    internal_cost: 0,
+    misc_percentage: 10,
+    misc_amount: 0,
+    overhead_profit_percentage: 25,
+    overhead_profit_amount: 0,
+    transport_percentage: 5,
+    transport_amount: 0,
+    planned_profit: 0,
+    actual_profit: 0
+  });
+  const [customPreliminaryName, setCustomPreliminaryName] = useState('');
+  const [customPreliminaryDesc, setCustomPreliminaryDesc] = useState('');
 
-  // Load master items only once when modal opens (not on every boq change)
-  // Load master items only once when modal opens
+  // Global percentages
+  const [overheadPercentage, setOverheadPercentage] = useState(10);
+  const [profitMarginPercentage, setProfitMarginPercentage] = useState(15);
+  const [discountPercentage, setDiscountPercentage] = useState(0);
+  const [discountAmount, setDiscountAmount] = useState(0);
+
+  // Expanded state
+  const [expandedItems, setExpandedItems] = useState<number[]>([]);
+  const [expandedSubItems, setExpandedSubItems] = useState<string[]>([]);
+
   useEffect(() => {
-    if (isOpen && masterItems.length === 0) {
-      loadMasterItems();
+    if (isOpen && boqId) {
+      fetchBOQData();
     }
-  }, [isOpen]);
+  }, [isOpen, boqId]);
 
-  // Fetch BOQ details when boq changes
-  useEffect(() => {
-    if (boq && boq.boq_id && isOpen) {
-      fetchBOQDetails();
-    }
-  }, [isOpen]);
-
-  // Fetch BOQ details when boq_id changes and modal is open
-  useEffect(() => {
-    if (boq && boq.boq_id && isOpen) {
-      fetchBOQDetails();
-    }
-  }, [boq?.boq_id, isOpen?.boq_id, isOpen]);
-
-  // Close dropdowns when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('.item-dropdown-container')) {
-        setItemDropdownOpen({});
-      }
-    };
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isOpen]);
-
-  const loadMasterItems = async () => {
-    setIsLoadingMasterData(true);
-    try {
-      const itemsData = await estimatorService.getAllItems();
-      setMasterItems(itemsData);
-    } catch (error) {
-      console.error('Failed to load master items');
-    } finally {
-      setIsLoadingMasterData(false);
-    }
-  };
-
-  const loadItemMaterials = async (itemId: number) => {
-    try {
-      const materials = await estimatorService.getItemMaterials(itemId);
-      setItemMaterials(prev => ({ ...prev, [itemId]: materials }));
-      return materials;
-    } catch (error) {
-      console.error('Failed to load materials for item:', error);
-      return [];
-    }
-  };
-
-  const loadItemLabours = async (itemId: number) => {
-    try {
-      const labours = await estimatorService.getItemLabours(itemId);
-      setItemLabours(prev => ({ ...prev, [itemId]: labours }));
-      return labours;
-    } catch (error) {
-      console.error('Failed to load labours for item:', error);
-      return [];
-    }
-  };
-
-  const getFilteredItems = (searchTerm: string) => {
-    if (!searchTerm || searchTerm.trim() === '') {
-      // Show all items when search is empty
-      return masterItems.slice(0, 10);
-    }
-    const term = searchTerm.toLowerCase();
-    return masterItems.filter(item =>
-      item.item_name.toLowerCase().includes(term)
-    ).slice(0, 10);
-  };
-
-  const handleItemNameChange = (itemIndex: number, value: string) => {
-    setItemSearchTerms(prev => ({ ...prev, [itemIndex]: value }));
-
-    // Always update item name in real-time
-    handleItemChange(itemIndex, 'item_name', value);
-
-    // Open dropdown if there's text and show suggestions
-    if (value.trim().length > 0) {
-      setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: true }));
-    } else {
-      setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: false }));
-    }
-  };
-
-  const selectMasterItem = async (itemIndex: number, masterItem: MasterItem) => {
-    setLoadingItemData(prev => ({ ...prev, [itemIndex]: true }));
-
-    try {
-      // Load materials and labour for this item
-      const [materials, labours] = await Promise.all([
-        loadItemMaterials(masterItem.item_id),
-        loadItemLabours(masterItem.item_id)
-      ]);
-
-      // Update the item with master data
-      const updatedItems = [...(editedBoq?.items || [])];
-      updatedItems[itemIndex] = {
-        ...updatedItems[itemIndex],
-        item_id: masterItem.item_id,
-        item_name: masterItem.item_name,
-        description: masterItem.description || updatedItems[itemIndex].description,
-        overhead_percentage: masterItem.default_overhead_percentage || updatedItems[itemIndex].overhead_percentage,
-        profit_margin_percentage: masterItem.default_profit_percentage || updatedItems[itemIndex].profit_margin_percentage,
-        materials: materials.map(mat => ({
-          material_id: mat.material_id,
-          material_name: mat.material_name,
-          quantity: 1,
-          unit: mat.default_unit,
-          unit_price: mat.current_market_price,
-          total_price: mat.current_market_price,
-          is_from_master: true
-        })),
-        labour: labours.map(lab => ({
-          labour_id: lab.labour_id,
-          labour_role: lab.labour_role,
-          hours: 8,
-          rate_per_hour: lab.amount / 8,
-          total_cost: lab.amount,
-          work_type: lab.work_type || 'contract',
-          is_from_master: true
-        }))
-      };
-
-      if (editedBoq) {
-        setEditedBoq({
-          ...editedBoq,
-          items: updatedItems
-        });
-      }
-
-      // Close dropdown
-      setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: false }));
-      setItemSearchTerms(prev => ({ ...prev, [itemIndex]: masterItem.item_name }));
-    } catch (error) {
-      toast.error('Failed to load item details');
-    } finally {
-      setLoadingItemData(prev => ({ ...prev, [itemIndex]: false }));
-    }
-  };
-
-  const fetchBOQDetails = async () => {
-    if (!boq?.boq_id) return;
-
+  const fetchBOQData = async () => {
     setIsLoading(true);
     try {
-      const response = await estimatorService.getBOQById(boq.boq_id);
-      if (response.success && response.data) {
-        setOriginalBoq(response.data);
+      const result = await estimatorService.getBOQById(boqId);
+      if (result.success && result.data) {
+        const data = result.data;
 
-        // Load preliminaries from database (already included in response)
-        if (response.data.preliminaries) {
-          setPreliminaries(response.data.preliminaries);
+        // Set basic info
+        setBoqName(data.boq_name || '');
+        setStatus(data.status || 'Draft');
+        setCreatedAt(data.created_at || '');
+
+        // Get global percentages from boq_details if available
+        const boqDetails = data.existing_purchase || data.boq_details || {};
+        setOverheadPercentage(boqDetails.overhead_percentage || data.overhead_percentage || 10);
+        setProfitMarginPercentage(boqDetails.profit_margin_percentage || data.profit_margin_percentage || 15);
+        setDiscountPercentage(boqDetails.discount_percentage || data.discount_percentage || 0);
+        setDiscountAmount(boqDetails.discount_amount || data.discount_amount || 0);
+
+        // Set project details
+        if (data.project_details) {
+          setProjectDetails({
+            project_name: data.project_details.project_name || '',
+            location: data.project_details.location || '',
+            floor: data.project_details.floor || '',
+            hours: data.project_details.hours || '',
+            status: data.project_details.status || 'active',
+            start_date: data.project_details.start_date || '',
+            end_date: data.project_details.end_date || '',
+            duration_days: data.project_details.duration_days || 0
+          });
         }
 
-        // Get items from correct location (existing_purchase.items OR items)
-        const items = (response.data.existing_purchase?.items || response.data.items) || [];
-
-        // Convert to editable format - preserve sub_items structure
-        const editableBoq: BOQUpdatePayload = {
-          project_id: response.data.project_id,
-          boq_id: response.data.boq_id,
-          boq_name: response.data.boq_name || boq.boq_name || boq.title || '',
-          status: response.data.status,
-          items: items.map((item: BOQItemDetailed) => ({
-            item_id: item.master_item_id || (item as any).item_id,
-            item_name: item.item_name,
-            description: item.description || '',
-            work_type: item.work_type || 'contract',
-            quantity: (item as any).quantity || 1,
-            unit: (item as any).unit || 'nos',
-            rate: (item as any).rate || 0,
-            overhead_percentage: item.overhead_percentage || 8,
-            profit_margin_percentage: item.profit_margin_percentage || 12,
-            discount_percentage: (item as any).discount_percentage || 0,
-            vat_percentage: (item as any).vat_percentage || 0,
-            status: 'Active',
-            // Preserve calculated amounts from API response
-            overhead_amount: (item as any).overhead_amount || 0,
-            profit_margin_amount: (item as any).profit_margin_amount || 0,
-            discount_amount: (item as any).discount_amount || 0,
-            selling_price: (item as any).selling_price || 0,
-            item_total: (item as any).item_total || 0,
-            // Preserve sub_items structure if present
-            sub_items: (item as any).sub_items?.map((si: any) => ({
-              sub_item_id: si.sub_item_id,
-              sub_item_name: si.sub_item_name || si.scope,
-              scope: si.scope || si.sub_item_name,
-              size: si.size || '',
-              location: si.location || '',
-              brand: si.brand || '',
-              quantity: si.quantity || 1,
-              unit: si.unit || 'nos',
-              rate: si.rate || si.per_unit_cost || 0,
-              // Preserve calculated amounts from sub_item
-              material_cost: si.material_cost || 0,
-              labour_cost: si.labour_cost || 0,
-              internal_cost: si.internal_cost || 0,
-              misc_amount: si.misc_amount || 0,
-              misc_percentage: si.misc_percentage || 0,
-              transport_amount: si.transport_amount || 0,
-              transport_percentage: si.transport_percentage || 0,
-              overhead_profit_amount: si.overhead_profit_amount || 0,
-              overhead_profit_percentage: si.overhead_profit_percentage || 0,
-              planned_profit: si.planned_profit || 0,
-              actual_profit: si.actual_profit || 0,
-              per_unit_cost: si.per_unit_cost || 0,
-              sub_item_total: si.sub_item_total || 0,
-              base_total: si.base_total || 0,
-              materials: (si.materials || []).map((mat: any) => ({
-                material_id: mat.master_material_id || mat.material_id,
-                material_name: mat.material_name,
-                description: mat.description || '',
-                quantity: mat.quantity,
-                unit: mat.unit,
-                unit_price: mat.unit_price,
-                total_price: mat.total_price || (mat.quantity * mat.unit_price),
-                vat_percentage: mat.vat_percentage || 0
-              })),
-              labour: (si.labour || []).map((lab: any) => ({
-                labour_id: lab.master_labour_id || lab.labour_id,
-                labour_role: lab.labour_role,
-                hours: lab.hours,
-                rate_per_hour: lab.rate_per_hour,
-                total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour),
-                work_type: lab.work_type || 'contract'
-              }))
-            })) || [],
-            // Old format fallback - materials and labour at item level
-            materials: (item as any).sub_items?.length > 0 ? [] : (item.materials || []).map((mat: any) => ({
-              material_id: mat.master_material_id || mat.material_id,
-              material_name: mat.material_name,
-              description: mat.description || '',
-              quantity: mat.quantity,
-              unit: mat.unit,
-              unit_price: mat.unit_price,
-              total_price: mat.total_price || (mat.quantity * mat.unit_price),
-              vat_percentage: mat.vat_percentage || 0
-            })),
-            labour: (item as any).sub_items?.length > 0 ? [] : (item.labour || []).map((lab: any) => ({
-              labour_id: lab.master_labour_id || lab.labour_id,
-              labour_role: lab.labour_role,
-              hours: lab.hours,
-              rate_per_hour: lab.rate_per_hour,
-              total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour),
-              work_type: lab.work_type || 'contract'
-            }))
-          }))
-        };
-
-        setEditedBoq(editableBoq);
-
-        // Initialize search terms with item names
-        const initialSearchTerms: Record<number, string> = {};
-        editableBoq.items.forEach((item, index) => {
-          initialSearchTerms[index] = item.item_name;
-        });
-        setItemSearchTerms(initialSearchTerms);
-
-        // Initialize useMaterialVAT based on whether materials have VAT percentages
-        const initialVATMode: Record<number, boolean> = {};
-        editableBoq.items.forEach((item, index) => {
-          // Check if any material has a VAT percentage > 0
-          const hasMaterialVAT = item.materials?.some(mat => (mat as any).vat_percentage > 0);
-          initialVATMode[index] = hasMaterialVAT || false;
-        });
-        setUseMaterialVAT(initialVATMode);
-
-        // Expand ALL items by default to show all details
-        if (editableBoq.items.length > 0) {
-          const allItemIndexes = editableBoq.items.map((_, index) => index);
-          setExpandedItems(new Set(allItemIndexes));
+        // Set items from existing_purchase
+        if (data.existing_purchase?.items) {
+          setItems(data.existing_purchase.items);
+          // Auto-expand first item
+          setExpandedItems([0]);
+        } else if (boqDetails.items) {
+          setItems(boqDetails.items);
+          setExpandedItems([0]);
         }
+
+        // Set preliminaries
+        if (data.preliminaries?.items) {
+          setPreliminaryItems(data.preliminaries.items);
+        }
+        if (data.preliminaries?.cost_details) {
+          setPreliminaryCostDetails(data.preliminaries.cost_details);
+        }
+
+        toast.success('BOQ data loaded successfully');
+      } else {
+        toast.error(result.message || 'Failed to fetch BOQ data');
       }
-    } catch (error) {
-      console.error('Error fetching BOQ details:', error);
-      toast.error('Failed to load BOQ details');
+    } catch (error: any) {
+      toast.error('Error loading BOQ data');
     } finally {
       setIsLoading(false);
     }
   };
 
-  if (!isOpen || !editedBoq) return null;
-
-  const toggleItemExpansion = (index: number) => {
-    const newExpanded = new Set(expandedItems);
-    if (newExpanded.has(index)) {
-      newExpanded.delete(index);
-    } else {
-      newExpanded.add(index);
+  // Calculate duration when dates change
+  useEffect(() => {
+    if (projectDetails.start_date && projectDetails.end_date) {
+      const start = new Date(projectDetails.start_date);
+      const end = new Date(projectDetails.end_date);
+      const diffTime = Math.abs(end.getTime() - start.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      setProjectDetails(prev => ({ ...prev, duration_days: diffDays }));
     }
-    setExpandedItems(newExpanded);
-  };
-
-  const handleItemChange = (itemIndex: number, field: string, value: any) => {
-    const updatedItems = [...editedBoq.items];
-    updatedItems[itemIndex] = {
-      ...updatedItems[itemIndex],
-      [field]: value
-    };
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const handleMaterialChange = (itemIndex: number, materialIndex: number, field: string, value: any) => {
-    const updatedItems = [...editedBoq.items];
-    const updatedMaterials = [...updatedItems[itemIndex].materials];
-
-    updatedMaterials[materialIndex] = {
-      ...updatedMaterials[materialIndex],
-      [field]: value
-    };
-
-    // Recalculate total_price if quantity or unit_price changed
-    if (field === 'quantity' || field === 'unit_price') {
-      updatedMaterials[materialIndex].total_price =
-        updatedMaterials[materialIndex].quantity * updatedMaterials[materialIndex].unit_price;
-    }
-
-    updatedItems[itemIndex] = {
-      ...updatedItems[itemIndex],
-      materials: updatedMaterials
-    };
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const handleLabourChange = (itemIndex: number, labourIndex: number, field: string, value: any) => {
-    const updatedItems = [...editedBoq.items];
-    const updatedLabour = [...updatedItems[itemIndex].labour];
-
-    updatedLabour[labourIndex] = {
-      ...updatedLabour[labourIndex],
-      [field]: value
-    };
-
-    // Recalculate total_cost if hours or rate_per_hour changed
-    if (field === 'hours' || field === 'rate_per_hour') {
-      updatedLabour[labourIndex].total_cost =
-        updatedLabour[labourIndex].hours * updatedLabour[labourIndex].rate_per_hour;
-    }
-
-    updatedItems[itemIndex] = {
-      ...updatedItems[itemIndex],
-      labour: updatedLabour
-    };
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  // Preliminary handlers
-  const handlePreliminaryCostChange = (field: string, value: any) => {
-    if (!preliminaries) return;
-
-    const updatedCostDetails = {
-      ...preliminaries.cost_details,
-      [field]: value
-    };
-
-    // Recalculate amount if quantity or rate changed
-    if (field === 'quantity' || field === 'rate') {
-      const quantity = field === 'quantity' ? parseFloat(value) || 0 : preliminaries.cost_details.quantity;
-      const rate = field === 'rate' ? parseFloat(value) || 0 : preliminaries.cost_details.rate;
-      updatedCostDetails.amount = quantity * rate;
-    }
-
-    setPreliminaries({
-      ...preliminaries,
-      cost_details: updatedCostDetails
-    });
-  };
-
-  const handlePreliminaryNoteChange = (value: string) => {
-    if (!preliminaries) return;
-    setPreliminaries({
-      ...preliminaries,
-      notes: value
-    });
-  };
-
-  const addItem = () => {
-    const newItem = {
-      item_name: '',
-      description: '',
-      overhead_percentage: 8,
-      profit_margin_percentage: 12,
-      discount_percentage: 0,
-      status: 'Active',
-      work_type: 'contract' as WorkType,
-      materials: [],
-      labour: []
-    };
-
-    setEditedBoq(prev => {
-      const newIndex = prev.items.length; // Add at the end
-      return {
-        ...prev,
-        items: [...prev.items, newItem] // Add new item at the end
-      };
-    });
-
-    // Expand the new item
-    setExpandedItems(prev => {
-      const newIndex = editedBoq.items.length; // The index after adding
-      return new Set([...prev, newIndex]);
-    });
-
-    // Clear search term for new item and open dropdown
-    const newIndex = editedBoq.items.length;
-    setItemSearchTerms(prev => ({ ...prev, [newIndex]: '' }));
-    setItemDropdownOpen(prev => ({ ...prev, [newIndex]: false }));
-
-    // Focus on the new item input after a short delay
-    setTimeout(() => {
-      const inputElement = document.querySelector(`input[data-item-index="${newIndex}"]`) as HTMLInputElement;
-      if (inputElement) {
-        inputElement.focus();
-      }
-    }, 100);
-  };
-
-  const removeItem = (itemIndex: number) => {
-    const updatedItems = editedBoq.items.filter((_, index) => index !== itemIndex);
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-
-    // Update expanded items - shift down indexes
-    const newExpandedItems = new Set<number>();
-    expandedItems.forEach(index => {
-      if (index < itemIndex) {
-        newExpandedItems.add(index);
-      } else if (index > itemIndex) {
-        newExpandedItems.add(index - 1);
-      }
-    });
-    setExpandedItems(newExpandedItems);
-
-    // Update search terms - reindex
-    const newSearchTerms: Record<number, string> = {};
-    Object.entries(itemSearchTerms).forEach(([key, value]) => {
-      const index = parseInt(key);
-      if (index < itemIndex) {
-        newSearchTerms[index] = value;
-      } else if (index > itemIndex) {
-        newSearchTerms[index - 1] = value;
-      }
-    });
-    setItemSearchTerms(newSearchTerms);
-
-    // Close all dropdowns
-    setItemDropdownOpen({});
-  };
-
-  const addMaterial = (itemIndex: number) => {
-    const updatedItems = [...editedBoq.items];
-    updatedItems[itemIndex].materials.push({
-      material_name: 'New Material',
-      quantity: 1,
-      unit: 'nos',
-      unit_price: 0,
-      total_price: 0
-    });
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const removeMaterial = (itemIndex: number, materialIndex: number) => {
-    const updatedItems = [...editedBoq.items];
-    updatedItems[itemIndex].materials = updatedItems[itemIndex].materials.filter(
-      (_, index) => index !== materialIndex
-    );
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const addLabour = (itemIndex: number) => {
-    const updatedItems = [...editedBoq.items];
-    updatedItems[itemIndex].labour.push({
-      labour_role: 'Worker',
-      hours: 8,
-      rate_per_hour: 100,
-      total_cost: 800,
-      work_type: 'contract'
-    });
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const removeLabour = (itemIndex: number, labourIndex: number) => {
-    const updatedItems = [...editedBoq.items];
-    updatedItems[itemIndex].labour = updatedItems[itemIndex].labour.filter(
-      (_, index) => index !== labourIndex
-    );
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  // Sub-item management functions
-  const addSubItem = (itemIndex: number) => {
-    const updatedItems = [...editedBoq.items];
-    if (!updatedItems[itemIndex].sub_items) {
-      updatedItems[itemIndex].sub_items = [];
-    }
-    updatedItems[itemIndex].sub_items.push({
-      sub_item_name: '',
-      scope: 'New Sub Item',
-      size: '',
-      location: '',
-      brand: '',
-      quantity: 1,
-      unit: 'nos',
-      rate: 0,
-      materials: [],
-      labour: []
-    });
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const removeSubItem = (itemIndex: number, subItemIndex: number) => {
-    const updatedItems = [...editedBoq.items];
-    updatedItems[itemIndex].sub_items = updatedItems[itemIndex].sub_items.filter(
-      (_: any, index: number) => index !== subItemIndex
-    );
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const handleSubItemChange = (itemIndex: number, subItemIndex: number, field: string, value: any) => {
-    const updatedItems = [...editedBoq.items];
-    updatedItems[itemIndex].sub_items[subItemIndex][field] = value;
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const addSubItemMaterial = (itemIndex: number, subItemIndex: number) => {
-    const updatedItems = [...editedBoq.items];
-    updatedItems[itemIndex].sub_items[subItemIndex].materials.push({
-      material_name: 'New Material',
-      quantity: 1,
-      unit: 'nos',
-      unit_price: 0,
-      total_price: 0,
-      description: '',
-      vat_percentage: 0
-    });
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const removeSubItemMaterial = (itemIndex: number, subItemIndex: number, materialIndex: number) => {
-    const updatedItems = [...editedBoq.items];
-    updatedItems[itemIndex].sub_items[subItemIndex].materials = updatedItems[itemIndex].sub_items[subItemIndex].materials.filter(
-      (_: any, index: number) => index !== materialIndex
-    );
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const handleSubItemMaterialChange = (itemIndex: number, subItemIndex: number, materialIndex: number, field: string, value: any) => {
-    const updatedItems = [...editedBoq.items];
-    const material = updatedItems[itemIndex].sub_items[subItemIndex].materials[materialIndex];
-    material[field] = value;
-
-    // Recalculate total_price when quantity or unit_price changes
-    if (field === 'quantity' || field === 'unit_price') {
-      material.total_price = material.quantity * material.unit_price;
-    }
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const addSubItemLabour = (itemIndex: number, subItemIndex: number) => {
-    const updatedItems = [...editedBoq.items];
-    updatedItems[itemIndex].sub_items[subItemIndex].labour.push({
-      labour_role: 'Worker',
-      hours: 8,
-      rate_per_hour: 50,
-      total_cost: 400,
-      work_type: 'contract'
-    });
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const removeSubItemLabour = (itemIndex: number, subItemIndex: number, labourIndex: number) => {
-    const updatedItems = [...editedBoq.items];
-    updatedItems[itemIndex].sub_items[subItemIndex].labour = updatedItems[itemIndex].sub_items[subItemIndex].labour.filter(
-      (_: any, index: number) => index !== labourIndex
-    );
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const handleSubItemLabourChange = (itemIndex: number, subItemIndex: number, labourIndex: number, field: string, value: any) => {
-    const updatedItems = [...editedBoq.items];
-    const labour = updatedItems[itemIndex].sub_items[subItemIndex].labour[labourIndex];
-    labour[field] = value;
-
-    // Recalculate total_cost when hours or rate_per_hour changes
-    if (field === 'hours' || field === 'rate_per_hour') {
-      labour.total_cost = labour.hours * labour.rate_per_hour;
-    }
-
-    setEditedBoq({
-      ...editedBoq,
-      items: updatedItems
-    });
-  };
-
-  const calculateItemTotals = (item: any, itemIndex?: number) => {
-    // If item has selling_price or sub_item_total, use it directly (already calculated)
-    // Otherwise calculate from materials/labour
-
-    let materialTotal = 0;
-    let labourTotal = 0;
-    let baseTotal = 0;
-    let sellingPrice = 0;
-    let overheadAmount = 0;
-    let profitAmount = 0;
-    let discountAmount = 0;
-    let vatAmount = 0;
-    let miscAmount = 0;
-    let transportAmount = 0;
-
-    if (item.sub_items?.length > 0) {
-      // New format: Calculate from sub_items
-      materialTotal = item.sub_items.reduce((sum: number, subItem: any) => {
-        const subMaterialTotal = subItem.materials?.reduce((mSum: number, mat: any) => mSum + (mat.total_price || 0), 0) || 0;
-        return sum + subMaterialTotal;
-      }, 0);
-
-      labourTotal = item.sub_items.reduce((sum: number, subItem: any) => {
-        const subLabourTotal = subItem.labour?.reduce((lSum: number, lab: any) => lSum + (lab.total_cost || lab.total_amount || 0), 0) || 0;
-        return sum + subLabourTotal;
-      }, 0);
-
-      // Extract breakdown amounts from BOTH item level AND sub_items level
-      // First try item level (overhead_amount, profit_margin_amount)
-      miscAmount = item.overhead_amount || 0;
-      overheadAmount = item.profit_margin_amount || 0;
-
-      // If not found at item level, sum from sub_items
-      if (!miscAmount) {
-        miscAmount = item.sub_items.reduce((sum: number, subItem: any) => sum + (subItem.misc_amount || 0), 0);
-      }
-      if (!overheadAmount) {
-        overheadAmount = item.sub_items.reduce((sum: number, subItem: any) => sum + (subItem.overhead_profit_amount || 0), 0);
-      }
-
-      // Transport is always at sub_item level
-      transportAmount = item.sub_items.reduce((sum: number, subItem: any) => sum + (subItem.transport_amount || 0), 0);
-
-      // Profit amount from sub_items
-      profitAmount = item.sub_items.reduce((sum: number, subItem: any) => sum + (subItem.planned_profit || 0), 0);
-
-      // IMPORTANT: Use sub_item_total directly if available (it already includes all costs)
-      // Otherwise calculate from quantity × rate
-      sellingPrice = item.sub_items.reduce((sum: number, subItem: any) => {
-        const subItemTotal = subItem.sub_item_total || ((subItem.quantity || 1) * (subItem.rate || 0));
-        return sum + subItemTotal;
-      }, 0);
-
-      // For baseTotal, use material + labour only (for display purposes)
-      baseTotal = materialTotal + labourTotal;
-
-      // Extract discount and VAT from item level
-      discountAmount = item.discount_amount || 0;
-      vatAmount = item.vat_amount || 0;
-    } else {
-      // Old format: Calculate from item-level materials/labour
-      materialTotal = item.materials?.reduce((sum: number, mat: any) => sum + (mat.total_price || 0), 0) || 0;
-      labourTotal = item.labour?.reduce((sum: number, lab: any) => sum + (lab.total_cost || 0), 0) || 0;
-      baseTotal = materialTotal + labourTotal;
-
-      // Calculate selling price with overhead, profit, discount, VAT
-      overheadAmount = baseTotal * (item.overhead_percentage || 0) / 100;
-      profitAmount = baseTotal * (item.profit_margin_percentage || 0) / 100;
-      const subtotal = baseTotal + overheadAmount + profitAmount;
-      discountAmount = subtotal * (item.discount_percentage || 0) / 100;
-      const afterDiscount = subtotal - discountAmount;
-      vatAmount = afterDiscount * (item.vat_percentage || 0) / 100;
-      sellingPrice = afterDiscount + vatAmount;
-    }
-
-    // Use item.selling_price if explicitly set, otherwise use calculated sellingPrice
-    const finalSellingPrice = item.selling_price || sellingPrice;
-
-    return {
-      materialTotal,
-      labourTotal,
-      baseTotal,
-      overheadAmount,
-      profitAmount,
-      discountAmount,
-      vatAmount,
-      miscAmount,
-      transportAmount,
-      sellingPrice: finalSellingPrice
-    };
-  };
-
-  const calculateGrandTotal = () => {
-    const itemsTotal = editedBoq.items.reduce((total, item, index) => {
-      const itemTotals = calculateItemTotals(item, index);
-      return total + itemTotals.sellingPrice;
-    }, 0);
-
-    // Add preliminary amount if it exists (from state)
-    const preliminaryAmount = preliminaries?.cost_details?.amount || 0;
-
-    return itemsTotal + preliminaryAmount;
-  };
+  }, [projectDetails.start_date, projectDetails.end_date]);
 
   const handleSave = async () => {
-    console.log('🔥🔥🔥 HANDLE SAVE CALLED - FILE VERSION: 2024-10-24-v2 🔥🔥🔥');
+    if (!boqName.trim()) {
+      toast.error('BOQ name is required');
+      return;
+    }
+
+    if (items.length === 0) {
+      toast.error('At least one item is required');
+      return;
+    }
+
     setIsSaving(true);
     try {
-      if (!editedBoq.boq_id) {
-        toast.error('BOQ ID is missing');
-        return;
-      }
-
-      // Enrich items with calculated values before sending
-      const enrichedItems = editedBoq.items.map((item, index) => {
-        const totals = calculateItemTotals(item, index);
-
-        console.log('=== ITEM CALCULATION DEBUG ===');
-        console.log('Item:', item.item_name);
-        console.log('Materials Total:', totals.materialTotal);
-        console.log('Labour Total:', totals.labourTotal);
-        console.log('Base Total:', totals.baseTotal);
-        console.log('Overhead Amount:', totals.overheadAmount);
-        console.log('Profit Amount:', totals.profitAmount);
-        console.log('Selling Price:', totals.sellingPrice);
-
-        // Enrich sub_items with calculated costs
-        const enrichedSubItems = item.sub_items?.map((subItem: any) => {
-          const subMaterialCost = subItem.materials?.reduce((sum: number, mat: any) =>
-            sum + (mat.total_price || (mat.quantity * mat.unit_price) || 0), 0) || 0;
-          const subLabourCost = subItem.labour?.reduce((sum: number, lab: any) =>
-            sum + (lab.total_cost || lab.total_amount || (lab.hours * lab.rate_per_hour) || 0), 0) || 0;
-          const subBaseTotal = subItem.base_total || ((subItem.quantity || 1) * (subItem.rate || 0));
-
-          return {
-            ...subItem,
-            materials_cost: subMaterialCost,
-            labour_cost: subLabourCost,
-            base_total: subBaseTotal
-          };
-        }) || [];
-
-        return {
-          ...item,
-          sub_items: enrichedSubItems,
-          item_total: totals.baseTotal,
-          overhead_amount: totals.overheadAmount,
-          profit_margin_amount: totals.profitAmount,
-          subtotal: totals.baseTotal + totals.overheadAmount + totals.profitAmount,
-          discount_amount: totals.discountAmount,
-          after_discount: totals.baseTotal + totals.overheadAmount + totals.profitAmount - totals.discountAmount,
-          selling_price: totals.sellingPrice
-        };
-      });
-
-      // Calculate grand totals
-      let totalMaterials = 0;
-      let totalLabour = 0;
-      let totalOverhead = 0;
-      let totalProfit = 0;
-      let totalDiscount = 0;
-      let totalVAT = 0;
-      let itemsTotal = 0;
-
-      enrichedItems.forEach((item, index) => {
-        const itemTotals = calculateItemTotals(item, index);
-        totalMaterials += itemTotals.materialTotal;
-        totalLabour += itemTotals.labourTotal;
-        totalOverhead += itemTotals.overheadAmount;
-        totalProfit += itemTotals.profitAmount;
-        totalDiscount += itemTotals.discountAmount;
-        totalVAT += itemTotals.vatAmount;
-        itemsTotal += itemTotals.sellingPrice;
-      });
-
-      // Add preliminary amount to grand total
-      const preliminaryAmount = preliminaries?.cost_details?.amount || 0;
-      const grandTotal = itemsTotal + preliminaryAmount;
-
-      // Save preliminaries separately if they exist and have been edited
-      if (preliminaries && editedBoq.project_id) {
-        try {
-          const prelimResult = await estimatorService.updatePreliminary(editedBoq.project_id, preliminaries);
-          if (!prelimResult.success) {
-            console.error('Failed to update preliminaries:', prelimResult.message);
-            toast.error('Failed to update preliminaries');
-          }
-        } catch (error) {
-          console.error('Error updating preliminaries:', error);
-        }
-      }
-
-      // Add is_revision flag and complete details to the payload
       const payload = {
-        ...editedBoq,
-        items: enrichedItems,
-        is_revision: isRevision,
-        // Include updated preliminaries
-        preliminaries: preliminaries || originalBoq?.preliminaries || {
-          items: [],
-          cost_details: {
-            quantity: 1,
-            unit: 'nos',
-            rate: 0,
-            amount: 0
-          },
-          notes: ''
-        },
-        // Add discount percentage if any
-        discount_percentage: editedBoq.items.some(item => (item.discount_percentage || 0) > 0)
-          ? editedBoq.items[0].discount_percentage
-          : 0,
-        discount_amount: totalDiscount,
-        // Add overhead and profit percentages from first item (or default)
-        overhead_percentage: enrichedItems.length > 0 ? enrichedItems[0].overhead_percentage : 10,
-        profit_margin_percentage: enrichedItems.length > 0 ? enrichedItems[0].profit_margin_percentage : 15
+        boq_name: boqName,
+        items: items,
+        overhead_percentage: overheadPercentage,
+        profit_margin_percentage: profitMarginPercentage,
+        discount_percentage: discountPercentage,
+        discount_amount: discountAmount,
+        project_details: projectDetails,
+        preliminaries: {
+          items: preliminaryItems.filter(item => item.checked || item.selected),
+          cost_details: preliminaryCostDetails
+        }
       };
 
-      // Determine which API to call based on BOQ status
-      // - If status is "rejected" (TD rejection): Use internal revision API
-      // - If isRevision flag is set: Use client revision API (for client-facing revisions)
-      // - Otherwise: Use regular update API
-      console.log('=== BOQ EDIT MODAL DEBUG ===');
-      console.log('BOQ Status (original):', boq?.status);
-      console.log('isRevision flag:', isRevision);
-
-      let result;
-      const boqStatus = boq?.status?.toLowerCase();
-      console.log('BOQ Status (lowercase):', boqStatus);
-      console.log('isInternalRevision flag:', isInternalRevision);
-
-      if (isInternalRevision || boqStatus === 'rejected') {
-        console.log('✅ Calling updateInternalRevisionBOQ API (Internal Revision)');
-        // Internal revision - save to boq_internal_revision table
-        result = await estimatorService.updateInternalRevisionBOQ(editedBoq.boq_id, payload);
-      } else if (isRevision) {
-        console.log('✅ Calling revisionBOQ API (Client Revision)');
-        // Client revision - use revision_boq API (for client-facing revisions)
-        result = await estimatorService.revisionBOQ(editedBoq.boq_id, payload);
-      } else {
-        console.log('✅ Calling regular updateBOQ API');
-        // Regular update - for Draft and other statuses
-        result = await estimatorService.updateBOQ(editedBoq.boq_id, payload);
-      }
-      console.log('=== END DEBUG ===');
+      const result = await estimatorService.updateBOQ(boqId, payload);
 
       if (result.success) {
-        toast.success(isRevision ? 'BOQ revision saved successfully' : 'BOQ updated successfully');
-        onSave();
+        toast.success('BOQ updated successfully');
+        if (onSaveSuccess) {
+          onSaveSuccess();
+        }
         onClose();
       } else {
         toast.error(result.message || 'Failed to update BOQ');
       }
-    } catch (error) {
-      toast.error('Failed to save BOQ changes');
+    } catch (error: any) {
+      toast.error('Error saving BOQ');
     } finally {
       setIsSaving(false);
     }
   };
 
+  // Item Management Functions
+  const toggleItemExpanded = (index: number) => {
+    setExpandedItems(prev =>
+      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+    );
+  };
+
+  const toggleSubItemExpanded = (key: string) => {
+    setExpandedSubItems(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    );
+  };
+
+  const updateItem = (index: number, field: string, value: any) => {
+    setItems(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
+  };
+
+  const updateSubItem = (itemIndex: number, subIndex: number, field: string, value: any) => {
+    setItems(prev => {
+      const updated = [...prev];
+      const item = { ...updated[itemIndex] };
+      const subItems = [...item.sub_items];
+      subItems[subIndex] = { ...subItems[subIndex], [field]: value };
+      item.sub_items = subItems;
+      updated[itemIndex] = item;
+      return updated;
+    });
+  };
+
+  const updateMaterial = (itemIndex: number, subIndex: number, matIndex: number, field: string, value: any) => {
+    setItems(prev => {
+      const updated = [...prev];
+      const item = { ...updated[itemIndex] };
+      const subItems = [...item.sub_items];
+      const subItem = { ...subItems[subIndex] };
+      const materials = [...subItem.materials];
+      materials[matIndex] = { ...materials[matIndex], [field]: value };
+
+      // Recalculate total_price
+      if (field === 'quantity' || field === 'unit_price') {
+        materials[matIndex].total_price = materials[matIndex].quantity * materials[matIndex].unit_price;
+      }
+
+      subItem.materials = materials;
+      subItem.materials_cost = materials.reduce((sum, m) => sum + m.total_price, 0);
+      subItems[subIndex] = subItem;
+      item.sub_items = subItems;
+      updated[itemIndex] = item;
+      return updated;
+    });
+  };
+
+  const updateLabour = (itemIndex: number, subIndex: number, labIndex: number, field: string, value: any) => {
+    setItems(prev => {
+      const updated = [...prev];
+      const item = { ...updated[itemIndex] };
+      const subItems = [...item.sub_items];
+      const subItem = { ...subItems[subIndex] };
+      const labour = [...subItem.labour];
+      labour[labIndex] = { ...labour[labIndex], [field]: value };
+
+      // Recalculate total_cost
+      if (field === 'hours' || field === 'rate_per_hour') {
+        labour[labIndex].total_cost = labour[labIndex].hours * labour[labIndex].rate_per_hour;
+      }
+
+      subItem.labour = labour;
+      subItem.labour_cost = labour.reduce((sum, l) => sum + l.total_cost, 0);
+      subItems[subIndex] = subItem;
+      item.sub_items = subItems;
+      updated[itemIndex] = item;
+      return updated;
+    });
+  };
+
+  const addMaterial = (itemIndex: number, subIndex: number) => {
+    setItems(prev => {
+      const updated = [...prev];
+      const item = { ...updated[itemIndex] };
+      const subItems = [...item.sub_items];
+      const subItem = { ...subItems[subIndex] };
+      subItem.materials = [
+        ...subItem.materials,
+        {
+          material_name: '',
+          quantity: 1,
+          unit: 'nos',
+          unit_price: 0,
+          total_price: 0,
+          brand: '',
+          description: '',
+          location: '',
+          vat_percentage: 0
+        }
+      ];
+      subItems[subIndex] = subItem;
+      item.sub_items = subItems;
+      updated[itemIndex] = item;
+      return updated;
+    });
+  };
+
+  const deleteMaterial = (itemIndex: number, subIndex: number, matIndex: number) => {
+    setItems(prev => {
+      const updated = [...prev];
+      const item = { ...updated[itemIndex] };
+      const subItems = [...item.sub_items];
+      const subItem = { ...subItems[subIndex] };
+      subItem.materials = subItem.materials.filter((_, idx) => idx !== matIndex);
+      subItem.materials_cost = subItem.materials.reduce((sum, m) => sum + m.total_price, 0);
+      subItems[subIndex] = subItem;
+      item.sub_items = subItems;
+      updated[itemIndex] = item;
+      return updated;
+    });
+  };
+
+  const addLabour = (itemIndex: number, subIndex: number) => {
+    setItems(prev => {
+      const updated = [...prev];
+      const item = { ...updated[itemIndex] };
+      const subItems = [...item.sub_items];
+      const subItem = { ...subItems[subIndex] };
+      subItem.labour = [
+        ...subItem.labour,
+        {
+          labour_role: '',
+          hours: 0,
+          rate_per_hour: 0,
+          total_cost: 0
+        }
+      ];
+      subItems[subIndex] = subItem;
+      item.sub_items = subItems;
+      updated[itemIndex] = item;
+      return updated;
+    });
+  };
+
+  const deleteLabour = (itemIndex: number, subIndex: number, labIndex: number) => {
+    setItems(prev => {
+      const updated = [...prev];
+      const item = { ...updated[itemIndex] };
+      const subItems = [...item.sub_items];
+      const subItem = { ...subItems[subIndex] };
+      subItem.labour = subItem.labour.filter((_, idx) => idx !== labIndex);
+      subItem.labour_cost = subItem.labour.reduce((sum, l) => sum + l.total_cost, 0);
+      subItems[subIndex] = subItem;
+      item.sub_items = subItems;
+      updated[itemIndex] = item;
+      return updated;
+    });
+  };
+
+  // Preliminary Functions
+  const togglePreliminaryItem = (index: number) => {
+    setPreliminaryItems(prev => {
+      const updated = [...prev];
+      updated[index] = {
+        ...updated[index],
+        checked: !updated[index].checked,
+        selected: !updated[index].selected
+      };
+      return updated;
+    });
+  };
+
+  const addCustomPreliminary = () => {
+    if (!customPreliminaryName.trim() || !customPreliminaryDesc.trim()) {
+      toast.error('Please enter both name and description for custom preliminary');
+      return;
+    }
+
+    const newItem: PreliminaryItem = {
+      id: `custom-${Date.now()}`,
+      name: customPreliminaryName,
+      description: customPreliminaryDesc,
+      checked: true,
+      selected: true,
+      isCustom: true
+    };
+
+    setPreliminaryItems(prev => [...prev, newItem]);
+    setCustomPreliminaryName('');
+    setCustomPreliminaryDesc('');
+    toast.success('Custom preliminary added');
+  };
+
+  const deleteCustomPreliminary = (index: number) => {
+    setPreliminaryItems(prev => prev.filter((_, idx) => idx !== index));
+    toast.success('Custom preliminary removed');
+  };
+
+  const updatePreliminaryCost = (field: keyof PreliminaryCostDetails, value: any) => {
+    setPreliminaryCostDetails(prev => {
+      const updated = { ...prev, [field]: value };
+
+      // Recalculate amounts based on percentages
+      const amount = Number(updated.amount) || 0;
+      const misc_pct = Number(updated.misc_percentage) || 0;
+      const overhead_pct = Number(updated.overhead_profit_percentage) || 0;
+      const transport_pct = Number(updated.transport_percentage) || 0;
+
+      updated.misc_amount = (amount * misc_pct) / 100;
+      updated.overhead_profit_amount = (amount * overhead_pct) / 100;
+      updated.transport_amount = (amount * transport_pct) / 100;
+      updated.planned_profit = updated.overhead_profit_amount;
+      updated.actual_profit = amount - updated.internal_cost - updated.misc_amount - updated.overhead_profit_amount - updated.transport_amount;
+
+      return updated;
+    });
+  };
+
+  const updateProjectDetail = (field: keyof ProjectDetails, value: string | number) => {
+    setProjectDetails(prev => ({ ...prev, [field]: value }));
+  };
+
+  if (!isOpen) return null;
+
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
-        {/* Backdrop */}
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden flex flex-col"
-        >
-          {/* Header - Match TD Style */}
-          <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#243d8a]/10 border-b border-blue-100 px-6 py-5 flex-shrink-0">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-md">
-                <FileText className="w-8 h-8 text-blue-600" />
-              </div>
-              <div>
-                <h2 className="text-2xl font-bold text-[#243d8a]">Edit BOQ</h2>
-                <p className="text-sm text-gray-600 mt-1">Update Bill of Quantities for your project</p>
-              </div>
-            </div>
-            <button
-              type="button"
+      {isOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4 py-8">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50"
               onClick={onClose}
-              className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-              disabled={isSaving}
-              aria-label="Close dialog"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
+            />
 
-          {/* Content - Scrollable */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-            {isLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="text-center">
-                  <Loader2 className="animate-spin h-12 w-12 text-blue-600 mx-auto mb-4" />
-                  <p className="text-gray-600">Loading BOQ details...</p>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative bg-white rounded-xl shadow-xl w-full max-w-[95vw] max-h-[95vh] overflow-hidden flex flex-col"
+            >
+              {/* Header */}
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/20 rounded-lg">
+                    <FileText className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-white">Edit BOQ</h2>
+                    <p className="text-sm text-blue-100">BOQ ID: {boqId}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors flex items-center gap-2 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSaving ? (
+                      <>
+                        <ModernLoadingSpinners size="sm" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-5 h-5" />
+                        <span>Save Changes</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={onClose}
+                    className="p-2 text-white hover:bg-white/20 rounded-lg transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
               </div>
-            ) : (
-              <>
-                {/* BOQ Details */}
-                <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 rounded-xl p-5 mb-6 border border-blue-100">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <div className="p-2 bg-blue-100 rounded-lg">
-                      <FileText className="w-5 h-5 text-blue-600" />
-                    </div>
-                    BOQ Details
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        BOQ Name *
-                      </label>
-                      <input
-                        type="text"
-                        value={editedBoq.boq_name}
-                        onChange={(e) => setEditedBoq({ ...editedBoq, boq_name: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="Enter BOQ name"
-                        disabled={isSaving}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Total Project Value
-                      </label>
-                      <div className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 font-semibold">
-                        AED {calculateGrandTotal().toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* Project Details if available */}
-                  {originalBoq?.project_details && (
-                    <div className="mt-4 pt-4 border-t border-gray-200">
-                      <h4 className="text-sm font-semibold text-gray-700 mb-3">Project Information</h4>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                        {originalBoq.project_details.project_name && (
-                          <div>
-                            <span className="text-gray-500">Project:</span>
-                            <p className="font-medium text-gray-900">{originalBoq.project_details.project_name}</p>
-                          </div>
-                        )}
-                        {originalBoq.project_details.location && (
-                          <div>
-                            <span className="text-gray-500">Location:</span>
-                            <p className="font-medium text-gray-900">{originalBoq.project_details.location}</p>
-                          </div>
-                        )}
-                        {originalBoq.project_details.floor && (
-                          <div>
-                            <span className="text-gray-500">Floor:</span>
-                            <p className="font-medium text-gray-900">{originalBoq.project_details.floor}</p>
-                          </div>
-                        )}
-                        {originalBoq.project_details.hours && (
-                          <div>
-                            <span className="text-gray-500">Hours:</span>
-                            <p className="font-medium text-gray-900">{originalBoq.project_details.hours}</p>
-                          </div>
-                        )}
-                      </div>
+              {/* Tabs */}
+              <div className="border-b border-gray-200 bg-gray-50 px-6 flex-shrink-0">
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => setActiveTab('details')}
+                    className={`px-4 py-3 text-sm font-medium border-b-2 transition-all ${
+                      activeTab === 'details'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4" />
+                      BOQ Details
                     </div>
-                  )}
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('timeline')}
+                    className={`px-4 py-3 text-sm font-medium border-b-2 transition-all ${
+                      activeTab === 'timeline'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      History & Timeline
+                    </div>
+                  </button>
                 </div>
+              </div>
 
-                {/* Preliminaries Section - Shown FIRST */}
-                {preliminaries && (preliminaries.items?.length > 0 || preliminaries.notes) && (
-                  <div className="mb-6">
-                    <div className="border border-amber-200 rounded-lg overflow-hidden">
-                      {/* Header */}
-                      <button
-                        type="button"
-                        onClick={() => setPreliminariesExpanded(!preliminariesExpanded)}
-                        className="w-full bg-gradient-to-r from-amber-400 to-orange-400 p-4 flex items-center justify-between"
-                        disabled={isSaving}
-                      >
-                        <div className="flex items-center gap-3">
-                          <FileText className="w-6 h-6 text-white" />
-                          <div className="text-left">
-                            <h3 className="text-lg font-bold text-white">Preliminaries & Approval Works</h3>
-                            <p className="text-xs text-white/80">Selected conditions and terms</p>
-                          </div>
-                        </div>
-                        {preliminariesExpanded ? (
-                          <ChevronDown className="w-5 h-5 text-white" />
-                        ) : (
-                          <ChevronRight className="w-5 h-5 text-white" />
-                        )}
-                      </button>
-
-                      {/* Expanded Content */}
-                      {preliminariesExpanded && (
-                        <div className="bg-amber-50">
-                          {/* Preliminary Items List */}
-                          {preliminaries.items && preliminaries.items.length > 0 && (
-                            <div className="p-4 space-y-2">
-                              {preliminaries.items.map((item: any, index: number) => (
-                                <div key={index} className="bg-white rounded-lg p-3 border border-amber-200 flex items-start gap-2">
-                                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center">
-                                    {index + 1}
-                                  </span>
-                                  <p className="text-sm text-gray-800 flex-1">{item.description}</p>
-                                  {item.isCustom && (
-                                    <span className="px-2 py-0.5 text-xs bg-amber-100 text-amber-700 rounded-full">
-                                      Custom
-                                    </span>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Cost Details - Editable */}
-                          {preliminaries.cost_details && (
-                            <div className="px-4 pb-4">
-                              <div className="bg-white rounded-lg p-4 border border-amber-200">
-                                <h5 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
-                                  <Calculator className="w-4 h-4" />
-                                  Cost Summary
-                                </h5>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                  <div>
-                                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                                      Quantity
-                                    </label>
-                                    <input
-                                      type="number"
-                                      value={preliminaries.cost_details.quantity || 1}
-                                      onChange={(e) => handlePreliminaryCostChange('quantity', e.target.value)}
-                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
-                                      disabled={isSaving}
-                                      min="1"
-                                      step="1"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                                      Unit
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={preliminaries.cost_details.unit || 'Nos'}
-                                      onChange={(e) => handlePreliminaryCostChange('unit', e.target.value)}
-                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
-                                      disabled={isSaving}
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                                      Rate (AED)
-                                    </label>
-                                    <input
-                                      type="number"
-                                      value={preliminaries.cost_details.rate || 0}
-                                      onChange={(e) => handlePreliminaryCostChange('rate', e.target.value)}
-                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
-                                      disabled={isSaving}
-                                      min="0"
-                                      step="0.01"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                                      Total Amount (AED)
-                                    </label>
-                                    <div className="w-full px-3 py-2 text-sm bg-amber-100 border border-amber-300 rounded-lg font-semibold text-amber-900">
-                                      {(preliminaries.cost_details.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Notes */}
-                          {preliminaries.notes && (
-                            <div className="px-4 pb-4">
-                              <div className="bg-white rounded-lg p-4 border border-amber-200">
-                                <h5 className="text-sm font-semibold text-amber-900 mb-2">Additional Notes</h5>
-                                <textarea
-                                  value={preliminaries.notes}
-                                  onChange={(e) => handlePreliminaryNoteChange(e.target.value)}
-                                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 min-h-[60px]"
-                                  disabled={isSaving}
-                                  placeholder="Add any additional notes..."
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-6">
+                {isLoading ? (
+                  <div className="flex flex-col items-center justify-center py-20">
+                    <ModernLoadingSpinners size="lg" />
+                    <p className="mt-6 text-gray-600">Loading BOQ data...</p>
                   </div>
-                )}
-
-                {/* BOQ Items - Match TD Style */}
-                <div className="mb-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-bold text-gray-900">BOQ Items</h3>
-                    <div className="flex items-center gap-3">
-                      {isLoadingMasterData && (
-                        <div className="flex items-center gap-2 text-sm text-gray-500">
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Loading master data...</span>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Project Information Section */}
+                    <div className="bg-red-50 rounded-lg p-5 border border-red-200">
+                      <h3 className="text-lg font-semibold text-red-900 mb-4 flex items-center gap-2">
+                        <Building2 className="w-5 h-5 text-red-600" />
+                        Project Information
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            BOQ Name <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={boqName}
+                            onChange={(e) => setBoqName(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Enter BOQ name"
+                          />
                         </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={addItem}
-                        className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-all font-semibold shadow-md"
-                        style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                        disabled={isSaving}
-                      >
-                        <Plus className="w-5 h-5" />
-                        Add Item
-                      </button>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Project Name</label>
+                          <input
+                            type="text"
+                            value={projectDetails.project_name}
+                            onChange={(e) => updateProjectDetail('project_name', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            placeholder="Project name"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Location</label>
+                          <input
+                            type="text"
+                            value={projectDetails.location}
+                            onChange={(e) => updateProjectDetail('location', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            placeholder="Location"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Floor</label>
+                          <input
+                            type="text"
+                            value={projectDetails.floor}
+                            onChange={(e) => updateProjectDetail('floor', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            placeholder="Floor"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Working Hours</label>
+                          <input
+                            type="text"
+                            value={projectDetails.hours}
+                            onChange={(e) => updateProjectDetail('hours', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            placeholder="Working hours"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                          <select
+                            value={status}
+                            onChange={(e) => setStatus(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            title="Select BOQ Status"
+                          >
+                            <option value="Draft">Draft</option>
+                            <option value="In_Review">In Review</option>
+                            <option value="Approved">Approved</option>
+                            <option value="Sent_for_Confirmation">Sent for Confirmation</option>
+                            <option value="Rejected">Rejected</option>
+                          </select>
+                        </div>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="space-y-4">
+                    {/* Project Timeline Section */}
+                    <div className="bg-blue-50 rounded-lg p-5 border border-blue-200">
+                      <h3 className="text-lg font-semibold text-blue-900 mb-4 flex items-center gap-2">
+                        <Clock className="w-5 h-5 text-blue-600" />
+                        Project Timeline
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+                          <input
+                            type="date"
+                            value={projectDetails.start_date}
+                            onChange={(e) => updateProjectDetail('start_date', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+                          <input
+                            type="date"
+                            value={projectDetails.end_date}
+                            onChange={(e) => updateProjectDetail('end_date', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Duration (Days)</label>
+                          <input
+                            type="number"
+                            value={projectDetails.duration_days}
+                            readOnly
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100"
+                            placeholder="Auto-calculated"
+                          />
+                        </div>
+                      </div>
+                    </div>
 
-                    {editedBoq.items.map((item, itemIndex) => {
-                      const totals = calculateItemTotals(item, itemIndex);
-                      const isExpanded = expandedItems.has(itemIndex);
+                    {/* Global Percentages */}
+                    <div className="bg-gray-50 rounded-lg p-5 border border-gray-200">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Global Settings</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Overhead %</label>
+                          <input
+                            type="number"
+                            value={overheadPercentage}
+                            onChange={(e) => setOverheadPercentage(Number(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            step="0.1"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Profit Margin %</label>
+                          <input
+                            type="number"
+                            value={profitMarginPercentage}
+                            onChange={(e) => setProfitMarginPercentage(Number(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            step="0.1"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Discount %</label>
+                          <input
+                            type="number"
+                            value={discountPercentage}
+                            onChange={(e) => setDiscountPercentage(Number(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            step="0.1"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Discount Amount</label>
+                          <input
+                            type="number"
+                            value={discountAmount}
+                            onChange={(e) => setDiscountAmount(Number(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            step="0.01"
+                          />
+                        </div>
+                      </div>
+                    </div>
 
-                      return (
-                        <div key={itemIndex} className="border border-gray-200 rounded-lg">
-                          {/* Item Header */}
-                          <div className="bg-gray-50 px-4 py-3 flex items-center justify-between">
-                            <div className="flex items-center gap-3 flex-1">
-                              <button
-                                type="button"
-                                onClick={() => toggleItemExpansion(itemIndex)}
-                                className="p-1 hover:bg-gray-200 rounded"
-                                disabled={isSaving}
-                                aria-label="Toggle item details"
-                              >
-                                {expandedItems.has(itemIndex) ? (
-                                  <ChevronDown className="w-4 h-4" />
-                                ) : (
-                                  <ChevronRight className="w-4 h-4" />
-                                )}
-                              </button>
-                              <span className="text-sm font-medium text-gray-700">Item #{itemIndex + 1}</span>
-                              {item.item_id && (
-                                <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">
-                                  From Master
+                    {/* Preliminaries Section */}
+                    <div className="bg-purple-50 rounded-lg p-5 border border-purple-200">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-purple-600" />
+                        Preliminaries & Approval Works
+                      </h3>
+
+                      {/* Preliminary Items List */}
+                      <div className="space-y-2 mb-4">
+                        {preliminaryItems.map((item, index) => (
+                          <div key={item.id || index} className="bg-white rounded-lg p-3 border border-purple-200 flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              checked={item.checked || item.selected}
+                              onChange={() => togglePreliminaryItem(index)}
+                              className="mt-1 w-4 h-4 text-purple-600 rounded"
+                            />
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900">{item.name}</p>
+                              <p className="text-sm text-gray-600">{item.description}</p>
+                              {item.isCustom && (
+                                <span className="inline-block mt-1 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">
+                                  Custom
                                 </span>
                               )}
-                              <div className="flex-1 relative item-dropdown-container">
-                                <div className="relative">
-                                  <input
-                                    type="text"
-                                    data-item-index={itemIndex}
-                                    value={itemSearchTerms[itemIndex] !== undefined ? itemSearchTerms[itemIndex] : item.item_name}
-                                    onChange={(e) => handleItemNameChange(itemIndex, e.target.value)}
-                                    className="w-full px-2 py-1 pr-8 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder="Search master items or type new item name"
-                                    disabled={isSaving || loadingItemData[itemIndex]}
-                                    onFocus={() => {
-                                      setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: true }));
-                                    }}
-                                  />
-                                  {loadingItemData[itemIndex] ? (
-                                    <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 animate-spin" />
-                                  ) : (
-                                    <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
-                                  )}
-                                  {itemDropdownOpen[itemIndex] && (
-                                    <div className="absolute z-[20] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                                      {(() => {
-                                        const searchTerm = itemSearchTerms[itemIndex] !== undefined ? itemSearchTerms[itemIndex] : item.item_name;
-                                        const filtered = getFilteredItems(searchTerm);
-                                        const currentSearchTerm = itemSearchTerms[itemIndex] || '';
-                                        const showNewOption = currentSearchTerm.trim().length > 0 &&
-                                          !filtered.some(i => i.item_name.toLowerCase() === currentSearchTerm.toLowerCase());
-
-                                        if (filtered.length === 0 && !showNewOption) {
-                                          return (
-                                            <div className="px-3 py-2 text-sm text-gray-500">
-                                              Type to search items or add new
-                                            </div>
-                                          );
-                                        }
-
-                                        return (
-                                          <>
-                                            {filtered.map(masterItem => (
-                                              <button
-                                                key={masterItem.item_id}
-                                                type="button"
-                                                onClick={() => selectMasterItem(itemIndex, masterItem)}
-                                                className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors flex items-center justify-between group"
-                                              >
-                                                <div>
-                                                  <div className="font-medium text-gray-900">{masterItem.item_name}</div>
-                                                  {masterItem.description && (
-                                                    <div className="text-xs text-gray-500 truncate">{masterItem.description}</div>
-                                                  )}
-                                                </div>
-                                                <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                  Select
-                                                </span>
-                                              </button>
-                                            ))}
-                                            {showNewOption && (
-                                              <button
-                                                type="button"
-                                                onClick={() => {
-                                                  handleItemChange(itemIndex, 'item_name', itemSearchTerms[itemIndex]);
-                                                  setItemDropdownOpen(prev => ({ ...prev, [itemIndex]: false }));
-                                                }}
-                                                className="w-full px-3 py-2 text-left text-sm bg-green-50 hover:bg-green-100 transition-colors border-t border-gray-200"
-                                              >
-                                                <div className="flex items-center gap-2">
-                                                  <PlusCircle className="w-4 h-4 text-green-600" />
-                                                  <span className="font-medium text-green-700">
-                                                    Add "{itemSearchTerms[itemIndex]}" as new item
-                                                  </span>
-                                                </div>
-                                              </button>
-                                            )}
-                                          </>
-                                        );
-                                      })()}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <input
-                                type="text"
-                                value={item.description}
-                                onChange={(e) => handleItemChange(itemIndex, 'description', e.target.value)}
-                                className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded"
-                                placeholder="Description (optional)"
-                                disabled={isSaving}
-                              />
                             </div>
-                            <div className="flex items-center gap-2 ml-4">
-                              <span className="text-sm font-medium text-gray-900">
-                                AED{totals.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                              </span>
+                            {item.isCustom && (
                               <button
-                                type="button"
-                                onClick={() => removeItem(itemIndex)}
+                                onClick={() => deleteCustomPreliminary(index)}
                                 className="p-1 text-red-500 hover:bg-red-50 rounded"
-                                disabled={isSaving}
-                                aria-label="Remove item"
+                                title="Delete custom preliminary"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Add Custom Preliminary */}
+                      <div className="bg-white rounded-lg p-4 border border-purple-300 mb-4">
+                        <h4 className="text-sm font-semibold text-gray-900 mb-3">Add Custom Preliminary</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <input
+                            type="text"
+                            value={customPreliminaryName}
+                            onChange={(e) => setCustomPreliminaryName(e.target.value)}
+                            placeholder="Preliminary name"
+                            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                          />
+                          <input
+                            type="text"
+                            value={customPreliminaryDesc}
+                            onChange={(e) => setCustomPreliminaryDesc(e.target.value)}
+                            placeholder="Description"
+                            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                          />
+                        </div>
+                        <button
+                          onClick={addCustomPreliminary}
+                          className="mt-3 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Add Custom Preliminary
+                        </button>
+                      </div>
+
+                      {/* Preliminary Cost Details */}
+                      <div className="bg-white rounded-lg p-4 border border-purple-300">
+                        <h4 className="text-sm font-semibold text-gray-900 mb-3">Cost Summary</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Quantity</label>
+                            <input
+                              type="number"
+                              value={preliminaryCostDetails.quantity}
+                              onChange={(e) => updatePreliminaryCost('quantity', Number(e.target.value))}
+                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Unit</label>
+                            <input
+                              type="text"
+                              value={preliminaryCostDetails.unit}
+                              onChange={(e) => updatePreliminaryCost('unit', e.target.value)}
+                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Rate</label>
+                            <input
+                              type="number"
+                              value={preliminaryCostDetails.rate}
+                              onChange={(e) => updatePreliminaryCost('rate', e.target.value)}
+                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Amount</label>
+                            <input
+                              type="number"
+                              value={preliminaryCostDetails.amount}
+                              onChange={(e) => updatePreliminaryCost('amount', Number(e.target.value))}
+                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Internal Cost</label>
+                            <input
+                              type="number"
+                              value={preliminaryCostDetails.internal_cost}
+                              onChange={(e) => updatePreliminaryCost('internal_cost', Number(e.target.value))}
+                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Misc %</label>
+                            <input
+                              type="number"
+                              value={preliminaryCostDetails.misc_percentage}
+                              onChange={(e) => updatePreliminaryCost('misc_percentage', Number(e.target.value))}
+                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Overhead & Profit %</label>
+                            <input
+                              type="number"
+                              value={preliminaryCostDetails.overhead_profit_percentage}
+                              onChange={(e) => updatePreliminaryCost('overhead_profit_percentage', Number(e.target.value))}
+                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Transport %</label>
+                            <input
+                              type="number"
+                              value={preliminaryCostDetails.transport_percentage}
+                              onChange={(e) => updatePreliminaryCost('transport_percentage', Number(e.target.value))}
+                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* BOQ Items Section */}
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                        <Package className="w-5 h-5 text-blue-600" />
+                        BOQ Items ({items.length})
+                      </h3>
+
+                      {items.map((item, itemIndex) => (
+                        <div key={itemIndex} className="bg-blue-50 rounded-lg border border-blue-200 overflow-hidden">
+                          {/* Item Header */}
+                          <div
+                            className="bg-blue-100 px-4 py-3 cursor-pointer hover:bg-blue-150 transition-colors flex items-center justify-between"
+                            onClick={() => toggleItemExpanded(itemIndex)}
+                          >
+                            <div className="flex items-center gap-3">
+                              {expandedItems.includes(itemIndex) ? (
+                                <ChevronDown className="w-5 h-5 text-blue-600" />
+                              ) : (
+                                <ChevronRight className="w-5 h-5 text-blue-600" />
+                              )}
+                              <span className="font-semibold text-gray-900">
+                                {itemIndex + 1}. {item.item_name}
+                              </span>
+                              {item.work_type && (
+                                <span className="px-2 py-0.5 text-xs bg-blue-200 text-blue-700 rounded">
+                                  {item.work_type}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {item.has_sub_items ? `${item.sub_items?.length || 0} sub-items` : 'Direct item'}
                             </div>
                           </div>
 
-                          {/* Item Details (Expandable) */}
-                          {expandedItems.has(itemIndex) && (
-                            <div className="p-4 space-y-4 bg-gray-50/50">
-                              {/* Sub Items Section - Check if sub_items exist */}
-                              {item.sub_items && item.sub_items.length > 0 ? (
-                                <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-4 border border-purple-200">
-                                  <div className="flex items-center justify-between mb-3">
-                                    <h4 className="text-sm font-bold text-purple-900 flex items-center gap-2">
-                                      <div className="p-1.5 bg-white rounded shadow-sm">
-                                        <Package className="w-4 h-4 text-purple-600" />
-                                      </div>
-                                      Sub Items
-                                    </h4>
-                                    <button
-                                      type="button"
-                                      onClick={() => addSubItem(itemIndex)}
-                                      className="text-xs font-semibold text-purple-700 hover:text-purple-800 px-3 py-1.5 bg-purple-200 rounded-lg"
-                                      disabled={isSaving}
-                                    >
-                                      + Add Sub Item
-                                    </button>
-                                  </div>
-
-                                  {/* Render each sub-item */}
-                                  <div className="space-y-4">
-                                    {item.sub_items.map((subItem: any, subIndex: number) => (
-                                      <div key={subIndex} className="bg-white rounded-lg p-4 border border-purple-200">
-                                        {/* Sub-item header */}
-                                        <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-200">
-                                          <div className="flex-1">
-                                            <input
-                                              type="text"
-                                              value={subItem.sub_item_name}
-                                              onChange={(e) => handleSubItemChange(itemIndex, subIndex, 'sub_item_name', e.target.value)}
-                                              className="font-semibold text-purple-900 px-2 py-1 border border-purple-300 rounded"
-                                              placeholder="Sub-item name"
-                                            />
-                                            <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
-                                              <input
-                                                type="text"
-                                                value={subItem.scope || ''}
-                                                onChange={(e) => handleSubItemChange(itemIndex, subIndex, 'scope', e.target.value)}
-                                                className="px-2 py-1 border border-gray-300 rounded"
-                                                placeholder="Scope"
-                                              />
-                                              <input
-                                                type="text"
-                                                value={subItem.size || ''}
-                                                onChange={(e) => handleSubItemChange(itemIndex, subIndex, 'size', e.target.value)}
-                                                className="px-2 py-1 border border-gray-300 rounded"
-                                                placeholder="Size"
-                                              />
-                                              <input
-                                                type="text"
-                                                value={subItem.location || ''}
-                                                onChange={(e) => handleSubItemChange(itemIndex, subIndex, 'location', e.target.value)}
-                                                className="px-2 py-1 border border-gray-300 rounded"
-                                                placeholder="Location"
-                                              />
-                                              <input
-                                                type="text"
-                                                value={subItem.brand || ''}
-                                                onChange={(e) => handleSubItemChange(itemIndex, subIndex, 'brand', e.target.value)}
-                                                className="px-2 py-1 border border-gray-300 rounded"
-                                                placeholder="Brand"
-                                              />
-                                            </div>
-                                          </div>
-                                          <button
-                                            type="button"
-                                            onClick={() => removeSubItem(itemIndex, subIndex)}
-                                            className="ml-2 p-1 text-red-600 hover:bg-red-100 rounded"
-                                          >
-                                            <Trash2 className="w-4 h-4" />
-                                          </button>
-                                        </div>
-
-                                        {/* Materials for this sub-item */}
-                                        <div className="mb-3">
-                                          <div className="flex items-center justify-between mb-2">
-                                            <h5 className="text-xs font-bold text-blue-900">📦 Materials</h5>
-                                            <button
-                                              type="button"
-                                              onClick={() => addSubItemMaterial(itemIndex, subIndex)}
-                                              className="text-xs text-blue-700 hover:text-blue-800"
-                                            >
-                                              + Add Material
-                                            </button>
-                                          </div>
-                                          {subItem.materials && subItem.materials.length > 0 ? (
-                                            <div className="space-y-2">
-                                              {subItem.materials.map((mat: any, matIndex: number) => (
-                                                <div key={matIndex} className="grid grid-cols-6 gap-2 items-center bg-blue-50 p-2 rounded">
-                                                  <input
-                                                    type="text"
-                                                    value={mat.material_name}
-                                                    onChange={(e) => handleSubItemMaterialChange(itemIndex, subIndex, matIndex, 'material_name', e.target.value)}
-                                                    className="col-span-2 px-2 py-1 text-xs border border-blue-300 rounded"
-                                                    placeholder="Material"
-                                                  />
-                                                  <input
-                                                    type="number"
-                                                    value={mat.quantity}
-                                                    onChange={(e) => handleSubItemMaterialChange(itemIndex, subIndex, matIndex, 'quantity', Number(e.target.value))}
-                                                    className="px-2 py-1 text-xs border border-blue-300 rounded"
-                                                    placeholder="Qty"
-                                                  />
-                                                  <input
-                                                    type="text"
-                                                    value={mat.unit}
-                                                    onChange={(e) => handleSubItemMaterialChange(itemIndex, subIndex, matIndex, 'unit', e.target.value)}
-                                                    className="px-2 py-1 text-xs border border-blue-300 rounded"
-                                                    placeholder="Unit"
-                                                  />
-                                                  <input
-                                                    type="number"
-                                                    value={mat.unit_price}
-                                                    onChange={(e) => handleSubItemMaterialChange(itemIndex, subIndex, matIndex, 'unit_price', Number(e.target.value))}
-                                                    className="px-2 py-1 text-xs border border-blue-300 rounded"
-                                                    placeholder="Rate"
-                                                  />
-                                                  <div className="flex items-center justify-between">
-                                                    <span className="text-xs font-semibold">AED {mat.total_price?.toLocaleString() || (mat.quantity * mat.unit_price).toLocaleString()}</span>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => removeSubItemMaterial(itemIndex, subIndex, matIndex)}
-                                                      className="p-1 text-red-600 hover:bg-red-100 rounded"
-                                                    >
-                                                      <Trash2 className="w-3 h-3" />
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          ) : (
-                                            <div className="text-center py-2 text-xs text-blue-700 bg-blue-50 rounded">No materials</div>
-                                          )}
-                                        </div>
-
-                                        {/* Labour for this sub-item */}
-                                        <div>
-                                          <div className="flex items-center justify-between mb-2">
-                                            <h5 className="text-xs font-bold text-orange-900">👷 Labour</h5>
-                                            <button
-                                              type="button"
-                                              onClick={() => addSubItemLabour(itemIndex, subIndex)}
-                                              className="text-xs text-orange-700 hover:text-orange-800"
-                                            >
-                                              + Add Labour
-                                            </button>
-                                          </div>
-                                          {subItem.labour && subItem.labour.length > 0 ? (
-                                            <div className="space-y-2">
-                                              {subItem.labour.map((lab: any, labIndex: number) => (
-                                                <div key={labIndex} className="grid grid-cols-5 gap-2 items-center bg-orange-50 p-2 rounded">
-                                                  <input
-                                                    type="text"
-                                                    value={lab.labour_role}
-                                                    onChange={(e) => handleSubItemLabourChange(itemIndex, subIndex, labIndex, 'labour_role', e.target.value)}
-                                                    className="col-span-2 px-2 py-1 text-xs border border-orange-300 rounded"
-                                                    placeholder="Role"
-                                                  />
-                                                  <input
-                                                    type="number"
-                                                    value={lab.hours}
-                                                    onChange={(e) => handleSubItemLabourChange(itemIndex, subIndex, labIndex, 'hours', Number(e.target.value))}
-                                                    className="px-2 py-1 text-xs border border-orange-300 rounded"
-                                                    placeholder="Hours"
-                                                  />
-                                                  <input
-                                                    type="number"
-                                                    value={lab.rate_per_hour}
-                                                    onChange={(e) => handleSubItemLabourChange(itemIndex, subIndex, labIndex, 'rate_per_hour', Number(e.target.value))}
-                                                    className="px-2 py-1 text-xs border border-orange-300 rounded"
-                                                    placeholder="Rate"
-                                                  />
-                                                  <div className="flex items-center justify-between">
-                                                    <span className="text-xs font-semibold">AED {lab.total_cost?.toLocaleString() || (lab.hours * lab.rate_per_hour).toLocaleString()}</span>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => removeSubItemLabour(itemIndex, subIndex, labIndex)}
-                                                      className="p-1 text-red-600 hover:bg-red-100 rounded"
-                                                    >
-                                                      <Trash2 className="w-3 h-3" />
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          ) : (
-                                            <div className="text-center py-2 text-xs text-orange-700 bg-orange-50 rounded">No labour</div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
+                          {/* Item Details (Expanded) */}
+                          {expandedItems.includes(itemIndex) && (
+                            <div className="p-4 space-y-4 bg-white">
+                              {/* Basic Item Fields */}
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-700 mb-1">Item Name *</label>
+                                  <input
+                                    type="text"
+                                    value={item.item_name}
+                                    onChange={(e) => updateItem(itemIndex, 'item_name', e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                                  />
                                 </div>
-                              ) : (
-                                // No sub_items - show direct materials and labour
-                                <div className="bg-gradient-to-r from-purple-50 to-purple-100/30 rounded-lg p-4 border border-purple-200">
-                                  <div className="flex items-center justify-between mb-3">
-                                    <h4 className="text-sm font-bold text-purple-900 flex items-center gap-2">
-                                      <div className="p-1.5 bg-white rounded shadow-sm">
-                                        <Package className="w-4 h-4 text-purple-600" />
-                                      </div>
-                                      Materials & Labour
-                                    </h4>
-                                    <button
-                                      type="button"
-                                      onClick={() => addSubItem(itemIndex)}
-                                      className="text-xs font-semibold text-purple-700 hover:text-purple-800 px-3 py-1.5 bg-purple-200 rounded-lg"
-                                      disabled={isSaving}
-                                    >
-                                      + Add Sub Item
-                                    </button>
-                                  </div>
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-700 mb-1">Work Type</label>
+                                  <select
+                                    value={item.work_type}
+                                    onChange={(e) => updateItem(itemIndex, 'work_type', e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                                  >
+                                    <option value="contract">Contract</option>
+                                    <option value="daily_wages">Daily Wages</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-700 mb-1">Unit</label>
+                                  <input
+                                    type="text"
+                                    value={item.unit}
+                                    onChange={(e) => updateItem(itemIndex, 'unit', e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                                  />
+                                </div>
+                              </div>
 
-                                  {/* VAT Mode Toggle */}
-                                  <div className="mb-3 pb-3 border-b border-blue-200">
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={useMaterialVAT[itemIndex] || false}
-                                        onChange={(e) => {
-                                          setUseMaterialVAT(prev => ({
-                                            ...prev,
-                                            [itemIndex]: e.target.checked
-                                          }));
-                                        }}
-                                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                        disabled={isSaving}
-                                      />
-                                      <span className="text-xs text-blue-900 font-medium">
-                                        Different VAT rates for materials
-                                      </span>
-                                      <span className="text-xs text-blue-600 italic">
-                                        (Check this if materials have different VAT percentages)
-                                      </span>
-                                    </label>
-                                  </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
+                                <textarea
+                                  value={item.description || ''}
+                                  onChange={(e) => updateItem(itemIndex, 'description', e.target.value)}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                                  rows={2}
+                                />
+                              </div>
 
-                                  {item.materials.length === 0 ? (
-                                    <div className="text-center py-4 text-blue-700 bg-blue-50 rounded-lg border border-blue-200">
-                                      No materials added yet
-                                    </div>
-                                  ) : (
-                                    <div className="overflow-x-auto bg-white rounded-lg">
-                                      <table className="w-full">
-                                        <thead className="bg-blue-100 border-b border-blue-200">
-                                          <tr>
-                                            <th className="text-left p-3 text-xs font-bold text-blue-900">Material</th>
-                                            <th className="text-left p-3 text-xs font-bold text-blue-900">Qty</th>
-                                            <th className="text-left p-3 text-xs font-bold text-blue-900">Unit</th>
-                                            <th className="text-left p-3 text-xs font-bold text-blue-900">Rate</th>
-                                            <th className="text-left p-3 text-xs font-bold text-blue-900">Total</th>
-                                            <th className="text-left p-3 text-xs font-bold text-blue-900"></th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {item.materials.map((material, matIndex) => (
-                                            <tr key={matIndex} className="border-t border-gray-100">
-                                              <td className="p-2">
+                              {/* Sub-Items */}
+                              {item.has_sub_items && item.sub_items && item.sub_items.length > 0 && (
+                                <div className="space-y-3">
+                                  <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                                    <Package className="w-4 h-4 text-green-600" />
+                                    Sub-Items ({item.sub_items.length})
+                                  </h4>
+                                  {item.sub_items.map((subItem, subIndex) => {
+                                    const subKey = `${itemIndex}-${subIndex}`;
+                                    const isExpanded = expandedSubItems.includes(subKey);
+                                    return (
+                                      <div key={subIndex} className="bg-green-50 rounded-lg p-3 border border-green-300">
+                                        <div
+                                          className="cursor-pointer hover:bg-green-100 p-2 rounded transition-colors flex items-center justify-between"
+                                          onClick={() => toggleSubItemExpanded(subKey)}
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            {isExpanded ? (
+                                              <ChevronDown className="w-4 h-4 text-green-600" />
+                                            ) : (
+                                              <ChevronRight className="w-4 h-4 text-green-600" />
+                                            )}
+                                            <span className="font-medium text-gray-900">
+                                              {subIndex + 1}. {subItem.sub_item_name || subItem.scope}
+                                            </span>
+                                          </div>
+                                          <span className="text-xs text-gray-600">
+                                            {subItem.materials?.length || 0} materials, {subItem.labour?.length || 0} labour
+                                          </span>
+                                        </div>
+
+                                        {isExpanded && (
+                                          <div className="mt-3 space-y-3 bg-white rounded p-3">
+                                            {/* Sub-Item Basic Fields */}
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                              <div>
+                                                <label className="block text-xs text-gray-600 mb-1">Sub-Item Name</label>
                                                 <input
                                                   type="text"
-                                                  value={material.material_name}
-                                                  onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'material_name', e.target.value)}
-                                                  className={`w-full px-3 py-1.5 border rounded-lg focus:outline-none focus:ring-2 ${
-                                                    material.is_from_master
-                                                      ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                                      : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
-                                                  }`}
-                                                  disabled={material.is_from_master}
-                                                  placeholder="Material name"
-                                                  title={material.is_from_master ? 'Material from master data cannot be edited' : ''}
+                                                  value={subItem.sub_item_name}
+                                                  onChange={(e) => updateSubItem(itemIndex, subIndex, 'sub_item_name', e.target.value)}
+                                                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500"
                                                 />
+                                              </div>
+                                              <div>
+                                                <label className="block text-xs text-gray-600 mb-1">Location</label>
                                                 <input
                                                   type="text"
-                                                  value={(material as any).description || ''}
-                                                  onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'description', e.target.value)}
-                                                  className="w-full px-3 py-1.5 mt-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                                                  placeholder="Description (optional)"
+                                                  value={subItem.location}
+                                                  onChange={(e) => updateSubItem(itemIndex, subIndex, 'location', e.target.value)}
+                                                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500"
                                                 />
-                                                {useMaterialVAT[itemIndex] && (
-                                                  <div className="flex items-center gap-1 mt-1">
-                                                    <span className="text-xs text-blue-700 font-medium">VAT:</span>
-                                                    <input
-                                                      type="number"
-                                                      value={(material as any).vat_percentage === 0 ? '' : (material as any).vat_percentage || ''}
-                                                      onChange={(e) => {
-                                                        const value = e.target.value === '' ? 0 : Number(e.target.value);
-                                                        handleMaterialChange(itemIndex, matIndex, 'vat_percentage', value);
-                                                      }}
-                                                      className="w-16 px-2 py-1 text-xs border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white"
-                                                      placeholder="0"
-                                                      min="0"
-                                                      step="0.1"
-                                                      disabled={isSaving}
-                                                    />
-                                                    <span className="text-xs text-gray-600">%</span>
-                                                  </div>
-                                                )}
-                                              </td>
-                                              <td className="p-2">
-                                                <div className="relative">
-                                                  <input
-                                                    type="number"
-                                                    value={material.quantity}
-                                                    onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'quantity', Number(e.target.value))}
-                                                    className="w-24 px-3 py-1.5 pr-9 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                    placeholder="1"
-                                                  />
-                                                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col">
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => handleMaterialChange(itemIndex, matIndex, 'quantity', material.quantity + 1)}
-                                                      className="px-1 hover:bg-blue-100 rounded text-blue-600"
-                                                    >
-                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                                      </svg>
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => handleMaterialChange(itemIndex, matIndex, 'quantity', Math.max(0, material.quantity - 1))}
-                                                      className="px-1 hover:bg-blue-100 rounded text-blue-600"
-                                                    >
-                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                      </svg>
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              </td>
-                                              <td className="p-2">
-                                                <ModernSelect
-                                                  value={material.unit}
-                                                  onChange={(value) => handleMaterialChange(itemIndex, matIndex, 'unit', value)}
-                                                  options={UNIT_OPTIONS}
-                                                  className="w-28"
+                                              </div>
+                                              <div>
+                                                <label className="block text-xs text-gray-600 mb-1">Brand</label>
+                                                <input
+                                                  type="text"
+                                                  value={subItem.brand}
+                                                  onChange={(e) => updateSubItem(itemIndex, subIndex, 'brand', e.target.value)}
+                                                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500"
                                                 />
-                                              </td>
-                                              <td className="p-2">
-                                                <div className="flex items-center gap-1">
-                                                  <span className="text-sm text-gray-500 font-medium">AED</span>
-                                                  <div className="relative">
-                                                    <input
-                                                      type="number"
-                                                      value={material.unit_price}
-                                                      onChange={(e) => handleMaterialChange(itemIndex, matIndex, 'unit_price', Number(e.target.value))}
-                                                      className="w-28 px-3 py-1.5 pr-9 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                      placeholder="0.00"
-                                                    />
-                                                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col">
+                                              </div>
+                                              <div>
+                                                <label className="block text-xs text-gray-600 mb-1">Size</label>
+                                                <input
+                                                  type="text"
+                                                  value={subItem.size}
+                                                  onChange={(e) => updateSubItem(itemIndex, subIndex, 'size', e.target.value)}
+                                                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500"
+                                                />
+                                              </div>
+                                              <div>
+                                                <label className="block text-xs text-gray-600 mb-1">Quantity</label>
+                                                <input
+                                                  type="number"
+                                                  value={subItem.quantity}
+                                                  onChange={(e) => updateSubItem(itemIndex, subIndex, 'quantity', Number(e.target.value))}
+                                                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500"
+                                                  step="0.01"
+                                                />
+                                              </div>
+                                              <div>
+                                                <label className="block text-xs text-gray-600 mb-1">Rate</label>
+                                                <input
+                                                  type="number"
+                                                  value={subItem.rate}
+                                                  onChange={(e) => updateSubItem(itemIndex, subIndex, 'rate', Number(e.target.value))}
+                                                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500"
+                                                  step="0.01"
+                                                />
+                                              </div>
+                                            </div>
+
+                                            <div>
+                                              <label className="block text-xs text-gray-600 mb-1">Scope</label>
+                                              <textarea
+                                                value={subItem.scope}
+                                                onChange={(e) => updateSubItem(itemIndex, subIndex, 'scope', e.target.value)}
+                                                className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500"
+                                                rows={2}
+                                              />
+                                            </div>
+
+                                            {/* Materials */}
+                                            <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                                              <div className="flex items-center justify-between mb-2">
+                                                <h5 className="text-xs font-semibold text-gray-900 flex items-center gap-1">
+                                                  <Package className="w-4 h-4 text-blue-600" />
+                                                  Materials ({subItem.materials?.length || 0})
+                                                </h5>
+                                                <button
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    addMaterial(itemIndex, subIndex);
+                                                  }}
+                                                  className="px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 flex items-center gap-1"
+                                                >
+                                                  <Plus className="w-3 h-3" />
+                                                  Add
+                                                </button>
+                                              </div>
+                                              <div className="space-y-2">
+                                                {subItem.materials?.map((material, matIndex) => (
+                                                  <div key={matIndex} className="bg-white rounded p-2 border border-blue-200">
+                                                    <div className="grid grid-cols-6 gap-2">
+                                                      <input
+                                                        type="text"
+                                                        value={material.material_name}
+                                                        onChange={(e) => updateMaterial(itemIndex, subIndex, matIndex, 'material_name', e.target.value)}
+                                                        placeholder="Material"
+                                                        className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-400"
+                                                      />
+                                                      <input
+                                                        type="number"
+                                                        value={material.quantity}
+                                                        onChange={(e) => updateMaterial(itemIndex, subIndex, matIndex, 'quantity', Number(e.target.value))}
+                                                        placeholder="Qty"
+                                                        className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-400"
+                                                        step="0.01"
+                                                      />
+                                                      <input
+                                                        type="text"
+                                                        value={material.unit}
+                                                        onChange={(e) => updateMaterial(itemIndex, subIndex, matIndex, 'unit', e.target.value)}
+                                                        placeholder="Unit"
+                                                        className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-400"
+                                                      />
+                                                      <input
+                                                        type="number"
+                                                        value={material.unit_price}
+                                                        onChange={(e) => updateMaterial(itemIndex, subIndex, matIndex, 'unit_price', Number(e.target.value))}
+                                                        placeholder="Price"
+                                                        className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-400"
+                                                        step="0.01"
+                                                      />
+                                                      <div className="flex items-center justify-center">
+                                                        <span className="text-xs font-medium text-gray-700">
+                                                          {material.total_price?.toFixed(2) || '0.00'}
+                                                        </span>
+                                                      </div>
                                                       <button
                                                         type="button"
-                                                        onClick={() => handleMaterialChange(itemIndex, matIndex, 'unit_price', material.unit_price + 10)}
-                                                        className="px-1 hover:bg-blue-100 rounded text-blue-600"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          deleteMaterial(itemIndex, subIndex, matIndex);
+                                                        }}
+                                                        className="p-1 text-red-500 hover:bg-red-100 rounded flex items-center justify-center"
+                                                        title="Delete material"
+                                                        aria-label="Delete material"
                                                       >
-                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                                        </svg>
-                                                      </button>
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => handleMaterialChange(itemIndex, matIndex, 'unit_price', Math.max(0, material.unit_price - 10))}
-                                                        className="px-1 hover:bg-blue-100 rounded text-blue-600"
-                                                      >
-                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                        </svg>
+                                                        <Trash2 className="w-3 h-3" />
                                                       </button>
                                                     </div>
                                                   </div>
-                                                </div>
-                                              </td>
-                                              <td className="p-2">
-                                                <span className="font-medium">AED {material.total_price.toLocaleString()}</span>
-                                              </td>
-                                              <td className="p-2">
+                                                ))}
+                                              </div>
+                                              <div className="mt-2 text-xs text-right font-semibold text-blue-900">
+                                                Materials Total: AED {subItem.materials_cost?.toFixed(2) || '0.00'}
+                                              </div>
+                                            </div>
+
+                                            {/* Labour */}
+                                            <div className="bg-orange-50 rounded-lg p-3 border border-orange-200">
+                                              <div className="flex items-center justify-between mb-2">
+                                                <h5 className="text-xs font-semibold text-gray-900 flex items-center gap-1">
+                                                  <Users className="w-4 h-4 text-orange-600" />
+                                                  Labour ({subItem.labour?.length || 0})
+                                                </h5>
                                                 <button
-                                                  onClick={() => removeMaterial(itemIndex, matIndex)}
-                                                  className="p-1 text-red-600 hover:bg-red-100 rounded"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    addLabour(itemIndex, subIndex);
+                                                  }}
+                                                  className="px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600 flex items-center gap-1"
                                                 >
-                                                  <Trash2 className="w-4 h-4" />
+                                                  <Plus className="w-3 h-3" />
+                                                  Add
                                                 </button>
-                                              </td>
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Labour Section - Orange Card - Only show if NO sub_items */}
-                              {!(item.sub_items && item.sub_items.length > 0) && (
-                              <div className="bg-gradient-to-r from-orange-50 to-orange-100/30 rounded-lg p-4 border border-orange-200">
-                                <div className="flex items-center justify-between mb-3">
-                                  <h4 className="text-sm font-bold text-orange-900 flex items-center gap-2">
-                                    <div className="p-1.5 bg-white rounded shadow-sm">
-                                      <Users className="w-4 h-4 text-orange-600" />
-                                    </div>
-                                    Labour
-                                  </h4>
-                                  <button
-                                    type="button"
-                                    onClick={() => addLabour(itemIndex)}
-                                    className="text-xs font-semibold text-orange-700 hover:text-orange-800"
-                                    disabled={isSaving}
-                                  >
-                                    + Add Labour
-                                  </button>
-                                </div>
-
-                                {item.labour.length === 0 ? (
-                                  <div className="text-center py-4 text-orange-700 bg-orange-50 rounded-lg border border-orange-200">
-                                    No labour added yet
-                                  </div>
-                                ) : (
-                                  <div className="overflow-x-auto bg-white rounded-lg">
-                                    <table className="w-full">
-                                      <thead className="bg-orange-100 border-b border-orange-200">
-                                        <tr>
-                                          <th className="text-left p-3 text-xs font-bold text-orange-900">Role</th>
-                                          <th className="text-left p-3 text-xs font-bold text-orange-900">Hours</th>
-                                          <th className="text-left p-3 text-xs font-bold text-orange-900">Rate/Hr</th>
-                                          <th className="text-left p-3 text-xs font-bold text-orange-900">Type</th>
-                                          <th className="text-left p-3 text-xs font-bold text-orange-900">Total</th>
-                                          <th className="text-left p-3 text-xs font-bold text-orange-900"></th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {item.labour.map((labour, labIndex) => (
-                                          <tr key={labIndex} className="border-t border-gray-100">
-                                            <td className="p-2">
-                                              <input
-                                                type="text"
-                                                value={labour.labour_role}
-                                                onChange={(e) => handleLabourChange(itemIndex, labIndex, 'labour_role', e.target.value)}
-                                                className={`w-full px-3 py-1.5 border rounded-lg focus:outline-none focus:ring-2 ${
-                                                  labour.is_from_master
-                                                    ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                                    : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
-                                                }`}
-                                                disabled={labour.is_from_master}
-                                                placeholder="Labour role"
-                                                title={labour.is_from_master ? 'Labour role from master data cannot be edited' : ''}
-                                              />
-                                            </td>
-                                            <td className="p-2">
-                                              <div className="relative">
-                                                <input
-                                                  type="number"
-                                                  value={labour.hours}
-                                                  onChange={(e) => handleLabourChange(itemIndex, labIndex, 'hours', Number(e.target.value))}
-                                                  className="w-24 px-3 py-1.5 pr-9 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                  placeholder="8"
-                                                />
-                                                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col">
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => handleLabourChange(itemIndex, labIndex, 'hours', labour.hours + 1)}
-                                                    className="px-1 hover:bg-orange-100 rounded text-orange-600"
-                                                  >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                                    </svg>
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => handleLabourChange(itemIndex, labIndex, 'hours', Math.max(0, labour.hours - 1))}
-                                                    className="px-1 hover:bg-orange-100 rounded text-orange-600"
-                                                  >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                    </svg>
-                                                  </button>
-                                                </div>
                                               </div>
-                                            </td>
-                                            <td className="p-2">
-                                              <div className="flex items-center gap-1">
-                                                <span className="text-sm text-gray-500 font-medium">AED</span>
-                                                <div className="relative">
-                                                  <input
-                                                    type="number"
-                                                    value={labour.rate_per_hour}
-                                                    onChange={(e) => handleLabourChange(itemIndex, labIndex, 'rate_per_hour', Number(e.target.value))}
-                                                    className="w-28 px-3 py-1.5 pr-9 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                    placeholder="0.00"
-                                                  />
-                                                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col">
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => handleLabourChange(itemIndex, labIndex, 'rate_per_hour', labour.rate_per_hour + 10)}
-                                                      className="px-1 hover:bg-orange-100 rounded text-orange-600"
-                                                    >
-                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                                      </svg>
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => handleLabourChange(itemIndex, labIndex, 'rate_per_hour', Math.max(0, labour.rate_per_hour - 10))}
-                                                      className="px-1 hover:bg-orange-100 rounded text-orange-600"
-                                                    >
-                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                      </svg>
-                                                    </button>
+                                              <div className="space-y-2">
+                                                {subItem.labour?.map((labour, labIndex) => (
+                                                  <div key={labIndex} className="bg-white rounded p-2 border border-orange-200">
+                                                    <div className="grid grid-cols-5 gap-2">
+                                                      <input
+                                                        type="text"
+                                                        value={labour.labour_role}
+                                                        onChange={(e) => updateLabour(itemIndex, subIndex, labIndex, 'labour_role', e.target.value)}
+                                                        placeholder="Role"
+                                                        className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-orange-400"
+                                                      />
+                                                      <input
+                                                        type="number"
+                                                        value={labour.hours}
+                                                        onChange={(e) => updateLabour(itemIndex, subIndex, labIndex, 'hours', Number(e.target.value))}
+                                                        placeholder="Hours"
+                                                        className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-orange-400"
+                                                        step="0.01"
+                                                      />
+                                                      <input
+                                                        type="number"
+                                                        value={labour.rate_per_hour}
+                                                        onChange={(e) => updateLabour(itemIndex, subIndex, labIndex, 'rate_per_hour', Number(e.target.value))}
+                                                        placeholder="Rate/hr"
+                                                        className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-orange-400"
+                                                        step="0.01"
+                                                      />
+                                                      <div className="flex items-center justify-center">
+                                                        <span className="text-xs font-medium text-gray-700">
+                                                          {labour.total_cost?.toFixed(2) || '0.00'}
+                                                        </span>
+                                                      </div>
+                                                      <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          deleteLabour(itemIndex, subIndex, labIndex);
+                                                        }}
+                                                        className="p-1 text-red-500 hover:bg-red-100 rounded flex items-center justify-center"
+                                                        title="Delete labour"
+                                                        aria-label="Delete labour"
+                                                      >
+                                                        <Trash2 className="w-3 h-3" />
+                                                      </button>
+                                                    </div>
                                                   </div>
-                                                </div>
+                                                ))}
                                               </div>
-                                            </td>
-                                            <td className="p-2">
-                                              <select
-                                                value={labour.work_type}
-                                                onChange={(e) => handleLabourChange(itemIndex, labIndex, 'work_type', e.target.value)}
-                                                className="px-3 py-1.5 border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white text-sm"
-                                              >
-                                                <option value="contract">Contract</option>
-                                                <option value="daily_wages">Daily</option>
-                                                <option value="piece_rate">Piece</option>
-                                              </select>
-                                            </td>
-                                            <td className="p-2">
-                                              <span className="font-medium">AED {labour.total_cost.toLocaleString()}</span>
-                                            </td>
-                                            <td className="p-2">
-                                              <button
-                                                onClick={() => removeLabour(itemIndex, labIndex)}
-                                                className="p-1 text-red-600 hover:bg-red-100 rounded"
-                                              >
-                                                <Trash2 className="w-4 h-4" />
-                                              </button>
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
-                              </div>
-                              )}
-
-                              {/* Overheads, Profit & Discount Section */}
-                              <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border border-green-200">
-                                <h5 className="text-sm font-bold text-green-900 mb-3 flex items-center gap-2">
-                                  <div className="p-1.5 bg-white rounded shadow-sm">
-                                    <Calculator className="w-4 h-4 text-green-600" />
-                                  </div>
-                                  Overheads, Profit, Discount & VAT
-                                </h5>
-                                <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${useMaterialVAT[itemIndex] ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
-                                  <div>
-                                    <label className="block text-xs font-semibold text-green-900 mb-2">
-                                      Miscellaneous (%)
-                                    </label>
-                                    <div className="flex items-center gap-2">
-                                      <input
-                                        type="number"
-                                        value={item.overhead_percentage}
-                                        onChange={(e) => handleItemChange(itemIndex, 'overhead_percentage', Number(e.target.value))}
-                                        className="flex-1 px-3 py-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
-                                        step="0.1"
-                                        disabled={isSaving}
-                                        placeholder="10"
-                                      />
-                                      <span className="text-sm text-gray-500">%</span>
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-semibold text-green-900 mb-2">
-                                      Overhead & Profit (%)
-                                    </label>
-                                    <div className="flex items-center gap-2">
-                                      <input
-                                        type="number"
-                                        value={item.profit_margin_percentage}
-                                        onChange={(e) => handleItemChange(itemIndex, 'profit_margin_percentage', Number(e.target.value))}
-                                        className="flex-1 px-3 py-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
-                                        step="0.1"
-                                        disabled={isSaving}
-                                        placeholder="15"
-                                      />
-                                      <span className="text-sm text-gray-500">%</span>
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-semibold text-green-900 mb-2">
-                                      Discount (%)
-                                    </label>
-                                    <div className="flex items-center gap-2">
-                                      <input
-                                        type="number"
-                                        value={item.discount_percentage || 0}
-                                        onChange={(e) => handleItemChange(itemIndex, 'discount_percentage', Number(e.target.value))}
-                                        className="flex-1 px-3 py-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
-                                        step="0.1"
-                                        disabled={isSaving}
-                                        placeholder="0"
-                                        min="0"
-                                        max="100"
-                                      />
-                                      <span className="text-sm text-gray-500">%</span>
-                                    </div>
-                                  </div>
-                                  {!useMaterialVAT[itemIndex] && (
-                                    <div>
-                                      <label className="block text-xs font-semibold text-green-900 mb-2">
-                                        VAT (%)
-                                      </label>
-                                      <div className="flex items-center gap-2">
-                                        <input
-                                          type="number"
-                                          value={(item as any).vat_percentage || 0}
-                                          onChange={(e) => handleItemChange(itemIndex, 'vat_percentage', Number(e.target.value))}
-                                          className="flex-1 px-3 py-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white"
-                                          step="0.1"
-                                          disabled={isSaving}
-                                          placeholder="5"
-                                          min="0"
-                                        />
-                                        <span className="text-sm text-gray-500">%</span>
+                                              <div className="mt-2 text-xs text-right font-semibold text-orange-900">
+                                                Labour Total: AED {subItem.labour_cost?.toFixed(2) || '0.00'}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        )}
                                       </div>
-                                    </div>
-                                  )}
+                                    );
+                                  })}
                                 </div>
-                              </div>
-
-                              {/* Cost Summary - Neutral like PM */}
-                              <div className="mt-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                                <h5 className="text-sm font-bold text-gray-900 mb-3">Cost Summary</h5>
-                                <div className="space-y-1 text-xs">
-                                  <div className="flex justify-between py-1">
-                                    <span className="text-gray-600">Materials:</span>
-                                    <span className="font-semibold text-gray-900">AED {totals.materialTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                  </div>
-                                  <div className="flex justify-between py-1">
-                                    <span className="text-gray-600">Labour:</span>
-                                    <span className="font-semibold text-gray-900">AED {totals.labourTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                  </div>
-                                  <div className="flex justify-between py-1">
-                                    <span className="text-gray-600">Miscellaneous:</span>
-                                    <span className="font-semibold text-gray-900">AED {(totals.miscAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                  </div>
-                                  <div className="flex justify-between py-1">
-                                    <span className="text-gray-600">Transport:</span>
-                                    <span className="font-semibold text-gray-900">AED {(totals.transportAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                  </div>
-                                  <div className="flex justify-between py-1">
-                                    <span className="text-gray-600">Overhead & Profit:</span>
-                                    <span className="font-semibold text-gray-900">AED {(totals.overheadAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                  </div>
-                                  {(item.discount_percentage || 0) > 0 && (
-                                    <div className="flex justify-between py-1">
-                                      <span className="text-red-600">Discount ({item.discount_percentage}%):</span>
-                                      <span className="font-semibold text-red-600">- AED {totals.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                    </div>
-                                  )}
-                                  {((item as any).vat_percentage || 0) > 0 && (
-                                    <div className="flex justify-between py-1">
-                                      <span className="text-blue-600">VAT ({(item as any).vat_percentage}%):</span>
-                                      <span className="font-semibold text-blue-600">+ AED {totals.vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                    </div>
-                                  )}
-                                  <div className="flex justify-between font-bold border-t border-gray-300 pt-2 mt-2">
-                                    <span className="text-gray-900">Selling Price:</span>
-                                    <span className="text-gray-900">AED {totals.sellingPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                  </div>
-                                </div>
-                              </div>
+                              )}
                             </div>
                           )}
                         </div>
-                      );
-                    })}
-
-                  {editedBoq.items.length === 0 && (
-                    <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50/50">
-                      <FileText className="w-10 h-10 text-gray-400 mx-auto mb-2" />
-                      <p className="text-gray-500 font-medium">No items added yet</p>
-                      <p className="text-sm text-gray-400 mt-1">Click "Add Item" to start building your BOQ</p>
+                      ))}
                     </div>
-                  )}
-                </div>
-
-                {/* Comprehensive Cost Breakdown */}
-                {editedBoq.items.length > 0 && (
-                  <>
-                    <div className="mt-6 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-5 border border-blue-200">
-                      <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                        <Calculator className="w-5 h-5 text-blue-600" />
-                        Cost Breakdown
-                      </h3>
-                      <div className="space-y-2 text-sm">
-                        {(() => {
-                          let totalMaterials = 0;
-                          let totalLabour = 0;
-                          let totalMisc = 0;
-                          let totalTransport = 0;
-                          let totalOverhead = 0;
-                          let totalProfit = 0;
-                          let totalDiscount = 0;
-                          let totalVAT = 0;
-                          let itemsTotal = 0;
-
-                          editedBoq.items.forEach((item, index) => {
-                            const itemTotals = calculateItemTotals(item, index);
-                            totalMaterials += itemTotals.materialTotal;
-                            totalLabour += itemTotals.labourTotal;
-                            totalMisc += itemTotals.miscAmount || 0;
-                            totalTransport += itemTotals.transportAmount || 0;
-                            totalOverhead += itemTotals.overheadAmount;
-                            totalProfit += itemTotals.profitAmount;
-                            totalDiscount += itemTotals.discountAmount;
-                            totalVAT += itemTotals.vatAmount;
-                            itemsTotal += itemTotals.sellingPrice;
-                          });
-
-                          // Add preliminary amount to grand total
-                          const preliminaryAmount = editedBoq.preliminaries?.cost_details?.amount || 0;
-                          const grandTotal = itemsTotal + preliminaryAmount;
-
-                          return (
-                            <>
-                              <div className="flex justify-between py-2 border-b border-blue-100">
-                                <span className="text-gray-600">Total Materials Cost:</span>
-                                <span className="font-semibold text-gray-900">AED {totalMaterials.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                              </div>
-                              <div className="flex justify-between py-2 border-b border-blue-100">
-                                <span className="text-gray-600">Total Labour Cost:</span>
-                                <span className="font-semibold text-gray-900">AED {totalLabour.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                              </div>
-                              <div className="flex justify-between py-2 border-b border-blue-100">
-                                <span className="text-gray-600">Base Cost (Materials + Labour):</span>
-                                <span className="font-semibold text-gray-900">AED {(totalMaterials + totalLabour).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                              </div>
-                              <div className="flex justify-between py-2 border-b border-blue-100">
-                                <span className="text-gray-600">Total Miscellaneous:</span>
-                                <span className="font-semibold text-gray-900">AED {totalMisc.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                              </div>
-                              <div className="flex justify-between py-2 border-b border-blue-100">
-                                <span className="text-gray-600">Total Transport:</span>
-                                <span className="font-semibold text-gray-900">AED {totalTransport.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                              </div>
-                              <div className="flex justify-between py-2 border-b border-blue-100">
-                                <span className="text-gray-600">Total Overhead & Profit:</span>
-                                <span className="font-semibold text-gray-900">AED {totalOverhead.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                              </div>
-                              {totalDiscount > 0 && (
-                                <div className="flex justify-between py-2 border-b border-blue-100">
-                                  <span className="text-red-600">Total Discount:</span>
-                                  <span className="font-semibold text-red-600">- AED {totalDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                </div>
-                              )}
-                              {totalVAT > 0 && (
-                                <div className="flex justify-between py-2 border-b border-blue-100">
-                                  <span className="text-green-600">Total VAT:</span>
-                                  <span className="font-semibold text-green-600">+ AED {totalVAT.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()}
-                      </div>
-                    </div>
-
-                    {/* Total Summary */}
-                    <div className="mt-4 bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-5 border-2 border-green-300 shadow-xl">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-xl shadow-md">
-                            <Calculator className="w-6 h-6 text-green-600" />
-                          </div>
-                          <h3 className="text-lg font-bold text-green-900">Total Project Value</h3>
-                        </div>
-                        <span className="text-3xl font-bold text-green-900">
-                          AED {calculateGrandTotal().toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    </div>
-                  </>
+                  </div>
                 )}
               </div>
-              </>
-            )}
+            </motion.div>
           </div>
-
-          {/* Footer - Match TD Style */}
-          <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-6 py-2.5 text-gray-700 bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition-all font-semibold shadow-sm"
-              disabled={isSaving}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isSaving || !editedBoq.boq_name || editedBoq.items.length === 0}
-              className="flex items-center gap-2 px-6 py-2.5 text-white rounded-lg hover:opacity-90 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed font-bold shadow-lg"
-              style={{ backgroundColor: isSaving || !editedBoq.boq_name || editedBoq.items.length === 0 ? '' : 'rgb(36, 61, 138)' }}
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Saving Changes...
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4" />
-                  Save Changes
-                </>
-              )}
-            </button>
-          </div>
-        </motion.div>
-      </div>
+        </div>
+      )}
     </AnimatePresence>
   );
 };

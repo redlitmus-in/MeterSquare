@@ -690,7 +690,9 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
                     {currentRevisionData.boq_details.preliminaries.items && currentRevisionData.boq_details.preliminaries.items.length > 0 && (
                       <div className="bg-white rounded-lg p-4 mb-4">
                         <div className="space-y-2">
-                          {currentRevisionData.boq_details.preliminaries.items.map((item: any, idx: number) => {
+                          {currentRevisionData.boq_details.preliminaries.items
+                            .filter((item: any) => (typeof item === 'object' ? (item.checked || item.selected) : true))
+                            .map((item: any, idx: number) => {
                             const itemText = typeof item === 'object' ? (item.description || item.name || item.text || '') : item;
                             const isCustom = typeof item === 'object' && item.isCustom;
                             return (

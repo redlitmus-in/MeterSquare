@@ -29,6 +29,7 @@ import { useAutoSync } from '@/hooks/useAutoSync';
 interface Material {
   project_id: number;
   project_name: string;
+  project_code?: string;
   client: string;
   location: string;
   boq_id: number;
@@ -236,7 +237,14 @@ const MaterialsToPurchase: React.FC = () => {
                         className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-all"
                       >
                         <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-4 py-3 border-b border-blue-200">
-                          <h3 className="font-bold text-gray-900">{material.project_name}</h3>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-gray-900">{material.project_name}</h3>
+                            {material.project_code && (
+                              <span className="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
+                                {material.project_code}
+                              </span>
+                            )}
+                          </div>
                           <div className="flex items-center gap-2 text-xs text-gray-600 mt-1">
                             <Building2 className="w-3 h-3" />
                             {material.client}
@@ -299,7 +307,14 @@ const MaterialsToPurchase: React.FC = () => {
                           <TableRow key={`${material.boq_id}-${material.master_material_id}-${index}`}>
                             <TableCell>
                               <div className="space-y-1">
-                                <div className="font-semibold text-gray-900">{material.project_name}</div>
+                                <div className="flex items-center gap-2">
+                                  <div className="font-semibold text-gray-900">{material.project_name}</div>
+                                  {material.project_code && (
+                                    <span className="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
+                                      {material.project_code}
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="text-xs text-gray-500 flex items-center gap-1">
                                   <Building2 className="w-3 h-3" />
                                   {material.client}
@@ -360,7 +375,14 @@ const MaterialsToPurchase: React.FC = () => {
                       >
                         <div className="bg-gradient-to-r from-green-50 to-green-100 px-4 py-3 border-b border-green-200">
                           <div className="flex items-center justify-between">
-                            <h3 className="font-bold text-gray-900">{material.project_name}</h3>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-gray-900">{material.project_name}</h3>
+                              {material.project_code && (
+                                <span className="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
+                                  {material.project_code}
+                                </span>
+                              )}
+                            </div>
                             <Badge className="bg-green-600 text-white">
                               <CheckCircle className="w-3 h-3 mr-1" />
                               Complete
@@ -428,7 +450,14 @@ const MaterialsToPurchase: React.FC = () => {
                           <TableRow key={`${material.boq_id}-${material.master_material_id}-${index}`}>
                             <TableCell>
                               <div className="space-y-1">
-                                <div className="font-semibold text-gray-900">{material.project_name}</div>
+                                <div className="flex items-center gap-2">
+                                  <div className="font-semibold text-gray-900">{material.project_name}</div>
+                                  {material.project_code && (
+                                    <span className="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
+                                      {material.project_code}
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="text-xs text-gray-500 flex items-center gap-1">
                                   <Building2 className="w-3 h-3" />
                                   {material.client}

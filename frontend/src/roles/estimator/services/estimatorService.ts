@@ -77,8 +77,6 @@ class EstimatorService {
 
   async createBOQ(payload: BOQCreatePayload): Promise<{ success: boolean; boq_id?: number; message: string }> {
     try {
-      console.log('Creating BOQ with payload:', payload);
-
       // Validate required fields
       if (!payload.project_id) {
         return {
@@ -117,10 +115,7 @@ class EstimatorService {
         }))
       };
 
-      console.log('Processed BOQ payload with totals:', processedPayload);
-
       const response = await apiClient.post<BOQCreateResponse>('/create_boq', processedPayload);
-      console.log('BOQ creation response:', response.data);
 
       return {
         success: true,
@@ -128,7 +123,6 @@ class EstimatorService {
         message: response.data.message || 'BOQ created successfully'
       };
     } catch (error: any) {
-      console.error('BOQ creation error:', error.response?.data || error.message);
 
       if (error.response?.status === 400) {
         return {
@@ -156,8 +150,6 @@ class EstimatorService {
 
   async updateBOQ(boqId: number, updateData: any): Promise<{ success: boolean; message: string }> {
     try {
-      console.log('=== ORIGINAL PAYLOAD ===', JSON.stringify(updateData, null, 2));
-
       // Validate required fields
       if (!updateData.boq_name || !updateData.boq_name.trim()) {
         return {
@@ -173,45 +165,50 @@ class EstimatorService {
         };
       }
 
-      // Ensure total_price and total_cost are included in the payload
+      // Process items to ensure sub_items have proper materials and labour with calculated totals
       const processedData = {
         ...updateData,
         items: updateData.items.map((item: any) => {
-          console.log('Processing item:', item.item_name);
+          // Process sub_items if they exist
+          const processedSubItems = item.sub_items?.map((subItem: any) => ({
+            ...subItem,
+            materials: subItem.materials?.map((mat: any) => ({
+              ...mat,
+              total_price: mat.total_price || (mat.quantity * mat.unit_price)
+            })) || [],
+            labour: subItem.labour?.map((lab: any) => ({
+              ...lab,
+              total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour)
+            })) || []
+          })) || [];
+
+          // Process item-level materials and labour (for items without sub_items)
+          const processedMaterials = item.materials?.map((mat: any) => ({
+            ...mat,
+            total_price: mat.total_price || (mat.quantity * mat.unit_price)
+          })) || [];
+
+          const processedLabour = item.labour?.map((lab: any) => ({
+            ...lab,
+            total_cost: lab.total_cost || (lab.hours * lab.rate_per_hour)
+          })) || [];
+
           return {
             ...item,
-            materials: item.materials.map((mat: any) => {
-              const total_price = mat.total_price || (mat.quantity * mat.unit_price);
-              console.log(`Material ${mat.material_name}: qty=${mat.quantity}, price=${mat.unit_price}, total=${total_price}`);
-              return {
-                ...mat,
-                total_price: total_price
-              };
-            }),
-            labour: item.labour.map((lab: any) => {
-              const total_cost = lab.total_cost || (lab.hours * lab.rate_per_hour);
-              console.log(`Labour ${lab.labour_role}: hours=${lab.hours}, rate=${lab.rate_per_hour}, total=${total_cost}`);
-              return {
-                ...lab,
-                total_cost: total_cost
-              };
-            })
+            sub_items: processedSubItems,
+            materials: processedMaterials,
+            labour: processedLabour
           };
         })
       };
 
-      console.log('=== PROCESSED PAYLOAD WITH TOTALS ===', JSON.stringify(processedData, null, 2));
-
       const response = await apiClient.put(`/boq/update_boq/${boqId}`, processedData);
-      console.log('BOQ update response:', response.data);
 
       return {
         success: true,
         message: response.data.message || 'BOQ updated successfully'
       };
     } catch (error: any) {
-      console.error('BOQ update error:', error.response?.data || error.message);
-
       if (error.response?.status === 404) {
         return {
           success: false,
@@ -238,8 +235,6 @@ class EstimatorService {
 
   async revisionBOQ(boqId: number, updateData: any): Promise<{ success: boolean; message: string }> {
     try {
-      console.log('=== REVISION BOQ PAYLOAD ===', JSON.stringify(updateData, null, 2));
-
       // Validate required fields
       if (!updateData.boq_name || !updateData.boq_name.trim()) {
         return {
@@ -285,17 +280,13 @@ class EstimatorService {
         }))
       };
 
-      console.log('=== PROCESSED REVISION PAYLOAD ===', JSON.stringify(processedData, null, 2));
-
       const response = await apiClient.put(`/revision_boq/${boqId}`, processedData);
-      console.log('BOQ revision response:', response.data);
 
       return {
         success: true,
         message: response.data.message || 'BOQ revision created successfully'
       };
     } catch (error: any) {
-      console.error('BOQ revision error:', error.response?.data || error.message);
 
       if (error.response?.status === 404) {
         return {
@@ -323,8 +314,6 @@ class EstimatorService {
 
   async updateInternalRevisionBOQ(boqId: number, updateData: any): Promise<{ success: boolean; message: string }> {
     try {
-      console.log('=== INTERNAL REVISION BOQ PAYLOAD ===', JSON.stringify(updateData, null, 2));
-
       // Validate required fields
       if (!updateData.boq_name || !updateData.boq_name.trim()) {
         return {
@@ -369,18 +358,14 @@ class EstimatorService {
         }))
       };
 
-      console.log('=== PROCESSED INTERNAL REVISION PAYLOAD ===', JSON.stringify(processedData, null, 2));
-
       // Call internal revision API endpoint
       const response = await apiClient.put(`/update_internal_boq/${boqId}`, processedData);
-      console.log('BOQ internal revision response:', response.data);
 
       return {
         success: true,
         message: response.data.message || 'BOQ internal revision created successfully'
       };
     } catch (error: any) {
-      console.error('BOQ internal revision error:', error.response?.data || error.message);
 
       if (error.response?.status === 404) {
         return {
@@ -1650,25 +1635,118 @@ class EstimatorService {
   }
 
   /**
-   * Update preliminaries for a project
+   * Get all preliminary master items (for creating new BOQ)
+   * Returns the complete list of available preliminaries
    */
-  async updatePreliminary(projectId: number, preliminaryData: any): Promise<{ success: boolean; message: string }> {
+  async getAllPreliminaryMasters(): Promise<{ success: boolean; data?: any[]; message?: string; count?: number }> {
     try {
-      const payload = {
-        preliminaries: preliminaryData
-      };
+      const response = await apiClient.get('/preliminary-masters');
 
-      const response = await apiClient.put(`/preliminary/${projectId}`, payload);
+      if (response.data && response.data.success) {
+        return {
+          success: true,
+          data: response.data.data || [],
+          count: response.data.count || 0
+        };
+      }
+
+      return {
+        success: false,
+        message: 'No preliminary data found',
+        data: []
+      };
+    } catch (error: any) {
+      console.error('Failed to fetch preliminary masters:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to fetch preliminary masters',
+        data: []
+      };
+    }
+  }
+
+  /**
+   * Create a new preliminary master item
+   * @param preliminaryData - The preliminary item to create
+   * @returns Response with created preliminary data
+   */
+  async createPreliminaryMaster(preliminaryData: {
+    description: string;
+    unit?: string;
+    rate?: number
+  }): Promise<{ success: boolean; data?: any; message?: string }> {
+    try {
+      const response = await apiClient.post('/preliminary-masters', preliminaryData);
+
+      if (response.data && response.data.success) {
+        return {
+          success: true,
+          data: response.data.data,
+          message: response.data.message || 'Preliminary master created successfully'
+        };
+      }
+
+      return {
+        success: false,
+        message: response.data?.error || 'Failed to create preliminary master'
+      };
+    } catch (error: any) {
+      console.error('Failed to create preliminary master:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to create preliminary master'
+      };
+    }
+  }
+
+  /**
+   * Get all preliminaries with selection status for a BOQ
+   * Used when editing BOQ - returns all items with is_checked status
+   */
+  async getBOQPreliminarySelections(boqId: number): Promise<{ success: boolean; data?: any[]; message?: string }> {
+    try {
+      const response = await apiClient.get(`/boq/${boqId}/preliminaries`);
+
+      if (response.data && response.data.success) {
+        return {
+          success: true,
+          data: response.data.data || []
+        };
+      }
+
+      return {
+        success: false,
+        message: 'No preliminary data found',
+        data: []
+      };
+    } catch (error: any) {
+      console.error('Failed to fetch BOQ preliminary selections:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to fetch BOQ preliminaries',
+        data: []
+      };
+    }
+  }
+
+  /**
+   * Save preliminary selections for a BOQ
+   */
+  async saveBOQPreliminarySelections(boqId: number, selections: any[]): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await apiClient.post(`/boq/${boqId}/preliminaries`, {
+        selections: selections
+      });
 
       return {
         success: true,
-        message: response.data.message || 'Preliminary updated successfully'
+        message: response.data.message || 'Preliminary selections saved successfully'
       };
     } catch (error: any) {
-      console.error('Failed to update preliminary:', error);
+      console.error('Failed to save preliminary selections:', error);
       return {
         success: false,
-        message: error.response?.data?.error || 'Failed to update preliminary'
+        message: error.response?.data?.error || 'Failed to save preliminary selections'
       };
     }
   }

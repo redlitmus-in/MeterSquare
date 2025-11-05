@@ -1555,6 +1555,7 @@ def send_vendor_email(cr_id):
 
         data = request.get_json()
         vendor_email = data.get('vendor_email')
+        custom_email_body = data.get('custom_email_body')
         custom_email_body = data.get('custom_email_body')  # Optional custom HTML body
         vendor_company_name = data.get('vendor_company_name')  # Update company name
         vendor_contact_person = data.get('vendor_contact_person')  # Update contact person
@@ -1562,6 +1563,20 @@ def send_vendor_email(cr_id):
 
         if not vendor_email:
             return jsonify({"error": "Vendor email is required"}), 400
+
+        # Parse comma-separated emails
+        import re
+        email_list = [email.strip() for email in vendor_email.split(',') if email.strip()]
+
+        # Validate each email
+        email_regex = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+        invalid_emails = [email for email in email_list if not email_regex.match(email)]
+
+        if invalid_emails:
+            return jsonify({"error": f"Invalid email address: {invalid_emails[0]}"}), 400
+
+        if not email_list:
+            return jsonify({"error": "At least one valid email address is required"}), 400
 
         # Get the change request
         cr = ChangeRequest.query.filter_by(
@@ -1669,7 +1684,7 @@ def send_vendor_email(cr_id):
         vendor_data = {
             'company_name': vendor.company_name,
             'contact_person_name': vendor.contact_person_name,
-            'email': vendor_email
+            'email': email_list[0]  # Primary email for display
         }
 
         purchase_data = {
@@ -1690,11 +1705,11 @@ def send_vendor_email(cr_id):
             'location': project.location or 'N/A'
         }
 
-        # Send email to vendor (with optional custom body)
+        # Send email to vendor(s) (with optional custom body)
         from utils.boq_email_service import BOQEmailService
         email_service = BOQEmailService()
         email_sent = email_service.send_vendor_purchase_order(
-            vendor_email, vendor_data, purchase_data, buyer_data, project_data, custom_email_body
+            email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, custom_email_body
         )
 
         if email_sent:
@@ -1705,6 +1720,9 @@ def send_vendor_email(cr_id):
             cr.updated_at = datetime.utcnow()
             db.session.commit()
 
+            recipients_str = ', '.join(email_list)
+            log.info(f"Purchase order email sent to vendor(s) {recipients_str} for CR-{cr_id}")
+            message = f"Purchase order email sent to {len(email_list)} recipient(s) successfully" if len(email_list) > 1 else "Purchase order email sent to vendor successfully"
             # Count recipients for response message
             if isinstance(vendor_email, str):
                 recipient_count = len([e.strip() for e in vendor_email.split(',') if e.strip()])

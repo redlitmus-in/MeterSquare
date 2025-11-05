@@ -192,10 +192,17 @@ export const exportBOQToExcelInternal = async (estimation: BOQEstimation) => {
     const cost_details = prelim_data.cost_details || {};
     const preliminary_amount = cost_details.amount || 0;
 
-    // Build description from ALL items
+    // Build description from checked items only
     let description = 'Preliminaries & Approval Works';
     if (prelim_items && prelim_items.length > 0) {
-      const selected_items = prelim_items.map((item_data: any) => {
+      const selected_items = prelim_items
+        .filter((item_data: any) => {
+          if (typeof item_data === 'object' && item_data !== null) {
+            return item_data.checked || item_data.selected;
+          }
+          return true;
+        })
+        .map((item_data: any) => {
         if (typeof item_data === 'object' && item_data !== null) {
           const item_text = item_data.description || item_data.name || item_data.text || '';
           const is_custom = item_data.isCustom;
@@ -506,10 +513,17 @@ export const exportBOQToExcelClient = async (estimation: BOQEstimation) => {
     const cost_details = prelim_data.cost_details || {};
     const preliminary_amount = cost_details.amount || 0;
 
-    // Build description from ALL items
+    // Build description from checked items only
     let description = 'Preliminaries & Approval Works';
     if (prelim_items && prelim_items.length > 0) {
-      const selected_items = prelim_items.map((item_data: any) => {
+      const selected_items = prelim_items
+        .filter((item_data: any) => {
+          if (typeof item_data === 'object' && item_data !== null) {
+            return item_data.checked || item_data.selected;
+          }
+          return true;
+        })
+        .map((item_data: any) => {
         if (typeof item_data === 'object' && item_data !== null) {
           const item_text = item_data.description || item_data.name || item_data.text || '';
           const is_custom = item_data.isCustom;

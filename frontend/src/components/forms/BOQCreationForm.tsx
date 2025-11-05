@@ -90,6 +90,7 @@ interface BOQLabourForm extends Omit<BOQLabour, 'labour_id' | 'total_cost'> {
 // Preliminaries interface
 interface PreliminaryItem {
   id: string;
+  prelim_id?: number; // Database ID from preliminaries_master
   description: string;
   checked: boolean;
   isCustom?: boolean; // Track if this is a custom added item
@@ -167,19 +168,7 @@ const UNIT_OPTIONS = [
 ];
 
 // Predefined Preliminaries & Approval Works
-const DEFAULT_PRELIMINARIES: Omit<PreliminaryItem, 'id' | 'checked'>[] = [
-  { description: 'Providing the necessary Health & Safety protection as per site requirements' },
-  { description: 'Appointing Consultant for ALAIN Municipality and Civil defense' },
-  { description: 'Obtaining authority approval (Al Ain Municipality, AACD, TAQA) with necessary submission drawings, Preparing AMC with base build fire Contractor' },
-  { description: 'TAQA temporary power application through TAQA approved contractor' },
-  { description: 'CAR Insurance: Complete Fit-out Insurance' },
-  { description: 'Mobilization: Mobilization of necessary personnel required for works' },
-  { description: 'Coordination: Allow for the comprehensive coordination of all services with other contractors, client, building maintenance team, security' },
-  { description: 'Submission of sample board 3D MOOD board for client and Landlord approval' },
-  { description: 'Scaffolding: Necessary scaffolding to carry out the works' },
-  { description: 'Delay & Stop drawing preparation, rebuilt drawing and project managements of the project' },
-  { description: 'Preliminaries cleaning on handover' }
-];
+// Removed hardcoded DEFAULT_PRELIMINARIES - now fetched from backend
 
 const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   isOpen,
@@ -247,20 +236,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     if (isOpen) {
       loadProjects();
       loadMasterItems();
-      // Initialize preliminaries with default items
-      if (preliminaries.length === 0) {
-        const initialPreliminaries = DEFAULT_PRELIMINARIES.map((item, index) => ({
-          id: `prelim-${index}`,
-          description: item.description,
-          checked: false,
-          isCustom: false,
-          quantity: 1,
-          unit: 'nos',
-          rate: 0,
-          amount: 0
-        }));
-        setPreliminaries(initialPreliminaries);
-      }
+      // Always load master preliminaries to show available options
+      loadMasterPreliminaries();
     }
   }, [isOpen]);
 
@@ -290,6 +267,77 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       toast.error('Failed to load master items');
     } finally {
       setIsLoadingMasterData(false);
+    }
+  };
+
+  const loadMasterPreliminaries = async () => {
+    try {
+      const response = await estimatorService.getAllPreliminaryMasters();
+
+      if (response.success && response.data && response.data.length > 0) {
+        // Map preliminary masters to UI format
+        const items = response.data.map((item: any) => ({
+          id: `prelim-${item.prelim_id}`,
+          prelim_id: item.prelim_id,
+          description: item.description || '',
+          checked: false, // Start with all unchecked for new BOQ
+          isCustom: false,
+          quantity: 1,
+          unit: item.unit || 'nos',
+          rate: item.rate || 0,
+          amount: 0
+        }));
+
+        setPreliminaries(items);
+      } else {
+        // If no items in database, start with empty
+        setPreliminaries([]);
+      }
+    } catch (error) {
+      console.error('Failed to load master preliminaries:', error);
+      toast.error('Failed to load preliminary items');
+      setPreliminaries([]);
+    }
+  };
+
+  const loadPreliminariesFromExisting = () => {
+    // Load preliminaries from existing BOQ data when editing
+    if (existingBoqData && existingBoqData.preliminaries) {
+      const preliminaryData = existingBoqData.preliminaries;
+
+      // Extract items from the preliminary data
+      if (preliminaryData.items && Array.isArray(preliminaryData.items)) {
+        const items = preliminaryData.items.map((item: any, index: number) => ({
+          id: item.id || `prelim-${index}`,
+          description: item.description || '',
+          checked: item.checked || item.selected || false,
+          isCustom: item.isCustom || false,
+          quantity: 1,
+          unit: 'nos',
+          rate: 0,
+          amount: 0
+        }));
+
+        setPreliminaries(items);
+      }
+
+      // Set cost details if available
+      const costDetails = preliminaryData.cost_details || preliminaryData.cost_analysis;
+      if (costDetails) {
+        setCostQuantity(costDetails.quantity || 1);
+        setCostUnit(costDetails.unit || 'nos');
+        setCostRate(costDetails.rate || 0);
+        setCostAmount(costDetails.amount || costDetails.client_rate || 0);
+        setPreliminaryInternalCost(costDetails.internal_cost || 0);
+        setPreliminaryMiscPercentage(costDetails.misc_percentage || 10);
+        setPreliminaryOverheadProfitPercentage(costDetails.overhead_profit_percentage || 25);
+        setPreliminaryTransportPercentage(costDetails.transport_percentage || 5);
+      }
+
+      // Set notes if available
+      if (preliminaryData.notes) {
+        setPreliminaryNotes(preliminaryData.notes);
+      }
     }
   };
 
@@ -361,20 +409,75 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         setBoqName(isRevision ? `${boqDetails.boq_name} - Revision` : boqDetails.boq_name);
         setSelectedProjectId(boqDetails.project_id);
 
-        // Load preliminaries if available
+        // Load and merge preliminaries with master list
         const prelimsData = boqDetails.preliminaries || {};
         if (prelimsData.items && Array.isArray(prelimsData.items)) {
-          const loadedPreliminaries = prelimsData.items.map((item: any, index: number) => ({
-            id: item.id || `prelim-${index}`,
-            description: item.description,
-            checked: item.checked || false,
-            isCustom: item.isCustom || false,
-            quantity: item.quantity || 1,
-            unit: item.unit || 'nos',
-            rate: item.rate || 0,
-            amount: item.amount || 0
-          }));
-          setPreliminaries(loadedPreliminaries);
+          // Get the current master preliminaries list
+          const response = await estimatorService.getAllPreliminaryMasters();
+
+          if (response.success && response.data) {
+            // Create a map of existing selected preliminaries
+            const selectedPrelimsMap = new Map();
+            prelimsData.items.forEach((item: any) => {
+              if (item.prelim_id) {
+                selectedPrelimsMap.set(item.prelim_id, item);
+              } else if (item.description) {
+                // For custom items without prelim_id
+                selectedPrelimsMap.set(`custom-${item.description}`, item);
+              }
+            });
+
+            // Build the complete list with master items
+            const mergedPreliminaries = response.data.map((masterItem: any) => {
+              const existingItem = selectedPrelimsMap.get(masterItem.prelim_id);
+              return {
+                id: `prelim-${masterItem.prelim_id}`,
+                prelim_id: masterItem.prelim_id,
+                description: masterItem.description || '',
+                checked: !!existingItem, // Check if this item was selected in existing BOQ
+                isCustom: false,
+                quantity: existingItem?.quantity || 1,
+                unit: existingItem?.unit || masterItem.unit || 'nos',
+                rate: existingItem?.rate || masterItem.rate || 0,
+                amount: existingItem?.amount || 0
+              };
+            });
+
+            // Add any custom preliminaries that aren't in master list
+            prelimsData.items.forEach((item: any) => {
+              if (item.isCustom || !item.prelim_id) {
+                mergedPreliminaries.push({
+                  id: item.id || `custom-${Date.now()}-${Math.random()}`,
+                  description: item.description,
+                  checked: true, // Custom items were selected
+                  isCustom: true,
+                  quantity: item.quantity || 1,
+                  unit: item.unit || 'nos',
+                  rate: item.rate || 0,
+                  amount: item.amount || 0
+                });
+              }
+            });
+
+            setPreliminaries(mergedPreliminaries);
+          } else {
+            // Fallback to just loading existing preliminaries if master fetch fails
+            const loadedPreliminaries = prelimsData.items.map((item: any, index: number) => ({
+              id: item.id || `prelim-${index}`,
+              prelim_id: item.prelim_id,
+              description: item.description,
+              checked: true, // All existing items were selected
+              isCustom: item.isCustom || false,
+              quantity: item.quantity || 1,
+              unit: item.unit || 'nos',
+              rate: item.rate || 0,
+              amount: item.amount || 0
+            }));
+            setPreliminaries(loadedPreliminaries);
+          }
+        } else {
+          // No existing preliminaries, just keep the master list loaded earlier
+          // The master list is already loaded in the useEffect
         }
 
         // Load cost details if available
@@ -1125,9 +1228,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     ));
   };
 
-  const addCustomPreliminary = () => {
+  const addCustomPreliminary = async () => {
     const newId = `prelim-custom-${Date.now()}`;
-    setPreliminaries([...preliminaries, {
+    const newPreliminary: PreliminaryItem = {
       id: newId,
       description: '',
       checked: false,
@@ -1136,10 +1239,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       unit: 'nos',
       rate: 0,
       amount: 0
-    }]);
+    };
+
+    setPreliminaries([...preliminaries, newPreliminary]);
   };
 
   const updatePreliminaryDescription = (id: string, description: string) => {
+    // Just update the local state, dont save to database yet
     setPreliminaries(preliminaries.map(item =>
       item.id === id ? { ...item, description } : item
     ));
@@ -1160,7 +1266,19 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   };
 
   const removePreliminary = (id: string) => {
-    setPreliminaries(preliminaries.filter(item => item.id !== id));
+    // Only allow removal of custom items; for default items, just uncheck them
+    setPreliminaries(preliminaries.map(item => {
+      if (item.id === id) {
+        if (item.isCustom) {
+          // Remove custom items completely
+          return null;
+        } else {
+          // For default items, just uncheck them instead of removing
+          return { ...item, checked: false };
+        }
+      }
+      return item;
+    }).filter(Boolean) as any[]);
   };
 
   const handleDownloadTemplate = async () => {
@@ -1326,6 +1444,35 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       }
     }
 
+    // Save custom preliminaries to master table before submitting BOQ
+    const customPrelims = preliminaries.filter(p => p.isCustom && p.description?.trim() && !p.prelim_id);
+
+    if (customPrelims.length > 0) {
+      toast.info('Saving custom preliminaries...');
+
+      for (const customPrelim of customPrelims) {
+        try {
+          const result = await estimatorService.createPreliminaryMaster({
+            description: customPrelim.description.trim(),
+            unit: customPrelim.unit || 'nos',
+            rate: customPrelim.rate || 0
+          });
+
+          if (result.success && result.data) {
+            // Update the preliminary with the new master ID
+            customPrelim.prelim_id = result.data.prelim_id;
+          }
+        } catch (error) {
+          console.error('Failed to save custom preliminary:', customPrelim.description, error);
+          // Continue even if one fails - dont block the entire BOQ submission
+        }
+      }
+
+      // Update state with new prelim_ids
+      setPreliminaries([...preliminaries]);
+      toast.success('Custom preliminaries saved to master list');
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -1344,9 +1491,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           discount_percentage: overallDiscount,
           discount_amount: discountAmount,
           preliminaries: {
-            items: preliminaries.filter(p => p.checked === true).map(p => ({
+            items: preliminaries.map(p => ({
               id: p.id,
+              prelim_id: p.prelim_id, // IMPORTANT: Include database ID
               description: p.description,
+              checked: p.checked,
+              selected: p.checked, // Backend also checks this field
               isCustom: p.isCustom || false
             })),
             cost_details: {
@@ -1558,9 +1708,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           discount_percentage: overallDiscount,
           discount_amount: discountAmount,
           preliminaries: {
-            items: preliminaries.filter(p => p.checked === true).map(p => ({
+            items: preliminaries.map(p => ({
               id: p.id,
+              prelim_id: p.prelim_id, // IMPORTANT: Include database ID
               description: p.description,
+              checked: p.checked,
+              selected: p.checked, // Backend also checks this field
               isCustom: p.isCustom || false
             })),
             cost_details: {
@@ -1708,9 +1861,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           discount_percentage: overallDiscount,
           discount_amount: discountAmount,
           preliminaries: {
-            items: preliminaries.filter(p => p.checked === true).map(p => ({
+            items: preliminaries.map(p => ({
               id: p.id,
+              prelim_id: p.prelim_id, // IMPORTANT: Include database ID
               description: p.description,
+              checked: p.checked,
+              selected: p.checked, // Backend also checks this field
               isCustom: p.isCustom || false
             })),
             cost_details: {
@@ -1985,9 +2141,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
                   className="mt-4 p-6 bg-white rounded-lg border border-purple-200 shadow-sm"
+                  style={{ overflow: 'visible' }}
                 >
-                  {/* Checklist Items */}
-                  <div className="space-y-3 mb-4">
+                  {/* Checklist Items with scrollbar when > 7 items */}
+                  <div className={`space-y-2 mb-3 ${preliminaries.length > 15 ? 'max-h-[30rem] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-purple-400 scrollbar-track-purple-100' : ''}`}>
                     {preliminaries.map((item) => (
                       <div
                         key={item.id}
@@ -3652,7 +3809,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               Cancel
             </button>
             <div className="flex items-center gap-3">
-              {!hideTemplate && (
+              {!hideTemplate && !editMode && (
                 <button
                   type="button"
                   onClick={handleDownloadTemplate}
@@ -3664,7 +3821,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   Download Template
                 </button>
               )}
-              {!hideBulkUpload && !hideTemplate && (
+              {!hideBulkUpload && !hideTemplate && !editMode && (
                 <button
                   type="button"
                   onClick={handleImportTemplate}
