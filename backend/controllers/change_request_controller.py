@@ -12,6 +12,7 @@ from services.change_request_workflow import workflow_service
 from datetime import datetime
 from sqlalchemy.orm.attributes import flag_modified
 from utils.boq_email_service import BOQEmailService
+from utils.admin_viewing_context import get_effective_user_context
 
 log = get_logger()
 
@@ -48,7 +49,7 @@ def create_change_request():
     try:
         data = request.get_json()
 
-        # Get current user
+        # Get current user (support admin viewing as another role)
         current_user = getattr(g, 'user', None)
         if not current_user:
             return jsonify({"error": "User not authenticated"}), 401
@@ -56,6 +57,13 @@ def create_change_request():
         user_id = current_user.get('user_id')
         user_name = current_user.get('full_name') or current_user.get('username') or 'User'
         user_role = current_user.get('role_name', 'user')
+
+        # Get effective role (handles admin viewing as PM/SE)
+        context = get_effective_user_context()
+        effective_role = context.get('effective_role', current_user.get('role', ''))
+        actual_role = current_user.get('role', '')
+
+        log.info(f"Create change request - User: {user_name}, actual_role: {actual_role}, effective_role: {effective_role}")
 
         # Validate input
         boq_id = data.get('boq_id')
@@ -414,14 +422,8 @@ def check_budget_threshold(change_request):
 def send_for_review(cr_id):
     """
     Send change request for review
-    SE → Sends to PM (always)
+    SE → Sends to assigned PM (only that PM)
     PM → Must explicitly choose TD or Estimator via route_to parameter
-
-    POST /api/change-request/{cr_id}/send-for-review
-    Body (optional for PM):
-    {
-        "route_to": "technical_director" or "estimator"  // PM only - if not provided, auto-routes based on 40% threshold
-    }
     """
     try:
         current_user = getattr(g, 'user', None)
@@ -429,191 +431,157 @@ def send_for_review(cr_id):
             return jsonify({"error": "User not authenticated"}), 401
 
         user_id = current_user.get('user_id')
-        user_role = current_user.get('role_name', '').lower()
+        user_role = current_user.get('role_name', '') or current_user.get('role', '')
+        user_role_lower = user_role.lower() if user_role else ''
 
-        log.info(f"User {user_id} attempting to send change request. Role: '{user_role}'")
+        log.info(f"User {user_id} attempting to send change request. Role: '{user_role}' (lowercase: '{user_role_lower}')")
 
-        # Get change request
+        # --- Get Change Request ---
         change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
         if not change_request:
             return jsonify({"error": "Change request not found"}), 404
 
-        # Check ownership - only creator can send for review
-        if change_request.requested_by_user_id != user_id:
+        # --- Role check ---
+        is_admin = user_role_lower == 'admin'
+        is_site_engineer = user_role_lower in ['site engineer', 'siteengineer', 'site_engineer']
+        if change_request.requested_by_user_id != user_id and not is_admin and not is_site_engineer:
+            log.warning(f"User {user_id} ({user_role_lower}) tried to send CR {cr_id} not created by them")
             return jsonify({"error": "You can only send your own requests for review"}), 403
 
-        # Validate workflow state
+        # --- Validate workflow state ---
         is_valid, error_msg = workflow_service.validate_workflow_state(change_request, 'send')
         if not is_valid:
             return jsonify({"error": error_msg}), 400
 
-        # Get request data for PM explicit routing
         data = request.get_json() or {}
-        route_to = data.get('route_to')  # PM can specify where to send
+        route_to = data.get('route_to')
+        normalized_role = workflow_service.normalize_role(user_role_lower)
 
-        normalized_role = workflow_service.normalize_role(user_role)
-
-        # Helper function to get miscellaneous amount from BOQ item
+        # --- Helper: get miscellaneous amount ---
         def get_item_miscellaneous_amount(change_request):
-            """Get miscellaneous amount from BOQ item"""
             try:
                 boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
                 if not boq_details:
                     return 0
-
                 boq_json = boq_details.boq_details or {}
                 items = boq_json.get('items', [])
-
-                # Find the item by item_id
                 for item in items:
                     item_id = item.get('master_item_id') or f"item_{change_request.boq_id}_{items.index(item) + 1}"
                     if str(item_id) == str(change_request.item_id):
                         return item.get('miscellaneous_amount', 0)
-
                 return 0
             except Exception as e:
                 log.error(f"Error getting miscellaneous amount: {str(e)}")
                 return 0
 
-        # Determine where to route based on requester role
+        # --- Determine next approver ---
+        next_approver = None
+        next_approver_id = None
+        next_role = None
+
         if normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
-            # Check if this request contains NEW materials (not from existing BOQ)
-            has_new_materials = False
-            if change_request.materials_data:
-                for mat in change_request.materials_data:
-                    # New material if master_material_id is None
-                    if mat.get('master_material_id') is None:
-                        has_new_materials = True
-                        break
+            # Site Engineer routes to assigned PM
+            next_role = CR_CONFIG.ROLE_PROJECT_MANAGER
 
-            if has_new_materials and normalized_role in ['sitesupervisor', 'site_supervisor']:
-                # Site Supervisor with NEW materials - check 40% threshold against miscellaneous amount ONLY
-                # Calculate cost of ONLY NEW materials (not total cost)
-                new_materials_cost = 0
-                if change_request.materials_data:
-                    for mat in change_request.materials_data:
-                        if mat.get('master_material_id') is None:
-                            new_materials_cost += mat.get('total_price', 0)
+            assigned_pm_id = None
+            project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
+            if project:
+                # The project manager is stored in the user_id field
+                assigned_pm_id = project.user_id
 
-                miscellaneous_amount = get_item_miscellaneous_amount(change_request)
+            if not assigned_pm_id:
+                log.error(f"No assigned PM found for Project ID {change_request.project_id}")
+                return jsonify({"error": "No Project Manager assigned for this project"}), 400
 
-                if miscellaneous_amount > 0:
-                    percentage_of_miscellaneous = (new_materials_cost / miscellaneous_amount) * 100
-                else:
-                    percentage_of_miscellaneous = 100  # Default to high if no miscellaneous allocated
+            # --- Fetch PM details from User table ---
+            assigned_pm_user = User.query.filter_by(user_id=assigned_pm_id, is_deleted=False).first()
+            if not assigned_pm_user:
+                return jsonify({"error": "Assigned Project Manager user record not found"}), 400
 
-                if percentage_of_miscellaneous > 40:
-                    # NEW materials cost >40% of miscellaneous - Route to Technical Director
-                    next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
-                    next_approver = "Technical Director"
-                    log.info(f"Site Supervisor NEW materials cost AED{new_materials_cost} >40% of miscellaneous: Routing to TD. Miscellaneous: {miscellaneous_amount}, %: {percentage_of_miscellaneous:.2f}%")
-                else:
-                    # NEW materials cost ≤40% of miscellaneous - Route directly to Estimator
-                    next_role = CR_CONFIG.ROLE_ESTIMATOR
-                    next_approver = "Estimator"
-                    log.info(f"Site Supervisor NEW materials cost AED{new_materials_cost} ≤40% of miscellaneous: Routing to Estimator. Miscellaneous: {miscellaneous_amount}, %: {percentage_of_miscellaneous:.2f}%")
-            else:
-                # SE or existing materials - always route to PM
-                next_role = CR_CONFIG.ROLE_PROJECT_MANAGER
-                next_approver = "Project Manager"
-                log.info(f"SE/SS request (existing materials or Site Engineer) - routing to PM")
+            next_approver = assigned_pm_user.full_name or assigned_pm_user.username
+            next_approver_id = assigned_pm_user.user_id
+            log.info(f"Routing CR {cr_id} to PM: {next_approver} (user_id={next_approver_id})")
 
         elif normalized_role in ['projectmanager', 'project_manager']:
-            # PM can explicitly choose route_to, or auto-route based on 40% threshold
+            # PM explicit or auto-routing
             if route_to:
-                # PM explicitly chose where to send
                 if route_to == 'technical_director':
                     next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
                     next_approver = "Technical Director"
-                    log.info(f"PM explicitly routing to TD")
                 elif route_to == 'estimator':
                     next_role = CR_CONFIG.ROLE_ESTIMATOR
                     next_approver = "Estimator"
-                    log.info(f"PM explicitly routing to Estimator")
                 else:
                     return jsonify({"error": f"Invalid route_to value: {route_to}. Must be 'technical_director' or 'estimator'"}), 400
+                next_approver_id = None
             else:
-                # Auto-route based on 40% threshold of miscellaneous amount ONLY
-                # Check if this request contains NEW materials
-                log.info(f"PM auto-routing - DEBUG: materials_data = {change_request.materials_data}")
-                has_new_materials = False
-                if change_request.materials_data:
-                    for mat in change_request.materials_data:
-                        master_mat_id = mat.get('master_material_id')
-                        log.info(f"PM auto-routing - DEBUG: Checking material '{mat.get('material_name')}' - master_material_id = {master_mat_id} (type: {type(master_mat_id)})")
-                        if mat.get('master_material_id') is None:
-                            has_new_materials = True
-                            break
-
-                log.info(f"PM auto-routing - DEBUG: has_new_materials = {has_new_materials}")
-
+                # Auto-route logic
+                has_new_materials = any(mat.get('master_material_id') is None for mat in (change_request.materials_data or []))
                 if has_new_materials:
-                    # NEW materials - check 40% threshold against miscellaneous amount ONLY
-                    # Calculate cost of ONLY NEW materials (not total cost)
-                    new_materials_cost = 0
-                    if change_request.materials_data:
-                        for mat in change_request.materials_data:
-                            if mat.get('master_material_id') is None:
-                                new_materials_cost += mat.get('total_price', 0)
-
+                    new_materials_cost = sum(mat.get('total_price', 0) for mat in change_request.materials_data if mat.get('master_material_id') is None)
                     miscellaneous_amount = get_item_miscellaneous_amount(change_request)
+                    percentage = (new_materials_cost / miscellaneous_amount) * 100 if miscellaneous_amount > 0 else 100
 
-                    if miscellaneous_amount > 0:
-                        percentage_of_miscellaneous = (new_materials_cost / miscellaneous_amount) * 100
-                    else:
-                        percentage_of_miscellaneous = 100
-
-                    if percentage_of_miscellaneous > 40:
-                        # NEW materials cost >40% - Route to Technical Director
+                    if percentage > 40:
                         next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
                         next_approver = "Technical Director"
-                        log.info(f"PM auto-routing NEW materials cost AED{new_materials_cost} >40% of miscellaneous to TD. Miscellaneous: {miscellaneous_amount}, %: {percentage_of_miscellaneous:.2f}%")
                     else:
-                        # NEW materials cost ≤40% - Route to Estimator
                         next_role = CR_CONFIG.ROLE_ESTIMATOR
                         next_approver = "Estimator"
-                        log.info(f"PM auto-routing NEW materials cost AED{new_materials_cost} ≤40% of miscellaneous to Estimator. Miscellaneous: {miscellaneous_amount}, %: {percentage_of_miscellaneous:.2f}%")
                 else:
-                    # Existing materials - use default workflow (estimator for normal, TD for high value)
                     next_role, next_approver = workflow_service.determine_initial_approver(user_role, change_request)
-                    log.info(f"PM auto-routing existing materials based on {change_request.percentage_of_item_overhead}% overhead")
+                next_approver_id = None
+
+        elif is_admin:
+            # Admin sends to assigned PM
+            next_role = CR_CONFIG.ROLE_PROJECT_MANAGER
+            project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
+            # The project manager is stored in the user_id field
+            assigned_pm_id = project.user_id if project else None
+
+            if not assigned_pm_id:
+                return jsonify({"error": "No Project Manager assigned for this project"}), 400
+
+            assigned_pm_user = User.query.filter_by(user_id=assigned_pm_id, is_deleted=False).first()
+            if not assigned_pm_user:
+                return jsonify({"error": "Assigned Project Manager user record not found"}), 400
+
+            next_approver = assigned_pm_user.full_name or assigned_pm_user.username
+            next_approver_id = assigned_pm_user.user_id
+
         else:
             log.error(f"Invalid role '{user_role}' attempting to send change request")
-            return jsonify({"error": f"Invalid role for sending request: {user_role}. Only Site Engineers and Project Managers can create change requests."}), 403
+            return jsonify({"error": f"Invalid role for sending request: {user_role}. Only Site Engineers and Project Managers can send requests."}), 403
 
-        # Update change request
+        # --- Update Change Request ---
         change_request.approval_required_from = next_role
         change_request.current_approver_role = next_role
+        change_request.current_approver_id = next_approver_id
         change_request.status = CR_CONFIG.STATUS_UNDER_REVIEW
         change_request.updated_at = datetime.utcnow()
 
-        # Add to BOQ History - Track sending for review
+        # --- Log to BOQ History ---
         existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
+        current_actions = []
 
         if existing_history:
-            if existing_history.action is None:
-                current_actions = []
-            elif isinstance(existing_history.action, list):
+            if isinstance(existing_history.action, list):
                 current_actions = existing_history.action
             elif isinstance(existing_history.action, dict):
                 current_actions = [existing_history.action]
-            else:
-                current_actions = []
-        else:
-            current_actions = []
 
-        # Prepare action for sending for review
         new_action = {
             "role": user_role,
             "type": "change_request_sent_for_review",
             "sender": current_user.get('full_name') or current_user.get('username'),
             "receiver": next_approver,
+            "receiver_user_id": next_approver_id,
             "sender_role": user_role,
             "receiver_role": next_role,
             "status": CR_CONFIG.STATUS_UNDER_REVIEW,
             "cr_id": cr_id,
             "item_name": change_request.item_name or f"CR #{cr_id}",
-            "materials_count": len(change_request.materials_data) if change_request.materials_data else 0,
+            "materials_count": len(change_request.materials_data or []),
             "total_cost": change_request.materials_total_cost,
             "comments": f"Change request sent to {next_approver} for review",
             "timestamp": datetime.utcnow().isoformat(),
@@ -624,8 +592,6 @@ def send_for_review(cr_id):
         }
 
         current_actions.append(new_action)
-        log.info(f"Appending change_request_sent_for_review action to BOQ {change_request.boq_id} history")
-
         if existing_history:
             existing_history.action = current_actions
             flag_modified(existing_history, "action")
@@ -653,8 +619,7 @@ def send_for_review(cr_id):
             db.session.add(boq_history)
 
         db.session.commit()
-
-        log.info(f"Change request {cr_id} sent for review to {next_approver} (role: {next_role})")
+        log.info(f"Change request {cr_id} sent for review to {next_approver} ({next_role})")
 
         return jsonify({
             "success": True,
@@ -668,13 +633,14 @@ def send_for_review(cr_id):
         db.session.rollback()
         log.error(f"Error sending change request for review: {str(e)}")
         import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
+        log.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 
 def get_all_change_requests():
     """
     Get all change requests (filtered by role)
+    Supports admin viewing as another role
     Estimator sees requests ≤50k
     TD sees all requests, especially >50k
     PM/SE see their own requests
@@ -687,6 +653,17 @@ def get_all_change_requests():
         user_id = current_user.get('user_id')
         user_role = current_user.get('role_name', '').lower()
 
+        # Get effective role (handles admin viewing as another role)
+        context = get_effective_user_context()
+        effective_role = context.get('effective_role', user_role)
+        actual_role = current_user.get('role', '').lower()
+        is_admin_viewing = context.get('is_admin_viewing', False)
+
+        log.info(f"Get all change requests - User: {user_id}, actual_role: {actual_role}, effective_role: {effective_role}, is_admin_viewing: {is_admin_viewing}")
+
+        # Use effective role for filtering
+        user_role = effective_role
+
         # Base query
         query = ChangeRequest.query.filter_by(is_deleted=False)
 
@@ -695,44 +672,75 @@ def get_all_change_requests():
             # SE sees ALL requests from their assigned projects (both PM and other SE requests)
             # This helps them avoid duplicate requests and coordinate better
 
-            # Get projects assigned to this SE/SS (site_supervisor_id in Project table)
-            se_project_ids = db.session.query(Project.project_id).filter_by(site_supervisor_id=user_id, is_deleted=False).all()
-            se_project_ids = [p[0] for p in se_project_ids] if se_project_ids else []
-
-            # SE/SS should see ALL requests from their projects (including PM requests)
-            if se_project_ids:
+            if is_admin_viewing:
+                # Admin viewing as SE: Show ALL SE-related requests
+                log.info(f"Admin viewing as SE - showing ALL SE-related requests")
                 query = query.filter(
-                    ChangeRequest.project_id.in_(se_project_ids)  # All requests from SE's projects
+                    ChangeRequest.requested_by_role.in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])
                 )
             else:
-                # Fallback: show only own requests if no project assignment found
-                query = query.filter_by(requested_by_user_id=user_id)
+                # Regular SE: Filter by their assigned projects
+                # Get projects assigned to this SE/SS (site_supervisor_id in Project table)
+                se_project_ids = db.session.query(Project.project_id).filter_by(site_supervisor_id=user_id, is_deleted=False).all()
+                se_project_ids = [p[0] for p in se_project_ids] if se_project_ids else []
+
+                log.info(f"Regular SE {user_id} - filtering by {len(se_project_ids)} assigned projects")
+
+                # SE/SS should see ALL requests from their projects (including PM requests)
+                if se_project_ids:
+                    query = query.filter(
+                        ChangeRequest.project_id.in_(se_project_ids)  # All requests from SE's projects
+                    )
+                else:
+                    # Fallback: show only own requests if no project assignment found
+                    query = query.filter_by(requested_by_user_id=user_id)
         elif user_role in ['projectmanager', 'project_manager']:
-            # PM sees:
-            # 1. Their own requests (all statuses)
-            # 2. Requests from SEs that need PM approval (approval_required_from = 'project_manager')
-            # 3. Requests approved by PM (where pm_approved_by_user_id is set) - stays visible in approved tab
-            # 4. ALL requests from their projects (for extra materials page)
+            # PM sees ONLY requests from their assigned projects:
+            # 1. Their own requests from their projects
+            # 2. SE requests from their projects that need PM approval
+            # 3. All purchase/change requests from their assigned projects
             from sqlalchemy import or_, and_
+            from utils.admin_viewing_context import should_apply_role_filter
 
-            # Get projects assigned to this PM
-            pm_projects = Project.query.filter_by(user_id=user_id).all()
-            pm_project_ids = [p.project_id for p in pm_projects]
-
-            query = query.filter(
-                or_(
-                    ChangeRequest.requested_by_user_id == user_id,  # PM's own requests
-                    ChangeRequest.approval_required_from == 'project_manager',  # Requests needing PM approval
-                    ChangeRequest.pm_approved_by_user_id == user_id,  # Requests approved by this PM (shows in approved tab even after TD/Est/Buyer approval)
-                    ChangeRequest.project_id.in_(pm_project_ids) if pm_project_ids else False  # All requests from PM's projects
+            # Check if admin is viewing as PM (should see ALL PM data, not user-specific)
+            if is_admin_viewing:
+                # Admin viewing as PM: Show ALL requests that ANY PM would see
+                log.info(f"Admin viewing as PM - showing ALL PM-related requests (not user-specific)")
+                query = query.filter(
+                    or_(
+                        ChangeRequest.requested_by_role.in_(['projectmanager', 'project_manager']),  # All PM-created requests
+                        ChangeRequest.approval_required_from == 'project_manager',  # All SE requests needing PM approval
+                        ChangeRequest.pm_approved_by_user_id.isnot(None)  # All requests approved by any PM
+                    )
                 )
-            )
+            else:
+                # Regular PM: Filter ONLY by their assigned projects
+                # Get projects where this user is the project manager (user_id field in Project table)
+                pm_projects = Project.query.filter_by(user_id=user_id, is_deleted=False).all()
+                pm_project_ids = [p.project_id for p in pm_projects]
+
+                log.info(f"Regular PM {user_id} - has {len(pm_project_ids)} assigned projects")
+
+                if pm_project_ids:
+                    # PM sees ALL purchase/change requests from their assigned projects only
+                    query = query.filter(
+                        ChangeRequest.project_id.in_(pm_project_ids)  # Only requests from PM's assigned projects
+                    )
+                else:
+                    # If PM has no assigned projects, show only their own requests
+                    log.warning(f"PM {user_id} has no assigned projects, showing only their own requests")
+                    query = query.filter(
+                        ChangeRequest.requested_by_user_id == user_id  # PM's own requests only
+                    )
         elif user_role == 'estimator':
             # Estimator sees:
             # 1. Requests where approval_required_from = 'estimator' (pending estimator approval)
             # 2. Requests approved by estimator that are assigned_to_buyer (approved tab)
             # 3. ALL requests that are purchase_completed (completed tab) - regardless of who approved
             from sqlalchemy import or_
+
+            log.info(f"Estimator filter - is_admin_viewing: {is_admin_viewing}")
+            # Admin viewing as estimator sees same as regular estimator (no user-specific filtering needed)
             query = query.filter(
                 or_(
                     ChangeRequest.approval_required_from == 'estimator',  # Pending requests
@@ -748,6 +756,9 @@ def get_all_change_requests():
             # 4. Requests with vendor selection pending TD approval (vendor_selection_status = 'pending_td_approval')
             # 5. Requests with vendor approved by TD (vendor_selection_status = 'approved')
             from sqlalchemy import or_
+
+            log.info(f"TD filter - is_admin_viewing: {is_admin_viewing}")
+            # Admin viewing as TD sees same as regular TD (no user-specific filtering needed)
             query = query.filter(
                 or_(
                     ChangeRequest.approval_required_from == 'technical_director',  # Pending requests
@@ -1803,7 +1814,7 @@ def update_change_request(cr_id):
 
         # Check edit permissions
         user_role = current_user.get('role_name', '').lower()
-        normalized_role = workflow_service.normalize_role(user_role)
+        normalized_role = workflow_service.normalize_role(user_role_lower)
 
         # PM can edit any pending request, SE can only edit their own, Estimator can edit requests assigned to them
         if user_role in ['projectmanager', 'project_manager']:

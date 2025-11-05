@@ -1007,15 +1007,26 @@ def get_boq(boq_id):
             return jsonify({"error": "BOQ details not found"}), 404
 
         # Get current user for role-based access control
+        # Support admin viewing as another role
         current_user = getattr(g, 'user', None)
         user_role = ''
         user_role_id = None
+        actual_role = ''
 
         if current_user:
-            # Try 'role' first (set by jwt_required), then 'role_name' as fallback
+            # Get the actual role from JWT
             role_name = current_user.get('role') or current_user.get('role_name', '')
-            user_role = role_name.lower().replace(' ', '').replace('_', '') if isinstance(role_name, str) else ''
+            actual_role = role_name.lower().replace(' ', '').replace('_', '') if isinstance(role_name, str) else ''
             user_role_id = current_user.get('role_id')
+
+            # Check if admin is viewing as another role
+            context = get_effective_user_context()
+            effective_role = context.get('effective_role', actual_role)
+
+            # Use effective role for access control (handles admin viewing as PM)
+            user_role = effective_role.lower().replace(' ', '').replace('_', '') if isinstance(effective_role, str) else ''
+
+            log.info(f"BOQ {boq_id} - User access: actual_role='{actual_role}', effective_role='{user_role}', is_admin_viewing={context.get('is_admin_viewing', False)}")
         # Fetch project details
         project = Project.query.filter_by(project_id=boq.project_id).first()
         # Get BOQ history to track which items were added via new_purchase
@@ -1148,10 +1159,15 @@ def get_boq(boq_id):
             new_labour_count += len(item.get("labour", []))
         # Role-based access control for new purchase items
         # Determine if user can view new purchase details based on status and role
+        # Admin always has access (both direct admin and admin viewing as another role)
         can_view_new_purchase = False
         boq_status = boq.status.lower() if boq.status else ''
 
-        if boq_status in ['new_purchase_create', 'sent_for_review']:
+        # Admin has full access
+        if actual_role == 'admin':
+            can_view_new_purchase = True
+            log.info(f"BOQ {boq_id} - Admin access GRANTED for status '{boq_status}'")
+        elif boq_status in ['new_purchase_create', 'sent_for_review']:
             # Only Project Manager can view when purchase is created or sent for review
             if user_role in ['projectmanager', 'project_manager']:
                 can_view_new_purchase = True
@@ -1517,14 +1533,28 @@ def get_all_boq():
             .order_by(BOQ.created_at.desc())  # Most recent first
         )
 
-        # Admin sees all BOQs, estimators see BOQs for their assigned projects OR projects with no estimator (backward compatibility)
+        # Role-based filtering for BOQs
         if user_role != 'admin' and should_apply_role_filter(context):
-            query = query.filter(
-                or_(
-                    Project.estimator_id == user_id,
-                    Project.estimator_id == None
+            if user_role in ['projectmanager', 'project_manager']:
+                # Project Manager sees only BOQs from their assigned projects
+                query = query.filter(Project.user_id == user_id)
+                log.info(f"PM {user_id} - filtering BOQs by assigned projects")
+            elif user_role == 'estimator':
+                # Estimator sees BOQs for their assigned projects OR projects with no estimator (backward compatibility)
+                query = query.filter(
+                    or_(
+                        Project.estimator_id == user_id,
+                        Project.estimator_id == None
+                    )
                 )
-            )
+            elif user_role in ['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']:
+                # Site Engineer/Supervisor sees BOQs from their assigned projects
+                query = query.filter(Project.site_supervisor_id == user_id)
+                log.info(f"SE/SS {user_id} - filtering BOQs by assigned projects")
+            elif user_role == 'buyer':
+                # Buyer sees BOQs from their assigned projects
+                query = query.filter(Project.buyer_id == user_id)
+                log.info(f"Buyer {user_id} - filtering BOQs by assigned projects")
 
         boqs = query.all()
         log.info(f"📊 Processing {len(boqs)} BOQs for user {user_id} (role: {user_role})")
