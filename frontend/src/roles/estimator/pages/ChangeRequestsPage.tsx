@@ -224,7 +224,7 @@ const ChangeRequestsPage: React.FC = () => {
             <TableHead>Project Name</TableHead>
             <TableHead>Requested By</TableHead>
             <TableHead>Date</TableHead>
-            <TableHead>New Items</TableHead>
+            <TableHead>Materials</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -410,7 +410,7 @@ const ChangeRequestsPage: React.FC = () => {
                         {/* Stats */}
                         <div className="px-4 pb-3 text-center text-sm">
                           <span className="font-bold text-blue-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                          <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
                         </div>
 
                         {/* Budget Comparison - Hidden */}
@@ -505,7 +505,7 @@ const ChangeRequestsPage: React.FC = () => {
 
                         <div className="px-4 pb-3 text-center text-sm">
                           <span className="font-bold text-green-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                          <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
                         </div>
 
                         <div className="border-t border-gray-200 p-2 sm:p-3">
@@ -565,7 +565,7 @@ const ChangeRequestsPage: React.FC = () => {
 
                         <div className="px-4 pb-3 text-center text-sm">
                           <span className="font-bold text-blue-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                          <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
                         </div>
 
                         <div className="border-t border-gray-200 p-2 sm:p-3">
@@ -625,7 +625,7 @@ const ChangeRequestsPage: React.FC = () => {
 
                         <div className="px-4 pb-3 text-center text-sm">
                           <span className="font-bold text-red-600 text-lg">{(request.materials_data?.length || 0)}</span>
-                          <span className="text-gray-600 ml-1">New Item{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                          <span className="text-gray-600 ml-1">{(request.materials_data?.length || 0) === 1 ? 'material' : 'materials'}</span>
                         </div>
 
                         <div className="border-t border-gray-200 p-2 sm:p-3">
