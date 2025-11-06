@@ -7,22 +7,29 @@ class BOQ(db.Model):
     __tablename__ = "boq"
 
     boq_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    project_id = db.Column(db.Integer, db.ForeignKey("project.project_id"), nullable=False)
-    boq_name = db.Column(db.String(255), nullable=False)
-    status = db.Column(db.String(50), default="Draft")
-    revision_number = db.Column(db.Integer, default=0, nullable=False)  # 0 = original, 1+ = revision cycles
-    internal_revision_number = db.Column(db.Integer, default=0, nullable=True)  # Tracks internal revisions before client submission
-    has_internal_revisions = db.Column(db.Boolean, default=False)  # Flag to indicate if BOQ has internal revisions
-    client_rejection_reason = db.Column(db.Text, nullable=True)  # For client rejection/cancellation reasons
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    created_by = db.Column(db.String(255), nullable=False)
+    project_id = db.Column(db.Integer, db.ForeignKey("project.project_id"), nullable=False, index=True)  # ✅ Added index
+    boq_name = db.Column(db.String(500), nullable=False)
+    status = db.Column(db.String(50), default="Draft", index=True)  # ✅ Added index (frequently filtered)
+    revision_number = db.Column(db.Integer, default=0, nullable=False)
+    internal_revision_number = db.Column(db.Integer, default=0, nullable=True)
+    has_internal_revisions = db.Column(db.Boolean, default=False)
+    client_rejection_reason = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)  # ✅ Added index
+    created_by = db.Column(db.String(255), nullable=False, index=True)  # ✅ Added index
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     last_modified_by = db.Column(db.String(255), nullable=True)
-    is_deleted = db.Column(db.Boolean, default=False)
+    is_deleted = db.Column(db.Boolean, default=False, index=True)  # ✅ Added index (frequently filtered)
     email_sent = db.Column(db.Boolean, default=False)
     client_status = db.Column(db.Boolean, default=False)
 
     project = db.relationship("Project", backref=db.backref("boqs", lazy=True))
+
+    # ✅ Composite indexes for common query patterns
+    __table_args__ = (
+        db.Index('idx_boq_project_status', 'project_id', 'status'),  # For queries like: WHERE project_id=X AND status=Y
+        db.Index('idx_boq_deleted_status', 'is_deleted', 'status'),  # For queries like: WHERE is_deleted=false AND status=Y
+        db.Index('idx_boq_created_at_desc', created_at.desc()),  # For ORDER BY created_at DESC
+    )
 
 
 # Master Tables - No duplicates, reusable across BOQs
@@ -30,7 +37,7 @@ class MasterItem(db.Model):
     __tablename__ = "boq_items"
 
     item_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    item_name = db.Column(db.String(255), nullable=False, unique=True)
+    item_name = db.Column(db.String(255), nullable=False, unique=True, index=True)  # ✅ Added index
     description = db.Column(db.Text, nullable=True)
     unit = db.Column(db.String(50), nullable=True)
     quantity = db.Column(db.Float, nullable=True)
@@ -47,18 +54,23 @@ class MasterItem(db.Model):
     discount_amount = db.Column(db.Float, nullable=True)
     vat_percentage = db.Column(db.Float, nullable=True)
     vat_amount = db.Column(db.Float, nullable=True)
-    is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, index=True)  # ✅ Added index
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)  # ✅ Added index
     created_by = db.Column(db.String(255), nullable=False)
-    is_deleted = db.Column(db.Boolean, default=False)
+    is_deleted = db.Column(db.Boolean, default=False, index=True)  # ✅ Added index
+
+    # ✅ Composite index for active, non-deleted items
+    __table_args__ = (
+        db.Index('idx_item_active_deleted', 'is_active', 'is_deleted'),
+    )
 
 
 class MasterSubItem(db.Model):
     __tablename__ = "boq_sub_items"
 
     sub_item_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    item_id = db.Column(db.Integer, db.ForeignKey("boq_items.item_id"), nullable=False)
-    sub_item_name = db.Column(db.String(255), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey("boq_items.item_id"), nullable=False, index=True)  # ✅ Added index
+    sub_item_name = db.Column(db.String(255), nullable=False, index=True)  # ✅ Added index
     description = db.Column(db.Text, nullable=True)
     size = db.Column(db.String(255), nullable=True)
     location = db.Column(db.String(255), nullable=True)
@@ -84,19 +96,25 @@ class MasterSubItem(db.Model):
     # Map database column 'actual_profit' to Python property 'negotiable_margin'
     negotiable_margin = db.Column('actual_profit', db.Float, default=0.0)
 
-    is_active = db.Column(db.Boolean, default=True)
+    is_active = db.Column(db.Boolean, default=True, index=True)  # ✅ Added index
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
-    is_deleted = db.Column(db.Boolean, default=False)
+    is_deleted = db.Column(db.Boolean, default=False, index=True)  # ✅ Added index
 
     item = db.relationship("MasterItem", backref=db.backref("sub_items", lazy=True))
+
+    # ✅ Composite indexes
+    __table_args__ = (
+        db.Index('idx_subitem_item_id', 'item_id', 'is_deleted'),  # For queries by item_id
+        db.Index('idx_subitem_active', 'is_active', 'is_deleted'),
+    )
 
 
 class MasterMaterial(db.Model):
     __tablename__ = "boq_material"
 
     material_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    material_name = db.Column(db.String(255), nullable=False, unique=True)
+    material_name = db.Column(db.String(255), nullable=False, unique=True, index=True)  # ✅ Added index
     item_id = db.Column(db.Integer)
     sub_item_id = db.Column(db.Integer, db.ForeignKey("boq_sub_items.sub_item_id"), nullable=True)
     description = db.Column(db.Text, nullable=True)

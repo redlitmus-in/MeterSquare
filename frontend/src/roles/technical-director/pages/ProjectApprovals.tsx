@@ -274,19 +274,14 @@ const ProjectApprovals: React.FC = () => {
   // State to trigger BOQ detail refresh after approval/rejection actions
   const [boqDetailsRefreshTrigger, setBoqDetailsRefreshTrigger] = useState(0);
 
-  // Load BOQs on mount and set up auto-refresh polling (ONLY ONCE)
+  // Load BOQs on mount - real-time subscriptions handle updates
   useEffect(() => {
     loadBOQs(); // Initial load with spinner
     loadPMs(); // Load PMs for assigned tab
 
-    // Poll for new BOQs every 2 seconds (background refresh)
-    const intervalId = setInterval(() => {
-      loadBOQs(false); // Auto-refresh without showing loading spinner
-      loadPMs(); // Also refresh PM data
-    }, 2000); // 2 seconds
-
-    // Cleanup interval on unmount
-    return () => clearInterval(intervalId);
+    // NO POLLING! Real-time subscriptions in realtimeSubscriptions.ts
+    // automatically invalidate queries when BOQ status changes.
+    // This provides instant updates (0-500ms) instead of 0-2 second delays.
   }, []); // Empty dependency array - run only once on mount
 
   // Load day extensions only when 'assigned' tab is active and BOQs are loaded

@@ -436,7 +436,7 @@ const ChangeRequestsPage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className={`p-3 rounded-lg ${isExtraMaterial ? "bg-orange-500" : "bg-purple-500"}`}>
+              <div className={`p-3 rounded-lg ${isExtraMaterial ? "bg-gradient-to-br from-[#243d8a] to-[#4a5fa8]" : "bg-gradient-to-br from-[#243d8a] to-[#4a5fa8]"}`}>
                 {isExtraMaterial ? <Box className="w-8 h-8 text-white" /> : <FileText className="w-8 h-8 text-white" />}
               </div>
               <div>
@@ -449,7 +449,7 @@ const ChangeRequestsPage: React.FC = () => {
             {isExtraMaterial && activeTab === 'requested' && (
               <Button
                 onClick={() => setShowExtraForm(true)}
-                className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 font-semibold"
+                className="bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] hover:from-[#1e3270] hover:to-[#3d4f8a] text-white px-6 py-3 font-semibold shadow-md"
               >
                 <Plus className="w-5 h-5 mr-2" />
                 NEW MATERIAL PURCHASE
@@ -503,48 +503,48 @@ const ChangeRequestsPage: React.FC = () => {
         {/* Content Tabs - Conditional based on Extra Material */}
         <div className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200 mb-6">
+            <TabsList className="w-full justify-start p-2 h-auto bg-gray-50 rounded-xl mb-6 gap-2">
               {isExtraMaterial ? (
                 <>
                   <TabsTrigger
                     value="requested"
-                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:text-blue-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                    className="rounded-lg border-2 border-transparent data-[state=active]:border-[#243d8a] data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#243d8a]/10 data-[state=active]:to-[#4a5fa8]/10 data-[state=active]:text-[#243d8a] text-gray-500 px-3 sm:px-4 py-2.5 font-semibold text-xs sm:text-sm transition-all hover:bg-gray-50"
                   >
                     <Box className="w-4 h-4 mr-2" />
                     Requested
-                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.my_requests})</span>
+                    <span className="ml-1 sm:ml-2 px-2 py-0.5 rounded-full bg-gray-100 data-[state=active]:bg-[#243d8a]/20 text-xs">({stats.my_requests})</span>
                   </TabsTrigger>
                   <TabsTrigger
                     value="pending"
-                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-yellow-500 data-[state=active]:text-yellow-600 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                    className="rounded-lg border-2 border-transparent data-[state=active]:border-[#243d8a] data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#243d8a]/10 data-[state=active]:to-[#4a5fa8]/10 data-[state=active]:text-[#243d8a] text-gray-500 px-3 sm:px-4 py-2.5 font-semibold text-xs sm:text-sm transition-all hover:bg-gray-50"
                   >
                     <Clock className="w-4 h-4 mr-2" />
                     Pending
-                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.pending_approval})</span>
+                    <span className="ml-1 sm:ml-2 px-2 py-0.5 rounded-full bg-gray-100 data-[state=active]:bg-[#243d8a]/20 text-xs">({stats.pending_approval})</span>
                   </TabsTrigger>
                   <TabsTrigger
                     value="accepted"
-                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-green-400 data-[state=active]:text-green-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                    className="rounded-lg border-2 border-transparent data-[state=active]:border-[#243d8a] data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#243d8a]/10 data-[state=active]:to-[#4a5fa8]/10 data-[state=active]:text-[#243d8a] text-gray-500 px-3 sm:px-4 py-2.5 font-semibold text-xs sm:text-sm transition-all hover:bg-gray-50"
                   >
                     <CheckCircle className="w-4 h-4 mr-2" />
                     Accepted
-                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.accepted})</span>
+                    <span className="ml-1 sm:ml-2 px-2 py-0.5 rounded-full bg-gray-100 data-[state=active]:bg-[#243d8a]/20 text-xs">({stats.accepted})</span>
                   </TabsTrigger>
                   <TabsTrigger
                     value="completed"
-                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-purple-400 data-[state=active]:text-purple-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                    className="rounded-lg border-2 border-transparent data-[state=active]:border-[#243d8a] data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#243d8a]/10 data-[state=active]:to-[#4a5fa8]/10 data-[state=active]:text-[#243d8a] text-gray-500 px-3 sm:px-4 py-2.5 font-semibold text-xs sm:text-sm transition-all hover:bg-gray-50"
                   >
                     <CheckCircle className="w-4 h-4 mr-2" />
                     Completed
-                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.completed_extra})</span>
+                    <span className="ml-1 sm:ml-2 px-2 py-0.5 rounded-full bg-gray-100 data-[state=active]:bg-[#243d8a]/20 text-xs">({stats.completed_extra})</span>
                   </TabsTrigger>
                   <TabsTrigger
                     value="rejected"
-                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:text-red-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                    className="rounded-lg border-2 border-transparent data-[state=active]:border-red-400 data-[state=active]:bg-gradient-to-r data-[state=active]:from-red-50 data-[state=active]:to-red-100 data-[state=active]:text-red-600 text-gray-500 px-3 sm:px-4 py-2.5 font-semibold text-xs sm:text-sm transition-all hover:bg-gray-50"
                   >
                     <XCircle className="w-4 h-4 mr-2" />
                     Rejected
-                    <span className="ml-1 sm:ml-2 text-gray-400">({stats.rejected})</span>
+                    <span className="ml-1 sm:ml-2 px-2 py-0.5 rounded-full bg-gray-100 data-[state=active]:bg-red-100 text-xs">({stats.rejected})</span>
                   </TabsTrigger>
                 </>
               ) : (
@@ -994,7 +994,7 @@ const ChangeRequestsPage: React.FC = () => {
 
                           <div className="px-4 pb-3 text-center text-sm">
                             <span className="font-bold text-blue-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
-                            <span className="text-gray-600 ml-1">Extra Purchase{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                            <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
 
                           <div className="px-4 pb-3 space-y-1.5 text-xs">
@@ -1102,7 +1102,7 @@ const ChangeRequestsPage: React.FC = () => {
 
                           <div className="px-4 pb-3 text-center text-sm">
                             <span className="font-bold text-yellow-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
-                            <span className="text-gray-600 ml-1">Extra Purchase{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                            <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
 
                           <div className="px-4 pb-3 space-y-1.5 text-xs">
@@ -1207,7 +1207,7 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                           <div className="px-4 pb-3 text-center text-sm">
                             <span className="font-bold text-green-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
-                            <span className="text-gray-600 ml-1">Extra Purchase{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                            <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
                           <div className="px-4 pb-3 space-y-1.5 text-xs">
                             <div className="flex justify-between">
@@ -1272,7 +1272,7 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                           <div className="px-4 pb-3 text-center text-sm">
                             <span className="font-bold text-purple-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
-                            <span className="text-gray-600 ml-1">Extra Purchase{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                            <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
                           <div className="px-4 pb-3 space-y-1.5 text-xs">
                             <div className="flex justify-between">
@@ -1337,7 +1337,7 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                           <div className="px-4 pb-3 text-center text-sm">
                             <span className="font-bold text-red-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
-                            <span className="text-gray-600 ml-1">Extra Purchase{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                            <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
                           </div>
                           <div className="px-4 pb-3 space-y-1.5 text-xs">
                             <div className="flex justify-between">
@@ -1428,7 +1428,7 @@ const ChangeRequestsPage: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="sticky top-0 bg-gradient-to-r from-orange-500 to-orange-600 px-6 py-4 flex items-center justify-between">
+            <div className="sticky top-0 bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] px-6 py-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white bg-opacity-20 rounded-lg">
                   <Box className="w-6 h-6 text-white" />

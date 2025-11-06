@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Send, Mail, User, MessageSquare, AlertCircle, CheckCircle, Download, FileText, FileSpreadsheet } from 'lucide-react';
+import { X, Send, Mail, User, MessageSquare, AlertCircle, CheckCircle, Download, FileText, FileSpreadsheet, Edit3, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { estimatorService } from '../services/estimatorService';
 import { downloadClientBOQPDF } from '@/services/boqPdfService';
@@ -39,8 +40,43 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
   const [failedCount, setFailedCount] = useState(0);
   const [boqData, setBoqData] = useState<any>(null);
   const [loadingBOQ, setLoadingBOQ] = useState(false);
+  // Format selection state - default both formats selected
+  const [sendPDF, setSendPDF] = useState(true);
+  const [sendExcel, setSendExcel] = useState(true);
+  // Email template editing state
+  const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  const [emailTemplate, setEmailTemplate] = useState('');
 
   const isClientMode = mode === 'client';
+
+  // Default email template
+  const getDefaultTemplate = () => {
+    return `Dear Valued Client,
+
+Please review the attached BOQ for your project.
+
+Project Name: ${projectName}
+
+Attached Documents:
+Please review the attached Excel document for complete project details.
+
+Next Steps:
+• Review the attached BOQ documents carefully
+• Verify all items and quantities match your requirements
+• Contact us if you have any questions or need clarifications
+• Provide your approval to proceed with the project
+
+Best Regards,
+Technical Director
+MeterSquare Interiors LLC`;
+  };
+
+  // Initialize email template when modal opens
+  React.useEffect(() => {
+    if (isOpen && isClientMode && !emailTemplate) {
+      setEmailTemplate(getDefaultTemplate());
+    }
+  }, [isOpen, isClientMode]);
 
   // Fetch BOQ data when modal opens in client mode
   React.useEffect(() => {
@@ -173,11 +209,17 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
       let response;
 
       if (isClientMode) {
+        // Build formats array based on user selection
+        const selectedFormats: string[] = [];
+        if (sendExcel) selectedFormats.push('excel');
+        if (sendPDF) selectedFormats.push('pdf');
+
         // Send to client - support multiple emails
         response = await estimatorService.sendBOQToClient(boqId, {
           client_email: recipientEmail.trim() || undefined,
           message: comments.trim() || undefined,
-          formats: ['excel', 'pdf']
+          formats: selectedFormats,
+          custom_email_body: emailTemplate.trim() || undefined
         });
 
         // Track sent/failed counts from response
@@ -229,6 +271,12 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
     setRecipientName('');
     setComments('');
     setEmailSent(false);
+    // Reset format selection to defaults
+    setSendPDF(true);
+    setSendExcel(true);
+    // Reset template editor
+    setShowTemplateEditor(false);
+    setEmailTemplate('');
     onClose();
   };
 
@@ -252,7 +300,7 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
   };
 
   const canSend = isClientMode
-    ? (recipientEmail && areAllEmailsValid(recipientEmail)) // Client mode: at least one valid email required
+    ? (recipientEmail && areAllEmailsValid(recipientEmail) && (sendPDF || sendExcel)) // Client mode: at least one valid email and one format required
     : (!recipientEmail || areAllEmailsValid(recipientEmail)); // TD mode: email optional but must be valid if provided
 
   if (!isOpen) return null;
@@ -274,7 +322,7 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative bg-white rounded-xl shadow-xl max-w-lg w-full"
+              className="relative bg-white rounded-xl shadow-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto"
             >
               {emailSent ? (
                 // Success State
@@ -446,6 +494,126 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
                         className="resize-none"
                       />
                     </div>
+
+                    {/* Email Template Editor - Only for Client Mode */}
+                    {isClientMode && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="flex items-center gap-2">
+                            <Edit3 className="w-4 h-4 text-gray-500" />
+                            Email Template (Optional)
+                          </Label>
+                          <button
+                            type="button"
+                            onClick={() => setShowTemplateEditor(!showTemplateEditor)}
+                            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
+                            disabled={isSending}
+                          >
+                            {showTemplateEditor ? (
+                              <>
+                                <EyeOff className="w-4 h-4" />
+                                Hide Editor
+                              </>
+                            ) : (
+                              <>
+                                <Eye className="w-4 h-4" />
+                                Edit Template
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {showTemplateEditor && (
+                          <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-4 border border-purple-200">
+                            <p className="text-sm text-gray-600 mb-3">
+                              Customize the email body that will be sent to the client. The template supports plain text formatting.
+                            </p>
+                            <Textarea
+                              id="email-template"
+                              placeholder="Enter custom email template..."
+                              value={emailTemplate}
+                              onChange={(e) => setEmailTemplate(e.target.value)}
+                              disabled={isSending}
+                              rows={12}
+                              className="resize-none font-mono text-sm"
+                            />
+                            <div className="flex gap-2 mt-3">
+                              <button
+                                type="button"
+                                onClick={() => setEmailTemplate(getDefaultTemplate())}
+                                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 rounded-lg transition-colors"
+                                disabled={isSending}
+                              >
+                                Reset to Default
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Format Selection - Only for Client Mode */}
+                    {isClientMode && (
+                      <div className="space-y-3">
+                        <Label className="flex items-center gap-2">
+                          <Download className="w-4 h-4 text-gray-500" />
+                          Attachment Format(s) *
+                        </Label>
+                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+                          <p className="text-sm text-gray-600 mb-3">
+                            Select which file format(s) to send to the client
+                          </p>
+                          <div className="space-y-3">
+                            <div className="flex items-center space-x-3 p-3 bg-white rounded-lg border border-blue-200 hover:border-blue-300 transition-colors">
+                              <Checkbox
+                                id="format-excel"
+                                checked={sendExcel}
+                                onCheckedChange={(checked) => setSendExcel(checked === true)}
+                                disabled={isSending}
+                                className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600"
+                              />
+                              <label
+                                htmlFor="format-excel"
+                                className="flex items-center gap-2 flex-1 cursor-pointer"
+                              >
+                                <FileSpreadsheet className="w-5 h-5 text-green-600" />
+                                <div>
+                                  <p className="font-medium text-gray-900">Excel (.xlsx)</p>
+                                  <p className="text-xs text-gray-500">Editable spreadsheet format</p>
+                                </div>
+                              </label>
+                            </div>
+
+                            <div className="flex items-center space-x-3 p-3 bg-white rounded-lg border border-blue-200 hover:border-blue-300 transition-colors">
+                              <Checkbox
+                                id="format-pdf"
+                                checked={sendPDF}
+                                onCheckedChange={(checked) => setSendPDF(checked === true)}
+                                disabled={isSending}
+                                className="data-[state=checked]:bg-red-600 data-[state=checked]:border-red-600"
+                              />
+                              <label
+                                htmlFor="format-pdf"
+                                className="flex items-center gap-2 flex-1 cursor-pointer"
+                              >
+                                <FileText className="w-5 h-5 text-red-600" />
+                                <div>
+                                  <p className="font-medium text-gray-900">PDF (.pdf)</p>
+                                  <p className="text-xs text-gray-500">Professional document format</p>
+                                </div>
+                              </label>
+                            </div>
+                          </div>
+
+                          {!sendPDF && !sendExcel && (
+                            <div className="mt-3 flex items-center gap-2 text-sm text-red-600">
+                              <AlertCircle className="w-4 h-4" />
+                              <span>Please select at least one format</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Preview BOQ - Only for Client Mode */}
                     {isClientMode && (

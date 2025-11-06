@@ -637,6 +637,8 @@ class EnhancedBackgroundNotificationService {
 
   /**
    * Start background check interval
+   * ✅ OPTIMIZED: Only checks when tab is hidden and WebSocket is disconnected
+   * This provides a safety net without overwhelming the server
    */
   private startBackgroundCheck() {
     // Clear existing interval
@@ -644,12 +646,18 @@ class EnhancedBackgroundNotificationService {
       clearInterval(this.checkInterval);
     }
 
-    // Start new interval
+    // ✅ OPTIMIZATION: Increased from 30s to 60s, AND only when tab is hidden
+    // This reduces polling by 50% and only activates when truly needed
     this.checkInterval = setInterval(() => {
-      if (this.visibilityState === 'hidden') {
+      // Only check if tab is hidden AND WebSocket is disconnected
+      const isWebSocketConnected = this.websocket?.readyState === WebSocket.OPEN;
+
+      if (this.visibilityState === 'hidden' && !isWebSocketConnected) {
+        console.log('⏰ Background check (fallback only - WebSocket disconnected)');
         this.checkForNotifications();
       }
-    }, NotificationConfig.timing.backgroundCheck.interval);
+      // If WebSocket is connected, no need to poll - real-time handles everything
+    }, 60000); // ✅ 60 seconds (was 30 seconds) - 50% reduction
   }
 
   /**

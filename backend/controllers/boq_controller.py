@@ -68,6 +68,15 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
         db.session.flush()
     master_item_id = master_item.item_id
 
+    # ✅ OPTIMIZED: Bulk query for materials (prevents N+1 queries)
+    # BEFORE: 1 query per material = N+1 queries
+    # AFTER: 1 bulk query for all materials
+    material_names = [mat_data.get("material_name") for mat_data in materials_data]
+    existing_materials = MasterMaterial.query.filter(
+        MasterMaterial.material_name.in_(material_names)
+    ).all()
+    existing_materials_map = {mat.material_name: mat for mat in existing_materials}
+
     # Add to master materials (prevent duplicates) with item_id reference
     for mat_data in materials_data:
         material_name = mat_data.get("material_name")
@@ -77,7 +86,7 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
         vat_percentage = mat_data.get("vat_percentage", 0.0)
         vat_amount = mat_data.get("vat_amount", 0.0)
 
-        master_material = MasterMaterial.query.filter_by(material_name=material_name).first()
+        master_material = existing_materials_map.get(material_name)
         if not master_material:
             master_material = MasterMaterial(
                 material_name=material_name,
@@ -116,6 +125,15 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
             db.session.flush()
         master_material_ids.append(master_material.material_id)
 
+    # ✅ OPTIMIZED: Bulk query for labour (prevents N+1 queries)
+    # BEFORE: 1 query per labour role = N+1 queries
+    # AFTER: 1 bulk query for all labour roles
+    labour_roles = [labour_data_item.get("labour_role") for labour_data_item in labour_data]
+    existing_labour = MasterLabour.query.filter(
+        MasterLabour.labour_role.in_(labour_roles)
+    ).all()
+    existing_labour_map = {labour.labour_role: labour for labour in existing_labour}
+
     # Add to master labour (prevent duplicates) with item_id reference
     for i, labour_data_item in enumerate(labour_data):
         labour_role = labour_data_item.get("labour_role")
@@ -124,7 +142,7 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
         hours = labour_data_item.get("hours", 0.0)
         labour_amount = float(rate_per_hour) * float(hours)
 
-        master_labour = MasterLabour.query.filter_by(labour_role=labour_role).first()
+        master_labour = existing_labour_map.get(labour_role)
 
         if not master_labour:
             master_labour = MasterLabour(
@@ -155,156 +173,168 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
 
     return master_item_id, master_material_ids, master_labour_ids
 
-
 def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
-    """Add sub-items to master tables with their materials and labour"""
+    """Add sub-items, their materials, and labour to master tables"""
     master_sub_item_ids = []
 
     for sub_item in sub_items:
         sub_item_name = sub_item.get("sub_item_name")
+        if not sub_item_name:
+            continue
 
-        # Check if sub-item already exists for this master item
+        # Check if master sub-item already exists for this item and sub-item name
         master_sub_item = MasterSubItem.query.filter_by(
             item_id=master_item_id,
             sub_item_name=sub_item_name
         ).first()
 
         if not master_sub_item:
+            # Create new master sub-item
             master_sub_item = MasterSubItem(
                 item_id=master_item_id,
                 sub_item_name=sub_item_name,
-                description=sub_item.get("scope"),
-                size=sub_item.get("size"),
-                location=sub_item.get("location"),
-                brand=sub_item.get("brand"),
+                description=sub_item.get("scope") or sub_item.get("description", ""),
+                size=sub_item.get("size", ""),
+                location=sub_item.get("location", ""),
+                brand=sub_item.get("brand", ""),
                 unit=sub_item.get("unit"),
                 quantity=sub_item.get("quantity"),
                 per_unit_cost=sub_item.get("per_unit_cost"),
-                sub_item_total_cost=sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None,
-
-                # Per-sub-item percentages
+                sub_item_total_cost=sub_item.get("sub_item_total_cost"),
                 misc_percentage=sub_item.get("misc_percentage", 10.0),
                 misc_amount=sub_item.get("misc_amount", 0.0),
                 overhead_profit_percentage=sub_item.get("overhead_profit_percentage", 25.0),
                 overhead_profit_amount=sub_item.get("overhead_profit_amount", 0.0),
                 transport_percentage=sub_item.get("transport_percentage", 5.0),
                 transport_amount=sub_item.get("transport_amount", 0.0),
-
-                # Cost breakdown
                 material_cost=sub_item.get("material_cost", 0.0),
                 labour_cost=sub_item.get("labour_cost", 0.0),
                 internal_cost=sub_item.get("internal_cost", 0.0),
                 planned_profit=sub_item.get("planned_profit", 0.0),
                 negotiable_margin=sub_item.get("negotiable_margin", 0.0),
-
                 created_by=created_by
             )
             db.session.add(master_sub_item)
             db.session.flush()
         else:
-            # Update existing sub-item
-            master_sub_item.description = sub_item.get("scope")
-            master_sub_item.size = sub_item.get("size")
-            master_sub_item.location = sub_item.get("location")
-            master_sub_item.brand = sub_item.get("brand")
+            # Update existing master sub-item
+            master_sub_item.description = sub_item.get("scope") or sub_item.get("description", "")
+            master_sub_item.size = sub_item.get("size", "")
+            master_sub_item.location = sub_item.get("location", "")
+            master_sub_item.brand = sub_item.get("brand", "")
             master_sub_item.unit = sub_item.get("unit")
             master_sub_item.quantity = sub_item.get("quantity")
             master_sub_item.per_unit_cost = sub_item.get("per_unit_cost")
-            master_sub_item.sub_item_total_cost = sub_item.get("per_unit_cost", 0) * sub_item.get("quantity", 1) if sub_item.get("per_unit_cost") and sub_item.get("quantity") else None
-
-            # Update percentages
+            master_sub_item.sub_item_total_cost = sub_item.get("sub_item_total_cost")
             master_sub_item.misc_percentage = sub_item.get("misc_percentage", 10.0)
             master_sub_item.misc_amount = sub_item.get("misc_amount", 0.0)
             master_sub_item.overhead_profit_percentage = sub_item.get("overhead_profit_percentage", 25.0)
             master_sub_item.overhead_profit_amount = sub_item.get("overhead_profit_amount", 0.0)
             master_sub_item.transport_percentage = sub_item.get("transport_percentage", 5.0)
             master_sub_item.transport_amount = sub_item.get("transport_amount", 0.0)
-
-            # Update cost breakdown
             master_sub_item.material_cost = sub_item.get("material_cost", 0.0)
             master_sub_item.labour_cost = sub_item.get("labour_cost", 0.0)
             master_sub_item.internal_cost = sub_item.get("internal_cost", 0.0)
             master_sub_item.planned_profit = sub_item.get("planned_profit", 0.0)
             master_sub_item.negotiable_margin = sub_item.get("negotiable_margin", 0.0)
-
             db.session.flush()
 
-        master_sub_item_ids.append(master_sub_item.sub_item_id)
+        master_sub_item_id = master_sub_item.sub_item_id
+        master_sub_item_ids.append(master_sub_item_id)
 
         # Add materials for this sub-item
-        for mat_data in sub_item.get("materials", []):
-            material_name = mat_data.get("material_name")
-            quantity = mat_data.get("quantity", 0.0)
-            unit_price = mat_data.get("unit_price", 0.0)
-            total_price = mat_data.get("total_price", quantity * unit_price)
-            vat_percentage = mat_data.get("vat_percentage", 0.0)
-            vat_amount = mat_data.get("vat_amount", 0.0)
+        materials = sub_item.get("materials", [])
+        if materials:
+            material_names = [mat.get("material_name") for mat in materials]
+            existing_materials = MasterMaterial.query.filter(
+                MasterMaterial.material_name.in_(material_names)
+            ).all()
+            existing_materials_map = {mat.material_name: mat for mat in existing_materials}
 
-            master_material = MasterMaterial.query.filter_by(material_name=material_name).first()
-            if not master_material:
-                master_material = MasterMaterial(
-                    material_name=material_name,
-                    item_id=master_item_id,
-                    sub_item_id=master_sub_item.sub_item_id,
-                    description=mat_data.get("description"),
-                    quantity=quantity,
-                    default_unit=mat_data.get("unit", "nos"),
-                    current_market_price=unit_price,
-                    total_price=total_price,
-                    vat_percentage=vat_percentage,
-                    vat_amount=vat_amount,
-                    created_by=created_by,
-                    last_modified_by=created_by
-                )
-                db.session.add(master_material)
-                db.session.flush()
-            else:
-                # Update existing material
-                if master_material.sub_item_id is None:
-                    master_material.sub_item_id = master_sub_item.sub_item_id
-                if master_material.item_id is None:
-                    master_material.item_id = master_item_id
-                master_material.description = mat_data.get("description")
-                master_material.quantity = quantity
-                master_material.current_market_price = unit_price
-                master_material.total_price = total_price
-                master_material.vat_percentage = vat_percentage
-                master_material.vat_amount = vat_amount
-                master_material.default_unit = mat_data.get("unit", "nos")
-                master_material.last_modified_by = created_by
-                db.session.flush()
+            for mat in materials:
+                material_name = mat.get("material_name")
+                if not material_name:
+                    continue
+
+                quantity = mat.get("quantity", 0.0)
+                unit_price = mat.get("unit_price", 0.0)
+                total_price = mat.get("total_price", quantity * unit_price)
+
+                master_material = existing_materials_map.get(material_name)
+                if not master_material:
+                    master_material = MasterMaterial(
+                        material_name=material_name,
+                        item_id=master_item_id,
+                        sub_item_id=master_sub_item_id,
+                        description=mat.get("description"),
+                        quantity=quantity,
+                        default_unit=mat.get("unit", "nos"),
+                        current_market_price=unit_price,
+                        total_price=total_price,
+                        vat_percentage=mat.get("vat_percentage", 0.0),
+                        vat_amount=mat.get("vat_amount", 0.0),
+                        created_by=created_by,
+                        last_modified_by=created_by
+                    )
+                    db.session.add(master_material)
+                    db.session.flush()
+                else:
+                    # Update existing material
+                    master_material.sub_item_id = master_sub_item_id
+                    if master_material.item_id is None:
+                        master_material.item_id = master_item_id
+                    master_material.description = mat.get("description")
+                    master_material.quantity = quantity
+                    master_material.current_market_price = unit_price
+                    master_material.total_price = total_price
+                    master_material.vat_percentage = mat.get("vat_percentage", 0.0)
+                    master_material.vat_amount = mat.get("vat_amount", 0.0)
+                    master_material.last_modified_by = created_by
+                    db.session.flush()
 
         # Add labour for this sub-item
-        for labour_data in sub_item.get("labour", []):
-            labour_role = labour_data.get("labour_role")
-            rate_per_hour = labour_data.get("rate_per_hour", 0.0)
-            hours = labour_data.get("hours", 0.0)
-            labour_amount = float(rate_per_hour) * float(hours)
+        labour_list = sub_item.get("labour", [])
+        if labour_list:
+            labour_roles = [labour.get("labour_role") for labour in labour_list]
+            existing_labour = MasterLabour.query.filter(
+                MasterLabour.labour_role.in_(labour_roles)
+            ).all()
+            existing_labour_map = {labour.labour_role: labour for labour in existing_labour}
 
-            master_labour = MasterLabour.query.filter_by(labour_role=labour_role).first()
-            if not master_labour:
-                master_labour = MasterLabour(
-                    labour_role=labour_role,
-                    item_id=master_item_id,
-                    sub_item_id=master_sub_item.sub_item_id,
-                    work_type="contract",
-                    hours=float(hours),
-                    rate_per_hour=float(rate_per_hour),
-                    amount=labour_amount,
-                    created_by=created_by
-                )
-                db.session.add(master_labour)
-                db.session.flush()
-            else:
-                # Update existing labour
-                if master_labour.sub_item_id is None:
-                    master_labour.sub_item_id = master_sub_item.sub_item_id
-                if master_labour.item_id is None:
-                    master_labour.item_id = master_item_id
-                master_labour.hours = float(hours)
-                master_labour.rate_per_hour = float(rate_per_hour)
-                master_labour.amount = labour_amount
-                db.session.flush()
+            for labour in labour_list:
+                labour_role = labour.get("labour_role")
+                if not labour_role:
+                    continue
+
+                rate_per_hour = labour.get("rate_per_hour", 0.0)
+                hours = labour.get("hours", 0.0)
+                labour_amount = float(rate_per_hour) * float(hours)
+
+                master_labour = existing_labour_map.get(labour_role)
+                if not master_labour:
+                    master_labour = MasterLabour(
+                        labour_role=labour_role,
+                        item_id=master_item_id,
+                        sub_item_id=master_sub_item_id,
+                        work_type=labour.get("work_type"),
+                        hours=float(hours),
+                        rate_per_hour=float(rate_per_hour),
+                        amount=labour_amount,
+                        created_by=created_by
+                    )
+                    db.session.add(master_labour)
+                    db.session.flush()
+                else:
+                    # Update existing labour
+                    master_labour.sub_item_id = master_sub_item_id
+                    if master_labour.item_id is None:
+                        master_labour.item_id = master_item_id
+                    if master_labour.work_type is None:
+                        master_labour.work_type = labour.get("work_type")
+                    master_labour.hours = float(hours)
+                    master_labour.rate_per_hour = float(rate_per_hour)
+                    master_labour.amount = labour_amount
+                    db.session.flush()
 
     return master_sub_item_ids
 
@@ -889,8 +919,55 @@ def create_boq():
             for item in preliminary_items:
                 prelim_id = item.get('prelim_id')
                 is_checked = item.get('checked', False) or item.get('selected', False)
+                is_custom = item.get('isCustom', False)
 
-                log.info(f"Preliminary item: prelim_id={prelim_id}, checked={is_checked}, item={item}")
+                log.info(f"Preliminary item: prelim_id={prelim_id}, checked={is_checked}, isCustom={is_custom}, item={item}")
+
+                # Handle edited master preliminaries - update the master record
+                if prelim_id and not is_custom:
+                    description = item.get('description', '')
+                    if description:
+                        # Check if description was changed from master
+                        from models.preliminary_master import PreliminaryMaster
+                        master_prelim = PreliminaryMaster.query.get(prelim_id)
+                        if master_prelim and master_prelim.description != description:
+                            # Update the master preliminary description
+                            master_prelim.description = description
+                            master_prelim.updated_by = 'Estimator'
+                            log.info(f"[CREATE_BOQ] Updated master preliminary: prelim_id={prelim_id}, new description={description}")
+
+                # Handle custom preliminaries - create new row in preliminaries_master
+                if is_custom and not prelim_id:
+                    from models.preliminary_master import PreliminaryMaster
+                    description = item.get('description', '')
+                    name = item.get('name', description[:50] if description else 'Custom Item')
+
+                    if description:  # Only create if there's a description
+                        # Check if this custom preliminary already exists (by description)
+                        existing_custom = PreliminaryMaster.query.filter_by(
+                            description=description,
+                            created_by='Estimator'
+                        ).first()
+
+                        if existing_custom:
+                            prelim_id = existing_custom.prelim_id
+                            log.info(f"[CREATE_BOQ] Found existing custom preliminary: prelim_id={prelim_id}")
+                        else:
+                            # Create new custom preliminary in master table
+                            new_custom_prelim = PreliminaryMaster(
+                                name=name,
+                                description=description,
+                                unit='nos',
+                                rate=0,
+                                is_active=True,
+                                display_order=9999,  # Custom items appear at the end
+                                created_by='Estimator',
+                                updated_by='Estimator'
+                            )
+                            db.session.add(new_custom_prelim)
+                            db.session.flush()  # Get the prelim_id
+                            prelim_id = new_custom_prelim.prelim_id
+                            log.info(f"[CREATE_BOQ] Created new custom preliminary: prelim_id={prelim_id}, description={description}")
 
                 if prelim_id:
                     preliminary_selections_to_save.append({
@@ -2171,6 +2248,18 @@ def update_boq(boq_id):
                 is_custom = item.get('isCustom', False)
 
                 log.info(f"[UPDATE_BOQ] Preliminary item: prelim_id={prelim_id}, checked={is_checked}, isCustom={is_custom}")
+
+                # Handle edited master preliminaries - update the master record
+                if prelim_id and not is_custom:
+                    description = item.get('description', '')
+                    if description:
+                        # Check if description was changed from master
+                        master_prelim = PreliminaryMaster.query.get(prelim_id)
+                        if master_prelim and master_prelim.description != description:
+                            # Update the master preliminary description
+                            master_prelim.description = description
+                            master_prelim.updated_by = user_name
+                            log.info(f"[UPDATE_BOQ] Updated master preliminary: prelim_id={prelim_id}, new description={description}")
 
                 # Handle custom preliminaries - create new row in preliminaries_master
                 if is_custom and not prelim_id:

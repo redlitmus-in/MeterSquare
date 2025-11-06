@@ -200,7 +200,7 @@ const MyProjects: React.FC = () => {
   // Other state variables
   const [availableSEs, setAvailableSEs] = useState<SiteEngineer[]>([]);
   const [loadingSEs, setLoadingSEs] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<'review' | 'pending' | 'assigned' | 'completed' | 'approved' | 'rejected'>('review');
+  const [filterStatus, setFilterStatus] = useState<'pending' | 'assigned' | 'completed' | 'approved' | 'rejected'>('pending');
   const [selectedSE, setSelectedSE] = useState<SiteEngineer | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [seSearchQuery, setSeSearchQuery] = useState('');
@@ -554,19 +554,6 @@ const MyProjects: React.FC = () => {
       if (!matchesSearch) return false;
     }
 
-    if (filterStatus === 'review') {
-      const status = project.boq_status?.toLowerCase() || '';
-      // Review tab: BOQs sent by EST for PM review (including edited ones)
-      const reviewStatuses = [
-        'pending_pm_approval',
-        'draft',
-        'pending_revision',
-        'under_revision'
-      ];
-      return (!hasSiteSupervisor && project.status?.toLowerCase() !== 'completed') &&
-             reviewStatuses.includes(status) &&
-             status !== 'pm_rejected' && status !== 'rejected';
-    }
     if (filterStatus === 'pending') {
       const status = project.boq_status?.toLowerCase() || '';
       // Pending tab: Projects assigned by TD, waiting for SE assignment
@@ -597,19 +584,6 @@ const MyProjects: React.FC = () => {
   });
 
   const getTabCounts = () => ({
-    review: projects.filter(p => {
-      const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
-      const status = p.boq_status?.toLowerCase() || '';
-      const reviewStatuses = [
-        'pending_pm_approval',
-        'draft',
-        'pending_revision',
-        'under_revision'
-      ];
-      return (!hasSS && p.status?.toLowerCase() !== 'completed') &&
-             reviewStatuses.includes(status) &&
-             status !== 'pm_rejected' && status !== 'rejected';
-    }).length,
     pending: projects.filter(p => {
       const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
       const status = p.boq_status?.toLowerCase() || '';
@@ -726,17 +700,6 @@ const MyProjects: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
         <div className="bg-white rounded-2xl shadow-lg border border-blue-100 p-6">
           <div className="flex items-start justify-start gap-0 border-b border-gray-200 mb-6">
-            <button
-              onClick={() => setFilterStatus('review')}
-              className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-all border-b-2 ${
-                filterStatus === 'review'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Review ({tabCounts.review})
-            </button>
-
             <button
               onClick={() => setFilterStatus('pending')}
               className={`px-4 py-3 text-sm font-semibold whitespace-nowrap transition-all border-b-2 ${

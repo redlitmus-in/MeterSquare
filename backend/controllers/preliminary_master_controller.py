@@ -265,3 +265,52 @@ def create_preliminary_master():
             "success": False,
             "error": f"Failed to create preliminary master: {str(e)}"
         }), 500
+
+
+def delete_preliminary_master(prelim_id):
+    """
+    Delete (soft delete) a preliminary master item
+    Sets is_deleted=True instead of actually removing from database
+    """
+    try:
+        # Find the preliminary master
+        prelim = PreliminaryMaster.query.get(prelim_id)
+
+        if not prelim:
+            return jsonify({
+                "success": False,
+                "error": "Preliminary not found"
+            }), 404
+
+        if prelim.is_deleted:
+            return jsonify({
+                "success": False,
+                "error": "Preliminary already deleted"
+            }), 400
+
+        # Soft delete - set is_deleted flag
+        prelim.is_deleted = True
+        prelim.is_active = False
+        prelim.updated_at = datetime.now()
+
+        # Get current user if available
+        current_user = getattr(g, 'user', None)
+        if current_user:
+            prelim.updated_by = current_user.get('username', 'unknown')
+
+        db.session.commit()
+
+        log.info(f"Deleted preliminary master: {prelim_id} - {prelim.description}")
+
+        return jsonify({
+            "success": True,
+            "message": "Preliminary deleted successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error deleting preliminary master: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": f"Failed to delete preliminary: {str(e)}"
+        }), 500

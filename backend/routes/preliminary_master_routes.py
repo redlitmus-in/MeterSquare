@@ -8,7 +8,8 @@ from controllers.preliminary_master_controller import (
     get_boq_preliminaries_with_selections,
     save_boq_preliminary_selections,
     get_selected_boq_preliminaries,
-    create_preliminary_master
+    create_preliminary_master,
+    delete_preliminary_master
 )
 
 preliminary_master_routes = Blueprint('preliminary_master_routes', __name__, url_prefix='/api')
@@ -47,3 +48,10 @@ def get_selected_preliminaries_route(boq_id):
 def create_preliminary_master_route():
     """Create a new preliminary master item"""
     return create_preliminary_master()
+
+# Delete a preliminary master item
+@preliminary_master_routes.route('/preliminary-master/<int:prelim_id>', methods=['DELETE'])
+@jwt_required
+def delete_preliminary_master_route(prelim_id):
+    """Delete (soft delete) a preliminary master item"""
+    return delete_preliminary_master(prelim_id)

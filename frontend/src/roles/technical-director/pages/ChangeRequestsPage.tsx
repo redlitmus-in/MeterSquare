@@ -68,20 +68,15 @@ const ChangeRequestsPage: React.FC = () => {
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
 
-  // Fetch change requests and vendor approvals from backend - Auto-refresh every 2 seconds
+  // Fetch change requests and vendor approvals - real-time subscriptions handle updates
   useEffect(() => {
     // Initial load with loading spinner
     loadChangeRequests(true);
     loadVendorApprovals();
 
-    // Set up auto-refresh interval (without loading spinner to prevent UI flicker)
-    const refreshInterval = setInterval(() => {
-      loadChangeRequests(false); // Silent background refresh
-      loadVendorApprovals();      // Silent background refresh
-    }, 2000); // Refresh every 2 seconds
-
-    // Cleanup interval on unmount
-    return () => clearInterval(refreshInterval);
+    // NO POLLING! Real-time subscriptions in realtimeSubscriptions.ts
+    // automatically invalidate queries when change_requests table changes.
+    // This provides instant updates across all roles without server load.
   }, []);
 
   const loadChangeRequests = async (showLoadingSpinner = false) => {

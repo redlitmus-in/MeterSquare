@@ -54,18 +54,14 @@ const ChangeRequestsPage: React.FC = () => {
   const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
 
-  // Fetch change requests from backend - Auto-refresh every 2 seconds
+  // Fetch purchase requests from backend - real-time subscriptions handle updates
   useEffect(() => {
     // Initial load with toasts
     loadChangeRequests(true);
 
-    // Set up auto-refresh interval (without toasts to prevent spam and UI flicker)
-    const refreshInterval = setInterval(() => {
-      loadChangeRequests(false); // Silent background refresh
-    }, 2000); // Refresh every 2 seconds
-
-    // Cleanup interval on unmount
-    return () => clearInterval(refreshInterval);
+    // NO POLLING! Real-time subscriptions in realtimeSubscriptions.ts
+    // automatically invalidate queries when change_requests table changes.
+    // This eliminates 30 requests/min per user and provides instant updates.
   }, []);
 
   const loadChangeRequests = async (showToasts = false) => {
@@ -76,19 +72,19 @@ const ChangeRequestsPage: React.FC = () => {
         setChangeRequests(response.data);
         // Only show success toast on initial load to avoid spam
         if (showToasts && response.data.length > 0) {
-          toast.success(`Loaded ${response.data.length} change request(s)`);
+          toast.success(`Loaded ${response.data.length} purchase request(s)`);
         }
       } else {
         // Only show error toast on initial load to avoid spam
         if (showToasts) {
-          toast.error(response.message || 'Failed to load change requests');
+          toast.error(response.message || 'Failed to load purchase requests');
         }
       }
     } catch (error) {
       console.error('[ChangeRequests] Error loading change requests:', error);
       // Only show error toast on initial load to avoid spam
       if (showToasts) {
-        toast.error('Failed to load change requests');
+        toast.error('Failed to load purchase requests');
       }
     } finally {
       if (initialLoad) {
@@ -120,7 +116,7 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.reject(rejectingCrId, reason);
       if (response.success) {
-        toast.success('Change request rejected');
+        toast.success('Purchase request rejected');
         loadChangeRequests();
         setShowRejectionModal(false);
         setRejectingCrId(null);
@@ -128,7 +124,7 @@ const ChangeRequestsPage: React.FC = () => {
         toast.error(response.message);
       }
     } catch (error) {
-      toast.error('Failed to reject change request');
+      toast.error('Failed to reject purchase request');
     }
   };
 
@@ -143,7 +139,7 @@ const ChangeRequestsPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error in handleReview:', error);
-      toast.error('Failed to load change request details');
+      toast.error('Failed to load purchase request details');
     }
   };
 
@@ -161,7 +157,7 @@ const ChangeRequestsPage: React.FC = () => {
   };
 
   const handleEdit = (crId: number) => {
-    // Find the change request and open it in the edit modal directly
+    // Find the purchase request and open it in the edit modal directly
     const request = changeRequests.find(r => r.cr_id === crId);
     if (request) {
       setSelectedChangeRequest(request);
@@ -264,16 +260,16 @@ const ChangeRequestsPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Header - Purple theme for Change Requests */}
-      <div className="bg-gradient-to-r from-purple-500/5 to-purple-600/10 shadow-sm border-b-2 border-purple-200">
+      {/* Header - Blue theme for Purchase Requests */}
+      <div className="bg-gradient-to-r from-[#243d8a]/5 to-[#4a5fa8]/10 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg">
-              <FileText className="w-6 h-6 text-purple-600" />
+            <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
+              <FileText className="w-6 h-6 text-[#243d8a]" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-purple-700">Change Requests</h1>
-              <p className="text-sm text-purple-600">Material additions to existing approved projects</p>
+              <h1 className="text-2xl font-bold text-[#243d8a]">Purchase Requests</h1>
+              <p className="text-sm text-gray-600">Material additions to existing approved projects</p>
             </div>
           </div>
         </div>
@@ -342,7 +338,7 @@ const ChangeRequestsPage: React.FC = () => {
               </TabsTrigger>
               <TabsTrigger
                 value="escalated"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-purple-400 data-[state=active]:text-purple-500 text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#243d8a] data-[state=active]:text-[#243d8a] text-gray-500 px-2 sm:px-4 py-3 font-semibold text-xs sm:text-sm"
               >
                 <CheckCircle className="w-4 h-4 mr-2" />
                 Completed
@@ -364,7 +360,7 @@ const ChangeRequestsPage: React.FC = () => {
                 {filteredRequests.length === 0 ? (
                   <div className="text-center py-12">
                     <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No change requests found</p>
+                    <p className="text-gray-500 text-lg">No purchase requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
                   <RequestsTable requests={filteredRequests} />
@@ -640,7 +636,7 @@ const ChangeRequestsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Change Request Details Modal */}
+      {/* Purchase Request Details Modal */}
       <ChangeRequestDetailsModal
         isOpen={showDetailsModal}
         onClose={() => {
@@ -661,7 +657,7 @@ const ChangeRequestsPage: React.FC = () => {
           setRejectingCrId(null);
         }}
         onSubmit={handleRejectSubmit}
-        title="Reject Change Request"
+        title="Reject Purchase Request"
       />
 
       {/* Approval with Buyer Selection Modal */}
@@ -678,7 +674,7 @@ const ChangeRequestsPage: React.FC = () => {
         />
       )}
 
-      {/* Edit Change Request Modal */}
+      {/* Edit Purchase Request Modal */}
       {selectedChangeRequest && (
         <EditChangeRequestModal
           isOpen={showEditModal}
@@ -691,7 +687,7 @@ const ChangeRequestsPage: React.FC = () => {
             setShowEditModal(false);
             setSelectedChangeRequest(null);
             loadChangeRequests(true);
-            toast.success('Change request updated successfully');
+            toast.success('Purchase request updated successfully');
           }}
         />
       )}

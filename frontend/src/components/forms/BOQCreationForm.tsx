@@ -18,7 +18,9 @@ import {
   PlusCircle,
   Info,
   HelpCircle,
-  TrendingUp
+  TrendingUp,
+  Pencil,
+  Check
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
@@ -146,6 +148,7 @@ const UNIT_OPTIONS = [
   { value: 'bundle', label: 'Bundle' },
   { value: 'can', label: 'Can' },
   { value: 'carton', label: 'Carton' },
+  { value: 'cu.ft', label: 'Cu.ft' },
   { value: 'cu.m', label: 'Cu.m' },
   { value: 'drum', label: 'Drum' },
   { value: 'ft', label: 'Ft' },
@@ -217,7 +220,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   // Preliminaries state
   const [preliminaries, setPreliminaries] = useState<PreliminaryItem[]>([]);
   const [preliminariesExpanded, setPreliminariesExpanded] = useState(false);
-  const [preliminaryNotes, setPreliminaryNotes] = useState('Note: All authority charges & deposit are excluded (Approximate cost 10,000/-)');
+  const [preliminaryListExpanded, setPreliminaryListExpanded] = useState(false);
+  const [editingPreliminaryId, setEditingPreliminaryId] = useState<string | null>(null);
+  const [preliminaryNotes, setPreliminaryNotes] = useState('');
 
   // Separate cost details state (independent from checkboxes)
   const [costQuantity, setCostQuantity] = useState<number>(1);
@@ -451,6 +456,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   description: item.description,
                   checked: true, // Custom items were selected
                   isCustom: true,
+                  prelim_id: undefined, // No prelim_id for custom items
                   quantity: item.quantity || 1,
                   unit: item.unit || 'nos',
                   rate: item.rate || 0,
@@ -1245,10 +1251,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   };
 
   const updatePreliminaryDescription = (id: string, description: string) => {
-    // Just update the local state, dont save to database yet
-    setPreliminaries(preliminaries.map(item =>
-      item.id === id ? { ...item, description } : item
-    ));
+    // Update the description in-place - this will update the master preliminary
+    setPreliminaries(preliminaries.map(item => {
+      if (item.id === id) {
+        return {
+          ...item,
+          description
+        };
+      }
+      return item;
+    }));
   };
 
   const updatePreliminaryField = (id: string, field: keyof PreliminaryItem, value: any) => {
@@ -1265,20 +1277,37 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     }));
   };
 
-  const removePreliminary = (id: string) => {
-    // Only allow removal of custom items; for default items, just uncheck them
-    setPreliminaries(preliminaries.map(item => {
-      if (item.id === id) {
-        if (item.isCustom) {
-          // Remove custom items completely
-          return null;
-        } else {
-          // For default items, just uncheck them instead of removing
-          return { ...item, checked: false };
+  const removePreliminary = async (id: string) => {
+    const itemToRemove = preliminaries.find(item => item.id === id);
+    if (!itemToRemove) return;
+
+    // If it's a master preliminary (has prelim_id), delete from master database
+    if (itemToRemove.prelim_id) {
+      try {
+        const token = localStorage.getItem('access_token');
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'}/preliminary-master/${itemToRemove.prelim_id}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to delete preliminary from master database');
         }
+
+        toast.success('Preliminary deleted from master list');
+      } catch (error) {
+        console.error('Error deleting preliminary:', error);
+        toast.error(error instanceof Error ? error.message : 'Failed to delete preliminary from master database');
+        return; // Don't remove from UI if backend delete failed
       }
-      return item;
-    }).filter(Boolean) as any[]);
+    }
+
+    // Remove from frontend list
+    setPreliminaries(preliminaries.filter(item => item.id !== id));
   };
 
   const handleDownloadTemplate = async () => {
@@ -2143,12 +2172,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   className="mt-4 p-6 bg-white rounded-lg border border-purple-200 shadow-sm"
                   style={{ overflow: 'visible' }}
                 >
-                  {/* Checklist Items with scrollbar when > 7 items */}
-                  <div className={`space-y-2 mb-3 ${preliminaries.length > 15 ? 'max-h-[30rem] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-purple-400 scrollbar-track-purple-100' : ''}`}>
-                    {preliminaries.map((item) => (
+                  {/* Checklist Items - Show only 5 by default, expandable */}
+                  <div className="space-y-2 mb-3">
+                    {(preliminaryListExpanded ? preliminaries : preliminaries.slice(0, 5)).map((item) => (
                       <div
                         key={item.id}
-                        onClick={() => togglePreliminary(item.id)}
+                        onClick={() => editingPreliminaryId !== item.id && togglePreliminary(item.id)}
                         className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg hover:bg-purple-50 transition-colors cursor-pointer"
                       >
                         <input
@@ -2158,7 +2187,45 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           className="mt-1 w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500 pointer-events-none"
                           disabled={isSubmitting}
                         />
-                        {item.isCustom ? (
+                        {editingPreliminaryId === item.id ? (
+                          <div className="flex-1 flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={item.description}
+                              onChange={(e) => updatePreliminaryDescription(item.id, e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              placeholder="Enter preliminary item..."
+                              disabled={isSubmitting}
+                              autoFocus={true}
+                            />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingPreliminaryId(null);
+                              }}
+                              className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                              disabled={isSubmitting}
+                              title="Save changes"
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                setEditingPreliminaryId(null); // Clear edit mode first
+                                await removePreliminary(item.id);
+                              }}
+                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              disabled={isSubmitting}
+                              title="Delete item"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : item.isCustom ? (
                           <div className="flex-1 flex items-center gap-2">
                             <input
                               type="text"
@@ -2171,9 +2238,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             />
                             <button
                               type="button"
-                              onClick={(e) => {
+                              onClick={async (e) => {
                                 e.stopPropagation();
-                                removePreliminary(item.id);
+                                await removePreliminary(item.id);
                               }}
                               className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                               disabled={isSubmitting}
@@ -2182,13 +2249,49 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             </button>
                           </div>
                         ) : (
-                          <label className="flex-1 text-sm text-gray-700 cursor-pointer">
-                            {item.description}
-                          </label>
+                          <div className="flex-1 flex items-center justify-between group">
+                            <label className="text-sm text-gray-700 cursor-pointer flex-1">
+                              {item.description}
+                            </label>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingPreliminaryId(item.id);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                              disabled={isSubmitting}
+                              title="Edit item"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         )}
                       </div>
                     ))}
                   </div>
+
+                  {/* Show More/Less Button */}
+                  {preliminaries.length > 5 && (
+                    <button
+                      type="button"
+                      onClick={() => setPreliminaryListExpanded(!preliminaryListExpanded)}
+                      className="flex items-center justify-center gap-2 w-full px-4 py-2 mb-3 text-purple-600 border border-purple-300 rounded-lg hover:bg-purple-50 transition-all font-medium text-sm"
+                      disabled={isSubmitting}
+                    >
+                      {preliminaryListExpanded ? (
+                        <>
+                          <ChevronUp className="w-4 h-4" />
+                          Show Less
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="w-4 h-4" />
+                          Show More ({preliminaries.length - 5} more)
+                        </>
+                      )}
+                    </button>
+                  )}
 
                   {/* Add Custom Item Button */}
                   <button
@@ -2228,24 +2331,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">Unit</label>
-                          <select
+                          <input
+                            type="text"
+                            list="cost-unit-options"
                             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
                             value={costUnit}
                             disabled={isSubmitting}
                             onChange={(e) => setCostUnit(e.target.value)}
-                          >
-                            <option value="nos">Nos</option>
-                            <option value="sqft">Sqft</option>
-                            <option value="sqm">Sqm</option>
-                            <option value="rft">Rft</option>
-                            <option value="rm">Rm</option>
-                            <option value="cum">Cum</option>
-                            <option value="kg">Kg</option>
-                            <option value="ltr">Ltr</option>
-                            <option value="bag">Bag</option>
-                            <option value="ton">Ton</option>
-                            <option value="ls">LS</option>
-                          </select>
+                            placeholder="Select or type unit"
+                          />
+                          <datalist id="cost-unit-options">
+                            {UNIT_OPTIONS.map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </datalist>
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">Rate</label>
@@ -2414,16 +2513,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                       <span>Loading master data...</span>
                     </div>
                   )}
-                  <button
-                    type="button"
-                    onClick={addItem}
-                    className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-all font-semibold shadow-md"
-                    style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                    disabled={isSubmitting}
-                  >
-                    <Plus className="w-5 h-5" />
-                    Add Item
-                  </button>
                 </div>
               </div>
 
@@ -2556,21 +2645,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                       <div className="p-4 space-y-4 bg-gray-50/50">
                         {/* Items Section - Green Theme (Client-Facing) */}
                         <div className="bg-gradient-to-r from-green-50 to-green-100/30 rounded-lg p-4 border-2 border-green-400 shadow-sm">
-                          <div className="flex items-center justify-between mb-3">
+                          <div className="mb-3">
                             <h4 className="text-sm font-bold text-green-900 flex items-center gap-2">
                               <div className="p-1.5 bg-white rounded shadow-sm">
                                 <FileText className="w-4 h-4 text-green-600" />
                               </div>
                               Sub Items
                             </h4>
-                            <button
-                              type="button"
-                              onClick={() => addSubItem(item.id)}
-                              className="text-xs font-semibold text-green-700 hover:text-green-800"
-                              disabled={isSubmitting}
-                            >
-                              + Add Sub Item
-                            </button>
                           </div>
 
                           <div className="space-y-3">
@@ -2685,17 +2766,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       <label className="block text-xs font-medium text-gray-700 mb-1">
                                         Unit <span className="text-red-500">*</span>
                                       </label>
-                                      <select
+                                      <input
+                                        type="text"
+                                        list={`subitem-unit-options-${item.id}-${subItem.id}`}
                                         value={subItem.unit}
                                         onChange={(e) => updateSubItem(item.id, subItem.id, 'unit', e.target.value)}
                                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                                        placeholder="Select or type unit"
                                         required
                                         disabled={isSubmitting}
-                                      >
+                                      />
+                                      <datalist id={`subitem-unit-options-${item.id}-${subItem.id}`}>
                                         {UNIT_OPTIONS.map(opt => (
-                                          <option key={opt.value} value={opt.value} className="bg-white">{opt.label}</option>
+                                          <option key={opt.value} value={opt.value}>{opt.label}</option>
                                         ))}
-                                      </select>
+                                      </datalist>
                                     </div>
 
                                     <div>
@@ -2727,25 +2812,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
                                   {/* Raw Materials Section for Sub-item (Internal) */}
                                   <div className="mt-4 pt-4 border-t border-gray-200 border-2 border-red-300 rounded-lg p-3 bg-red-50/20">
-                                    <div className="flex items-center justify-between mb-3">
+                                    <div className="mb-3">
                                       <h5 className="text-xs font-bold text-blue-900 flex items-center gap-2">
                                         <Package className="w-3.5 h-3.5 text-blue-600" />
                                         Raw Materials
                                       </h5>
-                                      <button
-                                        type="button"
-                                        onClick={() => addSubItemMaterial(item.id, subItem.id)}
-                                        className="text-xs font-semibold text-blue-700 hover:text-blue-800"
-                                        disabled={isSubmitting}
-                                      >
-                                        + Add Material
-                                      </button>
                                     </div>
 
                                     <div className="space-y-2">
                                       {/* Column Headers */}
                                       {subItem.materials.length > 0 && (
                                         <div className="flex items-center gap-2 pb-2 border-b border-blue-200">
+                                          <div className="w-10 text-xs font-semibold text-gray-700">S.No</div>
                                           <div className="flex-1 text-xs font-semibold text-gray-700">Material Name</div>
                                           <div className="w-20 text-xs font-semibold text-gray-700">Qty</div>
                                           <div className="w-24 text-xs font-semibold text-gray-700">Unit</div>
@@ -2755,13 +2833,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                         </div>
                                       )}
 
-                                      {subItem.materials.map((material) => {
+                                      {subItem.materials.map((material, materialIndex) => {
                                         const materialDropdownId = `${item.id}-${subItem.id}-${material.id}`;
                                         const availableMaterials = getAvailableMaterials(item.id);
 
                                         return (
                                           <div key={material.id} className="space-y-1">
                                             <div className="flex items-center gap-2">
+                                              <div className="w-10 flex items-center justify-center text-xs font-medium text-gray-600">
+                                                {materialIndex + 1}
+                                              </div>
                                               <div className="flex-1 relative">
                                                 <input
                                                   type="text"
@@ -2836,16 +2917,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 step="0.01"
                                                 disabled={isSubmitting}
                                               />
-                                              <select
+                                              <input
+                                                type="text"
+                                                list={`material-unit-options-${item.id}-${subItem.id}-${material.id}`}
                                                 value={material.unit}
                                                 onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'unit', e.target.value)}
                                                 className="w-24 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                                placeholder="Unit"
                                                 disabled={isSubmitting}
-                                              >
+                                              />
+                                              <datalist id={`material-unit-options-${item.id}-${subItem.id}-${material.id}`}>
                                                 {UNIT_OPTIONS.map(opt => (
-                                                  <option key={opt.value} value={opt.value} className="bg-white">{opt.label}</option>
+                                                  <option key={opt.value} value={opt.value}>{opt.label}</option>
                                                 ))}
-                                              </select>
+                                              </datalist>
                                               <input
                                                 type="number"
                                                 value={material.unit_price}
@@ -2900,50 +2985,36 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           </div>
                                         </div>
                                       )}
+
+                                      {/* Add Material Button - Positioned at bottom */}
+                                      <div className="mt-3 pt-3 border-t border-blue-300">
+                                        <button
+                                          type="button"
+                                          onClick={() => addSubItemMaterial(item.id, subItem.id)}
+                                          className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all border border-blue-300"
+                                          disabled={isSubmitting}
+                                        >
+                                          <Plus className="w-4 h-4" />
+                                          Add Material
+                                        </button>
+                                      </div>
                                     </div>
                                   </div>
 
                                   {/* Labour Section for Sub-item (Internal) */}
                                   <div className="mt-4 pt-4 border-t border-gray-200 border-2 border-red-300 rounded-lg p-3 bg-red-50/20">
-                                    <div className="flex items-center justify-between mb-3">
+                                    <div className="mb-3">
                                       <h5 className="text-xs font-bold text-orange-900 flex items-center gap-2">
                                         <Users className="w-3.5 h-3.5 text-orange-600" />
                                         Labour
                                       </h5>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const newLabour: BOQLabourForm = {
-                                            id: Date.now().toString(),
-                                            labour_role: '',
-                                            hours: 8,
-                                            rate_per_hour: 0,
-                                            is_new: true
-                                          };
-                                          setItems(items.map(itm =>
-                                            itm.id === item.id
-                                              ? {
-                                                  ...itm,
-                                                  sub_items: itm.sub_items.map(si =>
-                                                    si.id === subItem.id
-                                                      ? { ...si, labour: [...si.labour, newLabour] }
-                                                      : si
-                                                  )
-                                                }
-                                              : itm
-                                          ));
-                                        }}
-                                        className="text-xs font-semibold text-orange-700 hover:text-orange-800"
-                                        disabled={isSubmitting}
-                                      >
-                                        + Add Labour
-                                      </button>
                                     </div>
 
                                     <div className="space-y-2">
                                       {/* Column Headers for Labour */}
                                       {subItem.labour.length > 0 && (
                                         <div className="flex items-center gap-2 pb-2 border-b border-orange-200">
+                                          <div className="w-10 text-xs font-semibold text-gray-700">S.No</div>
                                           <div className="flex-1 text-xs font-semibold text-gray-700">Labour Role</div>
                                           <div className="w-[100px] text-xs font-semibold text-gray-700">Work Type</div>
                                           <div className="w-20 text-xs font-semibold text-gray-700">Hours</div>
@@ -2953,9 +3024,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                         </div>
                                       )}
 
-                                      {subItem.labour.map((labour) => (
+                                      {subItem.labour.map((labour, labourIndex) => (
                                         <div key={labour.id} className="space-y-1">
                                           <div className="flex items-center gap-2">
+                                            <div className="w-10 flex items-center justify-center text-xs font-medium text-gray-600">
+                                              {labourIndex + 1}
+                                            </div>
                                             <input
                                               type="text"
                                               value={labour.labour_role}
@@ -3108,6 +3182,39 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           </span>
                                         </div>
                                       )}
+
+                                      {/* Add Labour Button - Positioned at bottom */}
+                                      <div className="mt-3 pt-3 border-t border-orange-300">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const newLabour: BOQLabourForm = {
+                                              id: Date.now().toString(),
+                                              labour_role: '',
+                                              hours: 8,
+                                              rate_per_hour: 0,
+                                              is_new: true
+                                            };
+                                            setItems(items.map(itm =>
+                                              itm.id === item.id
+                                                ? {
+                                                    ...itm,
+                                                    sub_items: itm.sub_items.map(si =>
+                                                      si.id === subItem.id
+                                                        ? { ...si, labour: [...si.labour, newLabour] }
+                                                        : si
+                                                    )
+                                                  }
+                                                : itm
+                                            ));
+                                          }}
+                                          className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-orange-700 bg-orange-50 hover:bg-orange-100 rounded-lg transition-all border border-orange-300"
+                                          disabled={isSubmitting}
+                                        >
+                                          <Plus className="w-4 h-4" />
+                                          Add Labour
+                                        </button>
+                                      </div>
                                     </div>
                                   </div>
 
@@ -3325,6 +3432,19 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 No sub items added yet. Click "+ Add Sub Item" to add one.
                               </div>
                             )}
+
+                            {/* Add Sub Item Button - Positioned at bottom */}
+                            <div className="mt-3 pt-3 border-t border-green-300">
+                              <button
+                                type="button"
+                                onClick={() => addSubItem(item.id)}
+                                className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-all border border-green-300"
+                                disabled={isSubmitting}
+                              >
+                                <Plus className="w-4 h-4" />
+                                Add Sub Item
+                              </button>
+                            </div>
                           </div>
                         </div>
 
@@ -3480,6 +3600,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   <p className="text-sm text-gray-400 mt-1">Click "Add Item" to start building your BOQ</p>
                 </div>
               )}
+
+              {/* Add Item Button - Positioned at bottom */}
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={addItem}
+                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-all font-semibold shadow-md"
+                  style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                  disabled={isSubmitting}
+                >
+                  <Plus className="w-5 h-5" />
+                  Add Item
+                </button>
+              </div>
             </div>
 
             {/* Grand Total Summary with Overall Discount */}

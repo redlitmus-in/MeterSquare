@@ -9,7 +9,11 @@ import {
   CheckCircle,
   Loader2,
   Edit3,
-  Save
+  Save,
+  Paperclip,
+  Upload,
+  FileIcon,
+  Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,6 +41,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const [vendorName, setVendorName] = useState('');
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
 
   // Editable fields
   const [editedGreeting, setEditedGreeting] = useState('');
@@ -50,6 +55,43 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const [editedBuyerPhone, setEditedBuyerPhone] = useState('');
   const [editedInstructions, setEditedInstructions] = useState('');
   const [editedDeliveryReq, setEditedDeliveryReq] = useState('');
+
+  // Handle file selection
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files) return;
+
+    const newFiles = Array.from(files);
+    const validFiles: File[] = [];
+
+    // Validate file size (max 10MB per file)
+    for (const file of newFiles) {
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error(`${file.name} is too large. Maximum file size is 10MB.`);
+        continue;
+      }
+      validFiles.push(file);
+    }
+
+    setAttachedFiles(prev => [...prev, ...validFiles]);
+
+    // Reset input
+    event.target.value = '';
+  };
+
+  // Remove attached file
+  const handleRemoveFile = (index: number) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Format file size
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  };
 
   // Load email preview when modal opens
   useEffect(() => {
@@ -313,6 +355,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     setEditedEmailContent('');
     setIsEditMode(false);
     setVendorName('');
+    setAttachedFiles([]);
     onClose();
   };
 
@@ -429,6 +472,79 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                             </ul>
                           </div>
                         </div>
+
+                        {/* File Attachments Section */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            <Paperclip className="w-4 h-4 inline mr-1" />
+                            Attachments (Optional)
+                          </label>
+
+                          {/* File Upload Button */}
+                          <div className="mb-3">
+                            <input
+                              type="file"
+                              id="file-upload"
+                              multiple
+                              onChange={handleFileSelect}
+                              className="hidden"
+                              accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip"
+                            />
+                            <label
+                              htmlFor="file-upload"
+                              className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition-colors cursor-pointer"
+                            >
+                              <Upload className="w-5 h-5 text-gray-500" />
+                              <span className="text-sm text-gray-600 font-medium">
+                                Click to upload files or drag and drop
+                              </span>
+                            </label>
+                            <p className="text-xs text-gray-500 mt-2">
+                              Supported formats: PDF, Word, Excel, Images, ZIP (Max 10MB per file)
+                            </p>
+                          </div>
+
+                          {/* Attached Files List */}
+                          {attachedFiles.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="text-xs font-medium text-gray-600 mb-2">
+                                Attached Files ({attachedFiles.length})
+                              </div>
+                              <div className="space-y-2 max-h-40 overflow-y-auto">
+                                {attachedFiles.map((file, index) => (
+                                  <motion.div
+                                    key={`${file.name}-${index}`}
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -10 }}
+                                    className="flex items-center justify-between gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+                                  >
+                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                      <div className="flex-shrink-0 p-2 bg-blue-100 rounded">
+                                        <FileIcon className="w-4 h-4 text-blue-600" />
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="text-sm font-medium text-gray-900 truncate">
+                                          {file.name}
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                          {formatFileSize(file.size)}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <button
+                                      onClick={() => handleRemoveFile(index)}
+                                      className="flex-shrink-0 p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                      title="Remove file"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </motion.div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </>
                     )}
                   </div>
@@ -462,6 +578,35 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                         )}
                       </Button>
                     </div>
+
+                    {/* Attached Files Preview */}
+                    {attachedFiles.length > 0 && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Paperclip className="w-4 h-4 text-blue-600" />
+                          <span className="text-sm font-semibold text-blue-900">
+                            Attachments ({attachedFiles.length})
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {attachedFiles.map((file, index) => (
+                            <div
+                              key={`${file.name}-${index}`}
+                              className="flex items-center gap-3 p-2 bg-white rounded border border-blue-200"
+                            >
+                              <FileIcon className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-medium text-gray-900 truncate">{file.name}</div>
+                                <div className="text-xs text-gray-500">{formatFileSize(file.size)}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-xs text-blue-700 mt-3">
+                          These files will be attached to the email.
+                        </p>
+                      </div>
+                    )}
 
                     <div className="border border-gray-300 rounded-lg overflow-hidden">
                       {isEditMode ? (

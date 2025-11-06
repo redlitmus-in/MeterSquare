@@ -650,7 +650,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         <select
           value={selectedProject?.project_id || ''}
           onChange={(e) => handleProjectChange(parseInt(e.target.value))}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
           disabled={loading}
           required
         >
@@ -675,7 +675,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           <select
             value={selectedArea?.area_id || ''}
             onChange={(e) => handleAreaChange(parseInt(e.target.value))}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
             required
           >
             <option value="">Select Area</option>
@@ -700,7 +700,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           <select
             value={selectedBoq?.boq_id || ''}
             onChange={(e) => handleBoqChange(parseInt(e.target.value))}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
             required
           >
             <option value="">Select BOQ</option>
@@ -725,7 +725,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           <select
             value={selectedItem?.item_id || ''}
             onChange={(e) => handleItemChange(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
             required
           >
             <option value="">Select BOQ Item</option>
@@ -750,7 +750,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           <select
             value={selectedSubItem?.sub_item_id || ''}
             onChange={(e) => handleSubItemChange(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
             required
           >
             <option value="">Select Sub-Item</option>
@@ -1050,7 +1050,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         e.target.value = "";
                       }
                     }}
-                    className="pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                    className="pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
                     value=""
                   >
                     <option value="">Select Material</option>
@@ -1065,7 +1065,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
               <button
                 type="button"
                 onClick={addNewMaterial}
-                className="flex items-center gap-1 px-3 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                className="flex items-center gap-1 px-3 py-2 text-sm bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] text-white rounded-lg hover:from-[#1e3270] hover:to-[#3d4f8a] shadow-md transition-all"
               >
                 <PlusIcon className="w-4 h-4" />
                 Add New Material
@@ -1113,7 +1113,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           type="text"
                           value={material.materialName}
                           onChange={(e) => updateMaterial(material.id, { materialName: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
                           placeholder="Enter material name"
                         />
                       </div>
@@ -1145,7 +1145,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         value={material.quantity}
                         onChange={(e) => updateMaterial(material.id, { quantity: parseFloat(e.target.value) || 0 })}
                         className={`w-full px-3 py-2 border border-gray-300 rounded-lg ${
-                          !material.isNew && isSiteEngineer ? 'bg-gray-100 cursor-not-allowed' : 'focus:ring-2 focus:ring-purple-500'
+                          !material.isNew && isSiteEngineer ? 'bg-white cursor-not-allowed' : 'bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]'
                         }`}
                         min="0.01"
                         step="0.01"
@@ -1163,34 +1163,30 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         value={material.unit}
                         onChange={(e) => material.isNew && updateMaterial(material.id, { unit: e.target.value })}
                         className={`w-full px-3 py-2 border border-gray-300 rounded-lg ${
-                          material.isNew ? 'focus:ring-2 focus:ring-purple-500' : 'bg-gray-100 cursor-not-allowed'
+                          material.isNew ? 'bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]' : 'bg-white cursor-not-allowed'
                         }`}
                         placeholder={material.isNew ? "e.g., kg, m², nos" : ""}
                         readOnly={!material.isNew}
                         disabled={!material.isNew}
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Unit Rate (AED) {material.isNew && <span className="text-red-500">*</span>}
-                      </label>
-                      <input
-                        type="number"
-                        value={material.unitRate}
-                        onChange={(e) => updateMaterial(material.id, { unitRate: parseFloat(e.target.value) || 0 })}
-                        className={`w-full px-3 py-2 border border-gray-300 rounded-lg ${
-                          material.isNew ? 'focus:ring-2 focus:ring-purple-500' : 'bg-gray-100 cursor-not-allowed'
-                        }`}
-                        min="0.01"
-                        step="0.01"
-                        placeholder={material.isNew ? "Enter rate" : ""}
-                        readOnly={!material.isNew}
-                        disabled={!material.isNew}
-                      />
-                    </div>
+                    {!material.isNew && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Unit Rate (AED)
+                        </label>
+                        <input
+                          type="number"
+                          value={material.unitRate}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white cursor-not-allowed"
+                          readOnly
+                          disabled
+                        />
+                      </div>
+                    )}
                   </div>
 
-                  {!isSiteEngineer && (
+                  {!isSiteEngineer && !material.isNew && (
                     <div className="mt-2 text-right">
                       <span className="text-sm text-gray-600">
                         Subtotal: <span className="font-medium text-gray-900">
@@ -1215,7 +1211,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           <textarea
             value={justification}
             onChange={(e) => setJustification(e.target.value)}
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 ${
+            className={`w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] ${
               justification.trim().length > 0 && justification.trim().length < 20
                 ? 'border-red-500'
                 : 'border-gray-300'
@@ -1240,7 +1236,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         <textarea
           value={remarks}
           onChange={(e) => setRemarks(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
           rows={2}
           placeholder="Additional notes or comments"
         />
@@ -1371,7 +1367,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         <button
           type="submit"
           disabled={loading || isSubmitting || !selectedItem || !selectedSubItem || materials.length === 0 || calculations.availableAfter < 0}
-          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+          className="px-6 py-2.5 bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] text-white rounded-lg hover:from-[#1e3270] hover:to-[#3d4f8a] transition-all shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed disabled:shadow-none font-semibold"
           title={calculations.availableAfter < 0 ? 'Cannot submit - Budget exceeded' : isSubmitting ? (initialData?.editMode ? 'Updating...' : 'Creating purchase request...') : ''}
         >
           {loading || isSubmitting ? (initialData?.editMode ? 'Updating...' : 'Creating...') : (initialData?.editMode ? 'Update Purchase Request' : 'Create Purchase Request')}

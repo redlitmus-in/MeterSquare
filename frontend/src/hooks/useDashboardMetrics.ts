@@ -69,7 +69,7 @@ export function useDashboardMetrics() {
     getEndpoint(),
     {
       cacheStrategy: 'DASHBOARD', // 30s stale time, 2min cache
-      refetchInterval: 30000, // Auto-refresh every 30 seconds
+      refetchInterval: false, // ✅ NO POLLING! Use real-time subscriptions instead
       showErrorToast: false, // Don't show errors for dashboard
     }
   );
@@ -97,7 +97,7 @@ export function usePendingApprovalsCount() {
     API_ENDPOINTS.ACCOUNTS.PENDING_APPROVALS,
     {
       cacheStrategy: 'REALTIME', // 10s stale time for real-time feel
-      refetchInterval: 15000, // Check every 15 seconds
+      refetchInterval: false, // ✅ NO POLLING! Use real-time subscriptions instead
       enabled: !!userRole,
     }
   );
@@ -189,7 +189,7 @@ export function useRoleDashboard() {
     {
       cacheStrategy: 'DASHBOARD',
       enabled: !!userRole,
-      refetchInterval: 60000, // Refresh every minute
+      refetchInterval: false, // ✅ NO POLLING! Use real-time subscriptions
     }
   );
 
@@ -219,7 +219,7 @@ export function useDashboardNotifications() {
     '/api/notifications',
     {
       cacheStrategy: 'REALTIME', // Very short cache for notifications
-      refetchInterval: 10000, // Check every 10 seconds
+      refetchInterval: false, // ✅ NO POLLING! Notifications pushed via Socket.io
     }
   );
 

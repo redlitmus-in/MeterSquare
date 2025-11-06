@@ -647,7 +647,49 @@ class BOQEmailService:
 
         return wrap_email_content(email_body)
 
-    def send_boq_to_client(self, boq_data, project_data, client_email, message, total_value, item_count, excel_file=None, pdf_file=None):
+    def generate_custom_client_email(self, boq_data, project_data, custom_body):
+        """
+        Generate custom email for Client using estimator's custom template
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            custom_body: Custom email body text from estimator
+
+        Returns:
+            str: HTML formatted email content
+        """
+        project_name = project_data.get('project_name', 'Your Project')
+
+        # Convert plain text line breaks to HTML breaks and preserve formatting
+        formatted_body = custom_body.replace('\n', '<br>')
+
+        email_body = f"""
+        <div class="email-container" style="background: #ffffff;">
+            <!-- Header with Logo -->
+            <div style="background: #ffffff; text-align: center; padding: 25px; border-bottom: 2px solid #e5e7eb;">
+                <img src="{LOGO_URL}" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
+            </div>
+
+            <!-- Content -->
+            <div class="content" style="padding: 30px; background: #ffffff; color: #000000;">
+                <div style="color: #000000; font-size: 14px; line-height: 1.8;">
+                    {formatted_body}
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer" style="background: #f9fafb; border-top: 1px solid #e5e7eb; padding: 20px; text-align: center;">
+                <p style="color: #000000; margin: 5px 0;"><strong>MeterSquare ERP - Construction Management System</strong></p>
+                <p style="color: #000000; margin: 5px 0;">For any queries, please contact our team.</p>
+                <p style="color: #000000; margin: 5px 0;">© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def send_boq_to_client(self, boq_data, project_data, client_email, message, total_value, item_count, excel_file=None, pdf_file=None, custom_email_body=None):
         """
         Send BOQ to Client with Excel and PDF attachments
 
@@ -660,13 +702,18 @@ class BOQEmailService:
             item_count: Number of items
             excel_file: Tuple (filename, file_data) for Excel
             pdf_file: Tuple (filename, file_data) for PDF
+            custom_email_body: Optional custom email body text from estimator
 
         Returns:
             bool: True if email sent successfully, False otherwise
         """
         try:
             # Generate email content
-            email_html = self.generate_boq_client_email(boq_data, project_data, message, total_value, item_count)
+            # If custom_email_body is provided, use it; otherwise use default template
+            if custom_email_body:
+                email_html = self.generate_custom_client_email(boq_data, project_data, custom_email_body)
+            else:
+                email_html = self.generate_boq_client_email(boq_data, project_data, message, total_value, item_count)
 
             # Create subject
             project_name = project_data.get('project_name', 'Project')

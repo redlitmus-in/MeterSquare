@@ -29,6 +29,7 @@ def send_boq_to_client():
         client_emails_raw = data.get('client_email') or data.get('client_emails')
         message = data.get('message', 'Please review the attached BOQ for your project.')
         formats = data.get('formats', ['excel', 'pdf'])
+        custom_email_body = data.get('custom_email_body')  # Custom email template from frontend
 
         if not boq_id or not client_emails_raw:
             return jsonify({"success": False, "error": "boq_id and client_email are required"}), 400
@@ -134,7 +135,8 @@ def send_boq_to_client():
                     total_value=client_total_value,  # CLIENT VERSION: Same total, distributed markup
                     item_count=len(items),
                     excel_file=excel_file,
-                    pdf_file=pdf_file
+                    pdf_file=pdf_file,
+                    custom_email_body=custom_email_body
                 )
 
                 if email_sent:

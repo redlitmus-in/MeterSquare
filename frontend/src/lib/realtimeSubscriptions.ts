@@ -3,7 +3,7 @@ import { invalidateQueries } from '@/lib/queryClient';
 import { toast } from 'sonner';
 
 // Types for subscription channels
-type SubscriptionChannel = 'purchases' | 'tasks' | 'notifications' | 'materials' | 'projects';
+type SubscriptionChannel = 'purchases' | 'tasks' | 'notifications' | 'materials' | 'projects' | 'boqs' | 'boq_details' | 'change_requests';
 
 // Store active subscriptions
 const activeSubscriptions = new Map<SubscriptionChannel, any>();
@@ -90,6 +90,15 @@ export const setupRealtimeSubscriptions = (userId?: string) => {
 
   // Subscribe to material updates
   subscribeToMaterials();
+
+  // Subscribe to BOQ updates (CRITICAL for real-time role updates)
+  subscribeToBOQs();
+
+  // Subscribe to BOQ details updates
+  subscribeToBOQDetails();
+
+  // Subscribe to change request updates
+  subscribeToChangeRequests();
 
   // Subscribe to project updates if user is logged in
   if (userId) {
@@ -267,6 +276,140 @@ const subscribeToProjects = () => {
     activeSubscriptions.set('projects', subscription);
   } catch (error) {
     console.error('Failed to subscribe to projects:', error);
+  }
+};
+
+/**
+ * Subscribe to BOQ table changes - CRITICAL for real-time role updates
+ * Fixes issue where TD approval doesn't instantly show in Estimator's approved tab
+ */
+const subscribeToBOQs = () => {
+  try {
+    const subscription = supabase
+      .channel('boq-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'boq',
+        },
+        (payload) => {
+          console.log('BOQ change received:', payload);
+
+          // Invalidate all BOQ-related queries for ALL roles
+          invalidateQueries(['boqs']);
+          invalidateQueries(['boq', payload.new?.boq_id || payload.old?.boq_id]);
+          invalidateQueries(['td_boqs']); // Technical Director BOQs
+          invalidateQueries(['pm_boqs']); // Project Manager BOQs
+          invalidateQueries(['estimator_boqs']); // Estimator BOQs
+          invalidateQueries(['project-boqs']); // Project-specific BOQs
+
+          // Show notification based on status change
+          const newStatus = payload.new?.status;
+          const oldStatus = payload.old?.status;
+
+          if (payload.eventType === 'UPDATE' && newStatus !== oldStatus) {
+            // Status changed - show appropriate notification
+            if (newStatus === 'PM_Approved') {
+              toast.success('BOQ approved by PM');
+            } else if (newStatus === 'Approved' || newStatus === 'TD_Approved') {
+              toast.success('BOQ approved by Technical Director');
+            } else if (newStatus === 'Pending_TD_Approval') {
+              toast.info('BOQ sent to Technical Director for approval');
+            } else if (newStatus === 'Client_Confirmed') {
+              toast.success('BOQ confirmed by client');
+            } else if (newStatus === 'Rejected') {
+              toast.error('BOQ rejected');
+            }
+          } else if (payload.eventType === 'INSERT') {
+            toast.info('New BOQ created');
+          }
+        }
+      )
+      .subscribe();
+
+    activeSubscriptions.set('boqs', subscription);
+  } catch (error) {
+    console.error('Failed to subscribe to BOQs:', error);
+  }
+};
+
+/**
+ * Subscribe to BOQ details table changes
+ */
+const subscribeToBOQDetails = () => {
+  try {
+    const subscription = supabase
+      .channel('boq-details-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'boq_details',
+        },
+        (payload) => {
+          console.log('BOQ details change received:', payload);
+
+          // Invalidate BOQ details queries
+          invalidateQueries(['boq-details']);
+          invalidateQueries(['boq-details', payload.new?.boq_id || payload.old?.boq_id]);
+        }
+      )
+      .subscribe();
+
+    activeSubscriptions.set('boq_details', subscription);
+  } catch (error) {
+    console.error('Failed to subscribe to BOQ details:', error);
+  }
+};
+
+/**
+ * Subscribe to change requests table changes
+ */
+const subscribeToChangeRequests = () => {
+  try {
+    const subscription = supabase
+      .channel('change-request-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'change_requests',
+        },
+        (payload) => {
+          console.log('Change request received:', payload);
+
+          // Invalidate change request queries for all roles
+          invalidateQueries(['change-requests']);
+          invalidateQueries(['change_requests']);
+          invalidateQueries(['change-request', payload.new?.request_id || payload.old?.request_id]);
+          invalidateQueries(['vendor-approvals']); // TD vendor approvals
+
+          // Show notification based on event
+          if (payload.eventType === 'INSERT') {
+            toast.info('New change request created');
+          } else if (payload.eventType === 'UPDATE') {
+            const newStatus = payload.new?.status;
+            const oldStatus = payload.old?.status;
+
+            if (newStatus !== oldStatus) {
+              if (newStatus === 'approved') {
+                toast.success('Change request approved');
+              } else if (newStatus === 'rejected') {
+                toast.error('Change request rejected');
+              }
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    activeSubscriptions.set('change_requests', subscription);
+  } catch (error) {
+    console.error('Failed to subscribe to change requests:', error);
   }
 };
 

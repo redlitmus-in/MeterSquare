@@ -110,16 +110,16 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
   return (
     <div className="space-y-6 p-4">
       {/* Header */}
-      <div className="bg-gradient-to-r from-slate-700 to-slate-800 rounded-xl p-6 border border-slate-600 shadow-lg">
+      <div className="bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] rounded-xl p-6 shadow-lg">
         <h2 className="text-2xl font-bold text-white mb-2">{data.boq_name}</h2>
-        <p className="text-sm text-slate-200">Real-time Cost Tracking & Variance Analysis</p>
+        <p className="text-sm text-blue-100">Real-time Cost Tracking & Variance Analysis</p>
       </div>
 
       {/* Detailed BOQ View Section */}
       <div className="bg-white rounded-lg shadow-md border border-gray-300 overflow-hidden">
-        <div className="bg-gray-800 px-6 py-4">
+        <div className="bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] px-6 py-4">
           <h3 className="text-lg font-bold text-white">Complete BOQ Details</h3>
-          <p className="text-xs text-gray-300 mt-1">Full breakdown of all items with materials and labour</p>
+          <p className="text-xs text-blue-100 mt-1">Full breakdown of all items with materials and labour</p>
         </div>
 
         <div className="p-6 max-h-[600px] overflow-y-auto">
@@ -239,7 +239,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
               <h3 className="text-xl font-bold text-gray-900">{item.item_name}</h3>
               <button
                 onClick={() => openBreakdownModal(item)}
-                className="px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2"
+                className="px-4 py-2 bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] hover:from-[#1e3270] hover:to-[#3d4f8a] text-white text-sm font-semibold rounded shadow-md transition-all flex items-center gap-2"
               >
                 <Calculator className="w-4 h-4" />
                 View Details
@@ -911,7 +911,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
             animate={{ opacity: 1, scale: 1 }}
             className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-auto"
           >
-            <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-6 py-4 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] px-6 py-4 flex items-center justify-between">
               <h3 className="text-xl font-bold text-white">Profit/Loss Breakdown: {selectedItemForBreakdown.item_name}</h3>
               <button
                 onClick={closeBreakdownModal}

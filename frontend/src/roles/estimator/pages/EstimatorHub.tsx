@@ -1675,16 +1675,6 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Edit</span>
               </button>
               <button
-                className="text-blue-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm"
-                onClick={() => {
-                  handleSendToPM(boq.project);
-                }}
-              >
-                <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                <span className="hidden sm:inline">Send to PM</span>
-                <span className="sm:hidden">PM</span>
-              </button>
-              <button
                 className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
                 onClick={() => {
                   setBoqToEmail(boq);
@@ -2507,16 +2497,6 @@ const EstimatorHub: React.FC = () => {
                                   <span className="sm:hidden">TD</span>
                                 </>
                               )}
-                            </button>
-                            <button
-                              className="flex-1 min-w-[80px] bg-gradient-to-r from-[#243d8a]/10 to-[#243d8a]/20 text-[#243d8a] text-[10px] sm:text-xs h-8 rounded hover:from-[#243d8a]/20 hover:to-[#243d8a]/30 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed border border-[#243d8a]/20"
-                              onClick={() => handleSendToPM(project)}
-                              disabled={sendingProjectId === project.project_id}
-                              title="Send to Project Manager"
-                            >
-                              <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                              <span className="hidden sm:inline">Send to PM</span>
-                              <span className="sm:hidden">PM</span>
                             </button>
                           </>
                         ) : null}

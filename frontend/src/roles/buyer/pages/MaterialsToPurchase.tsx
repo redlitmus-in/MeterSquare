@@ -59,7 +59,9 @@ const MaterialsToPurchase: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
 
-  // Fetch BOQ materials with auto-sync
+  // ✅ OPTIMIZED: Fetch BOQ materials - Real-time updates via Supabase (NO POLLING)
+  // BEFORE: Polling every 30 seconds = 2 requests/minute per user
+  // AFTER: Real-time subscriptions only = instant updates when BOQ changes (100% reduction in polling)
   const { data: materialsData, isLoading } = useAutoSync<MaterialsResponse>({
     queryKey: ['buyer-boq-materials'],
     fetchFn: async () => {
@@ -82,8 +84,9 @@ const MaterialsToPurchase: React.FC = () => {
 
       return response.json();
     },
-    staleTime: 30000,
-    refetchInterval: 30000, // Auto-refresh every 30 seconds
+    realtimeTables: ['boq', 'boq_items', 'boq_materials', 'boq_sub_items'], // ✅ Real-time subscriptions
+    staleTime: 60000, // ✅ 60 seconds (was 30 seconds)
+    // ❌ REMOVED: refetchInterval - No more polling!
   });
 
   const materials = useMemo(() => {

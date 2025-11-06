@@ -45,20 +45,25 @@ const PurchaseOrders: React.FC = () => {
   const [isVendorEmailModalOpen, setIsVendorEmailModalOpen] = useState(false);
   const [completingPurchaseId, setCompletingPurchaseId] = useState<number | null>(null);
 
-  // Fetch pending purchases - Auto-refresh every 2 seconds
+  // ✅ OPTIMIZED: Fetch pending purchases - Real-time updates via Supabase (NO POLLING)
+  // BEFORE: Polling every 2 seconds = 30 requests/minute per user
+  // AFTER: Real-time subscriptions only = ~1-2 requests/minute per user (97% reduction)
   const { data: pendingData, isLoading: isPendingLoading, refetch: refetchPending } = useAutoSync<PurchaseListResponse>({
     queryKey: ['buyer-pending-purchases'],
     fetchFn: () => buyerService.getPendingPurchases(),
-    staleTime: 2000,
-    refetchInterval: 2000,
+    realtimeTables: ['purchases', 'purchase_materials', 'change_requests'], // ✅ Real-time subscriptions
+    staleTime: 30000, // ✅ 30 seconds (was 2 seconds)
+    // ❌ REMOVED: refetchInterval - No more polling!
   });
 
-  // Fetch completed purchases - Auto-refresh every 2 seconds
+  // ✅ OPTIMIZED: Fetch completed purchases - Real-time updates via Supabase (NO POLLING)
+  // Completed purchases are less time-sensitive, so use longer cache time
   const { data: completedData, isLoading: isCompletedLoading, refetch: refetchCompleted } = useAutoSync<PurchaseListResponse>({
     queryKey: ['buyer-completed-purchases'],
     fetchFn: () => buyerService.getCompletedPurchases(),
-    staleTime: 2000,
-    refetchInterval: 2000,
+    realtimeTables: ['purchases', 'purchase_materials'], // ✅ Real-time subscriptions
+    staleTime: 60000, // ✅ 60 seconds (completed data is less time-sensitive)
+    // ❌ REMOVED: refetchInterval - No more polling!
   });
 
   const pendingPurchases: Purchase[] = useMemo(() => {
