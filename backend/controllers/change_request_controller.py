@@ -509,11 +509,22 @@ def send_for_review(cr_id):
                     next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
                     next_approver = "Technical Director"
                 elif route_to == 'estimator':
+                    # Route to the project's assigned estimator
+                    project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
+                    if not project or not project.estimator_id:
+                        return jsonify({"error": "No Estimator assigned for this project"}), 400
+
+                    # Fetch estimator details from User table
+                    assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
+                    if not assigned_estimator:
+                        return jsonify({"error": "Assigned Estimator user record not found"}), 400
+
                     next_role = CR_CONFIG.ROLE_ESTIMATOR
-                    next_approver = "Estimator"
+                    next_approver = assigned_estimator.full_name or assigned_estimator.username
+                    next_approver_id = assigned_estimator.user_id
+                    log.info(f"Routing CR {cr_id} to Estimator: {next_approver} (user_id={next_approver_id})")
                 else:
                     return jsonify({"error": f"Invalid route_to value: {route_to}. Must be 'technical_director' or 'estimator'"}), 400
-                next_approver_id = None
             else:
                 # Auto-route logic
                 has_new_materials = any(mat.get('master_material_id') is None for mat in (change_request.materials_data or []))
@@ -525,12 +536,41 @@ def send_for_review(cr_id):
                     if percentage > 40:
                         next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
                         next_approver = "Technical Director"
+                        next_approver_id = None
                     else:
+                        # Route to the project's assigned estimator
+                        project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
+                        if not project or not project.estimator_id:
+                            return jsonify({"error": "No Estimator assigned for this project"}), 400
+
+                        # Fetch estimator details from User table
+                        assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
+                        if not assigned_estimator:
+                            return jsonify({"error": "Assigned Estimator user record not found"}), 400
+
                         next_role = CR_CONFIG.ROLE_ESTIMATOR
-                        next_approver = "Estimator"
+                        next_approver = assigned_estimator.full_name or assigned_estimator.username
+                        next_approver_id = assigned_estimator.user_id
+                        log.info(f"Auto-routing CR {cr_id} to Estimator: {next_approver} (user_id={next_approver_id})")
                 else:
                     next_role, next_approver = workflow_service.determine_initial_approver(user_role, change_request)
-                next_approver_id = None
+
+                    # If routing to estimator, get the project-assigned one
+                    if next_role == CR_CONFIG.ROLE_ESTIMATOR:
+                        project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
+                        if not project or not project.estimator_id:
+                            return jsonify({"error": "No Estimator assigned for this project"}), 400
+
+                        # Fetch estimator details from User table
+                        assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
+                        if not assigned_estimator:
+                            return jsonify({"error": "Assigned Estimator user record not found"}), 400
+
+                        next_approver = assigned_estimator.full_name or assigned_estimator.username
+                        next_approver_id = assigned_estimator.user_id
+                        log.info(f"Auto-routing CR {cr_id} to Estimator: {next_approver} (user_id={next_approver_id})")
+                    else:
+                        next_approver_id = None
 
         elif is_admin:
             # Admin sends to assigned PM
@@ -556,7 +596,6 @@ def send_for_review(cr_id):
         # --- Update Change Request ---
         change_request.approval_required_from = next_role
         change_request.current_approver_role = next_role
-        change_request.current_approver_id = next_approver_id
         change_request.status = CR_CONFIG.STATUS_UNDER_REVIEW
         change_request.updated_at = datetime.utcnow()
 
@@ -733,21 +772,50 @@ def get_all_change_requests():
                         ChangeRequest.requested_by_user_id == user_id  # PM's own requests only
                     )
         elif user_role == 'estimator':
-            # Estimator sees:
-            # 1. Requests where approval_required_from = 'estimator' (pending estimator approval)
-            # 2. Requests approved by estimator that are assigned_to_buyer (approved tab)
-            # 3. ALL requests that are purchase_completed (completed tab) - regardless of who approved
-            from sqlalchemy import or_
+            # Estimator sees only requests from their assigned projects:
+            # 1. Requests needing estimator approval from THEIR projects (approval_required_from = 'estimator' AND project.estimator_id = user_id)
+            # 2. Requests they approved (approved_by_user_id = user_id)
+            # 3. Completed requests from their assigned projects
+            from sqlalchemy import or_, and_
 
-            log.info(f"Estimator filter - is_admin_viewing: {is_admin_viewing}")
-            # Admin viewing as estimator sees same as regular estimator (no user-specific filtering needed)
-            query = query.filter(
-                or_(
-                    ChangeRequest.approval_required_from == 'estimator',  # Pending requests
-                    ChangeRequest.approved_by_user_id.isnot(None),  # Approved by estimator
-                    ChangeRequest.status == 'purchase_completed'  # All completed purchases (actual DB value)
+            log.info(f"Estimator filter - user_id: {user_id}, is_admin_viewing: {is_admin_viewing}")
+
+            if is_admin_viewing:
+                # Admin viewing as estimator sees all estimator-related requests
+                query = query.filter(
+                    or_(
+                        ChangeRequest.approval_required_from == 'estimator',  # All pending estimator requests
+                        ChangeRequest.approved_by_user_id.isnot(None),  # All estimator-approved requests
+                        ChangeRequest.status == 'purchase_completed'  # All completed purchases
+                    )
                 )
-            )
+            else:
+                # Regular estimator: Filter by their assigned projects
+                # Get projects assigned to this estimator
+                estimator_projects = Project.query.filter_by(estimator_id=user_id, is_deleted=False).all()
+                estimator_project_ids = [p.project_id for p in estimator_projects]
+
+                log.info(f"Estimator {user_id} has {len(estimator_project_ids)} assigned projects: {estimator_project_ids}")
+
+                if estimator_project_ids:
+                    query = query.filter(
+                        or_(
+                            and_(
+                                ChangeRequest.approval_required_from == 'estimator',
+                                ChangeRequest.project_id.in_(estimator_project_ids)  # Requests from their projects needing estimator approval
+                            ),
+                            ChangeRequest.approved_by_user_id == user_id,  # Requests approved by this estimator
+                            and_(
+                                ChangeRequest.status == 'purchase_completed',
+                                ChangeRequest.project_id.in_(estimator_project_ids)  # Completed from their projects
+                            )
+                        )
+                    )
+                else:
+                    # If estimator has no projects, only show requests they've approved
+                    query = query.filter(
+                        ChangeRequest.approved_by_user_id == user_id
+                    )
         elif user_role in ['technical_director', 'technicaldirector']:
             # TD sees:
             # 1. Requests where approval_required_from = 'technical_director' (pending TD approval)
@@ -939,12 +1007,23 @@ def approve_change_request(cr_id):
                 # Overhead >40% - Route to Technical Director
                 next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
                 next_approver = 'Technical Director'
+                next_approver_id = None
                 log.info(f"PM approved CR {cr_id}: {percentage:.2f}% > 40% → Routing to TD")
             else:
-                # Overhead ≤40% - Route to Estimator
+                # Overhead ≤40% - Route to project's assigned Estimator
+                project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
+                if not project or not project.estimator_id:
+                    return jsonify({"error": "No Estimator assigned for this project"}), 400
+
+                # Fetch estimator details from User table
+                assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
+                if not assigned_estimator:
+                    return jsonify({"error": "Assigned Estimator user record not found"}), 400
+
                 next_role = CR_CONFIG.ROLE_ESTIMATOR
-                next_approver = 'Estimator'
-                log.info(f"PM approved CR {cr_id}: {percentage:.2f}% ≤ 40% → Routing to Estimator")
+                next_approver = assigned_estimator.full_name or assigned_estimator.username
+                next_approver_id = assigned_estimator.user_id
+                log.info(f"PM approved CR {cr_id}: {percentage:.2f}% ≤ 40% → Routing to Estimator: {next_approver} (user_id={next_approver_id})")
 
             change_request.approval_required_from = next_role
             change_request.current_approver_role = next_role
@@ -969,6 +1048,7 @@ def approve_change_request(cr_id):
                 "type": "change_request_approved_by_pm",
                 "sender": approver_name,
                 "receiver": next_approver,
+                "receiver_user_id": next_approver_id,
                 "sender_role": "project_manager",
                 "receiver_role": next_role,
                 "status": CR_CONFIG.STATUS_APPROVED_BY_PM,
