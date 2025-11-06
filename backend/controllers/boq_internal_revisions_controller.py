@@ -9,6 +9,8 @@ from config.db import db
 from config.logging import get_logger
 from models.boq import *
 from controllers.boq_controller import *
+from models.preliminary_master import *
+from models.project import Project
 from sqlalchemy import text
 from sqlalchemy.orm.attributes import flag_modified
 from datetime import datetime
@@ -20,10 +22,17 @@ def get_all_internal_revision():
     """
     Get all BOQs with their internal revisions
     Returns complete BOQ details with all internal revision history
+    - Estimators: Only see projects assigned to them
+    - Technical Directors: See all projects
 
     GET /api/boqs/all-internal-revisions
     """
     try:
+        # Get current logged-in user
+        current_user = getattr(g, 'user', None)
+        user_id = current_user.get('user_id') if current_user else None
+        user_role = current_user.get('role', '').lower() if current_user else ''
+
         # Get all BOQ IDs that have internal revision records
         boq_ids_with_revisions = db.session.query(BOQInternalRevision.boq_id).filter(
             BOQInternalRevision.is_deleted == False
@@ -32,13 +41,36 @@ def get_all_internal_revision():
         boq_ids = [row[0] for row in boq_ids_with_revisions]
 
         # Get all BOQs that either have the flag set OR have internal revision records
-        boqs = BOQ.query.filter(
+        boqs_query = BOQ.query.filter(
             BOQ.is_deleted == False,
             db.or_(
                 BOQ.has_internal_revisions == True,
                 BOQ.boq_id.in_(boq_ids)
             )
-        ).all()
+        )
+
+        # Filter based on user role
+        if user_role == 'estimator':
+            # For estimators, only show BOQs for projects assigned to them
+            # First, get all project IDs assigned to this estimator
+            estimator_project_ids = db.session.query(Project.project_id).filter(
+                Project.estimator_id == user_id,
+                Project.is_deleted == False
+            ).all()
+            estimator_project_ids = [pid[0] for pid in estimator_project_ids]
+
+            log.info(f"Estimator {user_id} assigned to {len(estimator_project_ids)} projects: {estimator_project_ids}")
+
+            # Filter BOQs to only those belonging to the estimator's projects
+            boqs_query = boqs_query.filter(BOQ.project_id.in_(estimator_project_ids))
+        elif user_role == 'technical_director':
+            # Technical directors see all BOQs
+            log.info(f"Technical Director {user_id} - showing all internal revision BOQs")
+        else:
+            # For other roles, you may want to apply different filters
+            log.info(f"User role '{user_role}' - showing all internal revision BOQs")
+
+        boqs = boqs_query.all()
 
         result = []
 
@@ -153,10 +185,19 @@ def get_all_internal_revision():
 
             result.append(boq_data)
 
+        # Build response message based on user role
+        if user_role == 'estimator':
+            message = f"Found {len(result)} BOQ(s) with internal revisions assigned to you"
+        elif user_role == 'technical_director':
+            message = f"Found {len(result)} BOQ(s) with internal revisions (all projects)"
+        else:
+            message = f"Found {len(result)} BOQ(s) with internal revisions"
+
         response = jsonify({
             "success": True,
             "count": len(result),
-            "message": f"Found {len(result)} BOQ(s) with internal revisions",
+            "message": message,
+            "user_role": user_role,
             "data": result
         })
         # Prevent caching
