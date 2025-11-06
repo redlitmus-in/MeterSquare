@@ -9,6 +9,7 @@ from datetime import datetime, date
 from sqlalchemy import func
 from models.user import User
 from utils.boq_email_service import BOQEmailService
+from utils.admin_viewing_context import get_effective_user_context
 
 
 log = get_logger()
@@ -27,14 +28,23 @@ def add_new_purchase():
         if not data.get("items") or len(data.get("items", [])) == 0:
             return jsonify({"error": "At least one item is required"}), 400
 
-        # Get current user first
+        # Get current user first (support admin viewing as another role)
         current_user = getattr(g, 'user', None)
         if current_user:
             created_by = current_user.get('full_name') or current_user.get('username') or 'User'
             user_id = current_user.get('user_id')
+
+            # Get effective role (handles admin viewing as PM)
+            context = get_effective_user_context()
+            effective_role = context.get('effective_role', current_user.get('role', ''))
+            actual_role = current_user.get('role', '')
+
+            log.info(f"Add new purchase - User: {created_by}, actual_role: {actual_role}, effective_role: {effective_role}")
         else:
             created_by = data.get("created_by", "Admin")
             user_id = None
+            effective_role = 'admin'
+            actual_role = 'admin'
 
         # Get BOQ
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
@@ -318,13 +328,22 @@ def add_new_purchase():
 def new_purchase_send_estimator(boq_id):
     """
     Send email notification to Estimator about new purchases added by Project Manager
+    Supports admin viewing as PM
     """
     try:
         current_user = getattr(g, 'user', None)
         if not current_user:
             return jsonify({"error": "User not authenticated"}), 401
+
         pm_name = current_user.get('full_name', 'Project Manager')
         pm_id = current_user.get('user_id')
+
+        # Get effective role (handles admin viewing as PM)
+        context = get_effective_user_context()
+        effective_role = context.get('effective_role', current_user.get('role', ''))
+        actual_role = current_user.get('role', '')
+
+        log.info(f"Send new purchase to estimator - User: {pm_name}, actual_role: {actual_role}, effective_role: {effective_role}")
         # Get BOQ
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         # Get BOQ details
@@ -542,6 +561,7 @@ def new_purchase_send_estimator(boq_id):
 def process_new_purchase_decision(boq_id):
     """
     Estimator approves or rejects new purchase request in a single API
+    Supports admin viewing as Estimator
     - If total BOQ amount < 50000: Send email to Project Manager
     - If total BOQ amount >= 50000: Send email to Technical Director
 
@@ -559,6 +579,13 @@ def process_new_purchase_decision(boq_id):
 
         estimator_name = current_user.get('full_name', 'Estimator')
         estimator_id = current_user.get('user_id')
+
+        # Get effective role (handles admin viewing as Estimator)
+        context = get_effective_user_context()
+        effective_role = context.get('effective_role', current_user.get('role', ''))
+        actual_role = current_user.get('role', '')
+
+        log.info(f"Process new purchase decision - User: {estimator_name}, actual_role: {actual_role}, effective_role: {effective_role}")
 
         # Get request data
         data = request.get_json() or {}

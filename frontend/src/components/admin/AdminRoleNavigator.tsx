@@ -102,6 +102,7 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
 
   const handleResetView = () => {
     resetToAdminView();
+    navigate('/admin/dashboard');
     toast.success('Returned to Admin view');
   };
 

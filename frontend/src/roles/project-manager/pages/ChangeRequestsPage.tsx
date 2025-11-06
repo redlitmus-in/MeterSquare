@@ -70,7 +70,15 @@ const ChangeRequestsPage: React.FC = () => {
     }
   );
 
-  const changeRequests = useMemo(() => changeRequestsData || [], [changeRequestsData]);
+  const changeRequests = useMemo(() => {
+    const allRequests = changeRequestsData || [];
+    // Filter by request_type based on current page
+    if (isExtraMaterial) {
+      return allRequests.filter(req => req.request_type === 'EXTRA_MATERIALS');
+    }
+    return allRequests.filter(req => req.request_type !== 'EXTRA_MATERIALS');
+  }, [changeRequestsData, isExtraMaterial]);
+
   const initialLoad = isLoading;
 
   const handleSendForReview = async (crId: number, routeTo?: 'technical_director' | 'estimator') => {
@@ -201,10 +209,22 @@ const ChangeRequestsPage: React.FC = () => {
     return colors[status as keyof typeof colors] || colors.pending;
   };
 
-  const getStatusLabel = (status: string) => {
+  const getStatusLabel = (status: string, approvalFrom?: string) => {
     // Status display based on workflow stage
-    if (['pending', 'under_review'].includes(status)) {
-      return 'PENDING';
+    console.log('getStatusLabel called with:', { status, approvalFrom });
+    if (status === 'pending') {
+      return 'Pending';
+    }
+    if (status === 'under_review') {
+      // Show specific approval stage for under_review status
+      if (approvalFrom === 'project_manager') {
+        return 'PM Approval Pending';
+      } else if (approvalFrom === 'technical_director') {
+        return 'TD Approval Pending';
+      } else if (approvalFrom === 'estimator') {
+        return 'Estimator Approval Pending';
+      }
+      return 'Under Review';
     }
     if (status === 'approved_by_pm') {
       return 'APPROVED BY PM';
@@ -230,6 +250,8 @@ const ChangeRequestsPage: React.FC = () => {
     return 'text-red-600';
   };
 
+  const isAdminUser = user?.role?.toLowerCase() === 'admin' || user?.role_name?.toLowerCase() === 'admin';
+
   const filteredRequests = changeRequests.filter(req => {
     const projectName = req.project_name || req.boq_name || '';
     const matchesSearch = projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -242,13 +264,32 @@ const ChangeRequestsPage: React.FC = () => {
       const isPMRequest = req.requested_by_user_id === user?.user_id;
       const isPMApprovedAndSent = req.status === 'under_review' && ['estimator', 'technical_director'].includes(req.approval_required_from || '');
 
-      matchesTab = (
-        (activeTab === 'requested' && req.status === 'under_review' && req.approval_required_from === 'project_manager' && !isPMRequest) ||  // SE requests waiting for PM approval
-        (activeTab === 'pending' && req.status === 'pending' && isPMRequest) ||  // PM's own requests only
-        (activeTab === 'accepted' && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||  // PM approved and sent to Est/TD or assigned to buyer
-        (activeTab === 'completed' && req.status === 'purchase_completed') ||  // Buyer completed purchase
-        (activeTab === 'rejected' && req.status === 'rejected')  // Rejected requests
-      );
+      // For Admin:
+      // - Pending tab shows only status='pending' (drafts not sent yet)
+      // - Request tab shows ALL status='under_review' (sent for approval to PM/TD/Estimator)
+      // For non-Admin PM/SE:
+      // - Pending tab shows their own status='pending'
+      // - Request tab shows status='under_review' where approval_required_from='project_manager'
+
+      if (isAdminUser) {
+        // Admin user logic
+        matchesTab = (
+          (activeTab === 'requested' && req.status === 'under_review') ||  // All under_review requests in Request tab
+          (activeTab === 'pending' && req.status === 'pending') ||  // Only pending drafts in Pending tab
+          (activeTab === 'accepted' && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||
+          (activeTab === 'completed' && req.status === 'purchase_completed') ||
+          (activeTab === 'rejected' && req.status === 'rejected')
+        );
+      } else {
+        // Non-admin user logic
+        matchesTab = (
+          (activeTab === 'requested' && req.status === 'under_review' && req.approval_required_from === 'project_manager') ||  // Requests waiting for PM approval
+          (activeTab === 'pending' && req.status === 'pending' && isPMRequest) ||  // User's own pending requests
+          (activeTab === 'accepted' && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||
+          (activeTab === 'completed' && req.status === 'purchase_completed') ||
+          (activeTab === 'rejected' && req.status === 'rejected')
+        );
+      }
     } else {
       // Change Requests tab filtering - show requests that need PM action or PM created
       matchesTab = (
@@ -266,11 +307,13 @@ const ChangeRequestsPage: React.FC = () => {
     approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer'].includes(r.status)).length,
     completed: changeRequests.filter(r => r.status === 'purchase_completed').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length,
-    // For Extra Material - separate SE requests from PM requests
-    my_requests: changeRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'project_manager' && r.requested_by_user_id !== user?.user_id).length,  // SE requests waiting for PM (Requested tab)
-    pending_approval: changeRequests.filter(r => r.status === 'pending' && r.requested_by_user_id === user?.user_id).length,  // PM's own requests (Pending tab)
-    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || (r.status === 'under_review' && ['estimator', 'technical_director'].includes(r.approval_required_from || '')) || r.status === 'assigned_to_buyer').length,  // PM approved and sent or assigned to buyer
-    completed_extra: changeRequests.filter(r => r.status === 'purchase_completed').length  // Buyer completed (Completed tab)
+    // For Extra Material - Admin vs non-Admin logic
+    my_requests: isAdminUser
+      ? changeRequests.filter(r => r.status === 'under_review').length  // Admin: all under_review in Request tab
+      : changeRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'project_manager').length,  // Non-admin: only PM approval pending
+    pending_approval: changeRequests.filter(r => r.status === 'pending').length,  // All pending drafts (not sent yet)
+    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || (r.status === 'under_review' && ['estimator', 'technical_director'].includes(r.approval_required_from || '')) || r.status === 'assigned_to_buyer').length,
+    completed_extra: changeRequests.filter(r => r.status === 'purchase_completed').length
   };
 
   if (initialLoad) {
@@ -318,7 +361,7 @@ const ChangeRequestsPage: React.FC = () => {
                 </TableCell>
                 <TableCell>
                   <Badge className={getStatusColor(request.status)}>
-                    {getStatusLabel(request.status)}
+                    {getStatusLabel(request.status, request.approval_required_from)}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right">
@@ -569,7 +612,7 @@ const ChangeRequestsPage: React.FC = () => {
                           <div className="flex items-start justify-between mb-2">
                             <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
                             <Badge className={getStatusColor(request.status)}>
-                              {getStatusLabel(request.status)}
+                              {getStatusLabel(request.status, request.approval_required_from)}
                             </Badge>
                           </div>
 
@@ -714,7 +757,7 @@ const ChangeRequestsPage: React.FC = () => {
                           <div className="flex items-start justify-between mb-2">
                             <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
                             <Badge className={getStatusColor(request.status)}>
-                              {getStatusLabel(request.status)}
+                              {getStatusLabel(request.status, request.approval_required_from)}
                             </Badge>
                           </div>
 
@@ -788,7 +831,7 @@ const ChangeRequestsPage: React.FC = () => {
                           <div className="flex items-start justify-between mb-2">
                             <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
                             <Badge className={getStatusColor(request.status)}>
-                              {getStatusLabel(request.status)}
+                              {getStatusLabel(request.status, request.approval_required_from)}
                             </Badge>
                           </div>
 

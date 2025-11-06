@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
+import { useAdminViewStore } from '@/store/adminViewStore';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 const TDChangeRequestsPage = lazy(() => import('@/roles/technical-director/pages/ChangeRequestsPage'));
@@ -10,6 +11,7 @@ const SEExtraMaterialPage = lazy(() => import('@/roles/site-engineer/pages/Extra
 
 const RoleBasedChangeRequests: React.FC = () => {
   const { user } = useAuthStore();
+  const { viewingAsRole } = useAdminViewStore();
   const location = useLocation();
   const userRole = (user as any)?.role || '';
   const userRoleLower = userRole.toLowerCase();
@@ -17,21 +19,29 @@ const RoleBasedChangeRequests: React.FC = () => {
   // Check if we're on extra-material route
   const isExtraMaterial = location.pathname.includes('extra-material');
 
-  console.log('[RoleBasedChangeRequests] User role:', userRole, 'Path:', location.pathname, 'Is Extra Material:', isExtraMaterial);
+  // Check if admin is viewing as another role
+  const isAdmin = userRoleLower === 'admin' || (user as any)?.role_id === 5;
+  const isAdminViewing = isAdmin && viewingAsRole && viewingAsRole !== 'admin';
+
+  // Use viewing role if admin is viewing as another role, otherwise use actual role
+  const effectiveRole = isAdminViewing ? viewingAsRole.toLowerCase() : userRoleLower;
+
+  console.log('[RoleBasedChangeRequests] User role:', userRole, 'Viewing as:', viewingAsRole, 'Effective role:', effectiveRole, 'Path:', location.pathname, 'Is Extra Material:', isExtraMaterial);
 
   // Determine which component to render based on role and route
   let Component;
 
   if (isExtraMaterial) {
-    // Extra Material routing
-    if (userRoleLower === 'site engineer' || userRoleLower === 'site_engineer' ||
-        userRoleLower === 'siteengineer' || userRole === 'siteEngineer') {
+    // Extra Material routing - Use effective role for proper UI selection
+    if (effectiveRole === 'site engineer' || effectiveRole === 'site_engineer' ||
+        effectiveRole === 'siteengineer' || effectiveRole === 'site supervisor' ||
+        effectiveRole === 'site_supervisor' || effectiveRole === 'sitesupervisor') {
       Component = SEExtraMaterialPage;
-    } else if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' ||
-               userRoleLower === 'projectmanager' || userRole === 'projectManager') {
+    } else if (effectiveRole === 'project manager' || effectiveRole === 'project_manager' ||
+               effectiveRole === 'projectmanager') {
       Component = PMChangeRequestsPage;
-    } else if (userRoleLower === 'admin' || userRole === 'admin') {
-      // Admin uses SE Extra Material page (simpler and works for all)
+    } else if (effectiveRole === 'admin' && !isAdminViewing) {
+      // Direct admin access (not viewing as another role) - default to SE page
       Component = SEExtraMaterialPage;
     } else {
       // Other roles don't have access to extra material
@@ -52,17 +62,17 @@ const RoleBasedChangeRequests: React.FC = () => {
       );
     }
   } else {
-    // Change Requests routing
-    if (userRoleLower === 'technical director' || userRoleLower === 'technical_director' ||
-        userRoleLower === 'technicaldirector' || userRole === 'technicalDirector') {
+    // Change Requests routing - Use effective role for proper UI selection
+    if (effectiveRole === 'technical director' || effectiveRole === 'technical_director' ||
+        effectiveRole === 'technicaldirector') {
       Component = TDChangeRequestsPage;
-    } else if (userRoleLower === 'estimator') {
+    } else if (effectiveRole === 'estimator') {
       Component = EstimatorChangeRequestsPage;
-    } else if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' ||
-               userRoleLower === 'projectmanager' || userRole === 'projectManager') {
+    } else if (effectiveRole === 'project manager' || effectiveRole === 'project_manager' ||
+               effectiveRole === 'projectmanager') {
       Component = PMChangeRequestsPage;
-    } else if (userRoleLower === 'admin' || userRole === 'admin') {
-      // Admin uses TD Change Requests page (has full access)
+    } else if (effectiveRole === 'admin' && !isAdminViewing) {
+      // Direct admin access (not viewing as another role) - default to TD page
       Component = TDChangeRequestsPage;
     } else {
       // Default to showing access denied message

@@ -777,6 +777,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                     <button
                       onClick={() => {
                         resetToAdminView();
+                        navigate('/admin/dashboard');
                         toast.success('Returned to Admin view');
                         setSidebarOpen(false);
                       }}

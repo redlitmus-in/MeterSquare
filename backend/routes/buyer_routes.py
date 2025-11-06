@@ -32,55 +32,17 @@ def check_buyer_td_or_admin_access():
         return jsonify({"error": "Access denied. Buyer, Technical Director, or Admin role required."}), 403
     return None
 
-# Buyer CRUD routes
-@buyer_routes.route('/create', methods=['POST'])
-@jwt_required
-def create_buyer_route():
-    """Create a new buyer (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
-    if access_check:
-        return access_check
-    return create_buyer()
-
-
-@buyer_routes.route('/all', methods=['GET'])
-@jwt_required
-def get_all_buyers_route():
-    """Get all buyers (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
-    if access_check:
-        return access_check
-    return get_all_buyers()
-
-
-@buyer_routes.route('/<int:user_id>', methods=['GET'])
-@jwt_required
-def get_buyer_id_route(user_id):
-    """Get buyer by ID (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
-    if access_check:
-        return access_check
-    return get_buyer_id(user_id)
-
-
-@buyer_routes.route('/<int:user_id>', methods=['PUT'])
-@jwt_required
-def update_buyer_route(user_id):
-    """Update buyer details (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
-    if access_check:
-        return access_check
-    return update_buyer(user_id)
-
-
-@buyer_routes.route('/<int:user_id>', methods=['DELETE'])
-@jwt_required
-def delete_buyer_route(user_id):
-    """Soft delete a buyer (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
-    if access_check:
-        return access_check
-    return delete_buyer(user_id)
+# ============================================================================
+# NOTE: Buyer CRUD (Create/Update/Delete) is managed by Project Manager
+# See projectmanager_routes.py for buyer CRUD operations:
+# - POST /api/create_buyer
+# - GET /api/all_buyers
+# - GET /api/get_buyer/<user_id>
+# - PUT /api/update_buyer/<user_id>
+# - DELETE /api/delete_buyer/<user_id>
+#
+# This file contains buyer-specific operational routes (dashboard, purchases, etc.)
+# ============================================================================
 
 
 # Dashboard route

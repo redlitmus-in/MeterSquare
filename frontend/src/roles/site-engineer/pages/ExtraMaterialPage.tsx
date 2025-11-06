@@ -68,11 +68,21 @@ const ExtraMaterialPage: React.FC = () => {
     async () => {
       const response = await axios.get(`${API_URL}/change-requests`, { headers });
 
-      // Filter to show only SE's own requests
+      // Filter based on role:
+      // - Admin sees all requests
+      // - Site Engineers see their own requests + requests created by admin
+      const isAdmin = user?.role?.toLowerCase() === 'admin';
       const seRequests = (response.data.data || [])
-        .filter((cr: any) => cr.requested_by_user_id === user?.user_id);
+        .filter((cr: any) => {
+          // Admin sees everything
+          if (isAdmin) return true;
+          // SE sees their own requests OR requests created by admin
+          return cr.requested_by_user_id === user?.user_id || cr.requested_by_role?.toLowerCase() === 'admin';
+        });
 
-      console.log('SE Requests:', seRequests.map(r => ({ cr_id: r.cr_id, status: r.status, current_approver: r.current_approver_role })));
+      console.log('🔍 User Role:', user?.role, 'Is Admin:', isAdmin);
+      console.log('🔍 Total Requests After Filter:', seRequests.length);
+      console.log('🔍 Request Details:', seRequests.map(r => ({ cr_id: r.cr_id, status: r.status, requested_by: r.requested_by_user_id, requested_by_role: r.requested_by_role, requested_by_name: r.requested_by_name })));
 
       // Transform pending materials (status: 'pending' - not yet sent to PM)
       const filteredPending = seRequests

@@ -1,27 +1,30 @@
 from flask import Blueprint, g, jsonify
 from utils.authentication import jwt_required
-from controllers.change_request_controller import (
-    create_change_request,
-    get_all_change_requests,
-    get_change_request_by_id,
-    approve_change_request,
-    reject_change_request,
-    update_change_request,
-    get_boq_change_requests,
-    send_for_review,
-    complete_purchase_and_merge_to_boq,
-    get_all_buyers
-)
+from controllers.change_request_controller import *
 
 change_request_routes = Blueprint('change_request_routes', __name__, url_prefix='/api')
 
 # Helper function - Change requests accessible by PM, SE, Estimator, TD, or Admin
 def check_cr_access():
-    """Check if current user can access Change Request operations"""
+    """
+    Check if current user can access Change Request operations
+    Supports admin viewing as another role
+    """
+    from utils.admin_viewing_context import get_effective_user_context
+
     current_user = g.user
     user_role = current_user.get('role', '').lower()
+
+    # Admin always has access
+    if user_role == 'admin':
+        return None
+
+    # Check effective role (handles admin viewing as another role)
+    context = get_effective_user_context()
+    effective_role = context.get('effective_role', user_role)
+
     allowed_roles = ['projectmanager', 'sitesupervisor', 'siteengineer', 'estimator', 'technicaldirector', 'admin']
-    if user_role not in allowed_roles:
+    if effective_role.lower() not in allowed_roles:
         return jsonify({"error": "Access denied. PM, SE, Estimator, TD, or Admin role required."}), 403
     return None
 

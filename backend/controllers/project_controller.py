@@ -416,7 +416,15 @@ def get_assigned_projects():
         user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
 
         # Query projects based on role - Show active/assigned projects (not completed)
-        if user_role in ['siteengineer', 'sitesupervisor', 'sitesupervisor']:
+        if user_role == 'admin':
+            # Admin sees all projects where site supervisor is assigned
+            projects = Project.query.filter(
+                Project.site_supervisor_id.isnot(None),
+                Project.is_deleted == False,
+                Project.status != 'completed'  # Exclude completed projects
+            ).all()
+
+        elif user_role in ['siteengineer', 'sitesupervisor', 'sitesupervisor']:
             # Get projects where user is assigned as site engineer/supervisor
             projects = Project.query.filter(
                 Project.site_supervisor_id == user_id,
