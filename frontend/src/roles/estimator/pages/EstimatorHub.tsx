@@ -401,7 +401,15 @@ const EstimatorHub: React.FC = () => {
     if (boqUpdateTimestamp === 0) return;
 
     loadBOQs(false); // Silent reload without loading spinner
-  }, [boqUpdateTimestamp]); // Reload whenever timestamp changes
+
+    // If user is on revisions tab, also reload revision-specific data
+    if (activeTab === 'revisions') {
+      loadRevisionTabs(); // Reload revision tabs (client/internal revisions)
+      if (selectedRevisionTab) {
+        loadRevisionProjects(selectedRevisionTab); // Reload projects for selected revision tab
+      }
+    }
+  }, [boqUpdateTimestamp, activeTab, selectedRevisionTab]); // Reload whenever timestamp, tab, or revision tab changes
 
   useEffect(() => {
     applyFilters();

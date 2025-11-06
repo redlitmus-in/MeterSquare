@@ -5,6 +5,7 @@ import { estimatorService } from '../services/estimatorService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
+import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 interface InternalRevision {
   id: number;
@@ -80,6 +81,9 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   const loadingRevisionsRef = useRef<number | null>(null);
   const isInitialMount = useRef(true);
 
+  // ✅ LISTEN TO REAL-TIME UPDATES - Internal revisions update automatically
+  const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
+
   useEffect(() => {
     loadBOQsWithInternalRevisions();
   }, []);
@@ -120,6 +124,19 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       // Don't call loadInternalRevisions here - it will be triggered by selectedBoq change
     }
   }, [refreshTrigger]);
+
+  // ✅ RELOAD internal revisions when real-time update is received
+  useEffect(() => {
+    if (boqUpdateTimestamp === 0) return;
+
+    // Reload BOQ list
+    loadBOQsWithInternalRevisions();
+
+    // Reload internal revisions for selected BOQ
+    if (selectedBoq) {
+      loadInternalRevisions(selectedBoq.boq_id);
+    }
+  }, [boqUpdateTimestamp]);
 
   const loadBOQsWithInternalRevisions = async () => {
     setIsLoadingBOQs(true);

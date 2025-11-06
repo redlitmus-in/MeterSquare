@@ -7,6 +7,7 @@ import { BOQ } from '../types';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import InternalRevisionTimeline from './InternalRevisionTimeline';
+import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 interface RevisionComparisonPageProps {
   boqList: BOQ[];
@@ -41,8 +42,10 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
   const [showDropdown, setShowDropdown] = useState(false);
   const [expandedRevisionIndex, setExpandedRevisionIndex] = useState<number | null>(null);
   const [isSendingToTD, setIsSendingToTD] = useState(false);
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // ✅ LISTEN TO REAL-TIME UPDATES - No more 3-second polling!
+  const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
 
   // Get display revision number
   // Original = show "Original", First Revision = 1, Second Revision = 2, etc.
@@ -78,12 +81,23 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
   useEffect(() => {
     if (selectedBoq) {
       loadRevisionData(selectedBoq);
-      startPollingForApproval();
     }
-    return () => {
-      stopPolling();
-    };
   }, [selectedBoq]);
+
+  // ✅ RELOAD revision data when real-time update is received
+  useEffect(() => {
+    if (boqUpdateTimestamp === 0) return;
+
+    // Refresh the parent component's BOQ list
+    if (onRefresh) {
+      onRefresh();
+    }
+
+    // Reload revision data if a BOQ is selected
+    if (selectedBoq) {
+      loadRevisionData(selectedBoq);
+    }
+  }, [boqUpdateTimestamp]);
 
   // Update selectedBoq when boqList changes (e.g., after approval/rejection, client response, or edit)
   useEffect(() => {
@@ -93,7 +107,6 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
         // Update if status changed OR if updated_at changed (indicating an edit)
         if (updatedBoq.status !== selectedBoq.status ||
             updatedBoq.updated_at !== selectedBoq.updated_at) {
-          console.log('🔄 BOQ updated:', updatedBoq.status !== selectedBoq.status ? 'status changed' : 'content edited');
           setSelectedBoq(updatedBoq);
         }
       }
@@ -117,36 +130,8 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
     };
   }, [showDropdown]);
 
-  // Auto-refresh when BOQ is pending TD approval
-  const startPollingForApproval = () => {
-    stopPolling(); // Clear any existing interval
-
-    if (selectedBoq && (selectedBoq.status === 'pending_approval' || selectedBoq.status === 'pending_revision')) {
-      console.log('🔄 Started polling for TD approval');
-      const interval = setInterval(async () => {
-        if (onRefresh) {
-          await onRefresh();
-          // Update selectedBoq from refreshed list
-          const updated = boqList.find(b => b.boq_id === selectedBoq.boq_id);
-          if (updated && (updated.status === 'approved' || updated.status === 'revision_approved')) {
-            console.log('✅ TD Approved! Stopping poll');
-            toast.success('BOQ approved by Technical Director!');
-            setSelectedBoq(updated);
-            stopPolling();
-          }
-        }
-      }, 3000); // Poll every 3 seconds for instant updates
-      setPollingInterval(interval);
-    }
-  };
-
-  const stopPolling = () => {
-    if (pollingInterval) {
-      clearInterval(pollingInterval);
-      setPollingInterval(null);
-      console.log('⏹️ Stopped polling');
-    }
-  };
+  // ✅ REMOVED POLLING - Now using real-time updates instead
+  // No more 3-second polling! Updates happen instantly via real-time store
 
   // Handle send to TD with loading state
   const handleSendToTD = async (boq: BOQ) => {
@@ -168,8 +153,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
       // Reload revision data
       await loadRevisionData(boq);
-      // Start polling for approval
-      startPollingForApproval();
+      // Real-time updates will automatically handle approval notifications
     } catch (error) {
       console.error('Error sending to TD:', error);
     } finally {
