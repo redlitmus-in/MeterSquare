@@ -35,6 +35,7 @@ import 'react-datepicker/dist/react-datepicker.css';
 import { estimatorService } from '../services/estimatorService';
 import { BOQ, BOQFilter, BOQStatus } from '../types';
 import { toast } from 'sonner';
+import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 import {
   Upload,
   FileText,
@@ -348,6 +349,9 @@ const EstimatorHub: React.FC = () => {
   const [isSendingToPM, setIsSendingToPM] = useState(false);
   const [loadingPMs, setLoadingPMs] = useState(false);
 
+  // ✅ LISTEN TO REAL-TIME UPDATES - This makes BOQs reload automatically!
+  const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
+
   // Debug full-screen state changes
   useEffect(() => {
     console.log('🔍 Full Screen State Changed:', {
@@ -390,6 +394,14 @@ const EstimatorHub: React.FC = () => {
       // clearInterval(intervalId);
     };
   }, [currentPage]);
+
+  // ✅ RELOAD BOQs when real-time update is received (e.g., TD approves BOQ)
+  useEffect(() => {
+    // Skip initial mount (timestamp is set on mount)
+    if (boqUpdateTimestamp === 0) return;
+
+    loadBOQs(false); // Silent reload without loading spinner
+  }, [boqUpdateTimestamp]); // Reload whenever timestamp changes
 
   useEffect(() => {
     applyFilters();

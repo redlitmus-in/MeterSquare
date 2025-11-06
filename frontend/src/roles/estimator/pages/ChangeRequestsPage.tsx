@@ -37,6 +37,7 @@ import ApprovalWithBuyerModal from '@/components/modals/ApprovalWithBuyerModal';
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 import { useAuthStore } from '@/store/authStore';
 import { permissions } from '@/utils/rolePermissions';
+import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
@@ -54,6 +55,9 @@ const ChangeRequestsPage: React.FC = () => {
   const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
 
+  // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
+  const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
+
   // Fetch purchase requests from backend - real-time subscriptions handle updates
   useEffect(() => {
     // Initial load with toasts
@@ -63,6 +67,14 @@ const ChangeRequestsPage: React.FC = () => {
     // automatically invalidate queries when change_requests table changes.
     // This eliminates 30 requests/min per user and provides instant updates.
   }, []);
+
+  // ✅ RELOAD change requests when real-time update is received
+  useEffect(() => {
+    // Skip initial mount
+    if (changeRequestUpdateTimestamp === 0) return;
+
+    loadChangeRequests(false); // Silent reload without toasts
+  }, [changeRequestUpdateTimestamp]); // Reload whenever timestamp changes
 
   const loadChangeRequests = async (showToasts = false) => {
     try {

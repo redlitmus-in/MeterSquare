@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { invalidateQueries } from '@/lib/queryClient';
 import { toast } from 'sonner';
+import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 // Types for subscription channels
 type SubscriptionChannel = 'purchases' | 'tasks' | 'notifications' | 'materials' | 'projects' | 'boqs' | 'boq_details' | 'change_requests';
@@ -43,8 +44,6 @@ export const subscribeToRealtime = (config: SubscribeToRealtimeConfig) => {
         ...(filter && { filter }),
       },
       (payload) => {
-        console.log(`${table} change received:`, payload);
-
         // Invalidate queries if keys provided
         if (invalidateKeys) {
           invalidateKeys.forEach(keys => {
@@ -124,8 +123,6 @@ const subscribeToPurchases = () => {
           table: 'purchases',
         },
         (payload) => {
-          console.log('Purchase change received:', payload);
-
           // Invalidate purchase-related queries
           invalidateQueries(['purchases']);
           invalidateQueries(['purchase', payload.new?.purchase_id]);
@@ -161,8 +158,6 @@ const subscribeToTasks = () => {
           table: 'tasks',
         },
         (payload) => {
-          console.log('Task change received:', payload);
-
           // Invalidate task-related queries
           invalidateQueries(['tasks']);
           invalidateQueries(['task', payload.new?.task_id]);
@@ -198,8 +193,6 @@ const subscribeToMaterials = () => {
           table: 'materials',
         },
         (payload) => {
-          console.log('Material change received:', payload);
-
           // Invalidate material-related queries
           invalidateQueries(['materials']);
           invalidateQueries(['material', payload.new?.material_id]);
@@ -229,8 +222,6 @@ const subscribeToUserNotifications = (userId: string) => {
           filter: `user_id=eq.${userId}`,
         },
         (payload) => {
-          console.log('New notification:', payload);
-
           // Show the notification
           const notification = payload.new;
           if (notification?.message) {
@@ -264,8 +255,6 @@ const subscribeToProjects = () => {
           table: 'projects',
         },
         (payload) => {
-          console.log('Project change received:', payload);
-
           // Invalidate project-related queries
           invalidateQueries(['projects']);
           invalidateQueries(['project', payload.new?.project_id]);
@@ -295,9 +284,10 @@ const subscribeToBOQs = () => {
           table: 'boq',
         },
         (payload) => {
-          console.log('BOQ change received:', payload);
+          // ✅ TRIGGER STORE UPDATE - This makes pages refetch data!
+          useRealtimeUpdateStore.getState().triggerBOQUpdate(payload);
 
-          // Invalidate all BOQ-related queries for ALL roles
+          // Invalidate all BOQ-related queries for ALL roles (for React Query pages)
           invalidateQueries(['boqs']);
           invalidateQueries(['boq', payload.new?.boq_id || payload.old?.boq_id]);
           invalidateQueries(['td_boqs']); // Technical Director BOQs
@@ -350,9 +340,10 @@ const subscribeToBOQDetails = () => {
           table: 'boq_details',
         },
         (payload) => {
-          console.log('BOQ details change received:', payload);
+          // ✅ TRIGGER STORE UPDATE
+          useRealtimeUpdateStore.getState().triggerBOQDetailsUpdate(payload);
 
-          // Invalidate BOQ details queries
+          // Invalidate BOQ details queries (for React Query pages)
           invalidateQueries(['boq-details']);
           invalidateQueries(['boq-details', payload.new?.boq_id || payload.old?.boq_id]);
         }
@@ -380,9 +371,10 @@ const subscribeToChangeRequests = () => {
           table: 'change_requests',
         },
         (payload) => {
-          console.log('Change request received:', payload);
+          // ✅ TRIGGER STORE UPDATE - This makes pages refetch data!
+          useRealtimeUpdateStore.getState().triggerChangeRequestUpdate(payload);
 
-          // Invalidate change request queries for all roles
+          // Invalidate change request queries for all roles (for React Query pages)
           invalidateQueries(['change-requests']);
           invalidateQueries(['change_requests']);
           invalidateQueries(['change-request', payload.new?.request_id || payload.old?.request_id]);
@@ -420,7 +412,6 @@ export const cleanupSubscriptions = () => {
   activeSubscriptions.forEach((subscription, channel) => {
     try {
       supabase.removeChannel(subscription);
-      console.log(`Cleaned up subscription: ${channel}`);
     } catch (error) {
       console.error(`Failed to cleanup subscription ${channel}:`, error);
     }

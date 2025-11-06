@@ -50,6 +50,7 @@ import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
 import DayExtensionApprovalModal from '@/roles/technical-director/components/DayExtensionApprovalModal';
 import { downloadInternalBOQPDF, downloadClientBOQPDF } from '@/services/boqPdfService';
 import { downloadInternalBOQExcel, downloadClientBOQExcel } from '@/services/boqExcelService';
+import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 import {
   Table,
   TableHeader,
@@ -274,6 +275,9 @@ const ProjectApprovals: React.FC = () => {
   // State to trigger BOQ detail refresh after approval/rejection actions
   const [boqDetailsRefreshTrigger, setBoqDetailsRefreshTrigger] = useState(0);
 
+  // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
+  const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
+
   // Load BOQs on mount - real-time subscriptions handle updates
   useEffect(() => {
     loadBOQs(); // Initial load with spinner
@@ -283,6 +287,22 @@ const ProjectApprovals: React.FC = () => {
     // automatically invalidate queries when BOQ status changes.
     // This provides instant updates (0-500ms) instead of 0-2 second delays.
   }, []); // Empty dependency array - run only once on mount
+
+  // ✅ RELOAD BOQs when real-time update is received
+  useEffect(() => {
+    // Skip initial mount (timestamp is set on mount)
+    if (boqUpdateTimestamp === 0) return;
+
+    // Reload base data
+    loadBOQs(false); // Silent reload without loading spinner
+    loadPMs(); // Also reload PMs
+
+    // Reload tab-specific data based on active tab
+    if (filterStatus === 'revisions') {
+      loadRevisionTabs(); // Reload revision tabs
+    }
+    // Note: 'assigned' tab data (pendingDayExtensions) will auto-reload via useEffect when boqs updates
+  }, [boqUpdateTimestamp, filterStatus]); // Reload whenever timestamp OR active tab changes
 
   // Load day extensions only when 'assigned' tab is active and BOQs are loaded
   useEffect(() => {

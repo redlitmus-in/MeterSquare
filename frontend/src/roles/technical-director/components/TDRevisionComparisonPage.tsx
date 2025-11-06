@@ -197,7 +197,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
             discount_percentage: boqData.discount_percentage || 0,
             discount_amount: boqData.discount_amount || 0,
             total_cost: boqData.total_cost || 0,
-            profit_analysis: boqData.profit_analysis || null
+            profit_analysis: boqData.profit_analysis || null,
+            preliminaries: boqData.preliminaries || {}
           },
           total_cost: boqData.total_cost || 0,
           created_at: boqData.created_at
@@ -1659,19 +1660,25 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                                       <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
                                         <h5 className="text-sm font-semibold text-gray-900 mb-3">Selected Items:</h5>
                                         <div className="space-y-2">
-                                          {items.map((item: any, idx: number) => (
-                                            <div key={idx} className="flex items-start gap-2">
-                                              <span className="text-green-600 font-bold mt-0.5">✓</span>
-                                              <div className="flex-1">
-                                                <p className="text-sm text-gray-800">{item.description}</p>
-                                                {item.custom_item && (
-                                                  <span className="inline-block mt-1 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
-                                                    Custom Item
-                                                  </span>
-                                                )}
+                                          {items
+                                            .filter((item: any) => (typeof item === 'object' ? (item.checked || item.selected) : true))
+                                            .map((item: any, idx: number) => {
+                                            const itemText = typeof item === 'object' ? (item.description || item.name || item.text || '') : item;
+                                            const isCustom = typeof item === 'object' && (item.custom_item || item.isCustom);
+                                            return (
+                                              <div key={idx} className="flex items-start gap-2">
+                                                <span className="text-green-600 font-bold mt-0.5">✓</span>
+                                                <div className="flex-1">
+                                                  <p className="text-sm text-gray-800">{itemText}</p>
+                                                  {isCustom && (
+                                                    <span className="inline-block mt-1 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
+                                                      Custom Item
+                                                    </span>
+                                                  )}
+                                                </div>
                                               </div>
-                                            </div>
-                                          ))}
+                                            );
+                                          })}
                                         </div>
                                       </div>
                                     )}

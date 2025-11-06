@@ -43,6 +43,7 @@ import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
 import VendorSelectionModal from '@/roles/buyer/components/VendorSelectionModal';
 import { useAuthStore } from '@/store/authStore';
 import { permissions } from '@/utils/rolePermissions';
+import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
@@ -68,6 +69,9 @@ const ChangeRequestsPage: React.FC = () => {
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
 
+  // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
+  const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
+
   // Fetch change requests and vendor approvals - real-time subscriptions handle updates
   useEffect(() => {
     // Initial load with loading spinner
@@ -78,6 +82,15 @@ const ChangeRequestsPage: React.FC = () => {
     // automatically invalidate queries when change_requests table changes.
     // This provides instant updates across all roles without server load.
   }, []);
+
+  // ✅ RELOAD change requests when real-time update is received
+  useEffect(() => {
+    // Skip initial mount
+    if (changeRequestUpdateTimestamp === 0) return;
+
+    loadChangeRequests(false); // Silent reload without loading spinner
+    loadVendorApprovals(); // Also reload vendor approvals
+  }, [changeRequestUpdateTimestamp]); // Reload whenever timestamp changes
 
   const loadChangeRequests = async (showLoadingSpinner = false) => {
     // Only show loading spinner on initial load, not on auto-refresh
