@@ -1,7 +1,7 @@
 from flask import Blueprint, g, jsonify
 from controllers.buyer_controller import *
 from controllers.auth_controller import jwt_required
-
+from controllers.upload_image_controller import *
 # Create blueprint with URL prefix
 buyer_routes = Blueprint('buyer_routes', __name__, url_prefix='/api/buyer')
 
@@ -236,3 +236,29 @@ def send_se_boq_vendor_email_route(assignment_id):
     if access_check:
         return access_check
     return send_se_boq_vendor_email(assignment_id)
+
+
+# File Management routes
+@buyer_routes.route('/upload/<int:cr_id>', methods=['POST'])
+# @jwt_required
+def upload_files_route(cr_id):
+    return buyer_upload_files(cr_id)
+
+
+@buyer_routes.route('/files/<int:cr_id>', methods=['GET'])
+# @jwt_required
+def view_files_route(cr_id):
+    return buyer_view_files(cr_id)
+
+
+@buyer_routes.route('/files/<int:cr_id>', methods=['DELETE'])
+# @jwt_required
+def delete_files_route(cr_id):
+    return buyer_delete_files(cr_id)
+
+
+@buyer_routes.route('/files/all/<int:cr_id>', methods=['DELETE'])
+# @jwt_required
+def delete_all_files_route(cr_id):
+    return buyer_delete_all_files(cr_id)
+

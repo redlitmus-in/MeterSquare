@@ -111,6 +111,9 @@ class ChangeRequest(db.Model):
     purchase_completion_date = db.Column(db.DateTime, nullable=True)
     purchase_notes = db.Column(db.Text, nullable=True)
 
+    # File uploads for buyer
+    file_path = db.Column(db.Text, nullable=True)  # Comma-separated list of uploaded file names
+
     # Vendor Selection (requires TD approval)
     selected_vendor_id = db.Column(db.Integer, db.ForeignKey('vendors.vendor_id'), nullable=True)
     selected_vendor_name = db.Column(db.String(255), nullable=True)
@@ -259,6 +262,9 @@ class ChangeRequest(db.Model):
             'purchase_completed_by_name': self.purchase_completed_by_name,
             'purchase_completion_date': self.purchase_completion_date.isoformat() if self.purchase_completion_date else None,
             'purchase_notes': self.purchase_notes,
+
+            # File uploads
+            'file_path': self.file_path,
 
             # Vendor Selection
             'selected_vendor_id': self.selected_vendor_id,
