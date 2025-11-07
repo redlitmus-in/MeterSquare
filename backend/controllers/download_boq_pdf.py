@@ -82,10 +82,11 @@ def download_internal_pdf():
 def download_client_pdf():
     """
     Download BOQ as Client PDF (clean view)
-    GET /api/boq/download/client/<boq_id>
+    GET /api/boq/download/client/<boq_id>?terms_text=custom+terms
     """
     try:
         boq_id = request.view_args.get('boq_id')
+        terms_text = request.args.get('terms_text', None)  # Get custom terms from query string
 
         if not boq_id:
             return jsonify({"success": False, "error": "boq_id is required"}), 400
@@ -119,10 +120,10 @@ def download_client_pdf():
         if not project:
             return jsonify({"success": False, "error": "Project not found"}), 404
 
-        # Generate PDF
+        # Generate PDF with optional custom terms
         generator = ModernBOQPDFGenerator()
         pdf_data = generator.generate_client_pdf(
-            project, items, total_material_cost, total_labour_cost, grand_total, boq_json
+            project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text
         )
 
         # Send file

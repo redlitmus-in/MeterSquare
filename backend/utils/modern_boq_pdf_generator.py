@@ -51,8 +51,14 @@ class ModernBOQPDFGenerator:
             except:
                 pass
 
-    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None):
-        """Generate clean CLIENT quotation PDF"""
+    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None):
+        """Generate clean CLIENT quotation PDF
+
+        Args:
+            terms_text: Optional custom terms and conditions text.
+                       Can be multi-line string with bullet points.
+                       If None, uses default hardcoded terms.
+        """
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4,
                               topMargin=30, bottomMargin=30,
@@ -68,8 +74,8 @@ class ModernBOQPDFGenerator:
         # Summary (pass boq_json for discount info)
         elements.extend(self._client_summary(items, grand_total, boq_json))
 
-        # Terms
-        elements.extend(self._client_terms())
+        # Terms (pass custom terms if provided)
+        elements.extend(self._client_terms(terms_text=terms_text))
 
         doc.build(elements, onFirstPage=self._add_watermark, onLaterPages=self._add_watermark)
         buffer.seek(0)
@@ -1064,8 +1070,14 @@ class ModernBOQPDFGenerator:
 
         return elements
 
-    def _client_terms(self):
-        """Simple terms section"""
+    def _client_terms(self, terms_text=None):
+        """Simple terms section
+
+        Args:
+            terms_text: Optional custom terms and conditions.
+                       Can be multi-line string with bullet points (• or -).
+                       Each line will be rendered as a separate paragraph.
+        """
         elements = []
         elements.append(Spacer(1, 10))
 
@@ -1073,9 +1085,25 @@ class ModernBOQPDFGenerator:
                                      fontSize=7, textColor=colors.HexColor('#666666'))
 
         elements.append(Paragraph('<b>TERMS & CONDITIONS:</b>', terms_style))
-        elements.append(Paragraph('• This quotation is valid for 30 days from the date of issue.', terms_style))
-        elements.append(Paragraph('• Payment terms: 50% advance, 40% on delivery, 10% after installation.', terms_style))
-        elements.append(Paragraph('• All prices are in AED and exclude VAT unless stated otherwise.', terms_style))
+
+        # Use custom terms if provided, otherwise use defaults
+        if terms_text and terms_text.strip():
+            # Parse custom terms - handle multi-line with bullet points
+            lines = terms_text.strip().split('\n')
+            for line in lines:
+                line = line.strip()
+                if line:
+                    # Ensure line starts with bullet point
+                    if not line.startswith('•') and not line.startswith('-'):
+                        line = f'• {line}'
+                    elif line.startswith('-'):
+                        line = f'• {line[1:].strip()}'
+                    elements.append(Paragraph(line, terms_style))
+        else:
+            # Default hardcoded terms (fallback)
+            elements.append(Paragraph('• This quotation is valid for 30 days from the date of issue.', terms_style))
+            elements.append(Paragraph('• Payment terms: 50% advance, 40% on delivery, 10% after installation.', terms_style))
+            elements.append(Paragraph('• All prices are in AED and exclude VAT unless stated otherwise.', terms_style))
 
         elements.append(Spacer(1, 8))
 

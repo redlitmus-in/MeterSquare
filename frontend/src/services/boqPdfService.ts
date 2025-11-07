@@ -60,11 +60,17 @@ export const downloadInternalBOQPDF = async (boqId: number): Promise<void> => {
  * Download Client BOQ PDF (clean view)
  * For client presentation - shows only items, sub-items, and final prices
  */
-export const downloadClientBOQPDF = async (boqId: number): Promise<void> => {
+export const downloadClientBOQPDF = async (boqId: number, termsText?: string): Promise<void> => {
   try {
     const token = localStorage.getItem('access_token');
 
-    const response = await axios.get(`${API_URL}/boq/download/client/${boqId}`, {
+    // Build URL with optional terms_text query parameter
+    let url = `${API_URL}/boq/download/client/${boqId}`;
+    if (termsText) {
+      url += `?terms_text=${encodeURIComponent(termsText)}`;
+    }
+
+    const response = await axios.get(url, {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -73,9 +79,9 @@ export const downloadClientBOQPDF = async (boqId: number): Promise<void> => {
 
     // Create download link
     const blob = new Blob([response.data], { type: 'application/pdf' });
-    const url = window.URL.createObjectURL(blob);
+    const blobUrl = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = url;
+    link.href = blobUrl;
 
     // Extract filename from Content-Disposition header
     const contentDisposition = response.headers['content-disposition'];
@@ -94,13 +100,49 @@ export const downloadClientBOQPDF = async (boqId: number): Promise<void> => {
 
     // Cleanup
     document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
+    window.URL.revokeObjectURL(blobUrl);
 
   } catch (error: any) {
     console.error('Error downloading client BOQ PDF:', error);
     throw new Error(
       error.response?.data?.error ||
       'Failed to download client BOQ PDF. Please try again.'
+    );
+  }
+};
+
+/**
+ * Preview Client BOQ PDF in modal/new tab (with custom terms)
+ * Returns blob URL for display in iframe or new tab
+ */
+export const previewClientBOQPDF = async (boqId: number, termsText?: string): Promise<string> => {
+  try {
+    const token = localStorage.getItem('access_token');
+
+    // Build URL with optional terms_text query parameter
+    let url = `${API_URL}/boq/download/client/${boqId}`;
+    if (termsText) {
+      url += `?terms_text=${encodeURIComponent(termsText)}`;
+    }
+
+    const response = await axios.get(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      responseType: 'blob',
+    });
+
+    // Create blob URL for preview
+    const blob = new Blob([response.data], { type: 'application/pdf' });
+    const blobUrl = window.URL.createObjectURL(blob);
+
+    return blobUrl; // Return URL for iframe/new tab
+
+  } catch (error: any) {
+    console.error('Error previewing client BOQ PDF:', error);
+    throw new Error(
+      error.response?.data?.error ||
+      'Failed to preview client BOQ PDF. Please try again.'
     );
   }
 };
@@ -146,5 +188,6 @@ export const sendBOQToClient = async (
 export default {
   downloadInternalBOQPDF,
   downloadClientBOQPDF,
+  previewClientBOQPDF,
   sendBOQToClient,
 };

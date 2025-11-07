@@ -364,9 +364,11 @@ class BuyerService {
       if (response.data.success) {
         return response.data;
       }
-      throw new Error(response.data.error || 'Failed to send email to vendor');
+      throw new Error(response.data.error || response.data.message || 'Failed to send email to vendor');
     } catch (error: any) {
       console.error('Error sending vendor email:', error);
+      console.error('Response data:', error.response?.data);
+
       if (error.response?.status === 401) {
         throw new Error('Authentication required. Please login again.');
       }
@@ -376,7 +378,14 @@ class BuyerService {
       if (error.response?.status === 403) {
         throw new Error('You do not have permission to send this email');
       }
-      throw new Error(error.response?.data?.error || 'Failed to send email to vendor');
+      if (error.response?.status === 400) {
+        throw new Error(error.response?.data?.error || error.response?.data?.message || 'Invalid request');
+      }
+      if (error.response?.status === 500) {
+        const errorMsg = error.response?.data?.error || error.response?.data?.message || 'Server error while sending email. Check backend logs.';
+        throw new Error(errorMsg);
+      }
+      throw new Error(error.response?.data?.error || error.response?.data?.message || 'Failed to send email to vendor');
     }
   }
 
@@ -405,6 +414,49 @@ class BuyerService {
         throw new Error('You do not have permission to send this email');
       }
       throw new Error(error.response?.data?.error || 'Failed to send email to vendor');
+    }
+  }
+
+  // Upload files for a purchase order
+  async uploadFiles(crId: number, files: File[]): Promise<{ success: boolean; uploaded_files: any[]; errors: any[] }> {
+    try {
+      const formData = new FormData();
+
+      // Append all files to FormData
+      files.forEach(file => {
+        formData.append('file', file);
+      });
+
+      const token = localStorage.getItem('access_token');
+
+      const response = await axios.post(
+        `${API_URL}/buyer/upload/${crId}`,
+        formData,
+        {
+          headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+            // Don't set Content-Type - axios will set it automatically with boundary
+          }
+        }
+      );
+
+      if (response.data.success !== false) {
+        return {
+          success: true,
+          uploaded_files: response.data.uploaded_files || [],
+          errors: response.data.errors || []
+        };
+      }
+      throw new Error(response.data.message || 'Failed to upload files');
+    } catch (error: any) {
+      console.error('Error uploading files:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      throw new Error(error.response?.data?.error || error.response?.data?.message || 'Failed to upload files');
     }
   }
 }

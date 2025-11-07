@@ -30,6 +30,7 @@ def send_boq_to_client():
         message = data.get('message', 'Please review the attached BOQ for your project.')
         formats = data.get('formats', ['excel', 'pdf'])
         custom_email_body = data.get('custom_email_body')  # Custom email template from frontend
+        terms_text = data.get('terms_text')  # Custom Terms & Conditions from frontend
 
         if not boq_id or not client_emails_raw:
             return jsonify({"success": False, "error": "boq_id and client_email are required"}), 400
@@ -115,7 +116,7 @@ def send_boq_to_client():
 
         if 'pdf' in formats:
             pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
-            pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json)
+            pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text)
             pdf_file = (pdf_filename, pdf_data)
 
         # Send email to all recipients - Pass selling price (overhead/profit distributed)
@@ -634,13 +635,16 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     return excel_buffer.read()
 
 
-def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None):
+def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None):
     """
     Generate Client PDF - MODERN PROFESSIONAL CORPORATE FORMAT
     Uses unified ModernBOQPDFGenerator
+
+    Args:
+        terms_text: Optional custom Terms & Conditions text
     """
     if boq_json is None:
         boq_json = {}
 
     generator = ModernBOQPDFGenerator()
-    return generator.generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json)
+    return generator.generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text)

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Send, Mail, User, MessageSquare, AlertCircle, CheckCircle, Download, FileText, FileSpreadsheet, Edit3, Eye, EyeOff } from 'lucide-react';
+import { X, Send, Mail, User, MessageSquare, AlertCircle, CheckCircle, Download, FileText, FileSpreadsheet, Edit3, Eye, EyeOff, FileCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,8 +9,9 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { estimatorService } from '../services/estimatorService';
-import { downloadClientBOQPDF } from '@/services/boqPdfService';
+import { downloadClientBOQPDF, previewClientBOQPDF } from '@/services/boqPdfService';
 import { downloadClientBOQExcel } from '@/services/boqExcelService';
+import { termsConditionsService, TermsConditionsTemplate } from '@/services/termsConditionsService';
 
 interface SendBOQEmailModalProps {
   isOpen: boolean;
@@ -46,6 +47,16 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
   // Email template editing state
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
   const [emailTemplate, setEmailTemplate] = useState('');
+  // Terms & Conditions state
+  const [termsTemplates, setTermsTemplates] = useState<TermsConditionsTemplate[]>([]);
+  const [selectedTermsId, setSelectedTermsId] = useState<number | null>(null);
+  const [customTermsText, setCustomTermsText] = useState('');
+  const [showTermsEditor, setShowTermsEditor] = useState(false);
+  const [loadingTerms, setLoadingTerms] = useState(false);
+  // Preview state
+  const [showEmailPreview, setShowEmailPreview] = useState(false);
+  const [showPDFPreview, setShowPDFPreview] = useState(false);
+  const [previewPDFUrl, setPreviewPDFUrl] = useState<string | null>(null);
 
   const isClientMode = mode === 'client';
 
@@ -77,6 +88,34 @@ MeterSquare Interiors LLC`;
       setEmailTemplate(getDefaultTemplate());
     }
   }, [isOpen, isClientMode]);
+
+  // Fetch Terms & Conditions templates when modal opens in client mode
+  React.useEffect(() => {
+    const fetchTermsTemplates = async () => {
+      if (isClientMode && isOpen) {
+        setLoadingTerms(true);
+        try {
+          const response = await termsConditionsService.getAllTerms(false); // Only active templates
+          if (response.success && response.data) {
+            setTermsTemplates(response.data);
+
+            // Auto-select default template
+            const defaultTemplate = response.data.find(t => t.is_default);
+            if (defaultTemplate) {
+              setSelectedTermsId(defaultTemplate.term_id);
+              setCustomTermsText(defaultTemplate.terms_text);
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching terms templates:', error);
+        } finally {
+          setLoadingTerms(false);
+        }
+      }
+    };
+
+    fetchTermsTemplates();
+  }, [isClientMode, isOpen]);
 
   // Fetch BOQ data when modal opens in client mode
   React.useEffect(() => {
@@ -219,7 +258,8 @@ MeterSquare Interiors LLC`;
           client_email: recipientEmail.trim() || undefined,
           message: comments.trim() || undefined,
           formats: selectedFormats,
-          custom_email_body: emailTemplate.trim() || undefined
+          custom_email_body: emailTemplate.trim() || undefined,
+          terms_text: customTermsText.trim() || undefined // Include custom T&C
         });
 
         // Track sent/failed counts from response
@@ -277,6 +317,10 @@ MeterSquare Interiors LLC`;
     // Reset template editor
     setShowTemplateEditor(false);
     setEmailTemplate('');
+    // Reset Terms & Conditions
+    setSelectedTermsId(null);
+    setCustomTermsText('');
+    setShowTermsEditor(false);
     onClose();
   };
 
@@ -482,73 +526,180 @@ MeterSquare Interiors LLC`;
                     <div className="space-y-2">
                       <Label htmlFor="comments" className="flex items-center gap-2">
                         <MessageSquare className="w-4 h-4 text-gray-500" />
-                        {isClientMode ? 'Message (Optional)' : 'Comments / Notes (Optional)'}
+                        {isClientMode ? 'Additional Message (Optional)' : 'Comments / Notes (Optional)'}
                       </Label>
                       <Textarea
                         id="comments"
-                        placeholder={isClientMode ? 'Add a message for the client...' : 'Add any comments or notes for the Technical Director...'}
+                        placeholder={isClientMode ? 'Add a brief message for the client...' : 'Add any comments or notes for the Technical Director...'}
                         value={comments}
                         onChange={(e) => setComments(e.target.value)}
                         disabled={isSending}
-                        rows={4}
+                        rows={3}
                         className="resize-none"
                       />
                     </div>
 
-                    {/* Email Template Editor - Only for Client Mode */}
+                    {/* COMBINED: Email & PDF Content Customization - Only for Client Mode */}
                     {isClientMode && (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="flex items-center gap-2">
-                            <Edit3 className="w-4 h-4 text-gray-500" />
-                            Email Template (Optional)
-                          </Label>
-                          <button
-                            type="button"
-                            onClick={() => setShowTemplateEditor(!showTemplateEditor)}
-                            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
-                            disabled={isSending}
-                          >
-                            {showTemplateEditor ? (
-                              <>
-                                <EyeOff className="w-4 h-4" />
-                                Hide Editor
-                              </>
-                            ) : (
-                              <>
-                                <Eye className="w-4 h-4" />
-                                Edit Template
-                              </>
-                            )}
-                          </button>
+                      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-5 border-2 border-blue-300">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Edit3 className="w-5 h-5 text-blue-700" />
+                          <h3 className="text-lg font-bold text-blue-900">Customize Email & PDF Content</h3>
                         </div>
+                        <p className="text-sm text-gray-700 mb-4">
+                          Customize the email body and PDF terms & conditions that will be sent to the client
+                        </p>
 
-                        {showTemplateEditor && (
-                          <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-4 border border-purple-200">
-                            <p className="text-sm text-gray-600 mb-3">
-                              Customize the email body that will be sent to the client. The template supports plain text formatting.
-                            </p>
-                            <Textarea
-                              id="email-template"
-                              placeholder="Enter custom email template..."
-                              value={emailTemplate}
-                              onChange={(e) => setEmailTemplate(e.target.value)}
-                              disabled={isSending}
-                              rows={12}
-                              className="resize-none font-mono text-sm"
-                            />
-                            <div className="flex gap-2 mt-3">
+                        <div className="space-y-4">
+                          {/* Email Body Section */}
+                          <div className="bg-white rounded-lg p-4 border border-blue-200">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                                <Mail className="w-4 h-4 text-purple-600" />
+                                Email Body
+                              </h4>
                               <button
                                 type="button"
-                                onClick={() => setEmailTemplate(getDefaultTemplate())}
-                                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 rounded-lg transition-colors"
+                                onClick={() => setShowTemplateEditor(!showTemplateEditor)}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors border border-purple-300"
                                 disabled={isSending}
                               >
-                                Reset to Default
+                                {showTemplateEditor ? (
+                                  <>
+                                    <EyeOff className="w-3 h-3" />
+                                    Hide
+                                  </>
+                                ) : (
+                                  <>
+                                    <Edit3 className="w-3 h-3" />
+                                    Edit
+                                  </>
+                                )}
                               </button>
                             </div>
+
+                            {showTemplateEditor ? (
+                              <div className="space-y-3">
+                                <Textarea
+                                  id="email-template"
+                                  placeholder="Enter custom email body..."
+                                  value={emailTemplate}
+                                  onChange={(e) => setEmailTemplate(e.target.value)}
+                                  disabled={isSending}
+                                  rows={10}
+                                  className="resize-none font-mono text-sm border-purple-200 focus:border-purple-400"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setEmailTemplate(getDefaultTemplate())}
+                                  className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                                  disabled={isSending}
+                                >
+                                  Reset to Default
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="bg-gray-50 rounded p-3 border border-gray-200">
+                                <p className="text-xs text-gray-600 whitespace-pre-wrap line-clamp-3">
+                                  {emailTemplate || getDefaultTemplate()}
+                                </p>
+                                <p className="text-xs text-purple-600 mt-2">Click "Edit" to customize</p>
+                              </div>
+                            )}
                           </div>
-                        )}
+
+                          {/* Terms & Conditions Section */}
+                          <div className="bg-white rounded-lg p-4 border border-blue-200">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                                <FileCheck className="w-4 h-4 text-green-600" />
+                                Terms & Conditions (for PDF)
+                              </h4>
+                              <button
+                                type="button"
+                                onClick={() => setShowTermsEditor(!showTermsEditor)}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors border border-green-300"
+                                disabled={isSending || loadingTerms}
+                              >
+                                {showTermsEditor ? (
+                                  <>
+                                    <EyeOff className="w-3 h-3" />
+                                    Hide
+                                  </>
+                                ) : (
+                                  <>
+                                    <Edit3 className="w-3 h-3" />
+                                    Edit
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            {loadingTerms ? (
+                              <div className="flex items-center justify-center py-4">
+                                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>
+                              </div>
+                            ) : (
+                              <>
+                                {/* Template Selector - Always Visible */}
+                                <div className="mb-3">
+                                  <label className="text-xs font-medium text-gray-700 mb-1 block">Select Template:</label>
+                                  <select
+                                    value={selectedTermsId || ''}
+                                    onChange={(e) => {
+                                      const termId = parseInt(e.target.value);
+                                      setSelectedTermsId(termId);
+                                      const template = termsTemplates.find(t => t.term_id === termId);
+                                      if (template) {
+                                        setCustomTermsText(template.terms_text);
+                                      }
+                                    }}
+                                    disabled={isSending}
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                  >
+                                    <option value="">Select terms template...</option>
+                                    {termsTemplates.map((template) => (
+                                      <option key={template.term_id} value={template.term_id}>
+                                        {template.template_name} {template.is_default ? '(Default)' : ''}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                {/* T&C Editor or Preview */}
+                                {showTermsEditor ? (
+                                  <div className="space-y-2">
+                                    <p className="text-xs text-gray-600">Customize terms (one per line):</p>
+                                    <Textarea
+                                      id="terms-text"
+                                      placeholder="• Enter Terms & Conditions (one per line)..."
+                                      value={customTermsText}
+                                      onChange={(e) => setCustomTermsText(e.target.value)}
+                                      disabled={isSending}
+                                      rows={8}
+                                      className="resize-none font-mono text-sm border-green-200 focus:border-green-400"
+                                    />
+                                  </div>
+                                ) : customTermsText ? (
+                                  <div className="bg-gray-50 rounded p-3 border border-gray-200">
+                                    <p className="text-xs font-semibold text-gray-700 mb-2">Preview:</p>
+                                    <div className="text-xs text-gray-600 space-y-1">
+                                      {customTermsText.split('\n').slice(0, 3).map((line, idx) => (
+                                        <p key={idx}>{line}</p>
+                                      ))}
+                                      {customTermsText.split('\n').length > 3 && (
+                                        <p className="text-gray-500 italic mt-1">...and {customTermsText.split('\n').length - 3} more</p>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-green-600 mt-2">Click "Edit" to customize</p>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-gray-500 italic">Select a template above</p>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     )}
 
@@ -623,14 +774,48 @@ MeterSquare Interiors LLC`;
                           <h3 className="font-semibold text-gray-900">Preview Client BOQ</h3>
                         </div>
                         <p className="text-sm text-gray-600 mb-3">
-                          Download and review the BOQ before sending to client
+                          Preview email and documents before sending to client
                         </p>
                         {loadingBOQ ? (
                           <div className="flex items-center justify-center py-4">
                             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                           </div>
                         ) : (
-                          <div className="flex gap-3">
+                          <>
+                            {/* Preview Buttons */}
+                            <div className="flex gap-3 mb-3">
+                              <button
+                                onClick={() => setShowEmailPreview(true)}
+                                disabled={isSending}
+                                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+                              >
+                                <Eye className="w-4 h-4" />
+                                Preview Email
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    toast.loading('Generating PDF preview...');
+                                    const pdfUrl = await previewClientBOQPDF(boqId, customTermsText);
+                                    setPreviewPDFUrl(pdfUrl);
+                                    setShowPDFPreview(true);
+                                    toast.dismiss();
+                                  } catch (error) {
+                                    toast.dismiss();
+                                    toast.error('Failed to generate PDF preview');
+                                    console.error('PDF preview error:', error);
+                                  }
+                                }}
+                                disabled={isSending}
+                                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+                              >
+                                <Eye className="w-4 h-4" />
+                                Preview PDF
+                              </button>
+                            </div>
+
+                            {/* Download Buttons */}
+                            <div className="flex gap-3">
                             <button
                               onClick={async () => {
                                 try {
@@ -654,7 +839,7 @@ MeterSquare Interiors LLC`;
                               onClick={async () => {
                                 try {
                                   toast.loading('Generating PDF file...');
-                                  await downloadClientBOQPDF(boqId);
+                                  await downloadClientBOQPDF(boqId, customTermsText);
                                   toast.dismiss();
                                   toast.success('PDF file downloaded successfully');
                                 } catch (error) {
@@ -670,6 +855,7 @@ MeterSquare Interiors LLC`;
                               Download PDF
                             </button>
                           </div>
+                          </>
                         )}
                       </div>
                     )}
@@ -704,6 +890,225 @@ MeterSquare Interiors LLC`;
                   </div>
                 </>
               )}
+            </motion.div>
+          </div>
+        </div>
+      )}
+
+      {/* Email Preview Modal */}
+      {showEmailPreview && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50"
+              onClick={() => setShowEmailPreview(false)}
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative bg-white rounded-xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+            >
+              {/* Header */}
+              <div className="bg-gradient-to-r from-purple-600/10 to-indigo-600/10 border-b border-purple-200 px-6 py-4 sticky top-0 bg-white z-10">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-100 rounded-lg">
+                      <Mail className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900">Email Preview</h2>
+                      <p className="text-sm text-gray-600">Preview how the email will look to the client</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowEmailPreview(false)}
+                    className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Email Content Preview */}
+              <div className="p-6">
+                <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
+                  {/* Email Header */}
+                  <div className="mb-4 pb-4 border-b border-gray-300">
+                    <p className="text-sm text-gray-600"><strong>From:</strong> MeterSquare Interiors LLC</p>
+                    <p className="text-sm text-gray-600"><strong>To:</strong> {recipientEmail || 'client@example.com'}</p>
+                    <p className="text-sm text-gray-600"><strong>Subject:</strong> BOQ Quotation - {projectName}</p>
+                  </div>
+
+                  {/* Email Body */}
+                  <div className="space-y-4">
+                    {emailTemplate ? (
+                      <div className="whitespace-pre-wrap font-sans text-gray-800">
+                        {emailTemplate}
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap font-sans text-gray-800">
+                        {getDefaultTemplate()}
+                      </div>
+                    )}
+
+                    {/* Message */}
+                    {comments && (
+                      <div className="mt-4 pt-4 border-t border-gray-300">
+                        <p className="text-sm font-semibold text-gray-700 mb-2">Additional Message:</p>
+                        <p className="text-gray-800 whitespace-pre-wrap">{comments}</p>
+                      </div>
+                    )}
+
+                    {/* Attachments Info */}
+                    <div className="mt-6 pt-4 border-t border-gray-300">
+                      <p className="text-sm font-semibold text-gray-700 mb-2">Attachments:</p>
+                      <div className="flex gap-2">
+                        {sendExcel && (
+                          <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-lg">
+                            <FileSpreadsheet className="w-4 h-4 text-green-600" />
+                            <span className="text-sm text-green-800">BOQ_Quotation.xlsx</span>
+                          </div>
+                        )}
+                        {sendPDF && (
+                          <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
+                            <FileText className="w-4 h-4 text-red-600" />
+                            <span className="text-sm text-red-800">BOQ_Quotation.pdf</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Terms Preview */}
+                    {customTermsText && (
+                      <div className="mt-4 pt-4 border-t border-gray-300">
+                        <p className="text-sm font-semibold text-gray-700 mb-2">Terms & Conditions (in PDF):</p>
+                        <div className="text-xs text-gray-600 space-y-1 bg-white p-3 rounded border border-gray-200">
+                          {customTermsText.split('\n').slice(0, 3).map((line, idx) => (
+                            <p key={idx}>{line}</p>
+                          ))}
+                          {customTermsText.split('\n').length > 3 && (
+                            <p className="text-gray-500 italic">...and {customTermsText.split('\n').length - 3} more terms</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Close Button */}
+                <div className="flex justify-end mt-6">
+                  <button
+                    onClick={() => setShowEmailPreview(false)}
+                    className="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors font-medium"
+                  >
+                    Close Preview
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        </div>
+      )}
+
+      {/* PDF Preview Modal */}
+      {showPDFPreview && previewPDFUrl && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50"
+              onClick={() => {
+                setShowPDFPreview(false);
+                if (previewPDFUrl) {
+                  window.URL.revokeObjectURL(previewPDFUrl);
+                  setPreviewPDFUrl(null);
+                }
+              }}
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative bg-white rounded-xl shadow-xl w-full max-w-6xl h-[90vh] flex flex-col"
+            >
+              {/* Header */}
+              <div className="bg-gradient-to-r from-indigo-600/10 to-blue-600/10 border-b border-indigo-200 px-6 py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-100 rounded-lg">
+                      <FileText className="w-5 h-5 text-indigo-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900">PDF Preview</h2>
+                      <p className="text-sm text-gray-600">Preview how the PDF will look with your custom terms</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowPDFPreview(false);
+                      if (previewPDFUrl) {
+                        window.URL.revokeObjectURL(previewPDFUrl);
+                        setPreviewPDFUrl(null);
+                      }
+                    }}
+                    className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* PDF Viewer */}
+              <div className="flex-1 overflow-hidden">
+                <iframe
+                  src={previewPDFUrl}
+                  className="w-full h-full border-0"
+                  title="PDF Preview"
+                />
+              </div>
+
+              {/* Footer */}
+              <div className="border-t border-gray-200 px-6 py-4 flex justify-between items-center bg-gray-50">
+                <p className="text-sm text-gray-600">
+                  This PDF includes your custom Terms & Conditions
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={async () => {
+                      try {
+                        await downloadClientBOQPDF(boqId, customTermsText);
+                        toast.success('PDF downloaded successfully');
+                      } catch (error) {
+                        toast.error('Failed to download PDF');
+                      }
+                    }}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors font-medium flex items-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowPDFPreview(false);
+                      if (previewPDFUrl) {
+                        window.URL.revokeObjectURL(previewPDFUrl);
+                        setPreviewPDFUrl(null);
+                      }
+                    }}
+                    className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors font-medium"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
             </motion.div>
           </div>
         </div>

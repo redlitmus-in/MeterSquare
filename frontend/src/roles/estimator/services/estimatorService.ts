@@ -851,7 +851,7 @@ class EstimatorService {
   // Send BOQ to Client (after TD approval)
   async sendBOQToClient(
     boqId: number,
-    params: { client_email?: string; message?: string; formats?: string[]; custom_email_body?: string }
+    params: { client_email?: string; message?: string; formats?: string[]; custom_email_body?: string; terms_text?: string }
   ): Promise<{ success: boolean; message: string }> {
     try {
       const response = await apiClient.post('/send_boq_to_client', {
@@ -859,7 +859,8 @@ class EstimatorService {
         client_email: params.client_email,
         message: params.message,
         formats: params.formats || ['excel', 'pdf'],
-        custom_email_body: params.custom_email_body
+        custom_email_body: params.custom_email_body,
+        terms_text: params.terms_text
       });
       return {
         success: response.data.success !== false,

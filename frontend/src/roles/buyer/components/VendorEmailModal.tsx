@@ -64,10 +64,10 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     const newFiles = Array.from(files);
     const validFiles: File[] = [];
 
-    // Validate file size (max 10MB per file)
+    // Validate file size (max 200MB per file)
     for (const file of newFiles) {
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error(`${file.name} is too large. Maximum file size is 10MB.`);
+      if (file.size > 200 * 1024 * 1024) {
+        toast.error(`${file.name} is too large. Maximum file size is 200MB.`);
         continue;
       }
       validFiles.push(file);
@@ -159,6 +159,38 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const handleSendEmail = async () => {
     try {
       setIsSendingEmail(true);
+
+      // Upload files first if there are any
+      if (attachedFiles.length > 0) {
+        toast.info(`Uploading ${attachedFiles.length} file(s)...`);
+        try {
+          const uploadResult = await buyerService.uploadFiles(purchase.cr_id, attachedFiles);
+
+          if (uploadResult.errors && uploadResult.errors.length > 0) {
+            // Some files failed, but continue if at least one succeeded
+            const failedCount = uploadResult.errors.length;
+            const successCount = uploadResult.uploaded_files.length;
+
+            if (successCount === 0) {
+              // All files failed
+              toast.error('All file uploads failed. Please try again.');
+              setIsSendingEmail(false);
+              return;
+            } else {
+              // Some succeeded, some failed
+              toast.warning(`${successCount} file(s) uploaded, ${failedCount} failed`);
+            }
+          } else {
+            // All files uploaded successfully
+            toast.success(`${uploadResult.uploaded_files.length} file(s) uploaded successfully`);
+          }
+        } catch (uploadError: any) {
+          console.error('Error uploading files:', uploadError);
+          toast.error(uploadError.message || 'Failed to upload files');
+          setIsSendingEmail(false);
+          return;
+        }
+      }
 
       // Get the email content - if edited, reconstruct from current fields
       const emailContent = isEditMode ? constructEmailHtml() : (editedEmailContent || emailPreview);
@@ -500,7 +532,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                               </span>
                             </label>
                             <p className="text-xs text-gray-500 mt-2">
-                              Supported formats: PDF, Word, Excel, Images, ZIP (Max 10MB per file)
+                              Supported formats: PDF, Word, Excel, Images, ZIP (Max 200MB per file)
                             </p>
                           </div>
 
@@ -876,7 +908,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                         {isSendingEmail ? (
                           <>
                             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            Sending...
+                            {attachedFiles.length > 0 ? 'Uploading & Sending...' : 'Sending...'}
                           </>
                         ) : (
                           <>
