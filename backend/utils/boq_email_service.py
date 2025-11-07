@@ -2002,9 +2002,9 @@ class BOQEmailService:
 
         return wrap_email_content(email_body)
 
-    def send_vendor_purchase_order(self, vendor_email, vendor_data, purchase_data, buyer_data, project_data, custom_email_body=None):
+    def send_vendor_purchase_order(self, vendor_email, vendor_data, purchase_data, buyer_data, project_data, custom_email_body=None, attachments=None):
         """
-        Send purchase order email to Vendor with embedded logo
+        Send purchase order email to Vendor with embedded logo and attachments
 
         Args:
             vendor_email: Vendor's email address (string with comma-separated emails or list)
@@ -2013,6 +2013,7 @@ class BOQEmailService:
             buyer_data: Dictionary containing buyer contact information
             project_data: Dictionary containing project information
             custom_email_body: Optional custom HTML body for the email (complete HTML document)
+            attachments: Optional list of tuples (filename, file_data, mime_type)
 
         Returns:
             bool: True if email sent successfully, False otherwise
@@ -2038,11 +2039,17 @@ class BOQEmailService:
             cr_id = purchase_data.get('cr_id', 'N/A')
             subject = f"Purchase Order CR-{cr_id} - {project_name}"
 
-            # Send email (send_email handles multiple recipients)
-            success = self.send_email(vendor_email, subject, email_html)
+            # Log attachment info if present
+            if attachments:
+                log.info(f"Sending email with {len(attachments)} attachment(s)")
+
+            # Send email with attachments
+            success = self.send_email(vendor_email, subject, email_html, attachments)
 
             if success:
                 log.info(f"Purchase order email sent successfully to vendor(s)")
+                if attachments:
+                    log.info(f"Email included {len(attachments)} attachment(s)")
             else:
                 log.error(f"Failed to send purchase order email to vendor(s)")
 

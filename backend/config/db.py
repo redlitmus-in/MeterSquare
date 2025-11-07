@@ -38,13 +38,10 @@ def initialize_db(app):
     # For Supabase or connection-limited databases, use smaller pool
     database_url = os.getenv('DATABASE_URL', '')
     if 'supabase' in database_url.lower() or os.getenv('USE_SMALL_POOL') == 'true':
-        print("⚠️ Using small pool for Supabase/limited connection database")
         pool_config["pool_size"] = 20
         pool_config["max_overflow"] = 10
 
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = pool_config
-
-    print(f"✅ Database pool configured: {pool_config['pool_size']} connections + {pool_config['max_overflow']} overflow")
 
     db.init_app(app)
     # return db

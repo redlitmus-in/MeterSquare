@@ -8,9 +8,19 @@ from models.role import Role
 from models.vendor import Vendor
 from config.logging import get_logger
 from datetime import datetime
+import os
+from supabase import create_client, Client
 
 log = get_logger()
 
+# Configuration constants
+supabase_url = os.environ.get('SUPABASE_URL')
+supabase_key = os.environ.get('SUPABASE_KEY')
+SUPABASE_BUCKET = "file_upload"
+# Pre-build base URL for public files
+PUBLIC_URL_BASE = f"{supabase_url}/storage/v1/object/public/{SUPABASE_BUCKET}/"
+# Initialize Supabase client
+supabase: Client = create_client(supabase_url, supabase_key) if supabase_url and supabase_key else None
 
 def create_buyer():
     """Create a new buyer user"""
@@ -1508,7 +1518,8 @@ def preview_vendor_email(cr_id):
         purchase_data = {
             'cr_id': cr.cr_id,
             'materials': materials_list,
-            'total_cost': round(cr_total, 2)
+            'total_cost': round(cr_total, 2),
+            'file_bath' : cr.file_path
         }
 
         buyer_data = {
@@ -1523,6 +1534,30 @@ def preview_vendor_email(cr_id):
             'location': project.location or 'N/A'
         }
 
+        # Get uploaded files information
+        uploaded_files = []
+        if cr.file_path:
+            filenames = [f.strip() for f in cr.file_path.split(",") if f.strip()]
+            for filename in filenames:
+                file_path = f"buyer/cr_{cr_id}/{filename}"
+                file_size = None
+
+                # Try to get file size from Supabase
+                try:
+                    file_response = supabase.storage.from_(SUPABASE_BUCKET).download(file_path)
+                    if file_response:
+                        file_size = len(file_response)
+                except Exception as e:
+                    log.warning(f"Could not get file size for {filename}: {str(e)}")
+
+                uploaded_files.append({
+                    "filename": filename,
+                    "path": file_path,
+                    "size_bytes": file_size,
+                    "size_mb": round(file_size / (1024 * 1024), 2) if file_size else None,
+                    "public_url": f"{supabase_url}/storage/v1/object/public/{SUPABASE_BUCKET}/{file_path}"
+                })
+
         # Generate email preview
         from utils.boq_email_service import BOQEmailService
         email_service = BOQEmailService()
@@ -1530,20 +1565,20 @@ def preview_vendor_email(cr_id):
             vendor_data, purchase_data, buyer_data, project_data
         )
 
-        # Use vendor table values
+        # Use vendor table values and include uploaded files
         return jsonify({
             "success": True,
             "email_preview": email_html,
             "vendor_email": vendor.email,
             "vendor_name": vendor.company_name,
             "vendor_contact_person": vendor.contact_person_name,
-            "vendor_phone": vendor.phone
+            "vendor_phone": vendor.phone,
+            "uploaded_files": uploaded_files,
+            "total_attachments": len(uploaded_files)
         }), 200
 
     except Exception as e:
         log.error(f"Error generating email preview: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to generate email preview: {str(e)}"}), 500
 
 
@@ -1705,11 +1740,97 @@ def send_vendor_email(cr_id):
             'location': project.location or 'N/A'
         }
 
+        # Fetch uploaded files from Supabase if available
+        attachments = []
+        if cr.file_path:
+            try:
+                # Parse file paths from database
+                filenames = [f.strip() for f in cr.file_path.split(",") if f.strip()]
+
+                for filename in filenames:
+                    try:
+                        # Build the full path in Supabase storage
+                        file_path = f"buyer/cr_{cr_id}/{filename}"
+
+                        # Download file from Supabase
+                        file_response = supabase.storage.from_(SUPABASE_BUCKET).download(file_path)
+
+                        if file_response:
+                            # Determine MIME type based on file extension
+                            ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'bin'
+                            mime_types = {
+                                # Documents
+                                'pdf': 'application/pdf',
+                                'doc': 'application/msword',
+                                'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                'xls': 'application/vnd.ms-excel',
+                                'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                'ppt': 'application/vnd.ms-powerpoint',
+                                'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                                'csv': 'text/csv',
+                                # Images
+                                'png': 'image/png',
+                                'jpg': 'image/jpeg',
+                                'jpeg': 'image/jpeg',
+                                'gif': 'image/gif',
+                                'bmp': 'image/bmp',
+                                'tiff': 'image/tiff',
+                                'svg': 'image/svg+xml',
+                                'webp': 'image/webp',
+                                # Text
+                                'txt': 'text/plain',
+                                # Archives
+                                'zip': 'application/zip',
+                                'rar': 'application/x-rar-compressed',
+                                '7z': 'application/x-7z-compressed',
+                                # CAD files
+                                'dwg': 'application/acad',
+                                'dxf': 'application/dxf',
+                                'dwf': 'application/x-dwf',
+                                'dgn': 'application/x-dgn',
+                                'rvt': 'application/octet-stream',
+                                'rfa': 'application/octet-stream',
+                                'nwd': 'application/octet-stream',
+                                'nwc': 'application/octet-stream',
+                                'ifc': 'application/x-step',
+                                'sat': 'application/x-sat',
+                                'step': 'application/x-step',
+                                'stp': 'application/x-step',
+                                'iges': 'application/iges',
+                                'igs': 'application/iges',
+                                # 3D files
+                                'skp': 'application/vnd.sketchup.skp',
+                                'obj': 'text/plain',
+                                'fbx': 'application/octet-stream',
+                                '3ds': 'application/x-3ds',
+                                'stl': 'model/stl',
+                                'ply': 'text/plain',
+                                'dae': 'model/vnd.collada+xml'
+                            }
+                            mime_type = mime_types.get(ext, 'application/octet-stream')
+
+                            # Add to attachments list
+                            attachments.append((filename, file_response, mime_type))
+                            log.info(f"Added attachment: {filename} for CR-{cr_id}")
+                        else:
+                            log.warning(f"Could not download file: {filename} for CR-{cr_id}")
+
+                    except Exception as e:
+                        log.error(f"Error downloading file {filename}: {str(e)}")
+                        # Continue with other files even if one fails
+                        continue
+
+                if attachments:
+                    log.info(f"Prepared {len(attachments)} attachments for CR-{cr_id}")
+
+            except Exception as e:
+                log.error(f"Error processing attachments for CR-{cr_id}: {str(e)}")
+        # Continue sending email even if attachments fail
         # Send email to vendor(s) (with optional custom body)
         from utils.boq_email_service import BOQEmailService
         email_service = BOQEmailService()
         email_sent = email_service.send_vendor_purchase_order(
-            email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, custom_email_body
+            email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, attachments
         )
 
         if email_sent:
