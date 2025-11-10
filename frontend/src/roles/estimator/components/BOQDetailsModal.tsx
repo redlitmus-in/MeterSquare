@@ -1645,7 +1645,8 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                           {formatCurrency(totalActualProfit)}
                                         </span>
                                       </div>
-                                      <div className="flex justify-between items-center pt-3 border-t-2 border-green-300">
+                                      {/* Variance Section - Commented out as per user request */}
+                                      {/* <div className="flex justify-between items-center pt-3 border-t-2 border-green-300">
                                         <span className="text-gray-900 font-bold">Variance:</span>
                                         <div className="text-right">
                                           <div className={`text-lg font-bold ${profitVariance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -1655,7 +1656,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                             ({profitVariance >= 0 ? '+' : ''}{profitVariancePercentage.toFixed(1)}%)
                                           </div>
                                         </div>
-                                      </div>
+                                      </div> */}
                                     </div>
                                   </div>
                                 </>

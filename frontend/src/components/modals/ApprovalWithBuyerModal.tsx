@@ -37,7 +37,17 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       fetchBuyers();
+      // Disable background scrolling when modal is open
+      document.body.style.overflow = 'hidden';
+    } else {
+      // Re-enable background scrolling when modal is closed
+      document.body.style.overflow = 'unset';
     }
+
+    // Cleanup function to ensure overflow is reset
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
   }, [isOpen]);
 
   const fetchBuyers = async () => {
@@ -103,7 +113,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -132,7 +142,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
             </div>
 
             {/* Content */}
-            <div className="p-6">
+            <div className="p-6 overflow-y-auto flex-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               {fetchingBuyers ? (
                 <div className="flex items-center justify-center py-8">
                   <ModernLoadingSpinners variant="dots" size="medium" color="primary" />
@@ -152,7 +162,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
                         </p>
                       </div>
                     ) : (
-                      <div className="border border-gray-300 rounded-lg max-h-60 overflow-y-auto p-3 space-y-4">
+                      <div className="border border-gray-300 rounded-lg max-h-60 overflow-y-auto p-3 space-y-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                         {/* Online Buyers Section */}
                         {buyers.filter(b => b.is_active === true).length > 0 && (
                           <div>
@@ -283,7 +293,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
             </div>
 
             {/* Footer */}
-            <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex items-center justify-end gap-3">
+            <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex items-center justify-end gap-3 flex-shrink-0">
               <button
                 onClick={onClose}
                 disabled={loading}

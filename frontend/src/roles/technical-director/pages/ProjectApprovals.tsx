@@ -3567,7 +3567,8 @@ const ProjectApprovals: React.FC = () => {
                                     {formatCurrency(totalActualProfit)}
                                   </span>
                                 </div>
-                                <div className="flex justify-between pt-2 border-t border-green-300">
+                                {/* Variance Section - Commented out as per user request */}
+                                {/* <div className="flex justify-between pt-2 border-t border-green-300">
                                   <span className="font-bold">Variance:</span>
                                   <div className="text-right">
                                     <div className={`font-bold text-sm ${profitVariance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -3575,7 +3576,7 @@ const ProjectApprovals: React.FC = () => {
                                     </div>
                                     <div className="text-xs">({profitVariance >= 0 ? '+' : ''}{profitVariancePercentage.toFixed(1)}%)</div>
                                   </div>
-                                </div>
+                                </div> */}
                               </div>
                             </div>
 
@@ -4881,7 +4882,8 @@ const ProjectApprovals: React.FC = () => {
                                     {formatCurrency(totalActualProfit)}
                                   </span>
                                 </div>
-                                <div className="flex justify-between pt-2 border-t border-green-300">
+                                {/* Variance Section - Commented out as per user request */}
+                                {/* <div className="flex justify-between pt-2 border-t border-green-300">
                                   <span className="font-bold">Variance:</span>
                                   <div className="text-right">
                                     <div className={`font-bold text-sm ${profitVariance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -4889,7 +4891,7 @@ const ProjectApprovals: React.FC = () => {
                                     </div>
                                     <div className="text-xs">({profitVariance >= 0 ? '+' : ''}{profitVariancePercentage.toFixed(1)}%)</div>
                                   </div>
-                                </div>
+                                </div> */}
                               </div>
                             </div>
 
