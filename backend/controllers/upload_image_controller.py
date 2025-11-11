@@ -814,10 +814,10 @@ def get_item_images(id):
 
 def delete_item_images(id):
     """
-    Delete specific images for a sub_item
+    Delete a specific image for a sub_item by filename
 
     DELETE /api/images/<id>
-    Body: {"images_to_delete": ["image_3_afe2f8a4.jpg", "image_5_12ab34cd.jpg"]}
+    Body: {"filename": "image_3_afe2f8a4.jpg"}
     """
     try:
         # Get the sub_item
@@ -825,37 +825,39 @@ def delete_item_images(id):
         if not sub_item:
             return jsonify({"error": "Sub_item not found"}), 404
 
-        # Get images to delete from request body
+        # Get image filename to delete from request body
         data = request.get_json()
-        images_to_delete = data.get('images_to_delete', [])
+        filename = data.get('filename', '').strip()
 
-        if not images_to_delete:
-            return jsonify({"error": "No images specified for deletion"}), 400
+        if not filename:
+            return jsonify({"error": "No filename specified for deletion"}), 400
 
         # Get current images from database (JSONB array)
         current_images = sub_item.sub_item_image if sub_item.sub_item_image and isinstance(sub_item.sub_item_image, list) else []
 
-        # Convert to set for efficient lookup
-        images_to_delete_set = set([img.strip() for img in images_to_delete])
+        # Check if image exists in database
+        image_found = False
+        for img in current_images:
+            if isinstance(img, dict) and img.get("filename") == filename:
+                image_found = True
+                break
 
-        # Delete files from storage
-        deleted_count = 0
-        failed_files = []
+        if not image_found:
+            return jsonify({"error": f"Image '{filename}' not found for this item"}), 404
 
-        for filename in images_to_delete_set:
-            file_path = f"items/{id}/{filename}"
-            try:
-                supabase.storage.from_(ITEM_SUPABASE_BUCKET).remove([file_path])
-                deleted_count += 1
-                log.info(f"Deleted image: {file_path}")
-            except Exception as e:
-                log.error(f"Failed to delete {file_path}: {str(e)}")
-                failed_files.append(filename)
+        # Delete file from storage
+        file_path = f"items/{id}/{filename}"
+        try:
+            supabase.storage.from_(ITEM_SUPABASE_BUCKET).remove([file_path])
+            log.info(f"Deleted image from storage: {file_path}")
+        except Exception as e:
+            log.error(f"Failed to delete {file_path} from storage: {str(e)}")
+            return jsonify({"error": f"Failed to delete image from storage: {str(e)}"}), 500
 
-        # Update database - remove deleted images from JSONB array
+        # Update database - remove deleted image from JSONB array
         remaining_images = [
             img for img in current_images
-            if isinstance(img, dict) and img.get("filename") not in images_to_delete_set
+            if isinstance(img, dict) and img.get("filename") != filename
         ]
 
         sub_item.sub_item_image = remaining_images if remaining_images else []
@@ -865,17 +867,16 @@ def delete_item_images(id):
 
         return jsonify({
             "success": True,
-            "message": "Image deletion completed",
+            "message": "Image deleted successfully",
             "sub_item_id": id,
-            "deleted_count": deleted_count,
-            "failed_files": failed_files,
+            "deleted_filename": filename,
             "remaining_images": len(remaining_images),
             "bucket": ITEM_SUPABASE_BUCKET
         }), 200
 
     except Exception as e:
         db.session.rollback()
-        log.error(f"Error deleting images for item {id}: {str(e)}")
+        log.error(f"Error deleting image for item {id}: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
