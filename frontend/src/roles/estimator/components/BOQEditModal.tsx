@@ -12,7 +12,10 @@ import {
   Calendar,
   Clock,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Image as ImageIcon,
+  Upload,
+  Eye
 } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
 import { toast } from 'sonner';
@@ -45,6 +48,7 @@ interface Labour {
 }
 
 interface SubItem {
+  sub_item_id?: number; // Backend sub-item ID
   sub_item_name: string;
   scope: string;
   location: string;
@@ -59,6 +63,9 @@ interface SubItem {
   materials_cost: number;
   labour_cost: number;
   description?: string;
+  images?: File[];
+  imageUrls?: string[];
+  sub_item_image?: any[]; // Existing images from database
 }
 
 interface BOQItem {
@@ -1112,6 +1119,192 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                                 className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500"
                                                 rows={2}
                                               />
+                                            </div>
+
+                                            {/* Image Upload Section */}
+                                            <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                                              <label className="block text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                                <ImageIcon className="w-3.5 h-3.5" />
+                                                Images <span className="text-gray-400 font-normal">(Optional)</span>
+                                              </label>
+
+                                              {/* Image Upload Input with Drag & Drop */}
+                                              <div className="mb-2">
+                                                <label
+                                                  className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-green-500 hover:bg-green-50/30 transition-all"
+                                                  onDragOver={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    e.currentTarget.classList.add('border-green-500', 'bg-green-50');
+                                                  }}
+                                                  onDragLeave={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    e.currentTarget.classList.remove('border-green-500', 'bg-green-50');
+                                                  }}
+                                                  onDrop={async (e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    e.currentTarget.classList.remove('border-green-500', 'bg-green-50');
+
+                                                    const files = Array.from(e.dataTransfer.files).filter(
+                                                      file => file.type.startsWith('image/')
+                                                    );
+
+                                                    if (files.length > 0) {
+                                                      // If sub-item has ID, upload immediately
+                                                      if (subItem.sub_item_id) {
+                                                        toast.loading(`Uploading ${files.length} image(s)...`, { id: 'upload-images' });
+
+                                                        const result = await estimatorService.uploadSubItemImages(subItem.sub_item_id, files);
+
+                                                        if (result.success) {
+                                                          // Refresh sub-item images from database
+                                                          const imagesResult = await estimatorService.getSubItemImages(subItem.sub_item_id);
+                                                          if (imagesResult.success && imagesResult.data.images) {
+                                                            updateSubItem(itemIndex, subIndex, 'sub_item_image', imagesResult.data.images);
+                                                          }
+                                                          toast.success(`${files.length} image(s) uploaded successfully`, { id: 'upload-images' });
+                                                        } else {
+                                                          toast.error(result.message || 'Failed to upload images', { id: 'upload-images' });
+                                                        }
+                                                      } else {
+                                                        // For new sub-items without ID, store locally
+                                                        const existingImages = subItem.images || [];
+                                                        const existingUrls = subItem.imageUrls || [];
+                                                        const newUrls = files.map(file => URL.createObjectURL(file));
+
+                                                        updateSubItem(itemIndex, subIndex, 'images', [...existingImages, ...files]);
+                                                        updateSubItem(itemIndex, subIndex, 'imageUrls', [...existingUrls, ...newUrls]);
+                                                        toast.success(`${files.length} image(s) added (will upload on save)`);
+                                                      }
+                                                    } else {
+                                                      toast.error('Please drop only image files');
+                                                    }
+                                                  }}
+                                                >
+                                                  <Upload className="w-4 h-4 text-gray-500" />
+                                                  <span className="text-sm text-gray-600">Click or drag images here</span>
+                                                  <input
+                                                    type="file"
+                                                    accept="image/*"
+                                                    multiple
+                                                    className="hidden"
+                                                    onChange={async (e) => {
+                                                      const files = Array.from(e.target.files || []);
+                                                      if (files.length > 0) {
+                                                        // If sub-item has ID, upload immediately
+                                                        if (subItem.sub_item_id) {
+                                                          toast.loading(`Uploading ${files.length} image(s)...`, { id: 'upload-images' });
+
+                                                          const result = await estimatorService.uploadSubItemImages(subItem.sub_item_id, files);
+
+                                                          if (result.success) {
+                                                            // Refresh sub-item images from database
+                                                            const imagesResult = await estimatorService.getSubItemImages(subItem.sub_item_id);
+                                                            if (imagesResult.success && imagesResult.data.images) {
+                                                              updateSubItem(itemIndex, subIndex, 'sub_item_image', imagesResult.data.images);
+                                                            }
+                                                            toast.success(`${files.length} image(s) uploaded successfully`, { id: 'upload-images' });
+                                                          } else {
+                                                            toast.error(result.message || 'Failed to upload images', { id: 'upload-images' });
+                                                          }
+                                                        } else {
+                                                          // For new sub-items without ID, store locally
+                                                          const existingImages = subItem.images || [];
+                                                          const existingUrls = subItem.imageUrls || [];
+                                                          const newUrls = files.map(file => URL.createObjectURL(file));
+
+                                                          updateSubItem(itemIndex, subIndex, 'images', [...existingImages, ...files]);
+                                                          updateSubItem(itemIndex, subIndex, 'imageUrls', [...existingUrls, ...newUrls]);
+                                                          toast.success(`${files.length} image(s) added (will upload on save)`);
+                                                        }
+                                                      }
+                                                      e.target.value = '';
+                                                    }}
+                                                  />
+                                                </label>
+                                              </div>
+
+                                              {/* Image Previews */}
+                                              {((subItem.sub_item_image && subItem.sub_item_image.length > 0) || (subItem.imageUrls && subItem.imageUrls.length > 0)) && (
+                                                <div className="grid grid-cols-4 gap-2">
+                                                  {/* Show existing images from database */}
+                                                  {subItem.sub_item_image && subItem.sub_item_image.map((image: any, imgIndex: number) => (
+                                                    <div key={`db-${imgIndex}`} className="relative group">
+                                                      <img
+                                                        src={image.url}
+                                                        alt={image.original_name || image.filename}
+                                                        className="w-full h-20 object-cover rounded-lg border border-gray-200 cursor-pointer hover:border-green-500 transition-all"
+                                                        onClick={() => window.open(image.url, '_blank')}
+                                                      />
+                                                      <div
+                                                        className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center cursor-pointer"
+                                                        onClick={() => window.open(image.url, '_blank')}
+                                                      >
+                                                        <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                      </div>
+                                                      <button
+                                                        type="button"
+                                                        onClick={async (e) => {
+                                                          e.stopPropagation();
+                                                          if (subItem.sub_item_id && image.filename) {
+                                                            toast.loading('Deleting image...', { id: 'delete-image' });
+                                                            const result = await estimatorService.deleteSubItemImages(subItem.sub_item_id, [image.filename]);
+                                                            if (result.success) {
+                                                              // Refresh images
+                                                              const imagesResult = await estimatorService.getSubItemImages(subItem.sub_item_id);
+                                                              if (imagesResult.success && imagesResult.data.images) {
+                                                                updateSubItem(itemIndex, subIndex, 'sub_item_image', imagesResult.data.images);
+                                                              }
+                                                              toast.success('Image deleted', { id: 'delete-image' });
+                                                            } else {
+                                                              toast.error(result.message || 'Failed to delete image', { id: 'delete-image' });
+                                                            }
+                                                          }
+                                                        }}
+                                                        className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                                      >
+                                                        <X className="w-3 h-3" />
+                                                      </button>
+                                                    </div>
+                                                  ))}
+
+                                                  {/* Show newly added images (not yet uploaded) */}
+                                                  {subItem.imageUrls && subItem.imageUrls.map((url, imgIndex) => (
+                                                    <div key={`new-${imgIndex}`} className="relative group">
+                                                      <img
+                                                        src={url}
+                                                        alt={`Preview ${imgIndex + 1}`}
+                                                        className="w-full h-20 object-cover rounded-lg border border-yellow-300 cursor-pointer hover:border-yellow-500 transition-all"
+                                                        onClick={() => window.open(url, '_blank')}
+                                                      />
+                                                      <div className="absolute top-0 right-0 bg-yellow-500 text-white text-xs px-1 rounded-bl">New</div>
+                                                      <div
+                                                        className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center cursor-pointer"
+                                                        onClick={() => window.open(url, '_blank')}
+                                                      >
+                                                        <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                      </div>
+                                                      <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          const newImages = (subItem.images || []).filter((_, i) => i !== imgIndex);
+                                                          const newUrls = (subItem.imageUrls || []).filter((_, i) => i !== imgIndex);
+                                                          updateSubItem(itemIndex, subIndex, 'images', newImages);
+                                                          updateSubItem(itemIndex, subIndex, 'imageUrls', newUrls);
+                                                          URL.revokeObjectURL(url);
+                                                          toast.success('Image removed');
+                                                        }}
+                                                        className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                                      >
+                                                        <X className="w-3 h-3" />
+                                                      </button>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              )}
                                             </div>
 
                                             {/* Materials */}

@@ -20,7 +20,8 @@ import {
   TrendingUp,
   HelpCircle,
   Info,
-  ArrowLeft
+  ArrowLeft,
+  Image as ImageIcon
 } from 'lucide-react';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
 import { estimatorService } from '../services/estimatorService';
@@ -627,6 +628,34 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                 <div><span className="text-gray-600">Qty:</span> <span className="font-medium">{subItem.quantity} {subItem.unit}</span></div>
                                                 {subItem.rate && <div><span className="text-gray-600">Rate:</span> <span className="font-medium">₹{subItem.rate}</span></div>}
                                               </div>
+
+                                              {/* Sub-item Images */}
+                                              {subItem.sub_item_image && Array.isArray(subItem.sub_item_image) && subItem.sub_item_image.length > 0 && (
+                                                <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                                  <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                                    <ImageIcon className="w-3.5 h-3.5" />
+                                                    Attached Images ({subItem.sub_item_image.length})
+                                                  </h5>
+                                                  <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                                    {subItem.sub_item_image.map((image: any, imgIndex: number) => (
+                                                      <div
+                                                        key={imgIndex}
+                                                        className="relative group cursor-pointer"
+                                                        onClick={() => window.open(image.url, '_blank')}
+                                                      >
+                                                        <img
+                                                          src={image.url}
+                                                          alt={`${subItem.sub_item_name} - ${image.original_name || image.filename}`}
+                                                          className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:border-green-500 transition-all"
+                                                        />
+                                                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center">
+                                                          <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                        </div>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              )}
                                             </div>
 
                                             {/* Sub-item Materials */}

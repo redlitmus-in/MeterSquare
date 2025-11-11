@@ -75,7 +75,7 @@ class EstimatorService {
     }
   }
 
-  async createBOQ(payload: BOQCreatePayload): Promise<{ success: boolean; boq_id?: number; message: string }> {
+  async createBOQ(payload: BOQCreatePayload): Promise<{ success: boolean; boq_id?: number; message: string; data?: any }> {
     try {
       // Validate required fields
       if (!payload.project_id) {
@@ -120,7 +120,8 @@ class EstimatorService {
       return {
         success: true,
         boq_id: response.data.boq?.boq_id,
-        message: response.data.message || 'BOQ created successfully'
+        message: response.data.message || 'BOQ created successfully',
+        data: response.data // Return full response data including items with sub_item_ids
       };
     } catch (error: any) {
 
@@ -1749,6 +1750,89 @@ class EstimatorService {
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to save preliminary selections'
+      };
+    }
+  }
+
+  // ==================== Image Upload Methods ====================
+
+  /**
+   * Upload images for a sub-item
+   * @param subItemId - The sub-item ID
+   * @param images - Array of image files
+   * @returns Upload response with image URLs
+   */
+  async uploadSubItemImages(subItemId: number, images: File[]): Promise<any> {
+    try {
+      const formData = new FormData();
+
+      // Append all images with the key "file"
+      images.forEach(image => {
+        formData.append('file', image);
+      });
+
+      const response = await apiClient.post(`/upload_image/${subItemId}`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error: any) {
+      console.error(`Error uploading images for sub-item ${subItemId}:`, error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to upload images'
+      };
+    }
+  }
+
+  /**
+   * Get images for a sub-item
+   * @param subItemId - The sub-item ID
+   * @returns Array of image objects with URLs
+   */
+  async getSubItemImages(subItemId: number): Promise<any> {
+    try {
+      const response = await apiClient.get(`/images/${subItemId}`);
+
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error: any) {
+      console.error(`Error fetching images for sub-item ${subItemId}:`, error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to fetch images'
+      };
+    }
+  }
+
+  /**
+   * Delete specific images for a sub-item
+   * @param subItemId - The sub-item ID
+   * @param imagesToDelete - Array of image filenames to delete
+   * @returns Deletion response
+   */
+  async deleteSubItemImages(subItemId: number, imagesToDelete: string[]): Promise<any> {
+    try {
+      const response = await apiClient.delete(`/images/${subItemId}`, {
+        data: { images_to_delete: imagesToDelete }
+      });
+
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error: any) {
+      console.error(`Error deleting images for sub-item ${subItemId}:`, error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to delete images'
       };
     }
   }

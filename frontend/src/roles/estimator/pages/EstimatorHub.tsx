@@ -3227,7 +3227,7 @@ const EstimatorHub: React.FC = () => {
         setShowProjectDialog(open);
         if (!open) setEditingProject(null);
       }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingProject ? 'Edit Project' : 'Create New Project'}

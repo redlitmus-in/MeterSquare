@@ -751,6 +751,15 @@ def create_boq():
                     materials_count += len(sub_item_materials)
                     labour_count += len(sub_item_labour)
 
+                # Add sub-items to master tables and get IDs
+                master_sub_item_ids = add_sub_items_to_master_tables(master_item_id, item_data.get("sub_items", []), created_by)
+
+                # Add sub_item_id to each sub-item in the list
+                for idx, sub_item in enumerate(sub_items_list):
+                    if idx < len(master_sub_item_ids):
+                        sub_item["sub_item_id"] = master_sub_item_ids[idx]
+                        sub_item["master_sub_item_id"] = master_sub_item_ids[idx]
+
                 # Calculate total materials and labour costs from all sub-items
                 total_materials_cost = sum(si.get("materials_cost", 0) for si in sub_items_list)
                 total_labour_cost = sum(si.get("labour_cost", 0) for si in sub_items_list)
@@ -1369,6 +1378,18 @@ def get_boq(boq_id):
             # Remove purchase_tracking completely from existing purchase items
             if "purchase_tracking" in item:
                 del item["purchase_tracking"]
+
+        # Fetch sub_item_image from database for all items (both existing and new)
+        from models.boq import MasterSubItem
+        for item in existing_purchase_items + new_add_purchase_items:
+            sub_items = item.get("sub_items", [])
+            for sub_item in sub_items:
+                sub_item_id = sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")
+                if sub_item_id:
+                    # Query database for sub_item_image
+                    master_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id).first()
+                    if master_sub_item and master_sub_item.sub_item_image:
+                        sub_item["sub_item_image"] = master_sub_item.sub_item_image
 
         # Calculate combined totals (with filtered new purchases)
         total_material_cost = existing_material_cost + filtered_new_material_cost
@@ -3805,6 +3826,7 @@ def get_sub_item(item_id):
                 "description": sub_item.description,
                 "location": sub_item.location,
                 "brand": sub_item.brand,
+                "sub_item_image": sub_item.sub_item_image,
                 "unit": sub_item.unit,
                 "quantity": sub_item.quantity,
                 "per_unit_cost": sub_item.per_unit_cost,

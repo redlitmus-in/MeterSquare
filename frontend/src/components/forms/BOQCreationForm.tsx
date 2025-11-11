@@ -20,7 +20,8 @@ import {
   HelpCircle,
   TrendingUp,
   Pencil,
-  Check
+  Check,
+  Image as ImageIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
@@ -50,6 +51,10 @@ interface SubItemForm {
 
   master_sub_item_id?: number; // Track if this is an existing sub-item
   is_new?: boolean; // Track if this is a new sub-item
+
+  // Image attachments
+  images?: File[]; // Array of image files
+  imageUrls?: string[]; // Array of image URLs for preview/display
 }
 
 interface BOQItemForm {
@@ -819,7 +824,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           work_type: 'daily_wages',
           is_new: true
         }
-      ]
+      ],
+      images: [],
+      imageUrls: []
     };
 
     setItems(items.map(item => {
@@ -2007,6 +2014,65 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
         if (result.success && result.boq_id) {
           toast.success(result.message);
+
+          // Check if any sub-items have images to upload
+          const hasImages = items.some(item =>
+            item.sub_items && item.sub_items.some(si => si.images && si.images.length > 0)
+          );
+
+          if (hasImages) {
+            toast.loading('Uploading images...', { id: 'upload-images' });
+            const boqDetailsResult = await estimatorService.getBOQById(result.boq_id);
+
+            if (boqDetailsResult.success && boqDetailsResult.data?.existing_purchase?.items) {
+              const createdItems = boqDetailsResult.data.existing_purchase.items;
+              let totalUploaded = 0;
+              let totalFailed = 0;
+
+              // Loop through form items to find sub-items with images
+              for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+                const formItem = items[itemIndex];
+                const createdItem = createdItems[itemIndex];
+
+                if (formItem.sub_items && formItem.sub_items.length > 0 && createdItem?.sub_items) {
+                  for (let subIndex = 0; subIndex < formItem.sub_items.length; subIndex++) {
+                    const formSubItem = formItem.sub_items[subIndex];
+                    const createdSubItem = createdItem.sub_items[subIndex];
+
+                    // Check if this sub-item has images to upload
+                    if (formSubItem.images && formSubItem.images.length > 0 && createdSubItem?.sub_item_id) {
+                      try {
+                        const uploadResult = await estimatorService.uploadSubItemImages(
+                          createdSubItem.sub_item_id,
+                          formSubItem.images
+                        );
+
+                        if (uploadResult.success) {
+                          totalUploaded += formSubItem.images.length;
+                        } else {
+                          totalFailed += formSubItem.images.length;
+                          toast.error(`Failed to upload images for ${formSubItem.sub_item_name}`);
+                        }
+                      } catch (error) {
+                        totalFailed += formSubItem.images?.length || 0;
+                      }
+                    }
+                  }
+                }
+              }
+
+              if (totalUploaded > 0) {
+                toast.success(`${totalUploaded} image(s) uploaded successfully`, { id: 'upload-images' });
+              } else if (totalFailed > 0) {
+                toast.error(`Failed to upload ${totalFailed} image(s)`, { id: 'upload-images' });
+              } else {
+                toast.dismiss('upload-images');
+              }
+            } else {
+              toast.error('BOQ created but images upload failed. Please add images in edit mode.', { id: 'upload-images' });
+            }
+          }
+
           if (onSubmit) {
             onSubmit(result.boq_id);
           }
@@ -2743,6 +2809,157 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       placeholder="e.g., RAK / Equivalent"
                                       disabled={isSubmitting}
                                     />
+                                  </div>
+
+                                  {/* Image Upload Section */}
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-2">
+                                      <ImageIcon className="w-3.5 h-3.5 inline mr-1" />
+                                      Images <span className="text-gray-400 text-xs">(Optional)</span>
+                                    </label>
+
+                                    {/* Image Upload Input with Drag & Drop */}
+                                    <div className="mb-2">
+                                      <label
+                                        className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-green-500 hover:bg-green-50/30 transition-all"
+                                        onDragOver={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          e.currentTarget.classList.add('border-green-500', 'bg-green-50');
+                                        }}
+                                        onDragLeave={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          e.currentTarget.classList.remove('border-green-500', 'bg-green-50');
+                                        }}
+                                        onDrop={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          e.currentTarget.classList.remove('border-green-500', 'bg-green-50');
+
+                                          const files = Array.from(e.dataTransfer.files).filter(
+                                            file => file.type.startsWith('image/')
+                                          );
+
+                                          if (files.length > 0) {
+                                            const existingImages = subItem.images || [];
+                                            const existingUrls = subItem.imageUrls || [];
+                                            const newUrls = files.map(file => URL.createObjectURL(file));
+
+                                            // Update both fields at once to avoid race condition
+                                            setItems(items.map(itm => {
+                                              if (itm.id === item.id) {
+                                                return {
+                                                  ...itm,
+                                                  sub_items: itm.sub_items.map(si =>
+                                                    si.id === subItem.id
+                                                      ? {
+                                                          ...si,
+                                                          images: [...existingImages, ...files],
+                                                          imageUrls: [...existingUrls, ...newUrls]
+                                                        }
+                                                      : si
+                                                  )
+                                                };
+                                              }
+                                              return itm;
+                                            }));
+
+                                            toast.success(`${files.length} image(s) added`);
+                                          } else {
+                                            toast.error('Please drop only image files');
+                                          }
+                                        }}
+                                      >
+                                        <Upload className="w-4 h-4 text-gray-500" />
+                                        <span className="text-sm text-gray-600">Click or drag images here</span>
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          multiple
+                                          className="hidden"
+                                          onChange={(e) => {
+                                            const files = Array.from(e.target.files || []);
+                                            if (files.length > 0) {
+                                              const existingImages = subItem.images || [];
+                                              const existingUrls = subItem.imageUrls || [];
+                                              const newUrls = files.map(file => URL.createObjectURL(file));
+
+                                              // Update both fields at once to avoid race condition
+                                              setItems(items.map(itm => {
+                                                if (itm.id === item.id) {
+                                                  return {
+                                                    ...itm,
+                                                    sub_items: itm.sub_items.map(si =>
+                                                      si.id === subItem.id
+                                                        ? {
+                                                            ...si,
+                                                            images: [...existingImages, ...files],
+                                                            imageUrls: [...existingUrls, ...newUrls]
+                                                          }
+                                                        : si
+                                                    )
+                                                  };
+                                                }
+                                                return itm;
+                                              }));
+
+                                              toast.success(`${files.length} image(s) added`);
+                                            }
+                                            e.target.value = '';
+                                          }}
+                                          disabled={isSubmitting}
+                                        />
+                                      </label>
+                                    </div>
+
+                                    {/* Image Previews */}
+                                    {subItem.imageUrls && subItem.imageUrls.length > 0 && (
+                                      <div className="grid grid-cols-4 gap-2">
+                                        {subItem.imageUrls.map((url, imgIndex) => (
+                                          <div key={imgIndex} className="relative group">
+                                            <img
+                                              src={url}
+                                              alt={`Preview ${imgIndex + 1}`}
+                                              className="w-full h-20 object-cover rounded-lg border border-gray-200"
+                                            />
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                const newImages = (subItem.images || []).filter((_, i) => i !== imgIndex);
+                                                const newUrls = (subItem.imageUrls || []).filter((_, i) => i !== imgIndex);
+
+                                                // Update both fields at once to avoid race condition
+                                                setItems(items.map(itm => {
+                                                  if (itm.id === item.id) {
+                                                    return {
+                                                      ...itm,
+                                                      sub_items: itm.sub_items.map(si =>
+                                                        si.id === subItem.id
+                                                          ? {
+                                                              ...si,
+                                                              images: newImages,
+                                                              imageUrls: newUrls
+                                                            }
+                                                          : si
+                                                      )
+                                                    };
+                                                  }
+                                                  return itm;
+                                                }));
+
+                                                URL.revokeObjectURL(url);
+                                                toast.success('Image removed');
+                                              }}
+                                              className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                                              disabled={isSubmitting}
+                                            >
+                                              <X className="w-3 h-3" />
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
 
                                   <div className="grid grid-cols-4 gap-3">
