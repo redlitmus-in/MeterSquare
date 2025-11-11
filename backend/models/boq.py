@@ -100,7 +100,8 @@ class MasterSubItem(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
     is_deleted = db.Column(db.Boolean, default=False, index=True)  # ✅ Added index
-
+    # Map Python attribute 'sub_item_image' to database column 'Sub_item_image'
+    sub_item_image = db.Column(JSONB, nullable=True)
     item = db.relationship("MasterItem", backref=db.backref("sub_items", lazy=True))
 
     # ✅ Composite indexes
