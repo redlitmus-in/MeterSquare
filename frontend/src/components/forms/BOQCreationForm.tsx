@@ -21,7 +21,8 @@ import {
   TrendingUp,
   Pencil,
   Check,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Eye
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
@@ -55,6 +56,7 @@ interface SubItemForm {
   // Image attachments
   images?: File[]; // Array of image files
   imageUrls?: string[]; // Array of image URLs for preview/display
+  imageData?: Array<{url: string, filename?: string, isExisting?: boolean}>; // Track if image is from backend
 }
 
 interface BOQItemForm {
@@ -241,6 +243,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [preliminaryOverheadProfitPercentage, setPreliminaryOverheadProfitPercentage] = useState<number>(25);
   const [preliminaryTransportPercentage, setPreliminaryTransportPercentage] = useState<number>(5);
 
+  // Custom units state
+  const [customUnits, setCustomUnits] = useState<Array<{ value: string; label: string }>>([]);
+  const [allUnitOptions, setAllUnitOptions] = useState<Array<{ value: string; label: string }>>(UNIT_OPTIONS);
+
   // Load projects and master items on mount
   useEffect(() => {
     if (isOpen) {
@@ -248,6 +254,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       loadMasterItems();
       // Always load master preliminaries to show available options
       loadMasterPreliminaries();
+      loadCustomUnits();
     }
   }, [isOpen]);
 
@@ -307,6 +314,71 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       console.error('Failed to load master preliminaries:', error);
       toast.error('Failed to load preliminary items');
       setPreliminaries([]);
+    }
+  };
+
+  const loadCustomUnits = async () => {
+    try {
+      const response = await estimatorService.getCustomUnits();
+      if (response.success && response.data) {
+        const customUnitsFromDB = response.data.map((unit: any) => ({
+          value: unit.value,
+          label: unit.label
+        }));
+        setCustomUnits(customUnitsFromDB);
+
+        // Merge predefined and custom units
+        const merged = [...UNIT_OPTIONS, ...customUnitsFromDB];
+        setAllUnitOptions(merged);
+      }
+    } catch (error) {
+      console.error('Failed to load custom units:', error);
+      // Don't show error toast - custom units are optional
+    }
+  };
+
+  const saveCustomUnit = async (unitValue: string) => {
+    try {
+      // Normalize the unit value
+      const normalizedValue = unitValue.trim().toLowerCase();
+
+      // Check if unit already exists in either predefined or custom units
+      const existsInPredefined = UNIT_OPTIONS.some(
+        opt => opt.value.toLowerCase() === normalizedValue
+      );
+      const existsInCustom = customUnits.some(
+        opt => opt.value.toLowerCase() === normalizedValue
+      );
+
+      if (existsInPredefined || existsInCustom) {
+        return; // Unit already exists, no need to save
+      }
+
+      // Create label from value (capitalize first letter)
+      const unitLabel = unitValue.trim().charAt(0).toUpperCase() + unitValue.trim().slice(1);
+
+      // Save to database
+      const response = await estimatorService.createCustomUnit(normalizedValue, unitLabel);
+
+      if (response.success && response.unit) {
+        const newUnit = {
+          value: response.unit.value,
+          label: response.unit.label
+        };
+
+        // Update custom units state
+        const updatedCustomUnits = [...customUnits, newUnit];
+        setCustomUnits(updatedCustomUnits);
+
+        // Update all unit options
+        const merged = [...UNIT_OPTIONS, ...updatedCustomUnits];
+        setAllUnitOptions(merged);
+
+        console.log('Custom unit saved:', newUnit);
+      }
+    } catch (error) {
+      console.error('Failed to save custom unit:', error);
+      // Don't show error toast - units will still work locally
     }
   };
 
@@ -676,11 +748,38 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       // Load sub-items with materials and labour for this item
       const subItemsData = await estimatorService.getItemSubItems(masterItem.item_id);
 
+      // Fetch images for each sub-item that has a sub_item_id
+      const subItemsWithImages = await Promise.all(
+        subItemsData.sub_items.map(async (subItem) => {
+          let imageUrls: string[] = [];
+          let imageData: Array<{url: string, filename?: string, isExisting?: boolean}> = [];
+
+          if (subItem.sub_item_id) {
+            try {
+              const imagesResponse = await estimatorService.getSubItemImages(subItem.sub_item_id);
+              if (imagesResponse && imagesResponse.data && imagesResponse.data.images) {
+                // Extract URLs and metadata from image objects
+                imageUrls = imagesResponse.data.images.map((img: any) => img.url);
+                imageData = imagesResponse.data.images.map((img: any) => ({
+                  url: img.url,
+                  filename: img.filename,
+                  isExisting: true
+                }));
+              }
+            } catch (error) {
+              // No images found, continue
+            }
+          }
+
+          return { ...subItem, imageUrls, imageData };
+        })
+      );
+
       // Update the item with master data
     setItems(items.map(item => {
       if (item.id === itemId) {
         // Convert master sub-items to form sub-items
-        const formSubItems: SubItemForm[] = subItemsData.sub_items.map((subItem, index) => ({
+        const formSubItems: SubItemForm[] = subItemsWithImages.map((subItem, index) => ({
           id: `si-${itemId}-${index}-${Date.now()}`,
           sub_item_name: subItem.sub_item_name || '',
           scope: subItem.description || '',
@@ -693,6 +792,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           misc_percentage: 10,
           overhead_profit_percentage: 25,
           transport_percentage: 5,
+          master_sub_item_id: subItem.sub_item_id, // Store master sub-item ID
+          imageUrls: (subItem as any).imageUrls || [], // Add fetched images
+          imageData: (subItem as any).imageData || [], // Add image metadata
           materials: (subItem.materials || []).map((mat, matIndex) => ({
             id: `mat-si-${itemId}-${index}-${matIndex}-${Date.now()}`,
             material_name: mat.material_name,
@@ -2404,10 +2506,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             value={costUnit}
                             disabled={isSubmitting}
                             onChange={(e) => setCostUnit(e.target.value)}
+                            onBlur={(e) => {
+                              const value = e.target.value.trim();
+                              if (value) {
+                                saveCustomUnit(value);
+                              }
+                            }}
                             placeholder="Select or type unit"
                           />
                           <datalist id="cost-unit-options">
-                            {UNIT_OPTIONS.map(opt => (
+                            {allUnitOptions.map(opt => (
                               <option key={opt.value} value={opt.value}>{opt.label}</option>
                             ))}
                           </datalist>
@@ -2844,7 +2952,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           if (files.length > 0) {
                                             const existingImages = subItem.images || [];
                                             const existingUrls = subItem.imageUrls || [];
+                                            const existingImageData = subItem.imageData || [];
                                             const newUrls = files.map(file => URL.createObjectURL(file));
+                                            const newImageData = newUrls.map(url => ({ url, isExisting: false }));
 
                                             // Update both fields at once to avoid race condition
                                             setItems(items.map(itm => {
@@ -2856,7 +2966,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                       ? {
                                                           ...si,
                                                           images: [...existingImages, ...files],
-                                                          imageUrls: [...existingUrls, ...newUrls]
+                                                          imageUrls: [...existingUrls, ...newUrls],
+                                                          imageData: [...existingImageData, ...newImageData]
                                                         }
                                                       : si
                                                   )
@@ -2883,7 +2994,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             if (files.length > 0) {
                                               const existingImages = subItem.images || [];
                                               const existingUrls = subItem.imageUrls || [];
+                                              const existingImageData = subItem.imageData || [];
                                               const newUrls = files.map(file => URL.createObjectURL(file));
+                                              const newImageData = newUrls.map(url => ({ url, isExisting: false }));
 
                                               // Update both fields at once to avoid race condition
                                               setItems(items.map(itm => {
@@ -2895,7 +3008,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                         ? {
                                                             ...si,
                                                             images: [...existingImages, ...files],
-                                                            imageUrls: [...existingUrls, ...newUrls]
+                                                            imageUrls: [...existingUrls, ...newUrls],
+                                                            imageData: [...existingImageData, ...newImageData]
                                                           }
                                                         : si
                                                     )
@@ -2915,49 +3029,92 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
                                     {/* Image Previews */}
                                     {subItem.imageUrls && subItem.imageUrls.length > 0 && (
-                                      <div className="grid grid-cols-4 gap-2">
-                                        {subItem.imageUrls.map((url, imgIndex) => (
-                                          <div key={imgIndex} className="relative group">
-                                            <img
-                                              src={url}
-                                              alt={`Preview ${imgIndex + 1}`}
-                                              className="w-full h-20 object-cover rounded-lg border border-gray-200"
-                                            />
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                const newImages = (subItem.images || []).filter((_, i) => i !== imgIndex);
-                                                const newUrls = (subItem.imageUrls || []).filter((_, i) => i !== imgIndex);
-
-                                                // Update both fields at once to avoid race condition
-                                                setItems(items.map(itm => {
-                                                  if (itm.id === item.id) {
-                                                    return {
-                                                      ...itm,
-                                                      sub_items: itm.sub_items.map(si =>
-                                                        si.id === subItem.id
-                                                          ? {
-                                                              ...si,
-                                                              images: newImages,
-                                                              imageUrls: newUrls
-                                                            }
-                                                          : si
-                                                      )
-                                                    };
-                                                  }
-                                                  return itm;
-                                                }));
-
-                                                URL.revokeObjectURL(url);
-                                                toast.success('Image removed');
-                                              }}
-                                              className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                                              disabled={isSubmitting}
+                                      <div className="mt-2 p-2 bg-gray-50 rounded-lg border border-gray-200">
+                                        <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                          <ImageIcon className="w-3.5 h-3.5" />
+                                          Attached Images ({subItem.imageUrls.length})
+                                        </h5>
+                                        <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                          {subItem.imageUrls.map((url, imgIndex) => (
+                                            <div
+                                              key={imgIndex}
+                                              className="relative group cursor-pointer"
                                             >
-                                              <X className="w-3 h-3" />
-                                            </button>
-                                          </div>
-                                        ))}
+                                              <img
+                                                src={url}
+                                                alt={`Preview ${imgIndex + 1}`}
+                                                className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:border-green-500 transition-all"
+                                                onClick={() => window.open(url, '_blank')}
+                                              />
+                                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center pointer-events-none">
+                                                <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={async (e) => {
+                                                  e.stopPropagation();
+
+                                                  // Check if this is an existing image from backend
+                                                  const imageInfo = subItem.imageData?.[imgIndex];
+
+                                                  if (imageInfo && imageInfo.isExisting && imageInfo.filename && subItem.master_sub_item_id) {
+                                                    // Call DELETE API for existing images
+                                                    try {
+                                                      const response = await estimatorService.deleteSubItemImage(subItem.master_sub_item_id, imageInfo.filename);
+                                                      if (response.success) {
+                                                        toast.success('Image deleted from database');
+                                                      } else {
+                                                        toast.error('Failed to delete image');
+                                                        return;
+                                                      }
+                                                    } catch (error) {
+                                                      console.error('Failed to delete image:', error);
+                                                      toast.error('Failed to delete image');
+                                                      return;
+                                                    }
+                                                  }
+
+                                                  const newImages = (subItem.images || []).filter((_, i) => i !== imgIndex);
+                                                  const newUrls = (subItem.imageUrls || []).filter((_, i) => i !== imgIndex);
+                                                  const newImageData = (subItem.imageData || []).filter((_, i) => i !== imgIndex);
+
+                                                  // Update both fields at once to avoid race condition
+                                                  setItems(items.map(itm => {
+                                                    if (itm.id === item.id) {
+                                                      return {
+                                                        ...itm,
+                                                        sub_items: itm.sub_items.map(si =>
+                                                          si.id === subItem.id
+                                                            ? {
+                                                                ...si,
+                                                                images: newImages,
+                                                                imageUrls: newUrls,
+                                                                imageData: newImageData
+                                                              }
+                                                            : si
+                                                        )
+                                                      };
+                                                    }
+                                                    return itm;
+                                                  }));
+
+                                                  // Only revoke if it's a blob URL (newly uploaded)
+                                                  if (url.startsWith('blob:')) {
+                                                    URL.revokeObjectURL(url);
+                                                  }
+
+                                                  if (!imageInfo?.isExisting) {
+                                                    toast.success('Image removed');
+                                                  }
+                                                }}
+                                                className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                                disabled={isSubmitting}
+                                              >
+                                                <X className="w-3 h-3" />
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
                                       </div>
                                     )}
                                   </div>
@@ -2988,13 +3145,19 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                         list={`subitem-unit-options-${item.id}-${subItem.id}`}
                                         value={subItem.unit}
                                         onChange={(e) => updateSubItem(item.id, subItem.id, 'unit', e.target.value)}
+                                        onBlur={(e) => {
+                                          const value = e.target.value.trim();
+                                          if (value) {
+                                            saveCustomUnit(value);
+                                          }
+                                        }}
                                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
                                         placeholder="Select or type unit"
                                         required
                                         disabled={isSubmitting}
                                       />
                                       <datalist id={`subitem-unit-options-${item.id}-${subItem.id}`}>
-                                        {UNIT_OPTIONS.map(opt => (
+                                        {allUnitOptions.map(opt => (
                                           <option key={opt.value} value={opt.value}>{opt.label}</option>
                                         ))}
                                       </datalist>
@@ -3139,12 +3302,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 list={`material-unit-options-${item.id}-${subItem.id}-${material.id}`}
                                                 value={material.unit}
                                                 onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'unit', e.target.value)}
+                                                onBlur={(e) => {
+                                                  const value = e.target.value.trim();
+                                                  if (value) {
+                                                    saveCustomUnit(value);
+                                                  }
+                                                }}
                                                 className="w-24 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                                                 placeholder="Unit"
                                                 disabled={isSubmitting}
                                               />
                                               <datalist id={`material-unit-options-${item.id}-${subItem.id}-${material.id}`}>
-                                                {UNIT_OPTIONS.map(opt => (
+                                                {allUnitOptions.map(opt => (
                                                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                                                 ))}
                                               </datalist>

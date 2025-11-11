@@ -1813,6 +1813,31 @@ class EstimatorService {
   }
 
   /**
+   * Delete a single image for a sub-item
+   * @param subItemId - The sub-item ID
+   * @param filename - Image filename to delete
+   * @returns Deletion response
+   */
+  async deleteSubItemImage(subItemId: number, filename: string): Promise<any> {
+    try {
+      const response = await apiClient.delete(`/images/${subItemId}`, {
+        data: { filename: filename }
+      });
+
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error: any) {
+      console.error(`Error deleting image for sub-item ${subItemId}:`, error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to delete image'
+      };
+    }
+  }
+
+  /**
    * Delete specific images for a sub-item
    * @param subItemId - The sub-item ID
    * @param imagesToDelete - Array of image filenames to delete
@@ -1833,6 +1858,43 @@ class EstimatorService {
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to delete images'
+      };
+    }
+  }
+
+  // Custom Units Management
+  async getCustomUnits(): Promise<{ success: boolean; data: any[] }> {
+    try {
+      const response = await apiClient.get('/custom-units');
+      return {
+        success: true,
+        data: response.data.custom_units || []
+      };
+    } catch (error: any) {
+      console.error('Error fetching custom units:', error);
+      return {
+        success: false,
+        data: []
+      };
+    }
+  }
+
+  async createCustomUnit(unitValue: string, unitLabel: string): Promise<{ success: boolean; unit?: any; message?: string }> {
+    try {
+      const response = await apiClient.post('/custom-units', {
+        unit_value: unitValue,
+        unit_label: unitLabel
+      });
+      return {
+        success: true,
+        unit: response.data.unit,
+        message: response.data.message
+      };
+    } catch (error: any) {
+      console.error('Error creating custom unit:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to create custom unit'
       };
     }
   }

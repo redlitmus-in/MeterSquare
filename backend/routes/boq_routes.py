@@ -253,3 +253,22 @@ def client_revision_td_mail_send_route():
     if access_check:
         return access_check
     return client_revision_td_mail_send()
+
+# Custom Units Management
+@boq_routes.route('/custom-units', methods=['GET'])
+@jwt_required
+def get_custom_units_route():
+    """Get all custom units (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_custom_units()
+
+@boq_routes.route('/custom-units', methods=['POST'])
+@jwt_required
+def create_custom_unit_route():
+    """Create a new custom unit (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return create_custom_unit()

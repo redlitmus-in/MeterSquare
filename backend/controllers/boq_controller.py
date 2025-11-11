@@ -3856,3 +3856,100 @@ def get_sub_item(item_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
+
+
+# ===================================
+# Custom Units Management
+# ===================================
+
+def get_custom_units():
+    """Get all custom units (non-deleted)"""
+    try:
+        custom_units = CustomUnit.query.filter_by(is_deleted=False).order_by(CustomUnit.unit_label.asc()).all()
+
+        units_data = []
+        for unit in custom_units:
+            units_data.append({
+                "unit_id": unit.unit_id,
+                "value": unit.unit_value,
+                "label": unit.unit_label,
+                "created_at": unit.created_at.isoformat() if unit.created_at else None,
+                "created_by": unit.created_by
+            })
+
+        log.info(f"Retrieved {len(units_data)} custom units")
+        return jsonify({
+            "message": "Custom units retrieved successfully",
+            "custom_units": units_data
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching custom units: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+def create_custom_unit():
+    """Create a new custom unit"""
+    try:
+        data = request.get_json()
+        current_user = g.user
+
+        # Validate required fields
+        unit_value = data.get('unit_value', '').strip().lower()
+        unit_label = data.get('unit_label', '').strip()
+
+        if not unit_value or not unit_label:
+            return jsonify({"error": "Both unit_value and unit_label are required"}), 400
+
+        # Check if unit already exists (case-insensitive)
+        existing_unit = CustomUnit.query.filter(
+            func.lower(CustomUnit.unit_value) == unit_value,
+            CustomUnit.is_deleted == False
+        ).first()
+
+        if existing_unit:
+            return jsonify({
+                "message": "Unit already exists",
+                "unit": {
+                    "unit_id": existing_unit.unit_id,
+                    "value": existing_unit.unit_value,
+                    "label": existing_unit.unit_label
+                }
+            }), 200
+
+        # Create new custom unit
+        new_unit = CustomUnit(
+            unit_value=unit_value,
+            unit_label=unit_label,
+            created_by=current_user.get('email', 'Unknown')
+        )
+
+        db.session.add(new_unit)
+        db.session.commit()
+
+        log.info(f"Created custom unit: {unit_label} ({unit_value}) by {current_user.get('email')}")
+
+        return jsonify({
+            "message": "Custom unit created successfully",
+            "unit": {
+                "unit_id": new_unit.unit_id,
+                "value": new_unit.unit_value,
+                "label": new_unit.unit_label,
+                "created_at": new_unit.created_at.isoformat() if new_unit.created_at else None
+            }
+        }), 201
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        log.error(f"Database error creating custom unit: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": "Database error occurred"}), 500
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error creating custom unit: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500

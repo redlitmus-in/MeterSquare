@@ -304,3 +304,20 @@ class LabourTracking(db.Model):
 
     boq = db.relationship("BOQ", backref=db.backref("labour_tracking", lazy=True))
     labour = db.relationship("MasterLabour", backref=db.backref("labour_tracking", lazy=True))
+
+
+# Custom Units Table - Stores user-defined units
+class CustomUnit(db.Model):
+    __tablename__ = "custom_units"
+
+    unit_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    unit_value = db.Column(db.String(50), nullable=False, unique=True, index=True)  # e.g., 'sqft', 'cbm'
+    unit_label = db.Column(db.String(100), nullable=False)  # e.g., 'Square Feet', 'Cubic Meter'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(255), nullable=False)
+    is_deleted = db.Column(db.Boolean, default=False, index=True)
+
+    # Index for frequently queried active units
+    __table_args__ = (
+        db.Index('idx_custom_unit_active', 'is_deleted'),
+    )
