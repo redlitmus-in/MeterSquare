@@ -119,6 +119,9 @@ class MasterMaterial(db.Model):
     item_id = db.Column(db.Integer)
     sub_item_id = db.Column(db.Integer, db.ForeignKey("boq_sub_items.sub_item_id"), nullable=True)
     description = db.Column(db.Text, nullable=True)
+    brand = db.Column(db.String(255), nullable=True)  # Material brand
+    size = db.Column(db.String(255), nullable=True)  # Material size
+    specification = db.Column(db.Text, nullable=True)  # Material specification
     quantity = db.Column(db.Float, nullable=True)
     default_unit = db.Column(db.String(50), nullable=False)
     current_market_price = db.Column(db.Float, nullable=True)

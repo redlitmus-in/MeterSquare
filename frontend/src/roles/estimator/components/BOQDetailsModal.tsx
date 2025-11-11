@@ -682,8 +682,11 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                         return (
                                                           <tr key={mIndex} className={`border-b border-blue-100 ${mIndex % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
                                                             <td className="py-1.5 px-2 text-gray-900">
-                                                              <div>{material.material_name}</div>
-                                                              {material.description && <div className="text-xs text-gray-500">{material.description}</div>}
+                                                              <div className="font-medium">{material.material_name}</div>
+                                                              {material.description && <div className="text-xs text-gray-500 mt-0.5">Desc: {material.description}</div>}
+                                                              {material.brand && <div className="text-xs text-gray-600 mt-0.5">Brand: {material.brand}</div>}
+                                                              {material.size && <div className="text-xs text-gray-600 mt-0.5">Size: {material.size}</div>}
+                                                              {material.specification && <div className="text-xs text-gray-600 mt-0.5">Spec: {material.specification}</div>}
                                                             </td>
                                                             <td className="py-1.5 px-2 text-center text-gray-700">{material.quantity}</td>
                                                             <td className="py-1.5 px-2 text-center text-gray-700 uppercase">{material.unit}</td>
@@ -1220,8 +1223,11 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                   {subItem.materials.map((material: any, mIndex: number) => (
                                                     <tr key={mIndex} className={`border-b border-blue-100 ${mIndex % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
                                                       <td className="py-1.5 px-2 text-gray-900">
-                                                        <div>{material.material_name}</div>
-                                                        {material.description && <div className="text-xs text-gray-500">{material.description}</div>}
+                                                        <div className="font-medium">{material.material_name}</div>
+                                                        {material.description && <div className="text-xs text-gray-500 mt-0.5">Desc: {material.description}</div>}
+                                                        {material.brand && <div className="text-xs text-gray-600 mt-0.5">Brand: {material.brand}</div>}
+                                                        {material.size && <div className="text-xs text-gray-600 mt-0.5">Size: {material.size}</div>}
+                                                        {material.specification && <div className="text-xs text-gray-600 mt-0.5">Spec: {material.specification}</div>}
                                                       </td>
                                                       <td className="py-1.5 px-2 text-center text-gray-700">{material.quantity}</td>
                                                       <td className="py-1.5 px-2 text-center text-gray-700 uppercase">{material.unit}</td>

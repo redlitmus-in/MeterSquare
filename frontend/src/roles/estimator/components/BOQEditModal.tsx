@@ -1239,8 +1239,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                                         onClick={() => window.open(image.url, '_blank')}
                                                       />
                                                       <div
-                                                        className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center cursor-pointer"
-                                                        onClick={() => window.open(image.url, '_blank')}
+                                                        className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center pointer-events-none"
                                                       >
                                                         <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                                                       </div>
@@ -1250,7 +1249,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                                           e.stopPropagation();
                                                           if (subItem.sub_item_id && image.filename) {
                                                             toast.loading('Deleting image...', { id: 'delete-image' });
-                                                            const result = await estimatorService.deleteSubItemImages(subItem.sub_item_id, [image.filename]);
+                                                            const result = await estimatorService.deleteSubItemImage(subItem.sub_item_id, image.filename);
                                                             if (result.success) {
                                                               // Refresh images
                                                               const imagesResult = await estimatorService.getSubItemImages(subItem.sub_item_id);
@@ -1281,8 +1280,7 @@ const BOQEditModal: React.FC<BOQEditModalProps> = ({
                                                       />
                                                       <div className="absolute top-0 right-0 bg-yellow-500 text-white text-xs px-1 rounded-bl">New</div>
                                                       <div
-                                                        className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center cursor-pointer"
-                                                        onClick={() => window.open(url, '_blank')}
+                                                        className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center pointer-events-none"
                                                       >
                                                         <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                                                       </div>

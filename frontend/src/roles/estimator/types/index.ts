@@ -10,6 +10,10 @@ export type WorkType = 'contract' | 'daily_wages' | 'piece_rate';
 export interface BOQMaterial {
   master_material_id?: number;
   material_name: string;
+  description?: string;
+  brand?: string;
+  size?: string;
+  specification?: string;
   quantity: number;
   unit: string;
   unit_price: number;

@@ -22,8 +22,25 @@ import {
   Pencil,
   Check,
   Image as ImageIcon,
-  Eye
+  Eye,
+  GripVertical
 } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { ProjectOption, BOQMaterial, BOQLabour, BOQCreatePayload, WorkType } from '@/roles/estimator/types';
@@ -176,6 +193,42 @@ const UNIT_OPTIONS = [
   { value: 'sq.m', label: 'Sq.m' },
   { value: 'tons', label: 'Tons' }
 ];
+
+// Professional SortableItem Component - Properly structured outside main component
+interface SortableItemProps {
+  item: any;
+  index: number;
+  children: (handlers: { attributes: any; listeners: any; isDragging: boolean }) => React.ReactNode;
+}
+
+const SortableItem: React.FC<SortableItemProps> = React.memo(({ item, index, children }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`${isDragging ? 'z-50' : ''}`}
+    >
+      {typeof children === 'function' ? children({ attributes, listeners, isDragging }) : children}
+    </div>
+  );
+});
+
+SortableItem.displayName = 'SortableItem';
 
 // Predefined Preliminaries & Approval Works
 // Removed hardcoded DEFAULT_PRELIMINARIES - now fetched from backend
@@ -885,6 +938,26 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const removeItem = (itemId: string) => {
     setItems(items.filter(item => item.id !== itemId));
     setExpandedItems(expandedItems.filter(id => id !== itemId));
+  };
+
+  // Drag and drop configuration - Professional implementation
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // Requires 8px movement to start drag
+      },
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setItems((currentItems) => {
+        const oldIndex = currentItems.findIndex((item) => item.id === active.id);
+        const newIndex = currentItems.findIndex((item) => item.id === over.id);
+        return arrayMove(currentItems, oldIndex, newIndex);
+      });
+    }
   };
 
   const toggleItemExpanded = (itemId: string) => {
@@ -2690,40 +2763,55 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-4">
-                {items.map((item, index) => (
-                  <div key={item.id} className="border border-gray-200 rounded-lg relative">
-                    {/* Item Header */}
-                    <div className="bg-gray-50 px-4 py-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3 flex-1">
-                          <button
-                            type="button"
-                            onClick={() => toggleItemExpanded(item.id)}
-                            className="p-1 hover:bg-gray-200 rounded"
-                            disabled={isSubmitting}
-                            aria-label="Toggle item details"
-                          >
-                            {expandedItems.includes(item.id) ? (
-                              <ChevronDown className="w-4 h-4" />
-                            ) : (
-                              <ChevronRight className="w-4 h-4" />
-                            )}
-                          </button>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-gray-800">Item #{index + 1}</span>
-                            {item.master_item_id && (
-                              <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">
-                                Master
-                              </span>
-                            )}
-                            {item.is_new && item.item_name && (
-                              <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded-full font-medium">
-                                New
-                              </span>
-                            )}
-                          </div>
-                          <div className="w-64 relative item-dropdown-container">
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
+                  <div className="space-y-4">
+                    {items.map((item, index) => (
+                      <SortableItem key={item.id} item={item} index={index}>
+                        {({ attributes, listeners, isDragging }) => (
+                          <div className="border border-gray-200 rounded-lg relative">
+                            <div className="bg-gray-50 px-4 py-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 flex-1">
+                                  <button
+                                    type="button"
+                                    {...attributes}
+                                    {...listeners}
+                                    className="group p-2 hover:bg-blue-50 rounded-lg cursor-grab active:cursor-grabbing transition-all duration-200 flex-shrink-0 relative"
+                                    aria-label="Drag to reorder"
+                                  >
+                                    <GripVertical className="w-4 h-4 text-gray-400 group-hover:text-blue-600 transition-colors" />
+                                    <span className="absolute left-1/2 -translate-x-1/2 -bottom-8 bg-gray-900 text-white text-xs px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                                      Drag to reorder
+                                    </span>
+                                  </button>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleItemExpanded(item.id)}
+                                  className="p-1 hover:bg-gray-200 rounded flex-shrink-0"
+                                  disabled={isSubmitting}
+                                  aria-label="Toggle item details"
+                                >
+                                  {expandedItems.includes(item.id) ? (
+                                    <ChevronDown className="w-4 h-4" />
+                                  ) : (
+                                    <ChevronRight className="w-4 h-4" />
+                                  )}
+                                </button>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold text-gray-800">Item #{index + 1}</span>
+                                  {item.master_item_id && (
+                                    <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">
+                                      Master
+                                    </span>
+                                  )}
+                                  {item.is_new && item.item_name && (
+                                    <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded-full font-medium">
+                                      New
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="w-64 relative item-dropdown-container">
                             <div className="relative">
                               <input
                                 type="text"
@@ -2798,21 +2886,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 })()}
                               </div>
                             )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3 ml-4">
-                          <button
-                            type="button"
-                            onClick={() => removeItem(item.id)}
-                            className="p-1 text-red-500 hover:bg-red-50 rounded"
-                            disabled={isSubmitting}
-                            aria-label="Remove item"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => removeItem(item.id)}
+                                  className="p-1 text-red-500 hover:bg-red-50 rounded"
+                                  disabled={isSubmitting}
+                                  aria-label="Remove item"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
 
                     {/* Item Details (Expandable) */}
                     {expandedItems.includes(item.id) && (
@@ -3350,6 +3438,43 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 placeholder="Description (optional)"
                                                 disabled={isSubmitting}
                                               />
+                                            </div>
+
+                                            {/* Material Detail Fields - Brand, Size, Specification */}
+                                            <div className="ml-0 grid grid-cols-2 gap-2 mt-2">
+                                              <div>
+                                                <label className="block text-xs font-medium text-gray-600 mb-1">Brand</label>
+                                                <input
+                                                  type="text"
+                                                  value={material.brand || ''}
+                                                  onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'brand', e.target.value)}
+                                                  className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50"
+                                                  placeholder="Brand (optional)"
+                                                  disabled={isSubmitting}
+                                                />
+                                              </div>
+                                              <div>
+                                                <label className="block text-xs font-medium text-gray-600 mb-1">Size</label>
+                                                <input
+                                                  type="text"
+                                                  value={material.size || ''}
+                                                  onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'size', e.target.value)}
+                                                  className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50"
+                                                  placeholder="Size (optional)"
+                                                  disabled={isSubmitting}
+                                                />
+                                              </div>
+                                              <div className="col-span-2">
+                                                <label className="block text-xs font-medium text-gray-600 mb-1">Specification</label>
+                                                <textarea
+                                                  value={material.specification || ''}
+                                                  onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'specification', e.target.value)}
+                                                  className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50 resize-none"
+                                                  placeholder="Specification (optional)"
+                                                  rows={2}
+                                                  disabled={isSubmitting}
+                                                />
+                                              </div>
                                             </div>
                                           </div>
                                         );
@@ -3975,9 +4100,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
                       </div>
                     )}
+                          </div>
+                        )}
+                      </SortableItem>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </SortableContext>
+              </DndContext>
 
               {items.length === 0 && (
                 <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50/50">

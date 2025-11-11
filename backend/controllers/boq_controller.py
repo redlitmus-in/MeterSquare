@@ -92,6 +92,9 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
                 material_name=material_name,
                 item_id=master_item_id,  # Set the item_id reference
                 description=mat_data.get("description"),
+                brand=mat_data.get("brand"),
+                size=mat_data.get("size"),
+                specification=mat_data.get("specification"),
                 quantity=quantity,
                 default_unit=mat_data.get("unit", "nos"),
                 current_market_price=unit_price,
@@ -110,6 +113,9 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
 
             # Always update current_market_price with the new unit_price from BOQ
             master_material.description = mat_data.get("description")
+            master_material.brand = mat_data.get("brand")
+            master_material.size = mat_data.get("size")
+            master_material.specification = mat_data.get("specification")
             master_material.quantity = quantity
             master_material.current_market_price = unit_price
             master_material.total_price = total_price
@@ -267,6 +273,9 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                         item_id=master_item_id,
                         sub_item_id=master_sub_item_id,
                         description=mat.get("description"),
+                        brand=mat.get("brand"),
+                        size=mat.get("size"),
+                        specification=mat.get("specification"),
                         quantity=quantity,
                         default_unit=mat.get("unit", "nos"),
                         current_market_price=unit_price,
@@ -284,6 +293,9 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     if master_material.item_id is None:
                         master_material.item_id = master_item_id
                     master_material.description = mat.get("description")
+                    master_material.brand = mat.get("brand")
+                    master_material.size = mat.get("size")
+                    master_material.specification = mat.get("specification")
                     master_material.quantity = quantity
                     master_material.current_market_price = unit_price
                     master_material.total_price = total_price

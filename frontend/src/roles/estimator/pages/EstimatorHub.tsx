@@ -2082,7 +2082,8 @@ const EstimatorHub: React.FC = () => {
               display: none !important;
             }
             /* Also hide by direct structure - flex-shrink-0 for form headers */
-            .full-screen-boq-wrapper .flex-shrink-0:first-of-type {
+            /* But don't hide drag handles */
+            .full-screen-boq-wrapper .flex-shrink-0:first-of-type:not([aria-label="Drag to reorder"]) {
               display: none !important;
             }
             /* Hide the close (X) button in top-right corner for forms */
