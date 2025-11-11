@@ -655,7 +655,7 @@ MeterSquare Interiors LLC`;
                                       }
                                     }}
                                     disabled={isSending}
-                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                    className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                                   >
                                     <option value="">Select terms template...</option>
                                     {termsTemplates.map((template) => (

@@ -113,7 +113,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-[95vw] max-h-[85vh] max-h-[90vh] overflow-hidden flex flex-col flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -142,7 +142,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
             </div>
 
             {/* Content */}
-            <div className="p-6 overflow-y-auto flex-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div className="p-6 overflow-y-auto flex-1 overflow-y-auto flex-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               {fetchingBuyers ? (
                 <div className="flex items-center justify-center py-8">
                   <ModernLoadingSpinners variant="dots" size="medium" color="primary" />

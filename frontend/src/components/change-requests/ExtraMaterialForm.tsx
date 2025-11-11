@@ -92,7 +92,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const [selectedArea, setSelectedArea] = useState<Area | null>(null);
   const [selectedBoq, setSelectedBoq] = useState<BOQ | null>(null);
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
-  const [selectedSubItem, setSelectedSubItem] = useState<SubItem | null>(null);
+  const [selectedSubItems, setSelectedSubItems] = useState<SubItem[]>([]);  // Changed to array for multiple selection
 
   // Multiple materials support
   const [materials, setMaterials] = useState<MaterialItem[]>([]);
@@ -152,16 +152,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           if (item) {
             setSelectedItem(item);
 
-            // Find the sub-item from sub_items_data
+            // Find all unique sub-items from sub_items_data
             if (initialData.sub_items_data && initialData.sub_items_data.length > 0) {
-              const firstSubItem = initialData.sub_items_data[0];
-              const subItem = item.sub_items?.find(si =>
-                si.sub_item_id === firstSubItem.sub_item_id ||
-                si.sub_item_name === firstSubItem.sub_item_name
-              );
-              if (subItem) {
-                setSelectedSubItem(subItem);
-              }
+              const uniqueSubItemIds = [...new Set(initialData.sub_items_data.map((d: any) => d.sub_item_id))];
+              const subItems = item.sub_items?.filter(si =>
+                uniqueSubItemIds.includes(si.sub_item_id)
+              ) || [];
+              setSelectedSubItems(subItems);
             }
 
             // Pre-fill justification and remarks
@@ -289,58 +286,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   };
 
   // Add material functions
-  const addExistingMaterial = (material: Material) => {
-    if (!selectedSubItem) return;
-
-    // Check if this material is already in the list
-    const isDuplicate = materials.some(
-      mat => !mat.isNew && mat.materialId === material.material_id && mat.subItemId === selectedSubItem.sub_item_id
-    );
-
-    if (isDuplicate) {
-      toast.error('Purchase request already made for this material. Please remove the existing entry if you want to modify it.');
-      return;
-    }
-
-    const newMaterialItem: MaterialItem = {
-      id: `material-${Date.now()}-${Math.random()}`,
-      isNew: false,
-      subItemId: selectedSubItem.sub_item_id,  // The sub-item (scope) ID like "Protection"
-      subItemName: selectedSubItem.sub_item_name,  // The sub-item (scope) name like "Protection"
-      materialId: material.material_id,  // The material ID like "Bubble Wrap's ID"
-      materialName: material.material_name,  // The material name like "Bubble Wrap"
-      quantity: material.quantity || 0,  // Auto-fill from BOQ quantity
-      unit: material.unit,  // Fixed from material
-      unitRate: material.unit_price || 0,  // Fixed from material
-      justification: ''  // Empty for user to fill
-    };
-    setMaterials([...materials, newMaterialItem]);
-  };
-
-  const handleSubItemChange = (subItemId: string) => {
-    if (!selectedItem) return;
-    const subItem = selectedItem.sub_items.find(si => si.sub_item_id === subItemId);
-    setSelectedSubItem(subItem || null);
-    setMaterials([]);  // Reset materials when sub-item changes
-  };
-
-  const addNewMaterial = () => {
-    if (!selectedSubItem) return;
-
-    const newMaterial: MaterialItem = {
-      id: `material-${Date.now()}-${Math.random()}`,
-      isNew: true,
-      subItemId: selectedSubItem.sub_item_id,  // The sub-item (scope) ID
-      subItemName: selectedSubItem.sub_item_name,  // The sub-item (scope) name
-      materialName: '',  // New material name (to be filled by user)
-      quantity: 0,  // Empty for user to fill
-      unit: '',
-      unitRate: 0,
-      reasonForNew: '',
-      justification: ''  // Empty for user to fill
-    };
-    setMaterials([...materials, newMaterial]);
-  };
+  // These functions are now handled inline in the UI since we support multiple sub-items
 
   const updateMaterial = (id: string, updates: Partial<MaterialItem>) => {
     setMaterials(materials.map(m =>
@@ -352,43 +298,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     setMaterials(materials.filter(m => m.id !== id));
   };
 
-  // Computed fields
+  // Computed fields - Simplified routing without calculations
   const calculations = useMemo(() => {
-    // Calculate total cost of ALL materials (for display purposes)
-    const totalCost = materials.reduce((sum, mat) =>
-      sum + (mat.quantity * mat.unitRate), 0
-    );
-
-    // Calculate cost of ONLY NEW materials (for 40% threshold calculation)
-    // This excludes existing materials (where isNew === false)
-    const newMaterialsCost = materials.reduce((sum, mat) =>
-      mat.isNew ? sum + (mat.quantity * mat.unitRate) : sum, 0
-    );
-
-    // Calculate the overhead percentage based on NEW materials ONLY
-    // This represents the additional overhead consumption for threshold routing
-    const overheadPercentage = itemOverhead && itemOverhead.allocated > 0
-      ? (newMaterialsCost / itemOverhead.allocated * 100)
-      : 0;
-
-    // Available after should consider current available minus new materials cost
-    const availableAfter = itemOverhead
-      ? itemOverhead.available - newMaterialsCost
-      : 0;
-
-    const exceeds40Percent = overheadPercentage > 40;
-
+    // Simple linear routing: All requests → Estimator → Buyer → TD
     return {
-      totalCost: totalCost,  // Total cost of ALL materials (existing + new)
-      newMaterialsCost: newMaterialsCost,  // Cost of NEW materials ONLY
-      overheadPercentage,  // Percentage based on NEW materials only
-      availableAfter,
-      exceeds40Percent,
-      routingPath: exceeds40Percent
-        ? 'PM → TD → Approved'
-        : 'PM → Estimator → Approved'
+      routingPath: isSiteEngineer
+        ? 'SE → PM → Estimator → Buyer → TD'
+        : 'PM → Estimator → Buyer → TD'
     };
-  }, [materials, itemOverhead]);
+  }, [isSiteEngineer]);
 
   const handleProjectChange = (projectId: number) => {
     const project = projects.find(p => p.project_id === projectId);
@@ -409,17 +327,17 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           if (singleBoq.items && singleBoq.items.length === 1) {
             const singleItem = singleBoq.items[0];
             setSelectedItem(singleItem);
-            setSelectedSubItem(null);
+            setSelectedSubItems([]);
             setMaterials([]);
           } else {
             setSelectedItem(null);
-            setSelectedSubItem(null);
+            setSelectedSubItems([]);
             setMaterials([]);
           }
         } else {
           setSelectedBoq(null);
           setSelectedItem(null);
-          setSelectedSubItem(null);
+          setSelectedSubItems([]);
           setMaterials([]);
         }
       } else {
@@ -427,7 +345,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         setSelectedArea(null);
         setSelectedBoq(null);
         setSelectedItem(null);
-        setSelectedSubItem(null);
+        setSelectedSubItems([]);
         setMaterials([]);
       }
     } else {
@@ -435,7 +353,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       setSelectedArea(null);
       setSelectedBoq(null);
       setSelectedItem(null);
-      setSelectedSubItem(null);
+      setSelectedSubItems([]);
       setMaterials([]);
     }
 
@@ -449,7 +367,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     // Reset downstream selections
     setSelectedBoq(null);
     setSelectedItem(null);
-    setSelectedSubItem(null);
+    setSelectedSubItems([]);
     setMaterials([]);
     setItemOverhead(null);
   };
@@ -460,7 +378,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     setSelectedBoq(boq || null);
     // Reset downstream selections
     setSelectedItem(null);
-    setSelectedSubItem(null);
+    setSelectedSubItems([]);
     setMaterials([]);
     setItemOverhead(null);
   };
@@ -469,7 +387,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     if (!selectedBoq) return;
     const item = selectedBoq.items.find(i => i.item_id === itemId);
     setSelectedItem(item || null);
-    setSelectedSubItem(null);  // Reset sub-item selection
+    setSelectedSubItems([]);  // Reset sub-items selection
     setMaterials([]);
   };
 
@@ -484,19 +402,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     }
 
     // Validation
-    if (!selectedProject || !selectedArea || !selectedItem) {
-      toast.error('Please select project, area, and BOQ item');
+    if (!selectedProject || !selectedArea || !selectedBoq || !selectedItem) {
+      toast.error('Please select project, area, BOQ, and BOQ item');
       return;
     }
 
     if (materials.length === 0) {
       toast.error('Please add at least one sub-item');
-      return;
-    }
-
-    // Budget validation - prevent submission if budget exceeded
-    if (calculations.availableAfter < 0) {
-      toast.error(`Cannot submit: Request exceeds budget by AED${Math.abs(calculations.availableAfter).toLocaleString()}. Please reduce materials or contact Technical Director.`);
       return;
     }
 
@@ -507,8 +419,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         return;
       }
 
-      if (material.quantity <= 0 || material.unitRate <= 0) {
-        toast.error(`Material "${material.materialName}" must have positive quantity and unit rate`);
+      if (material.quantity <= 0) {
+        toast.error(`Material "${material.materialName}" must have positive quantity`);
         return;
       }
     }
@@ -531,15 +443,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         sub_item_name: mat.subItemName,  // Sub-item name like "Protection"
         quantity: mat.quantity,
         unit: mat.unit,
-        unit_rate: mat.unitRate,
+        unit_rate: mat.isNew ? 0 : mat.unitRate,  // Set to 0 for new materials (no rate field)
         master_material_id: mat.isNew ? null : mat.materialId,  // Material ID
         reason: mat.isNew ? mat.reasonForNew : null,
         justification: mat.justification  // Per-material justification
       })),
       justification,
-      remarks,
-      total_cost: calculations.totalCost,
-      overhead_percent: calculations.overheadPercentage
+      remarks
     };
 
     // Set submission guards
@@ -738,141 +648,60 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         </motion.div>
       )}
 
-      {/* Sub-Item Selection */}
+      {/* Sub-Item Selection - Multiple Selection */}
       {selectedItem && selectedItem.sub_items.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Sub-Item (Scope) <span className="text-red-500">*</span>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Sub-Items (Scopes) <span className="text-red-500">*</span>
+            <span className="text-xs text-gray-500 font-normal ml-2">Select one or more sub-items</span>
           </label>
-          <select
-            value={selectedSubItem?.sub_item_id || ''}
-            onChange={(e) => handleSubItemChange(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
-            required
-          >
-            <option value="">Select Sub-Item</option>
-            {selectedItem.sub_items.map(subItem => (
-              <option key={subItem.sub_item_id} value={subItem.sub_item_id}>
-                {subItem.sub_item_name}
-              </option>
-            ))}
-          </select>
-        </motion.div>
-      )}
-
-
-      {/* Miscellaneous Display - Only show if there are new materials (not from BOQ) */}
-      {itemOverhead && materials.some(mat => mat.isNew) && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-gradient-to-br from-purple-50 to-indigo-50 p-4 rounded-lg border border-purple-200"
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <CalculatorIcon className="w-5 h-5 text-purple-600" />
-            <h3 className="font-medium text-purple-900">Item Miscellaneous Budget</h3>
-          </div>
-
-          {isSiteEngineer ? (
-            /* Simple message for Site Engineers */
-            <div className="bg-white rounded-lg p-4 border border-purple-200">
-              <div className="flex items-start gap-3">
-                <InformationCircleIcon className="w-6 h-6 text-purple-600 flex-shrink-0" />
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-purple-900">
-                    You are making a purchase outside the BOQ
-                  </p>
-                  <p className="text-sm text-gray-700">
-                    The cost will be deducted from the item's miscellaneous budget or actual profit.
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* Detailed budget info for PM/other roles */
-            <>
-              <div className="grid grid-cols-3 gap-4 text-sm">
-                <div>
-                  <p className="text-gray-600">Total Allocated</p>
-                  <p className="font-semibold text-gray-900">AED{itemOverhead.allocated.toLocaleString()}</p>
-                </div>
-                <div>
-                  <p className="text-gray-600">Consumed</p>
-                  <p className="font-semibold text-gray-900">AED{itemOverhead.consumed.toLocaleString()}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    From approved/pending requests
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-600">Available</p>
-                  <p className="font-semibold text-green-600">AED{itemOverhead.available.toLocaleString()}</p>
-                </div>
-              </div>
-
-          {/* Threshold Information */}
-          {itemOverhead.allocated > 0 && (
-            <div className="mt-3 pt-3 border-t border-purple-200">
-              <div className="flex items-start gap-2">
-                <InformationCircleIcon className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
-                <div className="text-xs space-y-1">
-                  <p className="text-purple-900">
-                    <span className="font-medium">40% Threshold:</span> AED{(itemOverhead.allocated * 0.4).toLocaleString()}
-                  </p>
-                  <p className="text-gray-600">
-                    Any request exceeding 40% of allocated miscellaneous (AED{(itemOverhead.allocated * 0.4).toLocaleString()}) will <span className="font-medium">always be sent to Technical Director</span> for approval
-                  </p>
-                </div>
-              </div>
-
-            {/* Visual Progress Bar */}
-            <div className="mt-3">
-              <div className="flex justify-between text-xs text-gray-600 mb-1">
-                <span>Consumed: {((itemOverhead.consumed / itemOverhead.allocated) * 100).toFixed(1)}%</span>
-                <span>Available: {((itemOverhead.available / itemOverhead.allocated) * 100).toFixed(1)}%</span>
-              </div>
-              <div className="relative h-6 bg-gray-200 rounded-full overflow-hidden">
-                {/* Consumed portion */}
-                <div
-                  className="absolute left-0 top-0 h-full bg-orange-400"
-                  style={{ width: `${Math.min((itemOverhead.consumed / itemOverhead.allocated) * 100, 100)}%` }}
-                />
-                {/* 40% threshold marker */}
-                <div
-                  className="absolute top-0 h-full w-0.5 bg-red-600"
-                  style={{ left: '40%' }}
+          <div className="border border-gray-300 rounded-lg p-3 bg-white max-h-60 overflow-y-auto space-y-2">
+            {selectedItem.sub_items.map(subItem => {
+              const isSelected = selectedSubItems.some(si => si.sub_item_id === subItem.sub_item_id);
+              return (
+                <label
+                  key={subItem.sub_item_id}
+                  className={`flex items-center p-3 rounded-lg cursor-pointer transition-all border-2 ${
+                    isSelected
+                      ? 'bg-blue-50 border-blue-500'
+                      : 'bg-gray-50 border-gray-200 hover:border-gray-300'
+                  }`}
                 >
-                  <span className="absolute -top-5 -left-3 text-xs text-red-600 font-medium">40%</span>
-                </div>
-              </div>
-              <div className="flex justify-between text-xs text-gray-500 mt-1">
-                <span>0</span>
-                <span>AED{itemOverhead.allocated.toLocaleString()}</span>
-              </div>
-            </div>
-            </div>
-          )}
-
-              {/* Show message when no overhead allocated */}
-              {itemOverhead.allocated === 0 && (
-                <div className="mt-3 pt-3 border-t border-purple-200">
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                    <div className="flex items-start gap-2">
-                      <InformationCircleIcon className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-                      <div className="text-sm text-yellow-800">
-                        <p className="font-medium mb-1">No Miscellaneous Budget Allocated</p>
-                        <p className="text-xs">This item has AED 0 allocated for miscellaneous expenses. Progress tracking and percentage calculations are not available.</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </>
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedSubItems([...selectedSubItems, subItem]);
+                      } else {
+                        // Remove this sub-item and its materials
+                        setSelectedSubItems(selectedSubItems.filter(si => si.sub_item_id !== subItem.sub_item_id));
+                        setMaterials(materials.filter(m => m.subItemId !== subItem.sub_item_id));
+                      }
+                    }}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="ml-3 text-sm font-medium text-gray-900">{subItem.sub_item_name}</span>
+                  {subItem.materials && subItem.materials.length > 0 && (
+                    <span className="ml-auto text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded">
+                      {subItem.materials.length} material{subItem.materials.length > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+          {selectedSubItems.length > 0 && (
+            <p className="text-xs text-green-600 mt-2">
+              {selectedSubItems.length} sub-item{selectedSubItems.length > 1 ? 's' : ''} selected
+            </p>
           )}
         </motion.div>
       )}
+
 
       {/* Existing Requests Section */}
       {selectedItem && existingRequests.length > 0 && (
@@ -1029,8 +858,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         </motion.div>
       )}
 
-      {/* Materials Section */}
-      {selectedSubItem && (
+      {/* Materials Section - Grouped by Sub-Item */}
+      {selectedSubItems.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1038,172 +867,203 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         >
           <div className="flex justify-between items-center">
             <h3 className="text-sm font-medium text-gray-900">Materials Purchase Request</h3>
-            <div className="flex gap-2">
-              {selectedSubItem && selectedSubItem.materials.length > 0 && (
-                <div className="relative">
-                  <select
-                    onChange={(e) => {
-                      const material = selectedSubItem.materials.find(m => m.material_id === e.target.value);
-                      if (material) {
-                        addExistingMaterial(material);
-                        // Reset dropdown
-                        e.target.value = "";
-                      }
-                    }}
-                    className="pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
-                    value=""
-                  >
-                    <option value="">Select Material</option>
-                    {selectedSubItem.materials.map(material => (
-                      <option key={material.material_id} value={material.material_id}>
-                        {material.material_name}{isSiteEngineer ? '' : ` - AED${material.unit_price}/${material.unit}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={addNewMaterial}
-                className="flex items-center gap-1 px-3 py-2 text-sm bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] text-white rounded-lg hover:from-[#1e3270] hover:to-[#3d4f8a] shadow-md transition-all"
-              >
-                <PlusIcon className="w-4 h-4" />
-                Add New Material
-              </button>
-            </div>
           </div>
 
-          {/* Materials List */}
-          {materials.length === 0 ? (
-            <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-              <p className="text-gray-500">No materials selected yet</p>
-              <p className="text-sm text-gray-400 mt-1">
-                Select a Sub-Item (Scope) from existing materials or add a new one
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {materials.map((material, index) => (
-                <div key={material.id} className="border border-gray-200 rounded-lg p-4 bg-white">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h4 className="font-medium text-gray-900">Purchase Request #{index + 1}</h4>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Scope: {material.subItemName}
-                        {!material.isNew && ` | Material: ${material.materialName}`}
-                        {!material.isNew && !isSiteEngineer && ` | Unit Rate: AED${material.unitRate}/${material.unit}`}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removeMaterial(material.id)}
-                      className="text-red-600 hover:text-red-700"
-                    >
-                      <TrashIcon className="w-5 h-5" />
-                    </button>
-                  </div>
+          {/* Material selection for each selected sub-item */}
+          {selectedSubItems.map(subItem => (
+            <div key={subItem.sub_item_id} className="border border-blue-200 rounded-lg p-4 bg-blue-50/30">
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="text-sm font-semibold text-blue-900 flex items-center gap-2">
+                  <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
+                  {subItem.sub_item_name}
+                </h4>
+                <div className="flex gap-2">
+                  {subItem.materials && subItem.materials.length > 0 && (
+                    <div className="relative">
+                      <select
+                        onChange={(e) => {
+                          const material = subItem.materials.find(m => m.material_id === e.target.value);
+                          if (material) {
+                            // Check for duplicates - prevent adding same material twice for this sub-item
+                            const isDuplicate = materials.some(
+                              m => !m.isNew &&
+                                   m.materialId === material.material_id &&
+                                   m.subItemId === subItem.sub_item_id
+                            );
 
-                  {material.isNew ? (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          New Material Name <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={material.materialName}
-                          onChange={(e) => updateMaterial(material.id, { materialName: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
-                          placeholder="Enter material name"
-                        />
-                      </div>
+                            if (isDuplicate) {
+                              toast.error(`"${material.material_name}" is already added for this sub-item. Please remove it first if you want to modify it.`);
+                              e.target.value = "";
+                              return;
+                            }
+
+                            // Pass the specific subItem to addExistingMaterial
+                            const newMaterialItem: MaterialItem = {
+                              id: `material-${Date.now()}-${Math.random()}`,
+                              isNew: false,
+                              subItemId: subItem.sub_item_id,
+                              subItemName: subItem.sub_item_name,
+                              materialId: material.material_id,
+                              materialName: material.material_name,
+                              quantity: material.quantity || 0,
+                              unit: material.unit,
+                              unitRate: material.unit_price || 0,
+                              justification: ''
+                            };
+                            setMaterials([...materials, newMaterialItem]);
+                            // Reset dropdown
+                            e.target.value = "";
+                          }
+                        }}
+                        className="pl-3 pr-10 py-2 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                        value=""
+                      >
+                        <option value="">Select Material</option>
+                        {subItem.materials.map(material => {
+                          // Check if this material is already added for this sub-item
+                          const isAlreadyAdded = materials.some(
+                            m => !m.isNew &&
+                                 m.materialId === material.material_id &&
+                                 m.subItemId === subItem.sub_item_id
+                          );
+
+                          return (
+                            <option
+                              key={material.material_id}
+                              value={material.material_id}
+                              disabled={isAlreadyAdded}
+                              className={isAlreadyAdded ? 'text-gray-400 italic' : ''}
+                            >
+                              {material.material_name}{isAlreadyAdded ? ' (Already added)' : ''}{isSiteEngineer ? '' : ` - AED${material.unit_price}/${material.unit}`}
+                            </option>
+                          );
+                        })}
+                      </select>
                     </div>
-                  ) : (
-                    <div className="mb-3 space-y-2">
-                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                        <p className="text-xs font-medium text-purple-900 mb-1">Scope (Sub-Item)</p>
-                        <p className="text-sm font-semibold text-purple-900">{material.subItemName}</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Add new material for this specific sub-item
+                      const newMaterial: MaterialItem = {
+                        id: `material-${Date.now()}-${Math.random()}`,
+                        isNew: true,
+                        subItemId: subItem.sub_item_id,
+                        subItemName: subItem.sub_item_name,
+                        materialName: '',
+                        quantity: 0,
+                        unit: '',
+                        unitRate: 0,
+                        reasonForNew: '',
+                        justification: ''
+                      };
+                      setMaterials([...materials, newMaterial]);
+                    }}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] text-white rounded-lg hover:from-[#1e3270] hover:to-[#3d4f8a] shadow-md transition-all"
+                  >
+                    <PlusIcon className="w-3.5 h-3.5" />
+                    Add New
+                  </button>
+                </div>
+              </div>
+
+              {/* Materials for this sub-item */}
+              <div className="space-y-2">
+                {materials.filter(m => m.subItemId === subItem.sub_item_id).length === 0 ? (
+                  <p className="text-xs text-gray-500 italic text-center py-4">
+                    No materials added for this sub-item yet
+                  </p>
+                ) : (
+                  materials.filter(m => m.subItemId === subItem.sub_item_id).map((material, index) => (
+                    <div key={material.id} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <h5 className="font-medium text-gray-900 text-xs">Material #{materials.indexOf(material) + 1}</h5>
+                          <p className="text-[10px] text-gray-500 mt-0.5">
+                            {!material.isNew && `${material.materialName}`}
+                            {!material.isNew && !isSiteEngineer && ` | AED${material.unitRate}/${material.unit}`}
+                            {material.isNew && <span className="text-green-600 font-medium">New Material</span>}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeMaterial(material.id)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </button>
                       </div>
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                        <p className="text-xs font-medium text-blue-900 mb-1">Selected Material</p>
-                        <p className="text-sm font-semibold text-blue-900">{material.materialName}</p>
-                        <div className="mt-2 flex gap-4 text-xs text-blue-700">
-                          <span>Unit: {material.unit}</span>
-                          {!isSiteEngineer && <span>Rate: AED{material.unitRate.toLocaleString()}/{material.unit}</span>}
+
+                      {material.isNew ? (
+                        <div className="space-y-2">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              New Material Name <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={material.materialName}
+                              onChange={(e) => updateMaterial(material.id, { materialName: e.target.value })}
+                              className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                              placeholder="Enter material name"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mb-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
+                          <p className="text-[10px] font-medium text-blue-900 mb-0.5">Selected Material</p>
+                          <p className="text-xs font-semibold text-blue-900">{material.materialName}</p>
+                          <div className="mt-1 flex gap-3 text-[10px] text-blue-700">
+                            <span>Unit: {material.unit}</span>
+                            {!isSiteEngineer && <span>Rate: AED{material.unitRate.toLocaleString()}/{material.unit}</span>}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Quantity <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            value={material.quantity}
+                            onChange={(e) => updateMaterial(material.id, { quantity: parseFloat(e.target.value) || 0 })}
+                            className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                            min="0.01"
+                            step="0.01"
+                            placeholder="Qty"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Unit {material.isNew && <span className="text-red-500">*</span>}
+                          </label>
+                          <input
+                            type="text"
+                            value={material.unit}
+                            onChange={(e) => material.isNew && updateMaterial(material.id, { unit: e.target.value })}
+                            className={`w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg ${
+                              material.isNew ? 'bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]' : 'bg-gray-100 cursor-not-allowed'
+                            }`}
+                            placeholder={material.isNew ? "Unit" : ""}
+                            readOnly={!material.isNew}
+                            disabled={!material.isNew}
+                          />
                         </div>
                       </div>
                     </div>
-                  )}
-
-                  <div className="grid grid-cols-3 gap-3 mt-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Quantity <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        value={material.quantity}
-                        onChange={(e) => updateMaterial(material.id, { quantity: parseFloat(e.target.value) || 0 })}
-                        className={`w-full px-3 py-2 border border-gray-300 rounded-lg ${
-                          !material.isNew && isSiteEngineer ? 'bg-white cursor-not-allowed' : 'bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]'
-                        }`}
-                        min="0.01"
-                        step="0.01"
-                        placeholder="Enter quantity"
-                        readOnly={!material.isNew && isSiteEngineer}
-                        disabled={!material.isNew && isSiteEngineer}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Unit {material.isNew && <span className="text-red-500">*</span>}
-                      </label>
-                      <input
-                        type="text"
-                        value={material.unit}
-                        onChange={(e) => material.isNew && updateMaterial(material.id, { unit: e.target.value })}
-                        className={`w-full px-3 py-2 border border-gray-300 rounded-lg ${
-                          material.isNew ? 'bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]' : 'bg-white cursor-not-allowed'
-                        }`}
-                        placeholder={material.isNew ? "e.g., kg, m², nos" : ""}
-                        readOnly={!material.isNew}
-                        disabled={!material.isNew}
-                      />
-                    </div>
-                    {!material.isNew && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Unit Rate (AED)
-                        </label>
-                        <input
-                          type="number"
-                          value={material.unitRate}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white cursor-not-allowed"
-                          readOnly
-                          disabled
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {!isSiteEngineer && !material.isNew && (
-                    <div className="mt-2 text-right">
-                      <span className="text-sm text-gray-600">
-                        Subtotal: <span className="font-medium text-gray-900">
-                          AED{(material.quantity * material.unitRate).toLocaleString()}
-                        </span>
-                      </span>
-                    </div>
-                  )}
-                </div>
-              ))}
+                  ))
+                )}
+              </div>
             </div>
-          )}
+          ))}
+
         </motion.div>
       )}
 
       {/* Justification */}
-      {selectedSubItem && (
+      {selectedSubItems.length > 0 && (
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Justification <span className="text-red-500">*</span>
@@ -1242,116 +1102,20 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         />
       </div>
 
-      {/* Calculations Summary - Only show if there are new materials (not from BOQ) */}
-      {selectedSubItem && materials.length > 0 && materials.some(mat => mat.isNew) && (
+      {/* Approval Routing Information */}
+      {selectedSubItems.length > 0 && materials.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-gray-50 p-4 rounded-lg border border-gray-200"
+          className="bg-blue-50 p-4 rounded-lg border border-blue-200"
         >
-          <h3 className="font-medium text-gray-900 mb-3">Request Summary (New Materials Only)</h3>
-
-          {/* Materials breakdown if multiple */}
-          {materials.length > 1 && (
-            <div className="mb-3 pb-3 border-b border-gray-200">
-              <p className="text-sm text-gray-600 mb-2">All Materials to be Added:</p>
-              <div className="space-y-1">
-                {materials.map((mat, idx) => (
-                  <div key={mat.id} className="flex justify-between text-sm">
-                    <span className="text-gray-600">
-                      {idx + 1}. {mat.materialName} ({mat.quantity} {mat.unit})
-                      {!mat.isNew && <span className="ml-2 text-xs text-blue-600">(Existing)</span>}
-                      {mat.isNew && <span className="ml-2 text-xs text-green-600">(New)</span>}
-                    </span>
-                    {!isSiteEngineer && <span className="text-gray-900">AED{(mat.quantity * mat.unitRate).toLocaleString()}</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            {!isSiteEngineer && (
-              <div>
-                <p className="text-gray-600">Additional Cost (Total)</p>
-                <p className="font-semibold text-gray-900">AED{calculations.totalCost.toLocaleString()}</p>
-                {calculations.totalCost !== calculations.newMaterialsCost && (
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    New materials: AED{calculations.newMaterialsCost.toLocaleString()}
-                  </p>
-                )}
-              </div>
-            )}
-            <div>
-              <p className="text-gray-600">Miscellaneous Usage</p>
-              <p className={`font-semibold ${calculations.exceeds40Percent ? 'text-red-600' : 'text-green-600'}`}>
-                {calculations.overheadPercentage.toFixed(2)}%{!isSiteEngineer && ` of AED${itemOverhead?.allocated.toLocaleString() || '0'}`}
-              </p>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {calculations.exceeds40Percent ? '> 40% threshold' : '≤ 40% threshold'}
-              </p>
-              <p className="text-xs text-blue-600 mt-0.5">
-                Based on NEW materials only
-              </p>
-            </div>
-            {!isSiteEngineer && (
-              <div>
-                <p className="text-gray-600">Available After Approval</p>
-                <p className={`font-semibold ${calculations.availableAfter < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                  AED{calculations.availableAfter.toLocaleString()}
-                </p>
-                {itemOverhead && (
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    from AED{itemOverhead.available.toLocaleString()}
-                  </p>
-                )}
-              </div>
-            )}
-            <div>
-              <p className="text-gray-600">Approval Routing</p>
-              <p className="font-semibold text-gray-900 text-xs">
-                {calculations.routingPath}
-              </p>
-            </div>
+          <div className="flex items-center gap-2 mb-2">
+            <InformationCircleIcon className="w-5 h-5 text-blue-600" />
+            <h3 className="font-medium text-blue-900">Approval Routing</h3>
           </div>
-
-          {/* Warnings */}
-          {calculations.exceeds40Percent && (
-            <div className="mt-3 flex items-center gap-2 text-amber-600 bg-amber-50 p-2 rounded">
-              <ExclamationTriangleIcon className="w-5 h-5 flex-shrink-0" />
-              <p className="text-sm">This request exceeds 40% threshold and will route to Technical Director for approval</p>
-            </div>
-          )}
-          {calculations.availableAfter < 0 && (
-            <div className="mt-3 flex items-center gap-2 text-red-600 bg-red-50 p-2 rounded">
-              <ExclamationTriangleIcon className="w-5 h-5 flex-shrink-0" />
-              <p className="text-sm">This request will exceed the available miscellaneous budget</p>
-            </div>
-          )}
-        </motion.div>
-      )}
-
-      {/* Budget Exceeded Warning - Prevents Submission */}
-      {selectedSubItem && materials.length > 0 && calculations.availableAfter < 0 && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-red-50 border-2 border-red-300 rounded-lg p-4"
-        >
-          <div className="flex items-start gap-3">
-            <ExclamationTriangleIcon className="w-6 h-6 text-red-600 flex-shrink-0" />
-            <div>
-              <h4 className="font-semibold text-red-900 mb-1">Budget Limit Reached</h4>
-              <p className="text-sm text-red-800 mb-2">
-                This purchase request exceeds the allocated miscellaneous budget by{' '}
-                <span className="font-semibold">AED{Math.abs(calculations.availableAfter).toLocaleString()}</span>.
-              </p>
-              <p className="text-sm text-red-700">
-                You cannot submit this request until the budget is adjusted or materials are reduced.
-                Please contact the Technical Director for budget approval or modify your request.
-              </p>
-            </div>
-          </div>
+          <p className="text-sm text-gray-700">
+            This request will follow the standard approval flow: <span className="font-semibold text-blue-900">{calculations.routingPath}</span>
+          </p>
         </motion.div>
       )}
 
@@ -1366,9 +1130,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         </button>
         <button
           type="submit"
-          disabled={loading || isSubmitting || !selectedItem || !selectedSubItem || materials.length === 0 || calculations.availableAfter < 0}
+          disabled={loading || isSubmitting || !selectedItem || selectedSubItems.length === 0 || materials.length === 0}
           className="px-6 py-2.5 bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] text-white rounded-lg hover:from-[#1e3270] hover:to-[#3d4f8a] transition-all shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed disabled:shadow-none font-semibold"
-          title={calculations.availableAfter < 0 ? 'Cannot submit - Budget exceeded' : isSubmitting ? (initialData?.editMode ? 'Updating...' : 'Creating purchase request...') : ''}
+          title={isSubmitting ? (initialData?.editMode ? 'Updating...' : 'Creating purchase request...') : ''}
         >
           {loading || isSubmitting ? (initialData?.editMode ? 'Updating...' : 'Creating...') : (initialData?.editMode ? 'Update Purchase Request' : 'Create Purchase Request')}
         </button>

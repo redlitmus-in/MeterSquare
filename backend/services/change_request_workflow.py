@@ -31,35 +31,25 @@ class ChangeRequestWorkflow:
     @staticmethod
     def check_budget_threshold(change_request) -> str:
         """
-        Check if request should go to TD or directly to Estimator
+        DEPRECATED: Simplified workflow - always routes to Estimator
+        Kept for backward compatibility
 
         Args:
             change_request: ChangeRequest model instance
 
         Returns:
-            str: 'technical_director' or 'estimator'
+            str: Always returns 'estimator'
         """
-        # Check cost threshold
-        if change_request.materials_total_cost > CR_CONFIG.BUDGET_THRESHOLD_TD:
-            log.info(f"CR {change_request.cr_id}: Cost {change_request.materials_total_cost} > {CR_CONFIG.BUDGET_THRESHOLD_TD} → TD approval required")
-            return CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
-
-        # Check if over budget
-        if change_request.is_over_budget:
-            log.info(f"CR {change_request.cr_id}: Over budget → TD approval required")
-            return CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
-
-        # Within budget and cost threshold
-        log.info(f"CR {change_request.cr_id}: Within budget and threshold → Estimator approval")
+        # Simplified workflow: always route to Estimator
         return CR_CONFIG.ROLE_ESTIMATOR
 
     @staticmethod
     def determine_initial_approver(requester_role: str, change_request) -> Tuple[str, str]:
         """
         Determine initial approver when request is sent for review
-        Automatically routes based on business rules:
+        Simplified linear workflow:
         - SE → PM (always)
-        - PM → TD (if >40% of item overhead) or Estimator (if ≤40%)
+        - PM → Estimator (always)
 
         Args:
             requester_role: Role of the person creating the request
@@ -76,19 +66,11 @@ class ChangeRequestWorkflow:
             log.info(f"Site Engineer/Supervisor request - routing to Project Manager")
             return CR_CONFIG.ROLE_PROJECT_MANAGER, "Project Manager"
 
-        # Project Manager → Route based on overhead threshold
+        # Project Manager → Estimator (simplified linear workflow)
         # Handle both database formats: camelCase (projectManager) and snake_case (project_manager)
         elif normalized_role in ['projectmanager', 'project_manager']:
-            # Check if overhead consumption exceeds 40% threshold
-            # If overhead > 40%, it needs TD approval
-            percentage = change_request.percentage_of_item_overhead or 0
-
-            if percentage > 40:
-                log.info(f"PM request with {percentage}% overhead (>40%) - routing to Technical Director")
-                return CR_CONFIG.ROLE_TECHNICAL_DIRECTOR, "Technical Director"
-            else:
-                log.info(f"PM request with {percentage}% overhead (≤40%) - routing directly to Estimator")
-                return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
+            log.info(f"PM request - routing to Estimator (simplified linear workflow)")
+            return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
 
         else:
             log.error(f"Invalid role '{requester_role}' (normalized: '{normalized_role}') attempting to send change request")
@@ -97,9 +79,8 @@ class ChangeRequestWorkflow:
     @staticmethod
     def determine_approval_route_by_percentage(change_request) -> Tuple[str, str]:
         """
-        Determine approval route based on 40% threshold of ITEM overhead
-        >40% → TD required
-        ≤40% → Estimator only
+        DEPRECATED: Simplified workflow - always routes to Estimator
+        Kept for backward compatibility
 
         Args:
             change_request: ChangeRequest model instance
@@ -107,20 +88,14 @@ class ChangeRequestWorkflow:
         Returns:
             tuple: (approval_required_from, next_approver_display_name)
         """
-        percentage = change_request.percentage_of_item_overhead or 0
-
-        if percentage > 40:
-            log.info(f"CR {change_request.cr_id}: {percentage}% > 40% → Requires TD approval")
-            return CR_CONFIG.ROLE_TECHNICAL_DIRECTOR, "Technical Director"
-        else:
-            log.info(f"CR {change_request.cr_id}: {percentage}% ≤ 40% → Estimator approval only")
-            return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
+        log.info(f"CR {change_request.cr_id}: Simplified workflow → Routing to Estimator")
+        return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
 
     @staticmethod
     def determine_next_approver_after_pm(change_request) -> Tuple[str, str]:
         """
         Determine next approver after PM approval
-        Routes based on 40% threshold of item overhead
+        Routes based on BOQ's dynamic overhead threshold
 
         Args:
             change_request: ChangeRequest model instance
@@ -128,7 +103,7 @@ class ChangeRequestWorkflow:
         Returns:
             tuple: (approval_required_from, next_approver_display_name)
         """
-        # Route based on percentage threshold (40%)
+        # Route based on dynamic percentage threshold from BOQ
         return ChangeRequestWorkflow.determine_approval_route_by_percentage(change_request)
 
     @staticmethod

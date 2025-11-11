@@ -990,40 +990,26 @@ def approve_change_request(cr_id):
 
         # Multi-stage approval logic
         if normalized_role in ['projectmanager']:
-            # PM approves - route to TD or Estimator based on material type and percentage threshold
+            # PM approves - route to Estimator (simplified linear workflow)
             change_request.pm_approved_by_user_id = approver_id
             change_request.pm_approved_by_name = approver_name
             change_request.pm_approval_date = datetime.utcnow()
             change_request.status = CR_CONFIG.STATUS_APPROVED_BY_PM
 
-            # Determine next approver based on percentage_of_item_overhead
-            # This percentage represents: (materials_total_cost / overhead_allocated) * 100
-            percentage = change_request.percentage_of_item_overhead or 0
+            # Simplified workflow: Always route to Estimator
+            project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
+            if not project or not project.estimator_id:
+                return jsonify({"error": "No Estimator assigned for this project"}), 400
 
-            log.info(f"PM approval routing: CR {cr_id} has percentage_of_item_overhead={percentage:.2f}%")
+            # Fetch estimator details from User table
+            assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
+            if not assigned_estimator:
+                return jsonify({"error": "Assigned Estimator user record not found"}), 400
 
-            # Apply 40% threshold for routing decision
-            if percentage > 40:
-                # Overhead >40% - Route to Technical Director
-                next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
-                next_approver = 'Technical Director'
-                next_approver_id = None
-                log.info(f"PM approved CR {cr_id}: {percentage:.2f}% > 40% → Routing to TD")
-            else:
-                # Overhead ≤40% - Route to project's assigned Estimator
-                project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
-                if not project or not project.estimator_id:
-                    return jsonify({"error": "No Estimator assigned for this project"}), 400
-
-                # Fetch estimator details from User table
-                assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
-                if not assigned_estimator:
-                    return jsonify({"error": "Assigned Estimator user record not found"}), 400
-
-                next_role = CR_CONFIG.ROLE_ESTIMATOR
-                next_approver = assigned_estimator.full_name or assigned_estimator.username
-                next_approver_id = assigned_estimator.user_id
-                log.info(f"PM approved CR {cr_id}: {percentage:.2f}% ≤ 40% → Routing to Estimator: {next_approver} (user_id={next_approver_id})")
+            next_role = CR_CONFIG.ROLE_ESTIMATOR
+            next_approver = assigned_estimator.full_name or assigned_estimator.username
+            next_approver_id = assigned_estimator.user_id
+            log.info(f"PM approved CR {cr_id} → Routing to Estimator: {next_approver} (user_id={next_approver_id}) [Simplified workflow]")
 
             change_request.approval_required_from = next_role
             change_request.current_approver_role = next_role
@@ -1056,8 +1042,7 @@ def approve_change_request(cr_id):
                 "item_name": change_request.item_name or f"CR #{cr_id}",
                 "materials_count": len(change_request.materials_data) if change_request.materials_data else 0,
                 "total_cost": change_request.materials_total_cost,
-                "overhead_percentage": percentage,
-                "comments": f"PM approved. Routed to {next_approver} (Overhead: {percentage:.2f}%)",
+                "comments": f"PM approved. Routed to {next_approver} for review",
                 "timestamp": datetime.utcnow().isoformat(),
                 "sender_name": approver_name,
                 "sender_user_id": approver_id,
@@ -1098,59 +1083,22 @@ def approve_change_request(cr_id):
 
             return jsonify({
                 "success": True,
-                "message": f"Approved by PM. Automatically forwarded to {next_approver} (Overhead: {percentage:.2f}%)",
+                "message": f"Approved by PM. Automatically forwarded to {next_approver} for review",
                 "status": CR_CONFIG.STATUS_APPROVED_BY_PM,
-                "next_approver": next_approver,
-                "overhead_percentage": percentage
+                "next_approver": next_approver
             }), 200
 
         elif normalized_role in ['technicaldirector', 'technical_director']:
-            # TD approves - route to Buyer
+            # TD approves - Final approval (simplified linear workflow)
             change_request.td_approved_by_user_id = approver_id
             change_request.td_approved_by_name = approver_name
             change_request.td_approval_date = datetime.utcnow()
-            change_request.status = CR_CONFIG.STATUS_ASSIGNED_TO_BUYER
-            change_request.approval_required_from = CR_CONFIG.ROLE_BUYER
-            change_request.current_approver_role = CR_CONFIG.ROLE_BUYER
+            change_request.status = CR_CONFIG.STATUS_PURCHASE_COMPLETE  # Mark as complete
+            change_request.approval_required_from = None  # No further approval needed
+            change_request.current_approver_role = None
+            change_request.updated_at = datetime.utcnow()
 
-            # Get buyer role_id
-            from models.role import Role
-            buyer_role = Role.query.filter_by(role='buyer', is_deleted=False).first()
-
-            # Get buyer in priority order: 1) selected by user, 2) project buyer, 3) first available buyer
-            buyer = None
-
-            # Priority 1: User selected a specific buyer
-            if selected_buyer_id:
-                buyer = User.query.filter_by(user_id=selected_buyer_id, is_deleted=False).first()
-                # Verify the user is actually a buyer
-                if buyer and buyer_role and buyer.role_id == buyer_role.role_id:
-                    log.info(f"TD selected buyer {buyer.full_name} (ID: {buyer.user_id}) for CR {cr_id}")
-                else:
-                    buyer = None
-                    log.warning(f"Selected buyer_id {selected_buyer_id} not found or not a buyer")
-
-            # Priority 2: Try project buyer if no buyer selected or selected buyer not found
-            if not buyer:
-                project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
-                if project and project.buyer_id:
-                    buyer = User.query.filter_by(user_id=project.buyer_id, is_deleted=False).first()
-                    if buyer:
-                        log.info(f"Using project buyer {buyer.full_name} (ID: {buyer.user_id})")
-
-            # Priority 3: Use first available buyer in system
-            if not buyer and buyer_role:
-                buyer = User.query.filter_by(role_id=buyer_role.role_id, is_deleted=False).first()
-                if buyer:
-                    log.info(f"No buyer assigned to project {change_request.project_id}, using system buyer: {buyer.full_name}")
-
-            if buyer:
-                change_request.assigned_to_buyer_user_id = buyer.user_id
-                change_request.assigned_to_buyer_name = buyer.full_name
-                change_request.assigned_to_buyer_date = datetime.utcnow()
-                log.info(f"CR {cr_id} assigned to buyer {buyer.full_name} (ID: {buyer.user_id})")
-            else:
-                log.warning(f"CR {cr_id} approved but no buyer found in system!")
+            log.info(f"TD {approver_name} gave final approval for CR {cr_id} - Change request complete")
 
             # Add to BOQ History - TD Approval
             existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -1171,15 +1119,15 @@ def approve_change_request(cr_id):
                 "role": "technical_director",
                 "type": "change_request_approved_by_td",
                 "sender": approver_name,
-                "receiver": change_request.assigned_to_buyer_name or "Buyer",
+                "receiver": None,  # No next receiver - final approval
                 "sender_role": "technical_director",
-                "receiver_role": "buyer",
-                "status": CR_CONFIG.STATUS_ASSIGNED_TO_BUYER,
+                "receiver_role": None,
+                "status": CR_CONFIG.STATUS_PURCHASE_COMPLETE,
                 "cr_id": cr_id,
                 "item_name": change_request.item_name or f"CR #{cr_id}",
                 "materials_count": len(change_request.materials_data) if change_request.materials_data else 0,
                 "total_cost": change_request.materials_total_cost,
-                "comments": f"TD approved. Assigned to {change_request.assigned_to_buyer_name or 'Buyer'} for purchase",
+                "comments": f"TD gave final approval. Change request completed.",
                 "timestamp": datetime.utcnow().isoformat(),
                 "sender_name": approver_name,
                 "sender_user_id": approver_id,
@@ -1195,8 +1143,8 @@ def approve_change_request(cr_id):
                 flag_modified(existing_history, "action")
                 existing_history.action_by = approver_name
                 existing_history.sender = approver_name
-                existing_history.receiver = change_request.assigned_to_buyer_name or "Buyer"
-                existing_history.comments = f"CR #{cr_id} approved by TD"
+                existing_history.receiver = None  # Final approval
+                existing_history.comments = f"CR #{cr_id} final approval by TD"
                 existing_history.action_date = datetime.utcnow()
                 existing_history.last_modified_by = approver_name
                 existing_history.last_modified_at = datetime.utcnow()
@@ -1207,10 +1155,10 @@ def approve_change_request(cr_id):
                     action_by=approver_name,
                     boq_status=change_request.boq.status if change_request.boq else 'unknown',
                     sender=approver_name,
-                    receiver=change_request.assigned_to_buyer_name or "Buyer",
-                    comments=f"CR #{cr_id} approved by TD",
+                    receiver=None,  # Final approval
+                    comments=f"CR #{cr_id} final approval by TD",
                     sender_role='technical_director',
-                    receiver_role='buyer',
+                    receiver_role=None,
                     action_date=datetime.utcnow(),
                     created_by=approver_name
                 )
@@ -1218,14 +1166,13 @@ def approve_change_request(cr_id):
 
             db.session.commit()
 
-            log.info(f"TD approved CR {cr_id}, routing to Buyer")
+            log.info(f"TD gave final approval for CR {cr_id}")
 
             return jsonify({
                 "success": True,
-                "message": "Approved by TD. Forwarded to Buyer for purchase.",
-                "status": CR_CONFIG.STATUS_ASSIGNED_TO_BUYER,
-                "next_approver": "Buyer",
-                "assigned_to_buyer_name": change_request.assigned_to_buyer_name
+                "message": "Final approval by TD. Change request completed.",
+                "status": CR_CONFIG.STATUS_PURCHASE_COMPLETE,
+                "cr_id": cr_id
             }), 200
 
         elif normalized_role == 'estimator':
@@ -1410,28 +1357,26 @@ def complete_purchase_and_merge_to_boq(cr_id):
         change_request.purchase_completed_by_name = buyer_name
         change_request.purchase_completion_date = datetime.utcnow()
         change_request.purchase_notes = purchase_notes
-        change_request.status = CR_CONFIG.STATUS_PURCHASE_COMPLETE
+
+        # Simplified workflow: After Buyer completes purchase, route to TD for final approval
+        change_request.status = CR_CONFIG.STATUS_APPROVED_BY_PM  # Use existing status that allows TD approval
+        change_request.approval_required_from = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
+        change_request.current_approver_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
         change_request.updated_at = datetime.utcnow()
 
-        log.info(f"Buyer {buyer_name} marked purchase complete for CR {cr_id}")
+        log.info(f"Buyer {buyer_name} marked purchase complete for CR {cr_id} - Routing to TD for final approval")
 
-        # IMPORTANT: DO NOT MERGE INTO BOQ JSON
-        # The original BOQ should remain immutable
-        # CR data is tracked separately in ChangeRequest table and MaterialPurchaseTracking
-        # The comparison view will show CRs dynamically without modifying the planned BOQ
-
-        # Skip BOQ merge - just commit the status change
         db.session.commit()
 
-        log.info(f"CR #{cr_id} marked as purchased_by_buyer - BOQ JSON remains unchanged")
+        log.info(f"CR #{cr_id} routed to TD for final approval")
 
-        # Return success without modifying BOQ
+        # Return success with next approver info
         return jsonify({
             "success": True,
-            "message": "Purchase marked as complete successfully",
+            "message": "Purchase completed. Forwarded to Technical Director for final approval.",
             "cr_id": cr_id,
             "status": change_request.status,
-            "note": "BOQ remains unchanged - CR is tracked separately"
+            "next_approver": "Technical Director"
         }), 200
 
         # OLD CODE BELOW - COMMENTED OUT TO PRESERVE BOQ IMMUTABILITY

@@ -64,6 +64,26 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     return labels[status as keyof typeof labels] || status.toUpperCase();
   };
 
+  // Calculate costs: Total vs NEW materials only
+  const materialsData = changeRequest.sub_items_data || changeRequest.materials_data || [];
+
+  // Total cost of ALL materials (for display)
+  const totalMaterialsCost = materialsData.reduce((sum: number, mat: any) =>
+    sum + (mat.total_price || (mat.quantity * mat.unit_price) || 0), 0
+  );
+
+  // Cost of ONLY NEW materials (not from BOQ) - for budget impact
+  // A material is NEW if master_material_id is null/undefined (means it was added manually, not selected from BOQ)
+  const newMaterialsCost = materialsData.reduce((sum: number, mat: any) => {
+    const isNewMaterial = mat.master_material_id === null || mat.master_material_id === undefined;
+    return isNewMaterial ? sum + (mat.total_price || (mat.quantity * mat.unit_price) || 0) : sum;
+  }, 0);
+
+  // Check if there are ANY new materials at all
+  const hasNewMaterials = materialsData.some((mat: any) =>
+    mat.master_material_id === null || mat.master_material_id === undefined
+  );
+
   const isOverBudget = changeRequest.overhead_analysis?.balance_type === 'negative';
   const isHighValue = changeRequest.approval_required_from === 'technical_director';
 
@@ -320,11 +340,21 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {(changeRequest.sub_items_data || changeRequest.materials_data)?.map((material: any, idx: number) => (
-                        <tr key={idx} className="hover:bg-gray-50">
-                          <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-gray-900">
-                            {material.material_name}
-                          </td>
+                      {(changeRequest.sub_items_data || changeRequest.materials_data)?.map((material: any, idx: number) => {
+                        // A material is NEW only if master_material_id is null/undefined
+                        const isNewMaterial = material.master_material_id === null || material.master_material_id === undefined;
+                        return (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-gray-900">
+                              <div className="flex items-center gap-2">
+                                <span>{material.material_name}</span>
+                                {isNewMaterial && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
+                                    NEW
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                           <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600">
                             {material.sub_item_name && (
                               <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
@@ -349,13 +379,14 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             {formatCurrency(material.total_price)}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                       <tr className="bg-purple-50 font-bold">
                         <td colSpan={5} className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-purple-900 text-right">
                           Total Materials Cost:
                         </td>
                         <td className="px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-purple-900 text-right whitespace-nowrap">
-                          {formatCurrency(changeRequest.materials_total_cost)}
+                          {formatCurrency(totalMaterialsCost)}
                         </td>
                       </tr>
                     </tbody>
@@ -363,13 +394,22 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                 </div>
               </div>
 
-              {/* Compact Budget Analysis & Cost Breakdown */}
-              <div className="mb-4 sm:mb-6">
-                <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                  <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
-                  Budget & Cost Summary
-                </h3>
-                <div className={`rounded-lg p-3 border ${isOverBudget ? 'bg-red-50 border-red-300' : 'bg-green-50 border-green-300'}`}>
+              {/* Compact Budget Analysis & Cost Breakdown - Only show if there are NEW materials */}
+              {hasNewMaterials && (
+                <div className="mb-4 sm:mb-6">
+                  <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                    <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
+                    Budget & Cost Summary
+                  </h3>
+                  {newMaterialsCost < totalMaterialsCost && (
+                    <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-[10px] text-blue-800 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        <span><strong>Note:</strong> Budget impact is calculated only from new materials (not from BOQ). Existing BOQ materials don't affect the budget.</span>
+                      </p>
+                    </div>
+                  )}
+                  <div className={`rounded-lg p-3 border ${isOverBudget ? 'bg-red-50 border-red-300' : 'bg-green-50 border-green-300'}`}>
                   {/* Compact Budget Status */}
                   <div className={`flex items-center gap-2 mb-3 p-2 rounded ${isOverBudget ? 'bg-red-100' : 'bg-green-100'}`}>
                     {isOverBudget ? (
@@ -389,22 +429,31 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                     <div className="bg-white/50 rounded p-2">
                       <p className="text-gray-600 mb-0.5">Materials Cost</p>
-                      <p className="font-bold text-purple-900">{formatCurrency(changeRequest.materials_total_cost)}</p>
+                      <p className="font-bold text-purple-900">{formatCurrency(totalMaterialsCost)}</p>
+                      {newMaterialsCost < totalMaterialsCost && (
+                        <p className="text-[9px] text-gray-500">New: {formatCurrency(newMaterialsCost)}</p>
+                      )}
                     </div>
                     <div className="bg-white/50 rounded p-2">
                       <p className="text-gray-600 mb-0.5">Budget Used</p>
                       <p className="font-bold text-orange-600">
-                        {formatCurrency(changeRequest.overhead_analysis?.consumed_by_this_request || 0)}
+                        {formatCurrency(newMaterialsCost)}
                         {changeRequest.overhead_analysis?.original_allocated && (
                           <span className="text-[10px] text-gray-600 ml-1">
-                            ({((changeRequest.materials_total_cost / changeRequest.overhead_analysis.original_allocated) * 100).toFixed(1)}%)
+                            ({((newMaterialsCost / changeRequest.overhead_analysis.original_allocated) * 100).toFixed(1)}%)
                           </span>
                         )}
                       </p>
+                      <p className="text-[9px] text-gray-500 italic">From new materials</p>
                     </div>
                     <div className="bg-white/50 rounded p-2">
                       <p className="text-gray-600 mb-0.5">Items Count</p>
-                      <p className="font-bold text-gray-900">{changeRequest.materials_data?.length || 0} items</p>
+                      <p className="font-bold text-gray-900">{materialsData.length || 0} items</p>
+                      {materialsData.filter((m: any) => m.master_material_id === null || m.master_material_id === undefined).length > 0 && (
+                        <p className="text-[9px] text-gray-500">
+                          {materialsData.filter((m: any) => m.master_material_id === null || m.master_material_id === undefined).length} new
+                        </p>
+                      )}
                     </div>
                     <div className="bg-white/50 rounded p-2">
                       <p className="text-gray-600 mb-0.5">Status</p>
@@ -425,6 +474,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Vendor Details - Only show if TD approved vendor */}
               {changeRequest.vendor_approved_by_td_id && (
