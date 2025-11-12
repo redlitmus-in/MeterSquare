@@ -52,12 +52,24 @@ def download_internal_pdf():
         # Calculate all values (this populates selling_price, overhead_amount, etc.)
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
+        # Fetch sub_item images from database and add to items
+        for item in items:
+            if item.get('has_sub_items'):
+                sub_items = item.get('sub_items', [])
+                for sub_item in sub_items:
+                    sub_item_id = sub_item.get('sub_item_id')
+                    if sub_item_id:
+                        # Fetch from database
+                        db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
+                        if db_sub_item and db_sub_item.sub_item_image:
+                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+
         # Get project
         project = boq.project
         if not project:
             return jsonify({"success": False, "error": "Project not found"}), 404
 
-        # Generate PDF
+        # Generate PDF with images
         generator = ModernBOQPDFGenerator()
         pdf_data = generator.generate_internal_pdf(
             project, items, total_material_cost, total_labour_cost, grand_total, boq_json
@@ -190,12 +202,24 @@ def download_internal_excel():
         # Calculate all values
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
+        # Fetch sub_item images from database and add to items
+        for item in items:
+            if item.get('has_sub_items'):
+                sub_items = item.get('sub_items', [])
+                for sub_item in sub_items:
+                    sub_item_id = sub_item.get('sub_item_id')
+                    if sub_item_id:
+                        # Fetch from database
+                        db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
+                        if db_sub_item and db_sub_item.sub_item_image:
+                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+
         # Get project
         project = boq.project
         if not project:
             return jsonify({"success": False, "error": "Project not found"}), 404
 
-        # Generate Excel
+        # Generate Excel with images
         excel_data = generate_internal_excel(
             project, items, total_material_cost, total_labour_cost, grand_total, boq_json
         )

@@ -234,6 +234,23 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
                 ws[f'A{row}'].font = small_font
                 row += 1
 
+                # Show image count if sub_item has images
+                sub_item_images = sub_item.get('sub_item_image', [])
+                if sub_item_images and isinstance(sub_item_images, list) and len(sub_item_images) > 0:
+                    ws.merge_cells(f'A{row}:G{row}')
+                    image_count = len(sub_item_images)
+                    # Create hyperlink to the first image (or you can link to a specific URL)
+                    # Format: display text with hyperlink
+                    cell = ws[f'A{row}']
+                    cell.value = f"📷 Images: {image_count} image{'s' if image_count > 1 else ''} attached"
+                    cell.font = Font(size=9, color="2563EB", italic=True, underline='single')
+                    # Add hyperlink - assuming images are stored as URLs in the array
+                    if isinstance(sub_item_images[0], str):
+                        cell.hyperlink = sub_item_images[0]
+                    elif isinstance(sub_item_images[0], dict) and 'url' in sub_item_images[0]:
+                        cell.hyperlink = sub_item_images[0]['url']
+                    row += 1
+
                 row += 1
 
                 # Materials section

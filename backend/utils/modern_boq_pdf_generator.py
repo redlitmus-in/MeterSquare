@@ -93,6 +93,11 @@ class ModernBOQPDFGenerator:
                               leftMargin=30, rightMargin=30)
         elements = []
 
+        # Prefetch all images in parallel for performance
+        print(f"[INTERNAL_PDF] Starting image prefetch for items...")
+        self._prefetch_all_images(items)
+        print(f"[INTERNAL_PDF] Image prefetch completed. Cache has {len(self.image_cache)} images")
+
         # Header
         elements.extend(self._internal_header(project))
 
@@ -590,10 +595,11 @@ class ModernBOQPDFGenerator:
         material_header_rows = []
         labour_header_rows = []
 
-        # Header
+        # Header - Added Image column
         table_data.append([
             Paragraph('<b>S.No</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER)),
             Paragraph('<b>Item / Description</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=7)),
+            Paragraph('<b>Image</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER)),
             Paragraph('<b>Qty</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER)),
             Paragraph('<b>Unit</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=7, alignment=TA_CENTER)),
             Paragraph('<b>Unit Price</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=7, alignment=TA_RIGHT)),
@@ -644,6 +650,7 @@ class ModernBOQPDFGenerator:
                 table_data.append([
                     str(item_index),
                     Paragraph(prelim_description, ParagraphStyle('Prelim', parent=self.styles['Normal'], fontSize=7)),
+                    '',  # No image for preliminaries
                     '1',
                     'lot',
                     f'{preliminary_amount:,.2f}',
@@ -662,7 +669,7 @@ class ModernBOQPDFGenerator:
                     str(item_index),
                     Paragraph(f'<b>{item.get("item_name", "N/A")}</b>',
                              ParagraphStyle('Item', parent=self.styles['Normal'], fontSize=8)),
-                    '', '', '', ''
+                    '', '', '', '', ''  # Added one more empty cell for image column
                 ])
 
                 # Sub-items with breakdown
@@ -689,9 +696,51 @@ class ModernBOQPDFGenerator:
 
                     sub_item_header += f'<br/><font size="6">Qty: {qty} {sub_item.get("unit", "nos")} @ AED{rate:.2f}/{sub_item.get("unit", "nos")}</font>'
 
+                    # Get all images from sub_item_image JSONB array (from cache)
+                    image_cell = ''
+                    sub_item_images = sub_item.get('sub_item_image', [])
+                    print(f"[INTERNAL_PDF] Sub-item {sub_item.get('sub_item_name')}: Found {len(sub_item_images) if isinstance(sub_item_images, list) else 0} images")
+
+                    if sub_item_images and isinstance(sub_item_images, list) and len(sub_item_images) > 0:
+                        # Load all images from cache
+                        loaded_images = []
+                        for img_data_obj in sub_item_images:
+                            if isinstance(img_data_obj, dict):
+                                image_url = img_data_obj.get('url', '')
+                                if image_url:
+                                    # Normalize URL
+                                    if not image_url.startswith('http'):
+                                        image_url = f'https://wgddnoiakkoskbbkbygw.supabase.co/storage/v1/object/public/boq_file/{image_url}'
+
+                                    # Get from cache
+                                    img = self.image_cache.get(image_url)
+                                    if img:
+                                        loaded_images.append(img)
+                                        print(f"[INTERNAL_PDF] ✓ Loaded image from cache: {image_url[:50]}...")
+                                    else:
+                                        print(f"[INTERNAL_PDF] ✗ Image not in cache: {image_url[:50]}...")
+
+                        # If we loaded multiple images, create a mini table to display them
+                        if len(loaded_images) > 0:
+                            if len(loaded_images) == 1:
+                                image_cell = loaded_images[0]
+                            else:
+                                # Create a vertical stack of images
+                                img_rows = [[img] for img in loaded_images]
+                                img_table = Table(img_rows, colWidths=[0.5*inch])
+                                img_table.setStyle(TableStyle([
+                                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                                    ('TOPPADDING', (0,0), (-1,-1), 2),
+                                    ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                                ]))
+                                image_cell = img_table
+                            print(f"[INTERNAL_PDF] ✓ Added {len(loaded_images)} image(s) to sub-item")
+
                     table_data.append([
                         f'{item_index}.{sub_idx}',
                         Paragraph(sub_item_header, ParagraphStyle('Sub', parent=self.styles['Normal'], fontSize=7)),
+                        image_cell,  # Image column
                         '', '',
                         Paragraph('<b>Client Amount:</b>', ParagraphStyle('ClientLabel', parent=self.styles['Normal'], fontSize=6, alignment=TA_RIGHT)),
                         Paragraph(f'<b>{client_amount:,.2f}</b>', ParagraphStyle('ClientAmt', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold', alignment=TA_RIGHT, textColor=colors.HexColor('#16a34a')))
@@ -705,7 +754,7 @@ class ModernBOQPDFGenerator:
                         table_data.append([
                             '',
                             Paragraph('<b>+ RAW MATERIALS</b>', ParagraphStyle('MatHeader', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold', textColor=colors.black)),
-                            '', '', '', ''
+                            '', '', '', '', ''  # Added one more empty cell for image column
                         ])
 
                         materials_cost = 0
@@ -716,6 +765,7 @@ class ModernBOQPDFGenerator:
                                 '',
                                 Paragraph(f'  • {mat.get("material_name", "N/A")}',
                                          ParagraphStyle('Mat', parent=self.styles['Normal'], fontSize=7)),
+                                '',  # Empty image column
                                 f'{mat.get("quantity", 0):.0f}',
                                 mat.get('unit', 'nos'),
                                 f'{mat.get("unit_price", 0):.2f}',
@@ -726,7 +776,7 @@ class ModernBOQPDFGenerator:
                         table_data.append([
                             '',
                             Paragraph('<b>Total Materials:</b>', ParagraphStyle('MatTotal', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold')),
-                            '', '', '',
+                            '', '', '', '',
                             Paragraph(f'<b>{materials_cost:,.2f}</b>', ParagraphStyle('MatTotalVal', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold'))
                         ])
 
@@ -738,7 +788,7 @@ class ModernBOQPDFGenerator:
                         table_data.append([
                             '',
                             Paragraph('<b>+ LABOUR</b>', ParagraphStyle('LabHeader', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold', textColor=colors.black)),
-                            '', '', '', ''
+                            '', '', '', '', ''  # Added one more empty cell for image column
                         ])
 
                         labour_cost = 0
@@ -749,6 +799,7 @@ class ModernBOQPDFGenerator:
                                 '',
                                 Paragraph(f'  • {lab.get("labour_role", "N/A")} (Labour)',
                                          ParagraphStyle('Lab', parent=self.styles['Normal'], fontSize=7)),
+                                '',  # Empty image column
                                 f'{lab.get("hours", 0):.0f}',
                                 'Hrs',
                                 f'{lab.get("rate_per_hour", 0):.2f}',
@@ -759,7 +810,7 @@ class ModernBOQPDFGenerator:
                         table_data.append([
                             '',
                             Paragraph('<b>Total Labour:</b>', ParagraphStyle('LabTotal', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold')),
-                            '', '', '',
+                            '', '', '', '',
                             Paragraph(f'<b>{labour_cost:,.2f}</b>', ParagraphStyle('LabTotalVal', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold'))
                         ])
 
@@ -782,7 +833,7 @@ class ModernBOQPDFGenerator:
                     internal_cost = base_cost + misc_amt + overhead_amt + transport_amt
 
                     # Add blank row for spacing
-                    table_data.append(['', '', '', '', '', ''])
+                    table_data.append(['', '', '', '', '', '', ''])
 
                     # SEPARATE ROWS for each cost component
                     # Misc row
@@ -790,7 +841,7 @@ class ModernBOQPDFGenerator:
                         '',
                         Paragraph(f'<i>Misc ({misc_pct:.1f}%)</i>',
                                  ParagraphStyle('Calc', parent=self.styles['Normal'], fontSize=7, textColor=colors.HexColor('#666666'))),
-                        '', '', '',
+                        '', '', '', '',
                         f'{misc_amt:,.2f}'
                     ])
 
@@ -799,7 +850,7 @@ class ModernBOQPDFGenerator:
                         '',
                         Paragraph(f'<i>O&P ({overhead_pct:.1f}%)</i>',
                                  ParagraphStyle('Calc', parent=self.styles['Normal'], fontSize=7, textColor=colors.HexColor('#666666'))),
-                        '', '', '',
+                        '', '', '', '',
                         f'{overhead_amt:,.2f}'
                     ])
 
@@ -809,7 +860,7 @@ class ModernBOQPDFGenerator:
                             '',
                             Paragraph(f'<i>Transport ({transport_pct:.1f}%)</i>',
                                      ParagraphStyle('Calc', parent=self.styles['Normal'], fontSize=7, textColor=colors.HexColor('#666666'))),
-                            '', '', '',
+                            '', '', '', '',
                             f'{transport_amt:,.2f}'
                         ])
 
@@ -818,19 +869,19 @@ class ModernBOQPDFGenerator:
                         '',
                         Paragraph('<b>Total Internal Cost</b>',
                                  ParagraphStyle('TotalCost', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold')),
-                        '', '', '',
+                        '', '', '', '',
                         Paragraph(f'<b>{internal_cost:,.2f}</b>', ParagraphStyle('TotalCostVal', parent=self.styles['Normal'], fontSize=7, fontName='Helvetica-Bold'))
                     ])
 
                     # Add blank row
-                    table_data.append(['', '', '', '', '', ''])
+                    table_data.append(['', '', '', '', '', '', ''])
 
                     # Planned Profit row
                     table_data.append([
                         '',
                         Paragraph('<i>Planned Profit:</i>',
                                  ParagraphStyle('Profit', parent=self.styles['Normal'], fontSize=7, textColor=colors.HexColor('#00AA00'))),
-                        '', '', '',
+                        '', '', '', '',
                         Paragraph(f'<font color="#00AA00">{overhead_amt:,.2f}</font>',
                                  ParagraphStyle('ProfitVal', parent=self.styles['Normal'], fontSize=7))
                     ])
@@ -843,15 +894,15 @@ class ModernBOQPDFGenerator:
                         '',
                         Paragraph('<i>Negotiable Margins:</i>',
                                  ParagraphStyle('ActualProfit', parent=self.styles['Normal'], fontSize=7, textColor=colors.HexColor(profit_color))),
-                        '', '', '',
+                        '', '', '', '',
                         Paragraph(f'<font color="{profit_color}">{negotiable_margin:,.2f}</font>',
                                  ParagraphStyle('ActualProfitVal', parent=self.styles['Normal'], fontSize=7))
                     ])
 
             item_index += 1
 
-        # Create table
-        main_table = Table(table_data, colWidths=[0.4*inch, 3*inch, 0.5*inch, 0.5*inch, 0.9*inch, 1.2*inch])
+        # Create table with Image column (7 columns now: S.No, Item/Description, Image, Qty, Unit, Unit Price, Total)
+        main_table = Table(table_data, colWidths=[0.4*inch, 2.5*inch, 0.5*inch, 0.5*inch, 0.5*inch, 0.9*inch, 1.2*inch])
 
         # Build table style with dynamic background colors
         table_styles = [
