@@ -86,6 +86,30 @@ ROLE_HIERARCHY = {
         'color': '#f97316',
         'icon': 'ShoppingCart'
     },
+    'inventory': {
+    'level': 3,
+    'tier': 'Operations',
+    'approval_limit': 10000,
+    'can_approve': ['material_issue', 'material_return'],
+    'can_initiate': ['store_access', 'material_request', 'stock_update'],
+    'permissions': [
+        'create_purchase_request',
+        'view_request_materials',
+        'material_management',
+        'view_stored_material',
+        'issue_material',
+        'receive_material',
+        'update_stock',
+        'view_stock_history'
+    ],
+    'description': (
+        'Inventory Department - Responsible for managing material inflow and outflow, '
+        'tracking stock levels, issuing materials to departments, receiving returned materials, '
+        'and maintaining accurate inventory records.'
+    ),
+   'color': '#ea580c',
+    'icon': 'HardHat'
+},
     'siteSupervisor': {
         'level': 3,
         'tier': 'Operations',
@@ -137,6 +161,26 @@ ROLE_HIERARCHY = {
             'view_own_change_requests'
         ],
         'description': 'Project Manager - Project coordination and approvals',
+        'color': '#059669',
+        'icon': 'UserCheck'
+    },
+    'mep': {
+        'level': 3,
+        'tier': 'Management',
+        'approval_limit': 50000,
+        'can_approve': ['purchase_request', 'project_task', 'material_request'],
+        'can_initiate': ['change_request'],
+        'permissions': [
+            'manage_projects',
+            'approve_mid_range',
+            'team_coordination',
+            'pm_flag_approval',
+            'qty_spec_approvals',
+            'view_cost_analysis',
+            'create_change_request',
+            'view_own_change_requests'
+        ],
+        'description': 'MEP Manager - Project coordination and approvals',
         'color': '#059669',
         'icon': 'UserCheck'
     },
@@ -270,6 +314,7 @@ ROLE_DEPARTMENTS = {
     'procurement': 'Operations',
     'siteSupervisor': 'Operations',
     'mepSupervisor': 'Operations',
+    'inventory' : 'Operations',
     'projectManager': 'Management',
     'design': 'Technical',
     'estimation': 'Technical',
