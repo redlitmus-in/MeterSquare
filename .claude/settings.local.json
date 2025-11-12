@@ -12,7 +12,8 @@
       "Bash(awk:*)",
       "Bash(cat:*)",
       "Bash(PGPASSWORD=postgres psql:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(\"/c/Users/admin/AppData/Local/Programs/Python/Python312/python\" app.py)"
     ],
     "deny": [],
     "ask": []

@@ -154,6 +154,9 @@ interface MasterMaterial {
   material_id: number;
   material_name: string;
   description?: string;
+  brand?: string;
+  size?: string;
+  specification?: string;
   current_market_price: number;
   default_unit: string;
 }
@@ -659,6 +662,15 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               misc_percentage: subItem.misc_percentage || 10,
               overhead_profit_percentage: subItem.overhead_profit_percentage || 25,
               transport_percentage: subItem.transport_percentage || 5,
+              // FIX: Include sub_item_id and images from the API response
+              sub_item_id: subItem.sub_item_id || subItem.master_sub_item_id,
+              images: [], // Initialize empty array for NEW images to be uploaded
+              imageUrls: (subItem.sub_item_image || []).map((img: any) => img.url),
+              imageData: (subItem.sub_item_image || []).map((img: any) => ({
+                url: img.url,
+                filename: img.filename,
+                isExisting: true
+              })),
               materials: (subItem.materials || []).map((mat: any, matIndex: number) => ({
                 id: `mat-si-${index}-${siIndex}-${matIndex}-${Date.now()}`,
                 material_name: mat.material_name,
@@ -666,6 +678,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 unit: mat.unit || 'nos',
                 unit_price: mat.unit_price || 0,
                 description: mat.description || '',
+                brand: mat.brand || '',
+                size: mat.size || '',
+                specification: mat.specification || '',
                 vat_percentage: mat.vat_percentage || 0,
                 master_material_id: mat.master_material_id,
                 is_from_master: !!mat.master_material_id,
@@ -691,6 +706,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               unit: mat.unit || 'nos',
               unit_price: mat.unit_price || 0,
               description: mat.description || '',
+              brand: mat.brand || '',
+              size: mat.size || '',
+              specification: mat.specification || '',
               vat_percentage: mat.vat_percentage || 0,
               master_material_id: mat.master_material_id,
               is_from_master: !!mat.master_material_id,
@@ -854,7 +872,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             quantity: mat.quantity || 1,
             unit: mat.unit || 'nos',
             unit_price: mat.current_market_price || 0,
-            description: '',
+            description: mat.description || '',
+            brand: mat.brand || '',
+            size: mat.size || '',
+            specification: mat.specification || '',
             master_material_id: mat.material_id,
             is_from_master: true,
             is_new: false
@@ -1063,6 +1084,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       quantity: 1,
       unit: 'nos',
       unit_price: 0,
+      description: '',
+      brand: '',
+      size: '',
+      specification: '',
       vat_percentage: 0,
       is_new: true
     };
@@ -1123,6 +1148,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       quantity: 1,
       unit: 'nos',
       unit_price: 0,
+      description: '',
+      brand: '',
+      size: '',
+      specification: '',
       vat_percentage: 0,
       is_new: true
     };
@@ -1144,6 +1173,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               ...mat,
               material_name: masterMaterial.material_name,
               description: masterMaterial.description,
+              brand: masterMaterial.brand || '',
+              size: masterMaterial.size || '',
+              specification: masterMaterial.specification || '',
               unit: masterMaterial.default_unit,
               unit_price: masterMaterial.current_market_price,
               master_material_id: masterMaterial.material_id,
@@ -1254,6 +1286,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const mapSubItemToPayload = (subItem: SubItemForm) => {
     const subItemCalc = calculateSubItemCost(subItem);
     return {
+      // FIX: Include sub_item_id to preserve IDs during updates
+      ...(subItem.sub_item_id && { sub_item_id: subItem.sub_item_id }),
+      ...(subItem.master_sub_item_id && { master_sub_item_id: subItem.master_sub_item_id }),
+
       sub_item_name: subItem.sub_item_name,
       scope: subItem.scope,
       size: subItem.size || null,
@@ -1290,6 +1326,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           unit_price: material.unit_price,
           total_price: materialTotal,
           description: material.description || null,
+          brand: material.brand || null,
+          size: material.size || null,
+          specification: material.specification || null,
           vat_percentage: material.vat_percentage || 0,
           vat_amount: materialVAT,
           master_material_id: material.master_material_id || null
@@ -1763,6 +1802,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   unit_price: material.unit_price,
                   total_price: materialTotal,
                   description: material.description || null,
+                  brand: material.brand || null,
+                  size: material.size || null,
+                  specification: material.specification || null,
                   vat_percentage: material.vat_percentage || 0,
                   vat_amount: materialVAT,
                   master_material_id: material.master_material_id || null
@@ -1788,8 +1830,67 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
         if (result.success) {
           toast.success(result.message || 'BOQ revision created successfully');
+
+          // FIX: Upload new images if any exist in sub-items (for revision mode)
+          const hasNewImages = items.some(item =>
+            item.sub_items && item.sub_items.some(si => si.images && si.images.length > 0)
+          );
+
+          if (hasNewImages && result.boq_id) {
+            toast.loading('Uploading new images...', { id: 'upload-images' });
+
+            // Re-fetch the new revision BOQ to get the latest sub_item_ids
+            const boqDetailsResult = await estimatorService.getBOQById(result.boq_id);
+
+            if (boqDetailsResult.success && boqDetailsResult.data?.existing_purchase?.items) {
+              const createdItems = boqDetailsResult.data.existing_purchase.items;
+              let totalUploaded = 0;
+              let totalFailed = 0;
+
+              // Loop through form items to find sub-items with NEW images
+              for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+                const formItem = items[itemIndex];
+                const createdItem = createdItems[itemIndex];
+
+                if (formItem.sub_items && formItem.sub_items.length > 0 && createdItem?.sub_items) {
+                  for (let subIndex = 0; subIndex < formItem.sub_items.length; subIndex++) {
+                    const formSubItem = formItem.sub_items[subIndex];
+                    const createdSubItem = createdItem.sub_items[subIndex];
+
+                    // Check if this sub-item has NEW images to upload
+                    if (formSubItem.images && formSubItem.images.length > 0 && createdSubItem?.sub_item_id) {
+                      try {
+                        const uploadResult = await estimatorService.uploadSubItemImages(
+                          createdSubItem.sub_item_id,
+                          formSubItem.images
+                        );
+
+                        if (uploadResult.success) {
+                          totalUploaded += formSubItem.images.length;
+                        } else {
+                          totalFailed += formSubItem.images.length;
+                          toast.error(`Failed to upload images for ${formSubItem.sub_item_name}`);
+                        }
+                      } catch (error) {
+                        totalFailed += formSubItem.images?.length || 0;
+                      }
+                    }
+                  }
+                }
+              }
+
+              if (totalUploaded > 0) {
+                toast.success(`${totalUploaded} new image(s) uploaded successfully`, { id: 'upload-images' });
+              } else if (totalFailed > 0) {
+                toast.error(`Failed to upload ${totalFailed} image(s)`, { id: 'upload-images' });
+              } else {
+                toast.dismiss('upload-images');
+              }
+            }
+          }
+
           if (onSubmit) {
-            onSubmit(existingBoqData.boq_id);
+            onSubmit(result.boq_id || existingBoqData.boq_id);
           }
           onClose();
         } else {
@@ -1884,6 +1985,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 unit_price: material.unit_price,
                 total_price: materialTotal,
                 description: material.description || null,
+                brand: material.brand || null,
+                size: material.size || null,
+                specification: material.specification || null,
                 vat_percentage: material.vat_percentage || 0,
                 vat_amount: materialVAT,
                 master_material_id: material.master_material_id || null
@@ -1972,12 +2076,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           ? `${API_URL}/update_internal_boq/${existingBoqData.boq_id}`
           : `${API_URL}/boq/update_boq/${existingBoqData.boq_id}`;
 
-        console.log('=== BOQCreationForm Edit Mode ===');
-        console.log('BOQ Status:', existingBoqData.status, '(lowercase:', boqStatus, ')');
-        console.log('Is Internal Revision Mode:', isInternalRevisionMode);
-        console.log('Use Internal Revision Endpoint:', useInternalRevisionEndpoint);
-        console.log('API Endpoint:', apiEndpoint);
-
         const response = await fetch(apiEndpoint, {
           method: 'PUT',
           headers: {
@@ -1991,6 +2089,65 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
         if (response.ok && result.success) {
           toast.success(result.message || 'BOQ updated successfully');
+
+          // FIX: Upload new images if any exist in sub-items
+          const hasNewImages = items.some(item =>
+            item.sub_items && item.sub_items.some(si => si.images && si.images.length > 0)
+          );
+
+          if (hasNewImages) {
+            toast.loading('Uploading new images...', { id: 'upload-images' });
+
+            // Re-fetch BOQ to get the latest sub_item_ids
+            const boqDetailsResult = await estimatorService.getBOQById(existingBoqData.boq_id);
+
+            if (boqDetailsResult.success && boqDetailsResult.data?.existing_purchase?.items) {
+              const updatedItems = boqDetailsResult.data.existing_purchase.items;
+              let totalUploaded = 0;
+              let totalFailed = 0;
+
+              // Loop through form items to find sub-items with NEW images
+              for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+                const formItem = items[itemIndex];
+                const updatedItem = updatedItems[itemIndex];
+
+                if (formItem.sub_items && formItem.sub_items.length > 0 && updatedItem?.sub_items) {
+                  for (let subIndex = 0; subIndex < formItem.sub_items.length; subIndex++) {
+                    const formSubItem = formItem.sub_items[subIndex];
+                    const updatedSubItem = updatedItem.sub_items[subIndex];
+
+                    // Check if this sub-item has NEW images to upload (not existing ones)
+                    if (formSubItem.images && formSubItem.images.length > 0 && updatedSubItem?.sub_item_id) {
+                      try {
+                        const uploadResult = await estimatorService.uploadSubItemImages(
+                          updatedSubItem.sub_item_id,
+                          formSubItem.images
+                        );
+
+                        if (uploadResult.success) {
+                          totalUploaded += formSubItem.images.length;
+                        } else {
+                          totalFailed += formSubItem.images.length;
+                          toast.error(`Failed to upload images for ${formSubItem.sub_item_name}`);
+                        }
+                      } catch (error) {
+                        totalFailed += formSubItem.images?.length || 0;
+                      }
+                    }
+                  }
+                }
+              }
+
+              if (totalUploaded > 0) {
+                toast.success(`${totalUploaded} new image(s) uploaded successfully`, { id: 'upload-images' });
+              } else if (totalFailed > 0) {
+                toast.error(`Failed to upload ${totalFailed} image(s)`, { id: 'upload-images' });
+              } else {
+                toast.dismiss('upload-images');
+              }
+            }
+          }
+
           if (onSubmit) {
             onSubmit(existingBoqData.boq_id);
           }
@@ -2142,6 +2299,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                     unit_price: material.unit_price,
                     total_price: materialTotal,
                     description: material.description || null,
+                    brand: material.brand || null,
+                    size: material.size || null,
+                    specification: material.specification || null,
                     vat_percentage: material.vat_percentage || 0,
                     vat_amount: materialVAT,
                     master_material_id: material.master_material_id || null
@@ -2166,6 +2326,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 unit_price: material.unit_price,
                 total_price: material.quantity * material.unit_price,
                 description: material.description || null,
+                brand: material.brand || null,
+                size: material.size || null,
+                specification: material.specification || null,
                 vat_percentage: material.vat_percentage || 0,
                 master_material_id: material.master_material_id || null
               })) : [],
@@ -3144,11 +3307,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
                                                   // Check if this is an existing image from backend
                                                   const imageInfo = subItem.imageData?.[imgIndex];
+                                                  // FIX: Use sub_item_id (from edit mode) OR master_sub_item_id (from create mode)
+                                                  const subItemId = subItem.sub_item_id || subItem.master_sub_item_id;
 
-                                                  if (imageInfo && imageInfo.isExisting && imageInfo.filename && subItem.master_sub_item_id) {
+                                                  if (imageInfo && imageInfo.isExisting && imageInfo.filename && subItemId) {
                                                     // Call DELETE API for existing images
                                                     try {
-                                                      const response = await estimatorService.deleteSubItemImage(subItem.master_sub_item_id, imageInfo.filename);
+                                                      const response = await estimatorService.deleteSubItemImage(subItemId, imageInfo.filename);
                                                       if (response.success) {
                                                         toast.success('Image deleted from database');
                                                       } else {
@@ -3356,6 +3521,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                           onClick={() => {
                                                             // Update sub-item material with master data
                                                             updateSubItemMaterial(item.id, subItem.id, material.id, 'material_name', masterMaterial.material_name);
+                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'description', masterMaterial.description || '');
+                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'brand', masterMaterial.brand || '');
+                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'size', masterMaterial.size || '');
+                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'specification', masterMaterial.specification || '');
                                                             updateSubItemMaterial(item.id, subItem.id, material.id, 'unit', masterMaterial.default_unit);
                                                             updateSubItemMaterial(item.id, subItem.id, material.id, 'unit_price', masterMaterial.current_market_price);
                                                             updateSubItemMaterial(item.id, subItem.id, material.id, 'master_material_id', masterMaterial.material_id);

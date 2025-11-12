@@ -1392,16 +1392,57 @@ def get_boq(boq_id):
                 del item["purchase_tracking"]
 
         # Fetch sub_item_image from database for all items (both existing and new)
-        from models.boq import MasterSubItem
+        # Also track if we need to update the database with recovered IDs
+        from models.boq import MasterSubItem, MasterItem
+        ids_were_recovered = False
+
         for item in existing_purchase_items + new_add_purchase_items:
             sub_items = item.get("sub_items", [])
             for sub_item in sub_items:
                 sub_item_id = sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")
+                master_sub_item = None
+
                 if sub_item_id:
-                    # Query database for sub_item_image
+                    # Query database for sub_item_image using ID
                     master_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id).first()
-                    if master_sub_item and master_sub_item.sub_item_image:
-                        sub_item["sub_item_image"] = master_sub_item.sub_item_image
+                else:
+                    # Fallback: Try to find by item_name and sub_item_name (for BOQs that lost their IDs)
+                    item_name = item.get("item_name")
+                    sub_item_name = sub_item.get("sub_item_name")
+
+                    if item_name and sub_item_name:
+                        # First find the master item
+                        master_item = MasterItem.query.filter_by(item_name=item_name).first()
+                        if master_item:
+                            # Then find the sub-item by item_id and sub_item_name
+                            master_sub_item = MasterSubItem.query.filter_by(
+                                item_id=master_item.item_id,
+                                sub_item_name=sub_item_name
+                            ).first()
+
+                            # If found, add the ID back to the JSON for future use
+                            if master_sub_item:
+                                sub_item["sub_item_id"] = master_sub_item.sub_item_id
+                                sub_item["master_sub_item_id"] = master_sub_item.sub_item_id
+                                ids_were_recovered = True
+                                log.info(f"Recovered sub_item_id {master_sub_item.sub_item_id} for '{sub_item_name}' in item '{item_name}'")
+
+                # Add images if found
+                if master_sub_item and master_sub_item.sub_item_image:
+                    sub_item["sub_item_image"] = master_sub_item.sub_item_image
+
+        # If we recovered any IDs, persist them back to the database
+        if ids_were_recovered:
+            try:
+                log.info(f"Persisting recovered sub_item_ids back to BOQDetails for BOQ {boq_id}")
+                # Update the existing_purchase items in boq_details with recovered IDs
+                boq_details.boq_details["items"] = existing_purchase_items + new_add_purchase_items
+                db.session.add(boq_details)
+                db.session.commit()
+                log.info(f"Successfully persisted recovered sub_item_ids for BOQ {boq_id}")
+            except Exception as e:
+                log.error(f"Failed to persist recovered sub_item_ids for BOQ {boq_id}: {str(e)}")
+                db.session.rollback()
 
         # Calculate combined totals (with filtered new purchases)
         total_material_cost = existing_material_cost + filtered_new_material_cost
@@ -1863,7 +1904,7 @@ def update_boq(boq_id):
                     total_selling_price = total_after_discount + total_vat_amount
 
                     # Process sub_items
-                    for sub_item_data in item_data.get("sub_items", []):
+                    for idx, sub_item_data in enumerate(item_data.get("sub_items", [])):
                         sub_item_quantity = clean_numeric_value(sub_item_data.get("quantity", 1.0))
                         sub_item_unit = sub_item_data.get("unit", "nos")
                         sub_item_rate = clean_numeric_value(sub_item_data.get("rate", 0.0))
@@ -1923,6 +1964,12 @@ def update_boq(boq_id):
                             "materials": sub_item_materials,
                             "labour": sub_item_labour
                         }
+
+                        # PRESERVE sub_item_id if it exists in the input data
+                        if "sub_item_id" in sub_item_data:
+                            sub_item_json["sub_item_id"] = sub_item_data["sub_item_id"]
+                        if "master_sub_item_id" in sub_item_data:
+                            sub_item_json["master_sub_item_id"] = sub_item_data["master_sub_item_id"]
 
                         sub_items_list.append(sub_item_json)
                         materials_count += len(sub_item_materials)
@@ -2007,6 +2054,16 @@ def update_boq(boq_id):
                             item_data.get("sub_items"),
                             created_by
                         )
+
+                        # Assign master sub-item IDs back to the sub_items in item_json
+                        # This ensures sub_item_id is preserved for future edits
+                        for idx, sub_item_id in enumerate(master_sub_item_ids):
+                            if idx < len(item_json.get("sub_items", [])):
+                                # Only assign if not already present (preserve existing IDs)
+                                if "sub_item_id" not in item_json["sub_items"][idx]:
+                                    item_json["sub_items"][idx]["sub_item_id"] = sub_item_id
+                                if "master_sub_item_id" not in item_json["sub_items"][idx]:
+                                    item_json["sub_items"][idx]["master_sub_item_id"] = sub_item_id
 
                     boq_items.append(item_json)
                     total_boq_cost += total_selling_price
@@ -2523,7 +2580,7 @@ def revision_boq(boq_id):
                     total_selling_price = total_after_discount + total_vat_amount
 
                     # Process sub_items
-                    for sub_item_data in item_data.get("sub_items", []):
+                    for idx, sub_item_data in enumerate(item_data.get("sub_items", [])):
                         sub_item_quantity = clean_numeric_value(sub_item_data.get("quantity", 1.0))
                         sub_item_unit = sub_item_data.get("unit", "nos")
                         sub_item_rate = clean_numeric_value(sub_item_data.get("rate", 0.0))
@@ -2583,6 +2640,12 @@ def revision_boq(boq_id):
                             "materials": sub_item_materials,
                             "labour": sub_item_labour
                         }
+
+                        # PRESERVE sub_item_id if it exists in the input data
+                        if "sub_item_id" in sub_item_data:
+                            sub_item_json["sub_item_id"] = sub_item_data["sub_item_id"]
+                        if "master_sub_item_id" in sub_item_data:
+                            sub_item_json["master_sub_item_id"] = sub_item_data["master_sub_item_id"]
 
                         sub_items_list.append(sub_item_json)
                         materials_count += len(sub_item_materials)
