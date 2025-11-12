@@ -713,8 +713,9 @@ def request_project_completion(project_id):
 
         boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).first()
 
-        # Get Project Manager details
-        pm_user = User.query.filter_by(user_id=project.user_id).first()
+        # Get Project Manager details (user_id is now JSONB array)
+        pm_ids = project.user_id if isinstance(project.user_id, list) else ([project.user_id] if project.user_id else [])
+        pm_user = User.query.filter_by(user_id=pm_ids[0]).first() if pm_ids else None
         pm_name = pm_user.full_name if pm_user else "Project Manager"
         pm_email = pm_user.email if pm_user else None
 

@@ -43,8 +43,8 @@ def create_pm():
             for proj_id in project_ids:
                 project = Project.query.filter_by(project_id=proj_id, is_deleted=False).first()
                 if project:
-                    # Assign this PM to the project (one PM per project, but PM can have multiple projects)
-                    project.user_id = new_user_id
+                    # Assign this PM to the project (convert to JSONB array format)
+                    project.user_id = [new_user_id] if new_user_id else None
                     project.last_modified_at = datetime.utcnow()
                     db.session.add(project)
                     assigned_count += 1
@@ -85,19 +85,12 @@ def get_all_pm_boqs():
                 Project.is_deleted == False
             ).all()
         else:
-            # Query projects where user_id JSON array contains the PM's ID
-            # Use raw SQL to properly cast to jsonb
-            from sqlalchemy import text
-            import json
-            result = db.session.execute(
-                text("""
-                    SELECT project_id FROM project
-                    WHERE user_id::jsonb @> CAST(:pm_id AS jsonb)
-                    AND is_deleted = false
-                """),
-                {"pm_id": json.dumps([user_id])}
-            )
-            assigned_projects = [(row.project_id,) for row in result]
+            # Query projects where user_id JSONB array contains the PM's ID
+            # Use JSONB contains operator directly
+            assigned_projects = db.session.query(Project.project_id).filter(
+                Project.user_id.contains([user_id]),
+                Project.is_deleted == False
+            ).all()
         # Extract project IDs
         project_ids = [p.project_id for p in assigned_projects]
 
@@ -205,11 +198,14 @@ def get_all_pm_boqs():
             pm_status = None
             pm_name = current_user.get('full_name')
             if boq.project and boq.project.user_id:
-                pm_user = User.query.filter_by(user_id=boq.project.user_id).first()
-                if pm_user:
-                    # Get user_status from database, fallback to is_active if user_status is null
-                    pm_status = pm_user.user_status if pm_user.user_status else ("Active" if pm_user.is_active else "Inactive")
-                    pm_name = pm_user.full_name
+                # project.user_id is now a JSONB array, get first PM (primary PM)
+                pm_ids = boq.project.user_id if isinstance(boq.project.user_id, list) else [boq.project.user_id]
+                if pm_ids and len(pm_ids) > 0:
+                    pm_user = User.query.filter_by(user_id=pm_ids[0]).first()
+                    if pm_user:
+                        # Get user_status from database, fallback to is_active if user_status is null
+                        pm_status = pm_user.user_status if pm_user.user_status else ("Active" if pm_user.is_active else "Inactive")
+                        pm_name = pm_user.full_name
 
             # Build complete project details
             project_details = None
@@ -333,19 +329,11 @@ def get_all_pm():
             is_online = pm.user_status == 'online'
             log.info(f"PM {pm.full_name}: user_status={pm.user_status}, is_online={is_online}")
 
-            # Fetch all projects assigned to this PM (user_id is now JSON array)
-            # Use raw SQL to query JSON array contains
-            from sqlalchemy import text
-            import json
-            result = db.session.execute(
-                text("""
-                    SELECT * FROM project
-                    WHERE user_id::jsonb @> CAST(:pm_id AS jsonb)
-                """),
-                {"pm_id": json.dumps([pm.user_id])}
-            )
-            project_ids = [row.project_id for row in result]
-            projects = Project.query.filter(Project.project_id.in_(project_ids)).all() if project_ids else []
+            # Fetch all projects assigned to this PM (user_id is now JSONB array)
+            # Use JSONB contains operator directly
+            projects = Project.query.filter(
+                Project.user_id.contains([pm.user_id])
+            ).all()
 
             if projects and len(projects) > 0:
                 # Add each project under assigned list
@@ -449,7 +437,8 @@ def update_pm(user_id):
             for project_id in data["assigned_projects"]:
                 project = Project.query.filter_by(project_id=project_id).first()
                 if project:
-                    project.user_id = user_id
+                    # Convert to JSONB array format
+                    project.user_id = [user_id] if user_id else None
 
         db.session.commit()
 

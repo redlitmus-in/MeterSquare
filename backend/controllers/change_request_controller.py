@@ -486,8 +486,9 @@ def send_for_review(cr_id):
             assigned_pm_id = None
             project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
             if project:
-                # The project manager is stored in the user_id field
-                assigned_pm_id = project.user_id
+                # The project manager is stored in the user_id field (now JSONB array)
+                pm_ids = project.user_id if isinstance(project.user_id, list) else ([project.user_id] if project.user_id else [])
+                assigned_pm_id = pm_ids[0] if pm_ids else None
 
             if not assigned_pm_id:
                 log.error(f"No assigned PM found for Project ID {change_request.project_id}")
@@ -576,8 +577,12 @@ def send_for_review(cr_id):
             # Admin sends to assigned PM
             next_role = CR_CONFIG.ROLE_PROJECT_MANAGER
             project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
-            # The project manager is stored in the user_id field
-            assigned_pm_id = project.user_id if project else None
+            # The project manager is stored in the user_id field (now JSONB array)
+            if project and project.user_id:
+                pm_ids = project.user_id if isinstance(project.user_id, list) else [project.user_id]
+                assigned_pm_id = pm_ids[0] if pm_ids else None
+            else:
+                assigned_pm_id = None
 
             if not assigned_pm_id:
                 return jsonify({"error": "No Project Manager assigned for this project"}), 400

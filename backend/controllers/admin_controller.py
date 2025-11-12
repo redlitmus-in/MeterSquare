@@ -499,8 +499,8 @@ def assign_project_manager(project_id):
         if pm_role and pm_role.role not in ['projectManager', 'technicalDirector', 'admin']:
             return jsonify({"error": "User is not a Project Manager, Technical Director, or Admin"}), 400
 
-        # Assign PM
-        project.user_id = pm_user_id
+        # Assign PM (convert to JSONB array format)
+        project.user_id = [pm_user_id] if pm_user_id else None
         project.last_modified_at = datetime.utcnow()
         project.last_modified_by = current_user.get('email')
         db.session.commit()
