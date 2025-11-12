@@ -133,6 +133,12 @@ interface Buyer {
 const MyProjects: React.FC = () => {
   const { user } = useAuthStore();
 
+  // ROLE-AWARE: Determine page title based on user role
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+  const isMEP = userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+  const pageTitle = isMEP ? 'My Projects (MEP)' : 'My Projects';
+
   // Modal states - declared first to use in auto-refresh condition
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [showEditBOQModal, setShowEditBOQModal] = useState(false);
@@ -648,7 +654,9 @@ const MyProjects: React.FC = () => {
                 <div className="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
                   <BuildingOfficeIcon className="w-6 h-6 text-blue-600" />
                 </div>
-                <h1 className="text-2xl font-bold text-[#243d8a]">My Projects</h1>
+                <h1 className={`text-2xl font-bold ${isMEP ? 'text-cyan-700' : 'text-[#243d8a]'}`}>
+                  {pageTitle}
+                </h1>
               </div>
             </div>
           </div>

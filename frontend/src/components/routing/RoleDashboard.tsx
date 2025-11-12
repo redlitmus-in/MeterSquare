@@ -82,6 +82,16 @@ const RoleDashboard: React.FC = () => {
       DashboardComponent = ProjectManagerDashboard;
       break;
 
+    // MEP Supervisor (management level) - SHARED with PM dashboard
+    case 'mep':
+    case 'MEP':
+    case 'mep supervisor':
+    case 'MEP Supervisor':
+    case 'mep_supervisor':
+    case UserRole.MEP:
+      DashboardComponent = ProjectManagerDashboard;  // Use SAME dashboard as PM
+      break;
+
     case 'siteengineer':
     case 'siteEngineer':
     case 'site engineer':

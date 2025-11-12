@@ -15,6 +15,7 @@ import { UserRole } from '@/types';
  * 7: technicalDirector
  * 8: buyer
  * 9: productionManager
+ * 11: mep (MEP Supervisor - management level)
  */
 export const ROLE_ID_TO_NAME: Record<number, string> = {
   3: 'siteEngineer',
@@ -24,6 +25,7 @@ export const ROLE_ID_TO_NAME: Record<number, string> = {
   7: 'technicalDirector',
   8: 'buyer',
   9: 'productionManager',
+  11: 'mep', // MEP Supervisor (management level, shares PM functionality)
   // Legacy/fallback mappings
   1: 'admin', // Fallback
   2: 'siteEngineer', // Fallback
@@ -39,6 +41,7 @@ export const ROLE_URL_SLUGS: Record<string, string> = {
   'buyer': 'buyer',
   [UserRole.SITE_SUPERVISOR]: 'site-supervisor',
   [UserRole.MEP_SUPERVISOR]: 'mep-supervisor',
+  [UserRole.MEP]: 'mep',  // Management level MEP (shares PM functionality)
   [UserRole.PROCUREMENT]: 'procurement',
   [UserRole.PROJECT_MANAGER]: 'project-manager',
   [UserRole.DESIGN]: 'design',
@@ -47,6 +50,7 @@ export const ROLE_URL_SLUGS: Record<string, string> = {
   [UserRole.TECHNICAL_DIRECTOR]: 'technical-director',
   'technicalDirector': 'technical-director',
   'projectManager': 'project-manager',
+  'mep': 'mep',  // Management level MEP
   'estimator': 'estimator',
   'estimation': 'estimator' // Map estimation to estimator URL
 };
@@ -65,6 +69,7 @@ export const ROLE_DASHBOARD_PATHS: Record<string, string> = {
   'buyer': '/buyer/dashboard',
   [UserRole.SITE_SUPERVISOR]: '/site-supervisor/dashboard',
   [UserRole.MEP_SUPERVISOR]: '/mep-supervisor/dashboard',
+  [UserRole.MEP]: '/mep/dashboard',  // Management level MEP dashboard
   [UserRole.PROCUREMENT]: '/procurement/dashboard',
   [UserRole.PROJECT_MANAGER]: '/project-manager/dashboard',
   [UserRole.DESIGN]: '/design/dashboard',
@@ -73,6 +78,7 @@ export const ROLE_DASHBOARD_PATHS: Record<string, string> = {
   [UserRole.TECHNICAL_DIRECTOR]: '/technical-director/dashboard',
   'technicalDirector': '/technical-director/dashboard',
   'projectManager': '/project-manager/dashboard',
+  'mep': '/mep/dashboard',  // Management level MEP
   'estimator': '/estimator/dashboard',
   'estimation': '/estimator/dashboard' // Map estimation to estimator dashboard
 };
@@ -141,6 +147,7 @@ export const getRoleDisplayName = (role: string | number | UserRole): string => 
     'buyer': 'Buyer',
     [UserRole.SITE_SUPERVISOR]: 'Site Supervisor',
     [UserRole.MEP_SUPERVISOR]: 'MEP Supervisor',
+    [UserRole.MEP]: 'MEP Supervisor',  // Display as "MEP Supervisor" in UI
     [UserRole.PROCUREMENT]: 'Procurement',
     [UserRole.PROJECT_MANAGER]: 'Project Manager',
     [UserRole.DESIGN]: 'Design',
@@ -149,6 +156,7 @@ export const getRoleDisplayName = (role: string | number | UserRole): string => 
     [UserRole.TECHNICAL_DIRECTOR]: 'Technical Director',
     'technicalDirector': 'Technical Director',
     'projectManager': 'Project Manager',
+    'mep': 'MEP Supervisor',  // Display as "MEP Supervisor" in UI
     'estimator': 'Estimator',
     'estimation': 'Estimator' // Map to Estimator display name
   };
@@ -168,6 +176,7 @@ export const getRoleThemeColor = (role: string | UserRole): string => {
     'buyer': 'orange',
     [UserRole.SITE_SUPERVISOR]: 'orange',
     [UserRole.MEP_SUPERVISOR]: 'cyan',
+    [UserRole.MEP]: 'cyan',  // Cyan for MEP (management level) - distinct from PM green
     [UserRole.PROCUREMENT]: 'red',
     [UserRole.PROJECT_MANAGER]: 'green',
     [UserRole.DESIGN]: 'purple',
@@ -176,6 +185,7 @@ export const getRoleThemeColor = (role: string | UserRole): string => {
     [UserRole.TECHNICAL_DIRECTOR]: 'blue',
     'technicalDirector': 'blue',
     'projectManager': 'green',
+    'mep': 'cyan',  // Cyan for MEP
     'estimator': 'indigo',
     'estimation': 'indigo' // Map to indigo (same as estimator)
   };
@@ -239,9 +249,11 @@ export const hasRouteAccess = (userRole: string | UserRole, routePath: string): 
     'buyer': ['/materials', '/projects', '/purchase-orders'], // Buyer access
     [UserRole.SITE_SUPERVISOR]: ['/workflows/material-dispatch-site'],
     [UserRole.MEP_SUPERVISOR]: ['/workflows/material-dispatch-site'],
+    [UserRole.MEP]: ['/procurement', '/workflows', '/projects', '/team', '/boq'],  // Same access as PM
     [UserRole.PROCUREMENT]: ['/procurement', '/vendor'],
     [UserRole.PROJECT_MANAGER]: ['/procurement', '/workflows', '/projects', '/team'],
     'projectManager': ['/procurement', '/workflows', '/projects', '/team'],
+    'mep': ['/procurement', '/workflows', '/projects', '/team', '/boq'],  // Same access as PM
     [UserRole.DESIGN]: ['/projects', '/workflows'],
     [UserRole.ESTIMATION]: ['/boq', '/estimation', '/projects', '/cost-analysis'], // Map to estimator access
     [UserRole.ACCOUNTS]: ['/procurement/approvals'],

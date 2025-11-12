@@ -38,7 +38,9 @@ const RoleBasedChangeRequests: React.FC = () => {
         effectiveRole === 'site_supervisor' || effectiveRole === 'sitesupervisor') {
       Component = SEExtraMaterialPage;
     } else if (effectiveRole === 'project manager' || effectiveRole === 'project_manager' ||
-               effectiveRole === 'projectmanager') {
+               effectiveRole === 'projectmanager' || effectiveRole === 'mep' ||
+               effectiveRole === 'mep supervisor' || effectiveRole === 'mep_supervisor') {
+      // PM and MEP share the same extra material page
       Component = PMChangeRequestsPage;
     } else if (effectiveRole === 'admin' && !isAdminViewing) {
       // Direct admin access (not viewing as another role) - default to SE page
@@ -69,7 +71,9 @@ const RoleBasedChangeRequests: React.FC = () => {
     } else if (effectiveRole === 'estimator') {
       Component = EstimatorChangeRequestsPage;
     } else if (effectiveRole === 'project manager' || effectiveRole === 'project_manager' ||
-               effectiveRole === 'projectmanager') {
+               effectiveRole === 'projectmanager' || effectiveRole === 'mep' ||
+               effectiveRole === 'mep supervisor' || effectiveRole === 'mep_supervisor') {
+      // PM and MEP share the same change requests page
       Component = PMChangeRequestsPage;
     } else if (effectiveRole === 'admin' && !isAdminViewing) {
       // Direct admin access (not viewing as another role) - default to TD page

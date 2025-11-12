@@ -147,7 +147,7 @@ ROLE_HIERARCHY = {
     'projectManager': {
         'level': 2,
         'tier': 'Management',
-        'approval_limit': 50000,
+        'approval_limit': None,  # No approval limit (as per requirements - removed)
         'can_approve': ['purchase_request', 'project_task', 'material_request'],
         'can_initiate': ['change_request'],
         'permissions': [
@@ -158,16 +158,20 @@ ROLE_HIERARCHY = {
             'qty_spec_approvals',
             'view_cost_analysis',
             'create_change_request',
-            'view_own_change_requests'
+            'view_own_change_requests',
+            'manage_site_engineers',
+            'manage_buyers',
+            'view_boq_analytics',
+            'manage_boq_items'
         ],
         'description': 'Project Manager - Project coordination and approvals',
         'color': '#059669',
         'icon': 'UserCheck'
     },
     'mep': {
-        'level': 3,
+        'level': 2,  # Same level as Project Manager
         'tier': 'Management',
-        'approval_limit': 50000,
+        'approval_limit': None,  # No approval limit (as per requirements)
         'can_approve': ['purchase_request', 'project_task', 'material_request'],
         'can_initiate': ['change_request'],
         'permissions': [
@@ -178,11 +182,15 @@ ROLE_HIERARCHY = {
             'qty_spec_approvals',
             'view_cost_analysis',
             'create_change_request',
-            'view_own_change_requests'
+            'view_own_change_requests',
+            'manage_site_engineers',
+            'manage_buyers',
+            'view_boq_analytics',
+            'manage_boq_items'
         ],
-        'description': 'MEP Manager - Project coordination and approvals',
-        'color': '#059669',
-        'icon': 'UserCheck'
+        'description': 'MEP Supervisor - MEP project coordination and approvals (same capabilities as PM)',
+        'color': '#0891b2',  # Cyan color to differentiate from PM
+        'icon': 'Activity'  # Different icon for visual distinction
     },
     'design': {
         'level': 3,
@@ -316,6 +324,7 @@ ROLE_DEPARTMENTS = {
     'mepSupervisor': 'Operations',
     'inventory' : 'Operations',
     'projectManager': 'Management',
+    'mep': 'Management',
     'design': 'Technical',
     'estimation': 'Technical',
     'estimator': 'Technical',

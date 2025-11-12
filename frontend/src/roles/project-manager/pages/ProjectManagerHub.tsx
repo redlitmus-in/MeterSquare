@@ -10,8 +10,14 @@ import { useDashboardMetricsAutoSync } from '@/hooks/useAutoSync';
 const ProjectManagerHub: React.FC = () => {
   const { user } = useAuthStore();
 
+  // ROLE-AWARE: Determine dashboard title based on user role
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+  const isMEP = userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+  const dashboardTitle = isMEP ? 'MEP Supervisor Dashboard' : 'Project Manager Dashboard';
+
   // Real-time auto-sync for dashboard data
-  const { data: dashboardData, isLoading: loading, refetch } = useDashboardMetricsAutoSync(
+  const { data: dashboardData, isLoading: loading, refetch} = useDashboardMetricsAutoSync(
     'project_manager',
     async () => {
       if (!user?.user_id) {
@@ -262,10 +268,12 @@ const ProjectManagerHub: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Header with Blue Gradient */}
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm">
+      {/* Header with Blue Gradient - ROLE-AWARE */}
+      <div className={`bg-gradient-to-r shadow-sm ${isMEP ? 'from-cyan-50 to-cyan-100' : 'from-blue-50 to-blue-100'}`}>
         <div className="max-w-7xl mx-auto px-6 py-5">
-          <h1 className="text-2xl font-bold text-blue-900">Project Manager Dashboard</h1>
+          <h1 className={`text-2xl font-bold ${isMEP ? 'text-cyan-900' : 'text-blue-900'}`}>
+            {dashboardTitle}
+          </h1>
         </div>
       </div>
 

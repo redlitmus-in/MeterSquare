@@ -101,6 +101,86 @@ def assign_projects_route():
         return access_check
     return assign_projects()
 
+# Get all MEP Supervisors (for TD to assign to projects)
+@technical_routes.route('/all_meps', methods=['GET'])
+@jwt_required
+def get_all_meps_route():
+    """TD or Admin gets all MEP Supervisors"""
+    from flask import jsonify, g
+    from models.user import User
+    from models.role import Role
+    from app import db
+
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+
+    try:
+        # Get all users with MEP role
+        meps = db.session.query(User).join(
+            Role, User.role_id == Role.role_id
+        ).filter(
+            Role.role.in_(['mep', 'MEP', 'mep_supervisor', 'MEP Supervisor']),
+            User.is_deleted == False
+        ).all()
+
+        mep_list = [{
+            'user_id': mep.user_id,
+            'full_name': mep.full_name,
+            'email': mep.email,
+            'phone': mep.phone,
+            'is_active': mep.is_active,
+            'role': mep.role.role if mep.role else 'Unknown'
+        } for mep in meps]
+
+        return jsonify({
+            "users": mep_list,
+            "count": len(mep_list)
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+#Assign MEP Supervisor to projects
+@technical_routes.route('/assign_mep_projects', methods=['POST'])
+@jwt_required
+def assign_mep_projects_route():
+    """TD or Admin assigns MEP Supervisors to projects"""
+    from flask import request, jsonify, g
+    from models.project import Project
+    from app import db
+
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+
+    try:
+        data = request.get_json()
+        mep_ids = data.get('mep_ids', [])
+        project_ids = data.get('project_ids', [])
+
+        if not mep_ids or not project_ids:
+            return jsonify({"error": "MEP IDs and Project IDs are required"}), 400
+
+        assigned_count = 0
+        for project_id in project_ids:
+            project = Project.query.filter_by(project_id=project_id).first()
+            if project:
+                # Update mep_supervisor_id as JSONB array
+                project.mep_supervisor_id = mep_ids
+                assigned_count += 1
+
+        db.session.commit()
+
+        return jsonify({
+            "message": f"Successfully assigned {len(mep_ids)} MEP(s) to {assigned_count} project(s)",
+            "assigned_projects": assigned_count
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
 # SE BOQ Vendor Approval routes
 @technical_routes.route('/se-boq-vendor-requests', methods=['GET'])
 @jwt_required

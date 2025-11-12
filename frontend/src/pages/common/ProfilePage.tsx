@@ -28,7 +28,8 @@ import {
   Award,
   Clock,
   AlertCircle,
-  Loader2
+  Loader2,
+  Activity
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from 'sonner';
@@ -147,7 +148,8 @@ const ProfilePage: React.FC = () => {
       5: 'Admin',
       6: 'Project Manager',
       7: 'Technical Director',
-      8: 'Buyer'
+      8: 'Buyer',
+      11: 'MEP Supervisor'
     };
 
     if (typeof roleId === 'number') {
@@ -164,7 +166,8 @@ const ProfilePage: React.FC = () => {
       5: ShieldIcon,     // Admin
       6: TrendingUp,     // Project Manager
       7: Award,          // Technical Director
-      8: BriefcaseIcon   // Buyer
+      8: BriefcaseIcon,  // Buyer
+      11: Activity       // MEP Supervisor
     };
 
     if (typeof roleId === 'number') {

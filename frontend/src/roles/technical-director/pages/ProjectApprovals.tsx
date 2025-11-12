@@ -32,7 +32,8 @@ import {
   X as XIcon,
   MapPin,
   ArrowRight,
-  ArrowLeft
+  ArrowLeft,
+  Activity
 } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
@@ -244,6 +245,9 @@ const ProjectApprovals: React.FC = () => {
   const [newPMData, setNewPMData] = useState({ full_name: '', email: '', phone: '' });
   const [pmSearchQuery, setPmSearchQuery] = useState('');
   const [expandedPMId, setExpandedPMId] = useState<number | null>(null);
+  // MEP Supervisor selection state
+  const [allMEPs, setAllMEPs] = useState<any[]>([]);
+  const [selectedMEPIds, setSelectedMEPIds] = useState<number[]>([]);
   const [showComparisonModal, setShowComparisonModal] = useState(false);
   const [showPMWorkloadView, setShowPMWorkloadView] = useState(false);
   const [showPMDetailsModal, setShowPMDetailsModal] = useState(false);
@@ -1276,9 +1280,18 @@ const ProjectApprovals: React.FC = () => {
       if (response.success && response.data) {
         setAllPMs(response.data);
       }
+
+      // Load MEP Supervisors and auto-select all by default
+      const mepResponse = await tdService.getAllMEPs();
+      if (mepResponse.success && mepResponse.data) {
+        setAllMEPs(mepResponse.data);
+        // Auto-select all MEPs by default (user can unselect if not needed)
+        const allMepIds = mepResponse.data.map((mep: any) => mep.user_id);
+        setSelectedMEPIds(allMepIds);
+      }
     } catch (error) {
-      console.error('Error loading PMs:', error);
-      toast.error('Failed to load Project Managers');
+      console.error('Error loading PMs/MEPs:', error);
+      toast.error('Failed to load Project Managers/MEP Supervisors');
     }
   };
 
@@ -1332,12 +1345,34 @@ const ProjectApprovals: React.FC = () => {
 
         toast.dismiss();
         if (response.success) {
-          const successMessage = pmCount > 1
-            ? `Project assigned to ${pmCount} PMs successfully`
-            : 'Project assigned to PM successfully';
-          toast.success(successMessage);
+          // Assign MEPs if selected (optional)
+          if (selectedMEPIds.length > 0) {
+            toast.loading(`Assigning ${selectedMEPIds.length} MEP Supervisor(s)...`);
+            const mepResponse = await tdService.assignMEPsToProjects(selectedMEPIds, [selectedEstimation.projectId]);
+            toast.dismiss();
+
+            if (!mepResponse.success) {
+              toast.warning(`PMs assigned, but MEP assignment failed: ${mepResponse.message}`);
+            } else {
+              const successMessage = pmCount > 1 && selectedMEPIds.length > 0
+                ? `Project assigned to ${pmCount} PM(s) and ${selectedMEPIds.length} MEP(s) successfully`
+                : pmCount > 1
+                ? `Project assigned to ${pmCount} PMs successfully`
+                : selectedMEPIds.length > 0
+                ? `Project assigned to PM and ${selectedMEPIds.length} MEP(s) successfully`
+                : 'Project assigned to PM successfully';
+              toast.success(successMessage);
+            }
+          } else {
+            const successMessage = pmCount > 1
+              ? `Project assigned to ${pmCount} PMs successfully`
+              : 'Project assigned to PM successfully';
+            toast.success(successMessage);
+          }
+
           setShowAssignPMModal(false);
           setSelectedPMIds([]);
+          setSelectedMEPIds([]);
           await loadBOQs();
           // Reload the selected BOQ details to update the UI
           if (selectedEstimation) {
@@ -2749,6 +2784,7 @@ const ProjectApprovals: React.FC = () => {
                     onClick={() => {
                       setShowAssignPMModal(false);
                       setSelectedPMIds([]);
+                      setSelectedMEPIds([]);
                       setNewPMData({ full_name: '', email: '', phone: '' });
                       setAssignMode('existing');
                     }}
@@ -3159,6 +3195,102 @@ const ProjectApprovals: React.FC = () => {
                   </motion.div>
                 )}
 
+                {/* MEP Supervisor Selection (Optional) - Only show when selecting existing team members */}
+                {assignMode === 'existing' && (
+                  <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="space-y-4 mt-6"
+                  >
+                    <div className="flex items-center justify-between pb-2 border-b-2 border-cyan-200">
+                      <h3 className="text-md font-bold text-cyan-900 flex items-center gap-2">
+                        <Activity className="w-5 h-5 text-cyan-600" />
+                        Assign MEP Supervisor
+                      </h3>
+                      {selectedMEPIds.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold px-2.5 py-1 bg-cyan-100 text-cyan-700 rounded-full">
+                            {selectedMEPIds.length} selected
+                          </span>
+                          <button
+                            onClick={() => setSelectedMEPIds([])}
+                            className="text-xs text-cyan-600 hover:text-cyan-800 underline"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {allMEPs.length > 0 ? (
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {allMEPs.map((mep: any) => {
+                          const isSelected = selectedMEPIds.includes(mep.user_id);
+                          return (
+                            <div
+                              key={mep.user_id}
+                              onClick={() => {
+                                if (isSelected) {
+                                  setSelectedMEPIds(selectedMEPIds.filter(id => id !== mep.user_id));
+                                } else {
+                                  setSelectedMEPIds([...selectedMEPIds, mep.user_id]);
+                                }
+                              }}
+                              className={`border rounded-lg px-4 py-3 cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'border-cyan-500 bg-cyan-50 shadow-sm'
+                                  : 'border-gray-200 hover:border-cyan-300 hover:bg-cyan-50/30'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      if (e.target.checked) {
+                                        setSelectedMEPIds([...selectedMEPIds, mep.user_id]);
+                                      } else {
+                                        setSelectedMEPIds(selectedMEPIds.filter(id => id !== mep.user_id));
+                                      }
+                                    }}
+                                    className="w-4 h-4 text-cyan-600 border-gray-300 rounded focus:ring-cyan-500 cursor-pointer"
+                                  />
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center text-white font-semibold text-sm">
+                                      {mep.full_name?.charAt(0) || 'M'}
+                                    </div>
+                                    <div>
+                                      <p className="font-semibold text-gray-900 text-sm">{mep.full_name}</p>
+                                      <p className="text-xs text-gray-500">{mep.email}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                                {mep.is_active && (
+                                  <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">
+                                    Active
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 px-4 bg-cyan-50 border border-cyan-200 rounded-lg">
+                        <Activity className="w-12 h-12 text-cyan-300 mx-auto mb-2" />
+                        <p className="text-sm text-cyan-700 font-medium">No MEP Supervisors available</p>
+                        <p className="text-xs text-cyan-600 mt-1">MEP assignment is optional for this project</p>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-gray-500 italic mt-2 px-1">
+                      💡 MEP Supervisors are selected by default. Uncheck if not needed for this project.
+                    </p>
+                  </motion.div>
+                )}
+
                 {/* Create New PM Form */}
                 {assignMode === 'create' && (
                   <motion.div
@@ -3223,7 +3355,8 @@ const ProjectApprovals: React.FC = () => {
                   <button
                     onClick={() => {
                       setShowAssignPMModal(false);
-                      setSelectedPMId(null);
+                      setSelectedPMIds([]);
+                      setSelectedMEPIds([]);
                       setNewPMData({ full_name: '', email: '', phone: '' });
                       setAssignMode('existing');
                     }}

@@ -630,8 +630,16 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     } else if (isEstimator) {
       // Estimator gets Projects page, not Procurement
       navigation.push(...estimatorItems);
-    } else if (user?.role_id === UserRole.PROJECT_MANAGER || currentRole === UserRole.PROJECT_MANAGER) {
-      // Project Manager gets specialized menu items - NO procurement/vendor pages
+    } else if (
+      user?.role_id === UserRole.PROJECT_MANAGER ||
+      currentRole === UserRole.PROJECT_MANAGER ||
+      user?.role_id === UserRole.MEP ||
+      currentRole === UserRole.MEP ||
+      currentRole === 'mep' ||
+      roleIdLower === 'mep' ||
+      getRoleDisplayName(roleId || '') === 'MEP Supervisor'
+    ) {
+      // Project Manager AND MEP Supervisor get the same specialized menu items - SHARED CODE
       navigation.push(...projectManagerItems);
     } else if (isSiteEngineer) {
       // Site Engineer gets Projects menu with submenu (Assigned, Ongoing, Completed)
@@ -643,9 +651,11 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       // Other roles get procurement
       navigation.push(procurementItem);
 
-      // Add vendor management for allowed roles (excluding Technical Director, Estimator, PM, and SE)
+      // Add vendor management for allowed roles (excluding Technical Director, Estimator, PM, MEP, and SE)
       if (vendorAllowedRoles.includes(currentRole as UserRole) &&
           currentRole !== UserRole.PROJECT_MANAGER &&
+          currentRole !== UserRole.MEP &&
+          currentRole !== 'mep' &&
           currentRole !== UserRole.ESTIMATION &&
           currentRole !== UserRole.SITE_ENGINEER) {
         navigation.push(vendorManagementItem);

@@ -12,13 +12,55 @@ from utils.authentication import *
 
 pm_routes = Blueprint("pm_routes", __name__, url_prefix='/api')
 
-# Helper function to check if user is PM or Admin
+# ============================================================================
+# STRICT ROLE-BASED ACCESS CONTROL DECORATORS
+# These decorators ensure PM and MEP roles are properly separated
+# ============================================================================
+
 def check_pm_or_admin_access():
-    """Check if current user is a Project Manager or Admin"""
+    """
+    Check if current user is a Project Manager or Admin.
+    STRICT: Only allows PM or Admin roles.
+    """
     current_user = g.user
     user_role = current_user.get('role', '').lower()
     if user_role not in ['projectmanager', 'admin']:
-        return jsonify({"error": "Access denied. Project Manager or Admin role required."}), 403
+        return jsonify({
+            "error": "Access denied. Project Manager or Admin role required.",
+            "required_roles": ["projectManager", "admin"],
+            "your_role": user_role
+        }), 403
+    return None
+
+def check_mep_or_admin_access():
+    """
+    Check if current user is a MEP Supervisor or Admin.
+    STRICT: Only allows MEP or Admin roles.
+    """
+    current_user = g.user
+    user_role = current_user.get('role', '').lower()
+    if user_role not in ['mep', 'admin']:
+        return jsonify({
+            "error": "Access denied. MEP Supervisor or Admin role required.",
+            "required_roles": ["mep", "admin"],
+            "your_role": user_role
+        }), 403
+    return None
+
+def check_pm_or_mep_or_admin_access():
+    """
+    Check if current user is a Project Manager, MEP Supervisor, or Admin.
+    SHARED CODE: Allows both PM and MEP roles to access the same endpoints.
+    This decorator is used for shared functionality where both roles have identical capabilities.
+    """
+    current_user = g.user
+    user_role = current_user.get('role', '').lower()
+    if user_role not in ['projectmanager', 'mep', 'admin']:
+        return jsonify({
+            "error": "Access denied. Project Manager, MEP Supervisor, or Admin role required.",
+            "required_roles": ["projectManager", "mep", "admin"],
+            "your_role": user_role
+        }), 403
     return None
 
 # ============================================================================
@@ -29,8 +71,8 @@ def check_pm_or_admin_access():
 @pm_routes.route('/pm_boq', methods=['GET'])
 @jwt_required
 def get_all_PM_boqs_route():
-    # Allow both PM and Admin access
-    access_check = check_pm_or_admin_access()
+    # SHARED: Allow PM, MEP, and Admin access
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return get_all_pm_boqs()
@@ -38,8 +80,8 @@ def get_all_PM_boqs_route():
 @pm_routes.route('/boq/send_estimator', methods=['POST'])
 @jwt_required
 def send_boq_to_estimator_route():
-    # Allow both PM and Admin access
-    access_check = check_pm_or_admin_access()
+    # SHARED: Allow PM, MEP, and Admin access
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return send_boq_to_estimator()
@@ -53,8 +95,8 @@ def send_boq_to_estimator_route():
 @pm_routes.route('/create_sitesupervisor', methods=['POST'])
 @jwt_required
 def create_sitesupervisor_route():
-    """PM or Admin creates a new Site Engineer"""
-    access_check = check_pm_or_admin_access()
+    """SHARED: PM, MEP, or Admin creates a new Site Engineer"""
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return create_sitesupervisor()
@@ -63,8 +105,8 @@ def create_sitesupervisor_route():
 @pm_routes.route('/all_sitesupervisor', methods=['GET'])
 @jwt_required
 def get_all_sitesupervisor_route():
-    """PM or Admin views all Site Engineers"""
-    access_check = check_pm_or_admin_access()
+    """SHARED: PM, MEP, or Admin views all Site Engineers"""
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return get_all_sitesupervisor()
@@ -73,8 +115,8 @@ def get_all_sitesupervisor_route():
 @pm_routes.route('/get_sitesupervisor/<int:site_supervisor_id>', methods=['GET'])
 @jwt_required
 def get_sitesupervisor_id_route(site_supervisor_id):
-    """PM or Admin views a specific Site Engineer"""
-    access_check = check_pm_or_admin_access()
+    """SHARED: PM, MEP, or Admin views a specific Site Engineer"""
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return get_sitesupervisor_id(site_supervisor_id)
@@ -83,8 +125,8 @@ def get_sitesupervisor_id_route(site_supervisor_id):
 @pm_routes.route('/update_sitesupervisor/<int:site_supervisor_id>', methods=['PUT'])
 @jwt_required
 def update_sitesupervisor_route(site_supervisor_id):
-    """PM or Admin updates Site Engineer details"""
-    access_check = check_pm_or_admin_access()
+    """SHARED: PM, MEP, or Admin updates Site Engineer details"""
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return update_sitesupervisor(site_supervisor_id)
@@ -93,8 +135,8 @@ def update_sitesupervisor_route(site_supervisor_id):
 @pm_routes.route('/delete_sitesupervisor/<int:site_supervisor_id>', methods=['DELETE'])
 @jwt_required
 def delete_sitesupervisor_route(site_supervisor_id):
-    """PM or Admin deletes a Site Engineer"""
-    access_check = check_pm_or_admin_access()
+    """SHARED: PM, MEP, or Admin deletes a Site Engineer"""
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return delete_sitesupervisor(site_supervisor_id)
@@ -103,8 +145,8 @@ def delete_sitesupervisor_route(site_supervisor_id):
 @pm_routes.route('/ss_assign', methods=['POST'])
 @jwt_required
 def assign_projects_sitesupervisor_route():
-    """PM or Admin assigns Site Engineer to projects"""
-    access_check = check_pm_or_admin_access()
+    """SHARED: PM, MEP, or Admin assigns Site Engineer to projects"""
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return assign_projects_sitesupervisor()
@@ -118,8 +160,8 @@ def assign_projects_sitesupervisor_route():
 @pm_routes.route('/create_buyer', methods=['POST'])
 @jwt_required
 def create_buyer_route():
-    """PM or Admin creates a new Buyer"""
-    access_check = check_pm_or_admin_access()
+    """SHARED: PM, MEP, or Admin creates a new Buyer"""
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return create_buyer()
@@ -128,8 +170,8 @@ def create_buyer_route():
 @pm_routes.route('/all_buyers', methods=['GET'])
 @jwt_required
 def get_all_buyers_route():
-    """PM or Admin views all Buyers (assigned and unassigned)"""
-    access_check = check_pm_or_admin_access()
+    """SHARED: PM, MEP, or Admin views all Buyers (assigned and unassigned)"""
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return get_all_buyers()
@@ -138,8 +180,8 @@ def get_all_buyers_route():
 @pm_routes.route('/get_buyer/<int:user_id>', methods=['GET'])
 @jwt_required
 def get_buyer_id_route(user_id):
-    """PM or Admin views a specific Buyer with assigned projects"""
-    access_check = check_pm_or_admin_access()
+    """SHARED: PM, MEP, or Admin views a specific Buyer with assigned projects"""
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return get_buyer_id(user_id)
@@ -148,8 +190,8 @@ def get_buyer_id_route(user_id):
 @pm_routes.route('/update_buyer/<int:user_id>', methods=['PUT'])
 @jwt_required
 def update_buyer_route(user_id):
-    """PM or Admin updates Buyer details"""
-    access_check = check_pm_or_admin_access()
+    """SHARED: PM, MEP, or Admin updates Buyer details"""
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return update_buyer(user_id)
@@ -158,8 +200,8 @@ def update_buyer_route(user_id):
 @pm_routes.route('/delete_buyer/<int:user_id>', methods=['DELETE'])
 @jwt_required
 def delete_buyer_route(user_id):
-    """PM or Admin deletes a Buyer"""
-    access_check = check_pm_or_admin_access()
+    """SHARED: PM, MEP, or Admin deletes a Buyer"""
+    access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
     return delete_buyer(user_id) 

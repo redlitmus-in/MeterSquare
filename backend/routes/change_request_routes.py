@@ -4,7 +4,7 @@ from controllers.change_request_controller import *
 
 change_request_routes = Blueprint('change_request_routes', __name__, url_prefix='/api')
 
-# Helper function - Change requests accessible by PM, SE, Estimator, TD, or Admin
+# Helper function - Change requests accessible by PM, MEP, SE, Estimator, TD, or Admin
 def check_cr_access():
     """
     Check if current user can access Change Request operations
@@ -23,9 +23,9 @@ def check_cr_access():
     context = get_effective_user_context()
     effective_role = context.get('effective_role', user_role)
 
-    allowed_roles = ['projectmanager', 'sitesupervisor', 'siteengineer', 'estimator', 'technicaldirector', 'admin']
+    allowed_roles = ['projectmanager', 'mep', 'sitesupervisor', 'siteengineer', 'estimator', 'technicaldirector', 'admin']
     if effective_role.lower() not in allowed_roles:
-        return jsonify({"error": "Access denied. PM, SE, Estimator, TD, or Admin role required."}), 403
+        return jsonify({"error": "Access denied. PM, MEP, SE, Estimator, TD, or Admin role required."}), 403
     return None
 
 

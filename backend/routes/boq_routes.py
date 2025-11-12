@@ -12,14 +12,14 @@ from controllers.download_boq_pdf import *
 
 boq_routes = Blueprint('boq_routes', __name__, url_prefix='/api')
 
-# Helper function - BOQ routes accessible by Estimator, PM, SE, TD, or Admin
+# Helper function - BOQ routes accessible by Estimator, PM, MEP, SE, TD, or Admin
 def check_boq_access():
     """Check if current user can access BOQ operations"""
     current_user = g.user
     user_role = current_user.get('role', '').lower()
-    allowed_roles = ['estimator', 'projectmanager', 'technicaldirector', 'admin', 'siteengineer', 'sitesupervisor']
+    allowed_roles = ['estimator', 'projectmanager', 'mep', 'technicaldirector', 'admin', 'siteengineer', 'sitesupervisor']
     if user_role not in allowed_roles:
-        return jsonify({"error": "Access denied. Estimator, PM, SE, TD, or Admin role required."}), 403
+        return jsonify({"error": "Access denied. Estimator, PM, MEP, SE, TD, or Admin role required."}), 403
     return None
 
 # BOQ Management

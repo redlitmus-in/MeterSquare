@@ -203,6 +203,37 @@ class TDService {
     }
   }
 
+  async getAllMEPs(): Promise<{ success: boolean; data?: any[]; message?: string }> {
+    try {
+      // Get all MEP Supervisors from dedicated endpoint
+      const response = await apiClient.get('/all_meps');
+
+      // Data is already filtered by backend for MEP role
+      const mepUsers = response.data.users || response.data || [];
+
+      // Format MEP data
+      const formattedMEPs = mepUsers.map((mep: any) => ({
+        user_id: mep.user_id,
+        full_name: mep.full_name,
+        email: mep.email,
+        phone: mep.phone,
+        is_active: mep.is_active === true
+      }));
+
+      return {
+        success: true,
+        data: formattedMEPs
+      };
+    } catch (error: any) {
+      console.error('Get all MEPs error:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.error || 'Failed to load MEP Supervisors'
+      };
+    }
+  }
+
   async getPMsWithWorkload(): Promise<{ success: boolean; data?: any[]; message?: string }> {
     try {
       const response = await apiClient.get('/all_pm');
@@ -318,6 +349,28 @@ class TDService {
       return {
         success: false,
         message: error.response?.data?.error || 'Failed to delete Project Manager'
+      };
+    }
+  }
+
+  async assignMEPsToProjects(mepIds: number | number[], projectIds: number[]): Promise<{ success: boolean; message: string }> {
+    try {
+      // Support both single mepId and multiple mepIds
+      const payload = {
+        mep_ids: Array.isArray(mepIds) ? mepIds : [mepIds],
+        project_ids: projectIds
+      };
+
+      const response = await apiClient.post('/assign_mep_projects', payload);
+      return {
+        success: true,
+        message: response.data.message || 'MEP Supervisors assigned successfully'
+      };
+    } catch (error: any) {
+      console.error('Assign MEP projects error:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to assign MEP Supervisors'
       };
     }
   }

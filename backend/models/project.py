@@ -12,6 +12,8 @@ class Project(db.Model):
     project_name = db.Column(db.String(255), nullable=False)  # Required
     # user_id is now a JSONB array of project manager ids to support multiple PMs
     user_id = db.Column(JSONB, nullable=True)  # Stores array of PM IDs: [1, 2, 3]
+    # mep_supervisor_id stores MEP Supervisor IDs as JSONB array (separate from PMs)
+    mep_supervisor_id = db.Column(JSONB, nullable=True)  # Stores array of MEP IDs: [1, 2]
     estimator_id = db.Column(db.Integer, nullable=True)
     site_supervisor_id = db.Column(db.Integer, nullable=True)
     buyer_id = db.Column(db.Integer, nullable=True)  # Buyer assigned to project
@@ -56,6 +58,7 @@ class Project(db.Model):
             'project_code': self.project_code,
             'project_name': self.project_name,
             'user_id': self.user_id,
+            'mep_supervisor_id': self.mep_supervisor_id,
             'estimator_id' : self.estimator_id,
             'site_supervisor_id': self.site_supervisor_id,
             'buyer_id': self.buyer_id,

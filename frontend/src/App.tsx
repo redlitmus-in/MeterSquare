@@ -111,8 +111,9 @@ const RoleSpecificProcurementHub: React.FC = () => {
   const userRoleLower = userRole.toLowerCase();
 
   console.log('User role from backend:', userRole, 'Lowercase:', userRoleLower, 'Viewing as:', viewingAsRole);
-  // Check if user is Project Manager
-  if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' || userRoleLower === 'projectmanager') {
+  // Check if user is Project Manager OR MEP Supervisor (both share same procurement hub)
+  if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' || userRoleLower === 'projectmanager' ||
+      userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor') {
     return <ProjectManagerHub />;
   }
 
@@ -288,7 +289,7 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <>{children}</>
 };
 
-// Project Manager, Technical Director, and Admin Route Component
+// Project Manager, MEP Supervisor, Technical Director, and Admin Route Component
 const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuthStore();
 
@@ -300,7 +301,7 @@ const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children
   const roleId = user?.role_id;
   const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
 
-  // Allow Project Manager, Technical Director, and Admin (check multiple format variations)
+  // Allow Project Manager, MEP, Technical Director, and Admin (check multiple format variations)
   const isProjectManager = userRole === 'Project Manager' ||
                           userRoleLower === 'project manager' ||
                           userRoleLower === 'project_manager' ||
@@ -308,6 +309,16 @@ const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children
                           roleId === UserRole.PROJECT_MANAGER ||
                           roleId === 'projectManager' ||
                           roleIdLower === 'project_manager';
+
+  // MEP Supervisor (management level) - same access as PM
+  const isMEP = userRole === 'MEP' ||
+                userRole === 'MEP Supervisor' ||
+                userRoleLower === 'mep' ||
+                userRoleLower === 'mep supervisor' ||
+                userRoleLower === 'mep_supervisor' ||
+                roleId === UserRole.MEP ||
+                roleId === 'mep' ||
+                roleIdLower === 'mep';
 
   const isTechnicalDirector = userRole === 'Technical Director' ||
                              userRoleLower === 'technical director' ||
@@ -323,7 +334,7 @@ const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children
                  roleIdLower === 'admin' ||
                  roleId === 5; // Database has admin as role_id: 5
 
-  if (!isProjectManager && !isTechnicalDirector && !isAdmin) {
+  if (!isProjectManager && !isMEP && !isTechnicalDirector && !isAdmin) {
     console.log('Access denied. User role:', userRole, 'role_id:', roleId);
     return <Navigate to="/403" replace />;
   }

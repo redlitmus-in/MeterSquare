@@ -6,7 +6,7 @@ purchase_routes = Blueprint('purchase_routes', __name__, url_prefix='/api')
 
 # Helper function to check if user is PM or Admin (or Admin viewing as PM)
 def check_pm_or_admin_access():
-    """Check if current user is a Project Manager or Admin"""
+    """Check if current user is a Project Manager, MEP Supervisor, or Admin"""
     from utils.admin_viewing_context import get_effective_user_context
 
     current_user = g.user
@@ -16,14 +16,14 @@ def check_pm_or_admin_access():
     if user_role == 'admin':
         return None
 
-    # Check if admin is viewing as PM
+    # Check if admin is viewing as PM or MEP
     context = get_effective_user_context()
     effective_role = context.get('effective_role', user_role)
 
-    if effective_role in ['projectmanager', 'project_manager']:
+    if effective_role in ['projectmanager', 'project_manager', 'mep', 'mep_supervisor']:
         return None
 
-    return jsonify({"error": "Access denied. Project Manager or Admin role required."}), 403
+    return jsonify({"error": "Access denied. Project Manager, MEP Supervisor, or Admin role required."}), 403
 
 # Helper function to check if user is Estimator or Admin (or Admin viewing as Estimator)
 def check_estimator_or_admin_access():

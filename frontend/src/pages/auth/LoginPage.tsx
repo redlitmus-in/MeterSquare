@@ -60,6 +60,7 @@ const availableRoles = [
   { value: 'technicalDirector', label: 'Technical Director', icon: Briefcase },
   { value: 'estimator', label: 'Estimator', icon: FileText },
   { value: 'projectManager', label: 'Project Manager', icon: Users },
+  { value: 'mep', label: 'MEP Supervisor', icon: Activity },  // MEP management level role
   { value: 'siteEngineer', label: 'Site Engineer', icon: HardHat },
   { value: 'buyer', label: 'Procurement', icon: Package },
 ];

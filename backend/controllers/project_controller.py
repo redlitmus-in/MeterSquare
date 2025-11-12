@@ -434,11 +434,22 @@ def get_assigned_projects():
 
         elif user_role in ['projectmanager']:
             # Get projects where user is assigned as project manager
+            # user_id is JSONB array, so use .contains() to check if user_id is in array
             projects = Project.query.filter(
-                Project.user_id == user_id,
+                Project.user_id.contains([user_id]),
                 Project.is_deleted == False,
                 Project.status != 'completed'  # Exclude completed projects
             ).all()
+
+        elif user_role in ['mep', 'mepsupervisor']:
+            # Get projects where user is assigned as MEP supervisor
+            # mep_supervisor_id is JSONB array, so use .contains() to check if user_id is in array
+            projects = Project.query.filter(
+                Project.mep_supervisor_id.contains([user_id]),
+                Project.is_deleted == False,
+                Project.status != 'completed'  # Exclude completed projects
+            ).all()
+
         else:
             return jsonify({"projects": []}), 200
 
@@ -671,9 +682,9 @@ def request_day_extension(boq_id):
         user_name = current_user.get('full_name') or current_user.get('username') or 'User'
         user_role = current_user.get('role_name', 'user').lower()
 
-        # Only PM can request day extension
-        if user_role not in ['projectmanager', 'project_manager']:
-            return jsonify({"error": "Only Project Managers can request day extensions"}), 403
+        # Only PM and MEP can request day extension
+        if user_role not in ['projectmanager', 'project_manager', 'mep', 'mepsupervisor']:
+            return jsonify({"error": "Only Project Managers and MEP Supervisors can request day extensions"}), 403
         role=Role.query.filter_by(role='technicalDirector').first()
         user=User.query.filter_by(role_id=role.role_id).first()
         # Get request data
@@ -1107,8 +1118,8 @@ def get_day_extension_history(boq_id):
 
         user_role = current_user.get('role_name', 'user').lower()
 
-        # Only PM and TD can view history
-        if user_role not in ['projectmanager', 'project_manager', 'technicaldirector', 'technical_director']:
+        # Only PM, MEP, and TD can view history
+        if user_role not in ['projectmanager', 'project_manager', 'mep', 'mepsupervisor', 'technicaldirector', 'technical_director']:
             return jsonify({"error": "Access denied"}), 403
 
         # Get the BOQ

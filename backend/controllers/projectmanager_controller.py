@@ -1,3 +1,25 @@
+"""
+PROJECT MANAGER & MEP SUPERVISOR CONTROLLER (SHARED CODE)
+
+This controller handles BOTH Project Manager and MEP Supervisor roles using shared code.
+
+STRICT ROLE SEPARATION:
+- Project Managers (PM) see ONLY projects where user_id JSONB array contains their ID
+- MEP Supervisors (MEP) see ONLY projects where mep_supervisor_id JSONB array contains their ID
+- Admins see ALL projects
+
+ROLE-AWARE FILTERING:
+- All functions check user role and filter data accordingly
+- PM and MEP have identical capabilities but separate data
+- No cross-role data leakage
+
+SHARED FUNCTIONALITY:
+- Both roles manage Site Engineers and Buyers (same resources)
+- Both roles approve/reject BOQs
+- Both roles handle change requests
+- Both roles track materials and labour
+"""
+
 from flask import request, jsonify, g
 from config.db import db
 from models.project import Project
@@ -78,19 +100,32 @@ def get_all_pm_boqs():
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 10, type=int), 100)
 
-        # Get all projects assigned to this project manager (admin sees all projects with PM assigned)
+        # STRICT ROLE-BASED FILTERING: PM sees only PM projects, MEP sees only MEP projects
         if user_role == 'admin' or not should_apply_role_filter(context):
+            # Admin sees all projects with PM or MEP assigned
             assigned_projects = db.session.query(Project.project_id).filter(
-                Project.user_id.isnot(None),  # Only projects with PM assigned
+                db.or_(
+                    Project.user_id.isnot(None),  # Projects with PM assigned
+                    Project.mep_supervisor_id.isnot(None)  # Projects with MEP assigned
+                ),
                 Project.is_deleted == False
             ).all()
-        else:
-            # Query projects where user_id JSONB array contains the PM's ID
-            # Use JSONB contains operator directly
+        elif user_role == 'projectmanager':
+            # PM sees ONLY projects where user_id JSONB array contains their ID
             assigned_projects = db.session.query(Project.project_id).filter(
                 Project.user_id.contains([user_id]),
                 Project.is_deleted == False
             ).all()
+        elif user_role == 'mep':
+            # MEP sees ONLY projects where mep_supervisor_id JSONB array contains their ID
+            assigned_projects = db.session.query(Project.project_id).filter(
+                Project.mep_supervisor_id.contains([user_id]),
+                Project.is_deleted == False
+            ).all()
+        else:
+            # Unknown role - no projects
+            assigned_projects = []
+
         # Extract project IDs
         project_ids = [p.project_id for p in assigned_projects]
 
@@ -98,30 +133,53 @@ def get_all_pm_boqs():
         if user_role == 'admin':
             boq_ids_for_approval = []
         else:
-            # MODIFIED: Also get BOQs where this PM is the recipient in BOQ history (for approval requests)
-            # Find BOQs where this PM was sent the BOQ for approval OR where PM approved it
-            # Query using raw SQL to search in JSONB array
+            # ROLE-AWARE BOQ APPROVAL HISTORY QUERY
+            # PM: Get BOQs sent to project_manager role
+            # MEP: Get BOQs sent to mep role
             from sqlalchemy import text
 
-            boqs_for_approval_query = db.session.execute(
-                text("""
-                    SELECT DISTINCT bh.boq_id
-                    FROM boq_history bh,
-                         jsonb_array_elements(bh.action) AS action_item
-                    WHERE (
-                        (action_item->>'receiver_role' = 'project_manager'
-                         AND (action_item->>'recipient_user_id')::INTEGER = :user_id
-                         AND action_item->>'type' = 'sent_to_pm')
-                        OR
-                        (action_item->>'sender_role' = 'project_manager'
-                         AND (action_item->>'decided_by_user_id')::INTEGER = :user_id
-                         AND action_item->>'type' = 'sent_to_estimator')
-                    )
-                """),
-                {"user_id": user_id}
-            )
+            if user_role == 'projectmanager':
+                # PM sees BOQs sent to project_manager role
+                boqs_for_approval_query = db.session.execute(
+                    text("""
+                        SELECT DISTINCT bh.boq_id
+                        FROM boq_history bh,
+                             jsonb_array_elements(bh.action) AS action_item
+                        WHERE (
+                            (action_item->>'receiver_role' = 'project_manager'
+                             AND (action_item->>'recipient_user_id')::INTEGER = :user_id
+                             AND action_item->>'type' = 'sent_to_pm')
+                            OR
+                            (action_item->>'sender_role' = 'project_manager'
+                             AND (action_item->>'decided_by_user_id')::INTEGER = :user_id
+                             AND action_item->>'type' = 'sent_to_estimator')
+                        )
+                    """),
+                    {"user_id": user_id}
+                )
+            elif user_role == 'mep':
+                # MEP sees BOQs sent to mep role (same logic as PM but for mep role)
+                boqs_for_approval_query = db.session.execute(
+                    text("""
+                        SELECT DISTINCT bh.boq_id
+                        FROM boq_history bh,
+                             jsonb_array_elements(bh.action) AS action_item
+                        WHERE (
+                            (action_item->>'receiver_role' = 'mep'
+                             AND (action_item->>'recipient_user_id')::INTEGER = :user_id
+                             AND action_item->>'type' = 'sent_to_mep')
+                            OR
+                            (action_item->>'sender_role' = 'mep'
+                             AND (action_item->>'decided_by_user_id')::INTEGER = :user_id
+                             AND action_item->>'type' = 'sent_to_estimator')
+                        )
+                    """),
+                    {"user_id": user_id}
+                )
+            else:
+                boqs_for_approval_query = []
 
-            boq_ids_for_approval = [row[0] for row in boqs_for_approval_query]
+            boq_ids_for_approval = [row[0] for row in boqs_for_approval_query] if boqs_for_approval_query else []
 
         # Build query - get all BOQs for assigned projects OR sent for approval
         # Handle empty lists by providing a fallback
