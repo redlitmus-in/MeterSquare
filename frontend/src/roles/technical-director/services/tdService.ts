@@ -282,12 +282,14 @@ class TDService {
     }
   }
 
-  async assignProjectsToPM(userId: number, projectIds: number[]): Promise<{ success: boolean; message: string }> {
+  async assignProjectsToPM(userIds: number | number[], projectIds: number[]): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await apiClient.post('/assign_projects', {
-        user_id: userId,
-        project_ids: projectIds
-      });
+      // Support both single userId and multiple userIds
+      const payload = Array.isArray(userIds)
+        ? { user_ids: userIds, project_ids: projectIds }
+        : { user_id: userIds, project_ids: projectIds };
+
+      const response = await apiClient.post('/assign_projects', payload);
       return {
         success: true,
         message: response.data.message || 'Projects assigned successfully'

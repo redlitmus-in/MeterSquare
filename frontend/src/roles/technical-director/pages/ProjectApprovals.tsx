@@ -240,14 +240,14 @@ const ProjectApprovals: React.FC = () => {
   const [showAssignPMModal, setShowAssignPMModal] = useState(false);
   const [assignMode, setAssignMode] = useState<'create' | 'existing'>('existing');
   const [allPMs, setAllPMs] = useState<any[]>([]);
-  const [selectedPMId, setSelectedPMId] = useState<number | null>(null);
+  const [selectedPMIds, setSelectedPMIds] = useState<number[]>([]); // Changed to array for multiple selection
   const [newPMData, setNewPMData] = useState({ full_name: '', email: '', phone: '' });
   const [pmSearchQuery, setPmSearchQuery] = useState('');
   const [expandedPMId, setExpandedPMId] = useState<number | null>(null);
   const [showComparisonModal, setShowComparisonModal] = useState(false);
   const [showPMWorkloadView, setShowPMWorkloadView] = useState(false);
   const [showPMDetailsModal, setShowPMDetailsModal] = useState(false);
-  const [selectedProjectPM, setSelectedProjectPM] = useState<any>(null);
+  const [selectedProjectPMs, setSelectedProjectPMs] = useState<any[]>([]); // Changed to array for multiple PMs
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [isRevisionApproval, setIsRevisionApproval] = useState(false);
 
@@ -1316,20 +1316,28 @@ const ProjectApprovals: React.FC = () => {
           toast.error(response.message);
         }
       } else {
-        // Assign to existing PM
-        if (!selectedPMId) {
-          toast.error('Please select a Project Manager');
+        // Assign to existing PM(s)
+        if (selectedPMIds.length === 0) {
+          toast.error('Please select at least one Project Manager');
           return;
         }
 
-        toast.loading('Assigning Project Manager...');
-        const response = await tdService.assignProjectsToPM(selectedPMId, [selectedEstimation.projectId]);
+        const pmCount = selectedPMIds.length;
+        const loadingMessage = pmCount > 1
+          ? `Assigning ${pmCount} Project Managers...`
+          : 'Assigning Project Manager...';
+        toast.loading(loadingMessage);
+
+        const response = await tdService.assignProjectsToPM(selectedPMIds, [selectedEstimation.projectId]);
 
         toast.dismiss();
         if (response.success) {
-          toast.success('Project assigned to PM successfully');
+          const successMessage = pmCount > 1
+            ? `Project assigned to ${pmCount} PMs successfully`
+            : 'Project assigned to PM successfully';
+          toast.success(successMessage);
           setShowAssignPMModal(false);
-          setSelectedPMId(null);
+          setSelectedPMIds([]);
           await loadBOQs();
           // Reload the selected BOQ details to update the UI
           if (selectedEstimation) {
@@ -1855,22 +1863,22 @@ const ProjectApprovals: React.FC = () => {
                             await loadPMs();
                           }
 
-                          // Find PM details for this project
-                          const pmForProject = allPMs.find(pm =>
+                          // Find ALL PM details for this project (supports multiple PMs)
+                          const pmsForProject = allPMs.filter(pm =>
                             pm.projects?.some((p: any) => p.project_id === estimation.projectId)
                           );
 
-                          if (pmForProject) {
-                            setSelectedProjectPM(pmForProject);
+                          if (pmsForProject.length > 0) {
+                            setSelectedProjectPMs(pmsForProject);
                             setShowPMDetailsModal(true);
                           } else {
                             // Try loading PMs again and retry
                             await loadPMs();
-                            const retryPM = allPMs.find(pm =>
+                            const retryPMs = allPMs.filter(pm =>
                               pm.projects?.some((p: any) => p.project_id === estimation.projectId)
                             );
-                            if (retryPM) {
-                              setSelectedProjectPM(retryPM);
+                            if (retryPMs.length > 0) {
+                              setSelectedProjectPMs(retryPMs);
                               setShowPMDetailsModal(true);
                             } else {
                               toast.error('PM details not found. Please refresh the page.');
@@ -2001,19 +2009,19 @@ const ProjectApprovals: React.FC = () => {
                                   if (allPMs.length === 0) {
                                     await loadPMs();
                                   }
-                                  const pmForProject = allPMs.find(pm =>
+                                  const pmsForProject = allPMs.filter(pm =>
                                     pm.projects?.some((p: any) => p.project_id === estimation.projectId)
                                   );
-                                  if (pmForProject) {
-                                    setSelectedProjectPM(pmForProject);
+                                  if (pmsForProject.length > 0) {
+                                    setSelectedProjectPMs(pmsForProject);
                                     setShowPMDetailsModal(true);
                                   } else {
                                     await loadPMs();
-                                    const retryPM = allPMs.find(pm =>
+                                    const retryPMs = allPMs.filter(pm =>
                                       pm.projects?.some((p: any) => p.project_id === estimation.projectId)
                                     );
-                                    if (retryPM) {
-                                      setSelectedProjectPM(retryPM);
+                                    if (retryPMs.length > 0) {
+                                      setSelectedProjectPMs(retryPMs);
                                       setShowPMDetailsModal(true);
                                     } else {
                                       toast.error('PM details not found. Please refresh the page.');
@@ -2740,7 +2748,7 @@ const ProjectApprovals: React.FC = () => {
                   <button
                     onClick={() => {
                       setShowAssignPMModal(false);
-                      setSelectedPMId(null);
+                      setSelectedPMIds([]);
                       setNewPMData({ full_name: '', email: '', phone: '' });
                       setAssignMode('existing');
                     }}
@@ -2784,9 +2792,26 @@ const ProjectApprovals: React.FC = () => {
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                   >
+                    {/* Selection Counter */}
+                    {selectedPMIds.length > 0 && (
+                      <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                        <p className="text-sm text-blue-700 font-medium">
+                          <span className="inline-flex items-center gap-1">
+                            <UserPlusIcon className="w-4 h-4" />
+                            {selectedPMIds.length} PM{selectedPMIds.length > 1 ? 's' : ''} selected
+                          </span>
+                          <button
+                            onClick={() => setSelectedPMIds([])}
+                            className="ml-2 text-xs text-blue-600 hover:text-blue-800 underline"
+                          >
+                            Clear all
+                          </button>
+                        </p>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between mb-4">
                       <label className="block text-sm font-semibold text-gray-700">
-                        Select Project Manager <span className="text-red-500">*</span>
+                        Select Project Manager(s) <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
@@ -2822,7 +2847,7 @@ const ProjectApprovals: React.FC = () => {
                                 </div>
                                 <div className="space-y-2">
                                   {onlinePMs.map((pm: any) => {
-                          const isSelected = selectedPMId === pm.user_id;
+                          const isSelected = selectedPMIds.includes(pm.user_id);
                           const projectCount = pm.projectCount || 0;
                           const isAvailable = projectCount === 0;
                           const isBusy = projectCount >= 1 && projectCount <= 3;
@@ -2849,7 +2874,13 @@ const ProjectApprovals: React.FC = () => {
                           return (
                             <div key={pm.user_id}>
                               <div
-                                onClick={() => setSelectedPMId(pm.user_id)}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setSelectedPMIds(selectedPMIds.filter(id => id !== pm.user_id));
+                                  } else {
+                                    setSelectedPMIds([...selectedPMIds, pm.user_id]);
+                                  }
+                                }}
                                 className={`border rounded-md px-3 py-2 cursor-pointer transition-all ${
                                   isSelected
                                     ? 'border-[#243d8a] bg-blue-50 shadow-sm'
@@ -2857,6 +2888,20 @@ const ProjectApprovals: React.FC = () => {
                                 }`}
                               >
                                 <div className="flex items-center gap-3">
+                                  {/* Checkbox for Multiple Selection */}
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      if (e.target.checked) {
+                                        setSelectedPMIds([...selectedPMIds, pm.user_id]);
+                                      } else {
+                                        setSelectedPMIds(selectedPMIds.filter(id => id !== pm.user_id));
+                                      }
+                                    }}
+                                    className="w-4 h-4 text-[#243d8a] border-gray-300 rounded focus:ring-[#243d8a] cursor-pointer"
+                                  />
                                   {/* Avatar with Online Status */}
                                   <div className="relative flex-shrink-0">
                                     <div className="w-9 h-9 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
@@ -2975,12 +3020,18 @@ const ProjectApprovals: React.FC = () => {
                             statusBg = 'bg-red-50 border-red-200';
                           }
 
-                          const isSelected = selectedPMId === pm.user_id;
+                          const isSelected = selectedPMIds.includes(pm.user_id);
 
                           return (
                             <div key={pm.user_id}>
                               <div
-                                onClick={() => setSelectedPMId(pm.user_id)}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setSelectedPMIds(selectedPMIds.filter(id => id !== pm.user_id));
+                                  } else {
+                                    setSelectedPMIds([...selectedPMIds, pm.user_id]);
+                                  }
+                                }}
                                 className={`border rounded-md px-3 py-2 cursor-pointer transition-all ${
                                   isSelected
                                     ? 'border-[#243d8a] bg-blue-50 shadow-sm'
@@ -2988,6 +3039,20 @@ const ProjectApprovals: React.FC = () => {
                                 }`}
                               >
                                 <div className="flex items-center gap-3">
+                                  {/* Checkbox for Multiple Selection */}
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      if (e.target.checked) {
+                                        setSelectedPMIds([...selectedPMIds, pm.user_id]);
+                                      } else {
+                                        setSelectedPMIds(selectedPMIds.filter(id => id !== pm.user_id));
+                                      }
+                                    }}
+                                    className="w-4 h-4 text-[#243d8a] border-gray-300 rounded focus:ring-[#243d8a] cursor-pointer"
+                                  />
                                   {/* Avatar with Offline Status */}
                                   <div className="relative flex-shrink-0">
                                     <div className="w-9 h-9 bg-gradient-to-br from-gray-400 to-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
@@ -3168,10 +3233,15 @@ const ProjectApprovals: React.FC = () => {
                   </button>
                   <button
                     onClick={handleAssignPM}
-                    className="flex-1 px-6 py-3 bg-[#243d8a] hover:bg-[#1a2d66] text-white rounded-xl font-semibold transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+                    disabled={assignMode === 'existing' && selectedPMIds.length === 0}
+                    className="flex-1 px-6 py-3 bg-[#243d8a] hover:bg-[#1a2d66] text-white rounded-xl font-semibold transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <UserPlusIcon className="w-5 h-5" />
-                    {assignMode === 'create' ? 'Create & Assign' : 'Assign to Project'}
+                    {assignMode === 'create'
+                      ? 'Create & Assign'
+                      : selectedPMIds.length > 0
+                      ? `Assign ${selectedPMIds.length} PM${selectedPMIds.length > 1 ? 's' : ''} to Project`
+                      : 'Assign to Project'}
                   </button>
                 </div>
               </div>
@@ -3931,7 +4001,7 @@ const ProjectApprovals: React.FC = () => {
         )}
 
         {/* PM Details Modal - Show assigned PM details for a project */}
-        {showPMDetailsModal && selectedProjectPM && (
+        {showPMDetailsModal && selectedProjectPMs.length > 0 && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -3944,14 +4014,18 @@ const ProjectApprovals: React.FC = () => {
                   <div className="flex items-center gap-3">
                     <UserIcon className="w-8 h-8 text-white p-1.5 bg-white bg-opacity-20 rounded-lg" />
                     <div>
-                      <h2 className="text-xl font-bold text-white">Assigned Project Manager</h2>
-                      <p className="text-blue-100 text-sm">PM Details and Workload</p>
+                      <h2 className="text-xl font-bold text-white">
+                        Assigned Project Manager{selectedProjectPMs.length > 1 ? 's' : ''}
+                      </h2>
+                      <p className="text-blue-100 text-sm">
+                        {selectedProjectPMs.length} PM{selectedProjectPMs.length > 1 ? 's' : ''} - Details and Workload
+                      </p>
                     </div>
                   </div>
                   <button
                     onClick={() => {
                       setShowPMDetailsModal(false);
-                      setSelectedProjectPM(null);
+                      setSelectedProjectPMs([]);
                     }}
                     className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition-colors"
                   >
@@ -3960,9 +4034,9 @@ const ProjectApprovals: React.FC = () => {
                 </div>
               </div>
 
-              <div className="p-6">
-                {(() => {
-                  const projectCount = selectedProjectPM.projectCount || 0;
+              <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                {selectedProjectPMs.map((pm, pmIndex) => {
+                  const projectCount = pm.projectCount || 0;
                   const isAvailable = projectCount === 0;
                   const isBusy = projectCount >= 1 && projectCount <= 3;
                   const isOverloaded = projectCount > 3;
@@ -3990,34 +4064,39 @@ const ProjectApprovals: React.FC = () => {
                   }
 
                   return (
-                    <>
+                    <div key={pm.user_id || pmIndex} className="pb-4 border-b last:border-b-0 last:pb-0">
                       {/* PM Info Card */}
-                      <div className={`border-2 rounded-xl p-5 mb-4 ${borderColor} ${statusBg}`}>
-                        <div className="flex items-start justify-between mb-4">
+                      <div className={`border-2 rounded-xl p-5 mb-3 ${borderColor} ${statusBg}`}>
+                        <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-3 mb-3">
-                              <h3 className="text-2xl font-bold text-gray-900">
-                                {selectedProjectPM.pm_name || selectedProjectPM.full_name}
+                              <h3 className="text-xl font-bold text-gray-900">
+                                {pm.pm_name || pm.full_name}
                               </h3>
-                              <span className={`px-3 py-1 rounded-full text-sm font-semibold ${statusColor} ${statusBg} border-2 ${borderColor}`}>
+                              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusColor} ${statusBg} border-2 ${borderColor}`}>
                                 {statusText}
                               </span>
+                              {pmIndex === 0 && selectedProjectPMs.length > 1 && (
+                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 border border-blue-300">
+                                  Primary
+                                </span>
+                              )}
                             </div>
 
-                            <div className="space-y-2 mb-4">
+                            <div className="space-y-1.5 mb-3">
                               <div className="flex items-center gap-2 text-gray-700">
-                                <span className="text-sm font-medium text-gray-500">Email:</span>
-                                <span className="text-sm">{selectedProjectPM.email}</span>
+                                <span className="text-xs font-medium text-gray-500">Email:</span>
+                                <span className="text-sm">{pm.email}</span>
                               </div>
                               <div className="flex items-center gap-2 text-gray-700">
-                                <span className="text-sm font-medium text-gray-500">Phone:</span>
-                                <span className="text-sm">{selectedProjectPM.phone}</span>
+                                <span className="text-xs font-medium text-gray-500">Phone:</span>
+                                <span className="text-sm">{pm.phone}</span>
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-2 mb-3">
-                              <BuildingOfficeIcon className="w-5 h-5 text-gray-500" />
-                              <span className="font-bold text-xl text-[#243d8a]">{projectCount}</span>
+                            <div className="flex items-center gap-2 mb-2">
+                              <BuildingOfficeIcon className="w-4 h-4 text-gray-500" />
+                              <span className="font-bold text-lg text-[#243d8a]">{projectCount}</span>
                               <span className="text-gray-600 text-sm">
                                 {projectCount === 1 ? 'project' : 'projects'} assigned
                               </span>
@@ -4031,9 +4110,9 @@ const ProjectApprovals: React.FC = () => {
                                   {projectCount === 0 ? '0%' : projectCount <= 3 ? `${Math.min(projectCount * 25, 75)}%` : '100%'}
                                 </span>
                               </div>
-                              <div className="w-full bg-gray-200 rounded-full h-3">
+                              <div className="w-full bg-gray-200 rounded-full h-2.5">
                                 <div
-                                  className={`h-3 rounded-full transition-all ${
+                                  className={`h-2.5 rounded-full transition-all ${
                                     isAvailable ? 'bg-green-500' : isBusy ? 'bg-yellow-500' : 'bg-red-500'
                                   }`}
                                   style={{ width: projectCount === 0 ? '0%' : `${Math.min(projectCount * 20, 100)}%` }}
@@ -4044,58 +4123,61 @@ const ProjectApprovals: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Assigned Projects List */}
-                      {selectedProjectPM.projects && selectedProjectPM.projects.length > 0 && (
-                        <div>
-                          <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                            <DocumentTextIcon className="w-5 h-5 text-gray-500" />
-                            All Assigned Projects ({selectedProjectPM.projects.length})
-                          </h4>
-                          <div className="max-h-64 overflow-y-auto space-y-2">
-                            {selectedProjectPM.projects.map((project: any, idx: number) => (
+                      {/* Assigned Projects List (Collapsible) */}
+                      {pm.projects && pm.projects.length > 0 && (
+                        <details className="group">
+                          <summary className="cursor-pointer text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2 hover:text-[#243d8a]">
+                            <DocumentTextIcon className="w-4 h-4 text-gray-500" />
+                            All Assigned Projects ({pm.projects.length})
+                            <svg className="w-4 h-4 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </summary>
+                          <div className="max-h-48 overflow-y-auto space-y-1.5 mt-2 pl-2">
+                            {pm.projects.map((project: any, idx: number) => (
                               <div
                                 key={idx}
-                                className="bg-gray-50 border border-gray-200 rounded-lg p-3 hover:border-[#243d8a] hover:bg-blue-50 transition-colors"
+                                className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 hover:border-[#243d8a] hover:bg-blue-50 transition-colors"
                               >
-                                <div className="flex items-start gap-3">
-                                  <BuildingOfficeIcon className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                                <div className="flex items-start gap-2">
+                                  <BuildingOfficeIcon className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                    <p className="text-xs font-medium text-gray-900 truncate">
                                       {project.project_name}
                                     </p>
-                                    <p className="text-xs text-gray-500">Project ID: {project.project_id}</p>
+                                    <p className="text-xs text-gray-500">ID: {project.project_id}</p>
                                   </div>
                                 </div>
                               </div>
                             ))}
                           </div>
-                        </div>
+                        </details>
                       )}
 
                       {projectCount === 0 && (
-                        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                          <p className="text-sm text-green-700 flex items-center gap-2">
-                            <CheckCircleIcon className="w-5 h-5" />
-                            This PM is currently available and has no assigned projects
+                        <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                          <p className="text-xs text-green-700 flex items-center gap-2">
+                            <CheckCircleIcon className="w-4 h-4" />
+                            Currently available with no assigned projects
                           </p>
                         </div>
                       )}
-
-                      {/* Close Button */}
-                      <div className="mt-6 pt-4 border-t border-gray-200">
-                        <button
-                          onClick={() => {
-                            setShowPMDetailsModal(false);
-                            setSelectedProjectPM(null);
-                          }}
-                          className="w-full px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold transition-colors"
-                        >
-                          Close
-                        </button>
-                      </div>
-                    </>
+                    </div>
                   );
-                })()}
+                })}
+
+                {/* Close Button */}
+                <div className="pt-4 border-t border-gray-200 sticky bottom-0 bg-white">
+                  <button
+                    onClick={() => {
+                      setShowPMDetailsModal(false);
+                      setSelectedProjectPMs([]);
+                    }}
+                    className="w-full px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

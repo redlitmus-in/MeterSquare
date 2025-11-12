@@ -85,10 +85,19 @@ def get_all_pm_boqs():
                 Project.is_deleted == False
             ).all()
         else:
-            assigned_projects = db.session.query(Project.project_id).filter(
-                Project.user_id == user_id,
-                Project.is_deleted == False
-            ).all()
+            # Query projects where user_id JSON array contains the PM's ID
+            # Use raw SQL to properly cast to jsonb
+            from sqlalchemy import text
+            import json
+            result = db.session.execute(
+                text("""
+                    SELECT project_id FROM project
+                    WHERE user_id::jsonb @> CAST(:pm_id AS jsonb)
+                    AND is_deleted = false
+                """),
+                {"pm_id": json.dumps([user_id])}
+            )
+            assigned_projects = [(row.project_id,) for row in result]
         # Extract project IDs
         project_ids = [p.project_id for p in assigned_projects]
 
@@ -324,8 +333,19 @@ def get_all_pm():
             is_online = pm.user_status == 'online'
             log.info(f"PM {pm.full_name}: user_status={pm.user_status}, is_online={is_online}")
 
-            # Fetch all projects assigned to this PM
-            projects = Project.query.filter_by(user_id=pm.user_id).all()
+            # Fetch all projects assigned to this PM (user_id is now JSON array)
+            # Use raw SQL to query JSON array contains
+            from sqlalchemy import text
+            import json
+            result = db.session.execute(
+                text("""
+                    SELECT * FROM project
+                    WHERE user_id::jsonb @> CAST(:pm_id AS jsonb)
+                """),
+                {"pm_id": json.dumps([pm.user_id])}
+            )
+            project_ids = [row.project_id for row in result]
+            projects = Project.query.filter(Project.project_id.in_(project_ids)).all() if project_ids else []
 
             if projects and len(projects) > 0:
                 # Add each project under assigned list
@@ -502,16 +522,29 @@ def assign_projects():
     try:
         data = request.get_json(silent=True)
 
+        # Support both single user_id (backward compatibility) and multiple user_ids
         user_id = data.get("user_id")
+        user_ids = data.get("user_ids")
         project_ids = data.get("project_ids")  # list of project IDs
 
-        if not user_id or not project_ids:
-            return jsonify({"error": "user_id and project_ids are required"}), 400
+        # Convert single user_id to list for uniform processing
+        if user_ids:
+            pm_ids = user_ids if isinstance(user_ids, list) else [user_ids]
+        elif user_id:
+            pm_ids = [user_id]
+        else:
+            return jsonify({"error": "user_id or user_ids is required"}), 400
 
-        # Validate user
-        user = User.query.filter_by(user_id=user_id).first()
-        if not user:
-            return jsonify({"error": "Project Manager not found"}), 404
+        if not project_ids:
+            return jsonify({"error": "project_ids are required"}), 400
+
+        # Validate all users
+        pm_users = []
+        for uid in pm_ids:
+            user = User.query.filter_by(user_id=uid).first()
+            if not user:
+                return jsonify({"error": f"Project Manager with ID {uid} not found"}), 404
+            pm_users.append(user)
 
         # Validate that all projects have Client_Confirmed BOQs
         for pid in project_ids:
@@ -533,10 +566,12 @@ def assign_projects():
         projects_data_for_email = []
         boq_histories_updated = 0
 
+        # Process each project
         for pid in project_ids:
             project = Project.query.filter_by(project_id=pid).first()
             if project:
-                project.user_id = user_id
+                # Store ALL PM IDs as JSON array in user_id field
+                project.user_id = pm_ids  # This will be stored as JSON array
                 project.last_modified_at = datetime.utcnow()
                 project.last_modified_by = td_name
 
@@ -555,6 +590,9 @@ def assign_projects():
 
                 # Find BOQs associated with this project
                 boqs = BOQ.query.filter_by(project_id=pid, is_deleted=False).all()
+
+                # Create PM names list for comments
+                pm_names_list = ", ".join([pm.full_name for pm in pm_users])
 
                 for boq in boqs:
                     # Get existing BOQ history
@@ -577,7 +615,7 @@ def assign_projects():
                     else:
                         current_actions = []
 
-                    # Prepare new action for PM assignment
+                    # Prepare new action for PM assignment (supporting multiple PMs)
                     new_action = {
                         "role": "technical_director",
                         "type": "assigned_project_manager",
@@ -585,15 +623,19 @@ def assign_projects():
                         "receiver": "project_manager",
                         "status": "PM_Assigned",
                         "boq_name": boq.boq_name,
-                        "comments": f"Project Manager {user.full_name} assigned to project",
+                        "comments": f"Project Manager(s) {pm_names_list} assigned to project",
                         "timestamp": datetime.utcnow().isoformat(),
                         "sender_name": td_name,
                         "sender_user_id": td_id,
                         "project_name": project.project_name,
                         "project_id": project.project_id,
-                        "assigned_pm_name": user.full_name,
-                        "assigned_pm_user_id": user.user_id,
-                        "assigned_pm_email": user.email
+                        "assigned_pms": [
+                            {
+                                "name": pm.full_name,
+                                "user_id": pm.user_id,
+                                "email": pm.email
+                            } for pm in pm_users
+                        ]
                     }
 
                     # Append new action
@@ -609,8 +651,8 @@ def assign_projects():
 
                         existing_history.action_by = td_name
                         existing_history.sender = td_name
-                        existing_history.receiver = user.full_name
-                        existing_history.comments = f"Project Manager {user.full_name} assigned to project"
+                        existing_history.receiver = pm_names_list
+                        existing_history.comments = f"Project Manager(s) {pm_names_list} assigned to project"
                         existing_history.sender_role = 'technical_director'
                         existing_history.receiver_role = 'project_manager'
                         existing_history.action_date = datetime.utcnow()
@@ -626,8 +668,8 @@ def assign_projects():
                             action_by=td_name,
                             boq_status="approved",
                             sender=td_name,
-                            receiver=user.full_name,
-                            comments=f"Project Manager {user.full_name} assigned to project",
+                            receiver=pm_names_list,
+                            comments=f"Project Manager(s) {pm_names_list} assigned to project",
                             sender_role='technical_director',
                             receiver_role='project_manager',
                             action_date=datetime.utcnow(),
@@ -663,15 +705,23 @@ def assign_projects():
             #     import traceback
             #     log.error(f"Email error traceback: {traceback.format_exc()}")
 
+        # Prepare response with all assigned PMs
+        assigned_pms_data = [
+            {
+                "user_id": pm.user_id,
+                "user_name": pm.full_name,
+                "email": pm.email,
+                "phone": pm.phone
+            } for pm in pm_users
+        ]
+
+        message = f"Projects assigned to {len(pm_users)} Project Manager(s) successfully" if len(pm_users) > 1 else "Projects assigned to Project Manager successfully"
+
         return jsonify({
             "success": True,
-            "message": "Projects assigned to Project Manager successfully",
-            "assigned_pm": {
-                "user_id": user.user_id,
-                "user_name": user.full_name,
-                "email": user.email,
-                "phone": user.phone
-            },
+            "message": message,
+            "assigned_pms": assigned_pms_data,
+            "assigned_pm_count": len(pm_users),
             "assigned_projects": assigned_projects,
             "assigned_count": len(assigned_projects),
             "boq_histories_updated": boq_histories_updated,

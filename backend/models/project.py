@@ -10,8 +10,8 @@ class Project(db.Model):
     project_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     project_code = db.Column(db.String(50), unique=True, nullable=False)  # Auto-generated unique code like Proj01
     project_name = db.Column(db.String(255), nullable=False)  # Required
-    # user_id is a project manager id in a user table
-    user_id = db.Column(db.Integer, nullable=True)
+    # user_id is now a JSON array of project manager ids to support multiple PMs
+    user_id = db.Column(db.JSON, nullable=True)  # Stores array of PM IDs: [1, 2, 3]
     estimator_id = db.Column(db.Integer, nullable=True)
     site_supervisor_id = db.Column(db.Integer, nullable=True)
     buyer_id = db.Column(db.Integer, nullable=True)  # Buyer assigned to project
