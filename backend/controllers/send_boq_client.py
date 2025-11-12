@@ -22,11 +22,6 @@ def send_boq_to_client():
     """
     try:
         data = request.get_json()
-        print(f"\n{'='*80}")
-        print(f"[SEND_BOQ_START] Request received")
-        print(f"[SEND_BOQ_START] Data: {data}")
-        print(f"{'='*80}\n")
-
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
@@ -90,7 +85,6 @@ def send_boq_to_client():
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
         # Fetch sub_item images from database (optimized for speed)
-        print(f"[SEND_BOQ] Fetching images from database...")
         try:
             # Get all sub_item_ids at once
             sub_item_ids = []
@@ -118,7 +112,6 @@ def send_boq_to_client():
                             if sub_item_id and sub_item_id in sub_items_map:
                                 sub_item['sub_item_image'] = sub_items_map[sub_item_id]
 
-                print(f"[SEND_BOQ] Fetched {len(sub_items_map)} images")
         except Exception as e:
             print(f"[SEND_BOQ] Error fetching images: {str(e)}")
 
@@ -156,10 +149,8 @@ def send_boq_to_client():
             try:
                 pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
                 # Generate PDF WITH images
-                print(f"[SEND_BOQ] Generating PDF with images...")
                 pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text, include_images=True)
                 pdf_file = (pdf_filename, pdf_data)
-                print(f"[SEND_BOQ] PDF generated successfully")
             except Exception as pdf_err:
                 log.error(f"Error generating PDF: {str(pdf_err)}")
                 import traceback
@@ -285,21 +276,8 @@ def send_boq_to_client():
                 "total_sent": len(successful_sends),
                 "total_failed": len(failed_sends)
             }
-
-            print(f"\n{'='*80}")
-            print(f"[SEND_BOQ_SUCCESS] BOQ sent to {len(successful_sends)} recipient(s)")
-            print(f"[SEND_BOQ_SUCCESS] Response: {response_data}")
-            print(f"{'='*80}\n")
-            log.info(f"BOQ {boq_id} sent successfully to {successful_sends}")
-
             return jsonify(response_data), 200
         else:
-            print(f"\n{'='*80}")
-            print(f"[SEND_BOQ_FAILED] No successful sends")
-            print(f"[SEND_BOQ_FAILED] Attempted: {client_emails}")
-            print(f"[SEND_BOQ_FAILED] Failed: {failed_sends}")
-            print(f"{'='*80}\n")
-
             return jsonify({
                 "success": False,
                 "error": f"Failed to send email to all recipients. Attempted: {', '.join(client_emails)}",
@@ -308,11 +286,6 @@ def send_boq_to_client():
 
     except Exception as e:
         import traceback
-        print(f"\n{'='*80}")
-        print(f"[SEND_BOQ_EXCEPTION] Error occurred: {str(e)}")
-        print(f"[SEND_BOQ_EXCEPTION] Traceback:\n{traceback.format_exc()}")
-        print(f"{'='*80}\n")
-
         log.error(f"Error sending BOQ to client: {str(e)}")
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"success": False, "error": str(e)}), 500
