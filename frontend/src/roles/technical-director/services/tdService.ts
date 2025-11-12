@@ -141,12 +141,15 @@ class TDService {
     formats?: string[] // ['excel', 'pdf'] or ['excel'] or ['pdf']
   ): Promise<{ success: boolean; message: string }> {
     try {
+      // Extended timeout for image processing (2 minutes to allow backend to fetch images)
       const response = await apiClient.post('/send_boq_to_client', {
         boq_id: boqId,
         client_email: clientEmail,
         message: message || 'Please review the attached BOQ for your project.',
         include_overhead_profit: false, // Always send client version without O&P
         formats: formats || ['excel', 'pdf'] // Default: send both formats
+      }, {
+        timeout: 120000  // 2 minutes (120 seconds) timeout for email with images
       });
       return {
         success: true,

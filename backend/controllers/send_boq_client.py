@@ -1,5 +1,5 @@
 from flask import request, jsonify, g
-from models.boq import BOQ, BOQDetails, BOQHistory
+from models.boq import BOQ, BOQDetails, BOQHistory, MasterSubItem
 from models.project import Project
 from config.db import db
 from datetime import datetime, date
@@ -22,6 +22,10 @@ def send_boq_to_client():
     """
     try:
         data = request.get_json()
+        print(f"\n{'='*80}")
+        print(f"[SEND_BOQ_START] Request received")
+        print(f"[SEND_BOQ_START] Data: {data}")
+        print(f"{'='*80}\n")
 
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
@@ -85,6 +89,39 @@ def send_boq_to_client():
         # Calculate all values (this populates selling_price, overhead_amount, etc.)
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
+        # Fetch sub_item images from database (optimized for speed)
+        print(f"[SEND_BOQ] Fetching images from database...")
+        try:
+            # Get all sub_item_ids at once
+            sub_item_ids = []
+            for item in items:
+                if item.get('has_sub_items'):
+                    for sub_item in item.get('sub_items', []):
+                        if sub_item.get('sub_item_id'):
+                            sub_item_ids.append(sub_item.get('sub_item_id'))
+
+            # Bulk fetch all images in ONE query
+            if sub_item_ids:
+                db_sub_items = MasterSubItem.query.filter(
+                    MasterSubItem.sub_item_id.in_(sub_item_ids),
+                    MasterSubItem.is_deleted == False
+                ).all()
+
+                # Fast lookup dictionary
+                sub_items_map = {item.sub_item_id: item.sub_item_image for item in db_sub_items if item.sub_item_image}
+
+                # Assign images
+                for item in items:
+                    if item.get('has_sub_items'):
+                        for sub_item in item.get('sub_items', []):
+                            sub_item_id = sub_item.get('sub_item_id')
+                            if sub_item_id and sub_item_id in sub_items_map:
+                                sub_item['sub_item_image'] = sub_items_map[sub_item_id]
+
+                print(f"[SEND_BOQ] Fetched {len(sub_items_map)} images")
+        except Exception as e:
+            print(f"[SEND_BOQ] Error fetching images: {str(e)}")
+
         # Calculate CLIENT VERSION - Selling price (includes overhead/profit distributed)
         client_total_value = grand_total  # Client sees same total as internal, just distributed differently
 
@@ -106,29 +143,6 @@ def send_boq_to_client():
             'location': project.location or 'N/A'
         }
 
-        # Fetch selected terms & conditions from database (new system)
-        selected_terms = []
-        try:
-            query = """
-                SELECT t.term_id, t.terms_text, t.display_order
-                FROM boq_terms t
-                INNER JOIN boq_terms_selections s ON t.term_id = s.term_id
-                WHERE s.boq_id = :boq_id AND s.is_checked = TRUE
-                ORDER BY t.display_order, t.term_id
-            """
-            cursor = db.session.execute(text(query), {'boq_id': boq_id})
-            for row in cursor:
-                selected_terms.append({
-                    'term_id': row[0],
-                    'terms_text': row[1],
-                    'display_order': row[2]
-                })
-            log.info(f"Fetched {len(selected_terms)} selected terms for BOQ {boq_id}")
-        except Exception as e:
-            log.warning(f"Could not fetch selected terms for BOQ {boq_id}: {str(e)}")
-            # Continue with legacy terms_text or defaults
-            selected_terms = []
-
         # Generate files - Pass CLIENT BASE COST (not selling price)
         excel_file = None
         pdf_file = None
@@ -139,10 +153,18 @@ def send_boq_to_client():
             excel_file = (excel_filename, excel_data)
 
         if 'pdf' in formats:
-            pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
-            # Pass both selected_terms (new system) and terms_text (legacy fallback)
-            pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text, selected_terms)
-            pdf_file = (pdf_filename, pdf_data)
+            try:
+                pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
+                # Generate PDF WITH images
+                print(f"[SEND_BOQ] Generating PDF with images...")
+                pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text, include_images=True)
+                pdf_file = (pdf_filename, pdf_data)
+                print(f"[SEND_BOQ] PDF generated successfully")
+            except Exception as pdf_err:
+                log.error(f"Error generating PDF: {str(pdf_err)}")
+                import traceback
+                log.error(f"PDF generation traceback: {traceback.format_exc()}")
+                return jsonify({"success": False, "error": f"Failed to generate PDF: {str(pdf_err)}"}), 500
 
         # Send email to all recipients - Pass selling price (overhead/profit distributed)
         email_service = BOQEmailService()
@@ -253,7 +275,7 @@ def send_boq_to_client():
             if failed_sends:
                 response_message += f". Failed to send to: {', '.join(failed_sends)}"
 
-            return jsonify({
+            response_data = {
                 "success": True,
                 "message": response_message,
                 "boq_id": boq_id,
@@ -262,8 +284,22 @@ def send_boq_to_client():
                 "failed_sends": failed_sends,
                 "total_sent": len(successful_sends),
                 "total_failed": len(failed_sends)
-            }), 200
+            }
+
+            print(f"\n{'='*80}")
+            print(f"[SEND_BOQ_SUCCESS] BOQ sent to {len(successful_sends)} recipient(s)")
+            print(f"[SEND_BOQ_SUCCESS] Response: {response_data}")
+            print(f"{'='*80}\n")
+            log.info(f"BOQ {boq_id} sent successfully to {successful_sends}")
+
+            return jsonify(response_data), 200
         else:
+            print(f"\n{'='*80}")
+            print(f"[SEND_BOQ_FAILED] No successful sends")
+            print(f"[SEND_BOQ_FAILED] Attempted: {client_emails}")
+            print(f"[SEND_BOQ_FAILED] Failed: {failed_sends}")
+            print(f"{'='*80}\n")
+
             return jsonify({
                 "success": False,
                 "error": f"Failed to send email to all recipients. Attempted: {', '.join(client_emails)}",
@@ -272,6 +308,11 @@ def send_boq_to_client():
 
     except Exception as e:
         import traceback
+        print(f"\n{'='*80}")
+        print(f"[SEND_BOQ_EXCEPTION] Error occurred: {str(e)}")
+        print(f"[SEND_BOQ_EXCEPTION] Traceback:\n{traceback.format_exc()}")
+        print(f"{'='*80}\n")
+
         log.error(f"Error sending BOQ to client: {str(e)}")
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -314,14 +355,14 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
 
     row = 1
 
-    # Title
-    ws.merge_cells(f'A{row}:F{row}')
+    # Title - Updated for image column
+    ws.merge_cells(f'A{row}:G{row}')
     ws[f'A{row}'] = "QUOTATION"
     ws[f'A{row}'].font = header_font
     ws[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
     row += 1
 
-    ws.merge_cells(f'A{row}:F{row}')
+    ws.merge_cells(f'A{row}:G{row}')
     ws[f'A{row}'] = "Bill of Quantities"
     ws[f'A{row}'].font = Font(size=11, italic=True, color="6B7280")
     ws[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
@@ -352,7 +393,7 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     row += 2
 
     # Scope of Work Header
-    ws.merge_cells(f'A{row}:F{row}')
+    ws.merge_cells(f'A{row}:G{row}')
     ws[f'A{row}'] = "SCOPE OF WORK"
     ws[f'A{row}'].font = sub_header_font
     ws[f'A{row}'].fill = light_blue_fill
@@ -362,14 +403,14 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     # Process each item
     for idx, item in enumerate(items, 1):
         # Item Header
-        ws.merge_cells(f'A{row}:F{row}')
+        ws.merge_cells(f'A{row}:G{row}')
         ws[f'A{row}'] = f"{idx}. {item.get('item_name', 'N/A')}"
         ws[f'A{row}'].font = Font(bold=True, size=11, color="1F4788")
         ws[f'A{row}'].fill = PatternFill(start_color="E0E7FF", end_color="E0E7FF", fill_type="solid")
         row += 1
 
         if item.get('description'):
-            ws.merge_cells(f'A{row}:F{row}')
+            ws.merge_cells(f'A{row}:G{row}')
             ws[f'A{row}'] = item['description']
             ws[f'A{row}'].font = Font(italic=True, size=9, color="6B7280")
             row += 1
@@ -384,8 +425,8 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
         item_total_calculated = 0
 
         if has_sub_items and sub_items:
-            # Sub-items table header
-            headers = ['Sub-Item Description', 'Scope / Size', 'Qty', 'Unit', 'Rate (AED)', 'Amount (AED)']
+            # Sub-items table header - Added Image column
+            headers = ['Sub-Item Description', 'Scope / Size', 'Image', 'Qty', 'Unit', 'Rate (AED)', 'Amount (AED)']
             for col_idx, header in enumerate(headers, start=1):
                 cell = ws.cell(row=row, column=col_idx)
                 cell.value = header
@@ -426,23 +467,52 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
                 # Accumulate for item total
                 item_total_calculated += sub_item_total
 
-                # Write row (same as client PDF structure)
+                # Get all images from sub_item_image JSONB array
+                image_text = ''
+                sub_item_images = sub_item.get('sub_item_image', [])
+                if sub_item_images and isinstance(sub_item_images, list) and len(sub_item_images) > 0:
+                    # Count total images and create link text
+                    image_count = len(sub_item_images)
+                    if image_count == 1:
+                        first_image = sub_item_images[0]
+                        if isinstance(first_image, dict):
+                            image_url = first_image.get('url', '')
+                            if image_url:
+                                image_text = 'View Image'
+                    else:
+                        # Multiple images - just use the first one for the link
+                        first_image = sub_item_images[0]
+                        if isinstance(first_image, dict):
+                            image_url = first_image.get('url', '')
+                            if image_url:
+                                image_text = f'View Images ({image_count})'
+
+                # Write row (updated with image column)
                 ws.cell(row=row, column=1).value = sub_item_name
                 ws.cell(row=row, column=1).alignment = Alignment(horizontal='left', vertical='center')
                 ws.cell(row=row, column=2).value = scope_size
                 ws.cell(row=row, column=2).alignment = Alignment(horizontal='left', vertical='center')
-                ws.cell(row=row, column=3).value = round(quantity, 2)
-                ws.cell(row=row, column=3).alignment = Alignment(horizontal='center', vertical='center')
-                ws.cell(row=row, column=4).value = unit
+
+                # Image column (column 3)
+                image_cell = ws.cell(row=row, column=3)
+                if image_text and image_url:
+                    image_cell.value = image_text
+                    image_cell.hyperlink = image_url
+                    image_cell.font = Font(color="0563C1", underline="single")
+                image_cell.alignment = Alignment(horizontal='center', vertical='center')
+
+                ws.cell(row=row, column=4).value = round(quantity, 2)
                 ws.cell(row=row, column=4).alignment = Alignment(horizontal='center', vertical='center')
-                ws.cell(row=row, column=5).value = round(rate, 2)
-                ws.cell(row=row, column=5).alignment = Alignment(horizontal='right', vertical='center')
-                ws.cell(row=row, column=5).number_format = '#,##0.00'
-                ws.cell(row=row, column=6).value = round(sub_item_total, 2)
+                ws.cell(row=row, column=5).value = unit
+                ws.cell(row=row, column=5).alignment = Alignment(horizontal='center', vertical='center')
+                ws.cell(row=row, column=6).value = round(rate, 2)
                 ws.cell(row=row, column=6).alignment = Alignment(horizontal='right', vertical='center')
                 ws.cell(row=row, column=6).number_format = '#,##0.00'
+                ws.cell(row=row, column=7).value = round(sub_item_total, 2)
+                ws.cell(row=row, column=7).alignment = Alignment(horizontal='right', vertical='center')
+                ws.cell(row=row, column=7).number_format = '#,##0.00'
 
-                for col in range(1, 7):
+                for col in range(1, 8):
                     ws.cell(row=row, column=col).border = thin_border
                     ws.cell(row=row, column=col).font = normal_font
 
@@ -459,23 +529,23 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
             ws[f'D{row}'] = f"Rate: AED {item_rate:,.2f}/{item_unit}"
             row += 1
 
-        # Item Total
-        ws.merge_cells(f'A{row}:E{row}')
+        # Item Total - Updated to merge to column F (added image column)
+        ws.merge_cells(f'A{row}:F{row}')
         ws[f'A{row}'] = "Item Total:"
         ws[f'A{row}'].font = Font(bold=True, size=11, color="10B981")
         ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
         # Use calculated total if has sub-items, otherwise use old field
         item_total_value = item_total_calculated if (item.get('has_sub_items', False) and item.get('sub_items', [])) else item.get('selling_price', 0)
-        ws[f'F{row}'] = round(item_total_value, 2)
-        ws[f'F{row}'].font = Font(bold=True, size=11, color="10B981")
-        ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'].number_format = '#,##0.00'
-        ws[f'F{row}'].fill = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
+        ws[f'G{row}'] = round(item_total_value, 2)
+        ws[f'G{row}'].font = Font(bold=True, size=11, color="10B981")
+        ws[f'G{row}'].alignment = Alignment(horizontal='right', vertical='center')
+        ws[f'G{row}'].number_format = '#,##0.00'
+        ws[f'G{row}'].fill = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
         row += 3
 
     # Cost Summary
     row += 1
-    ws.merge_cells(f'A{row}:F{row}')
+    ws.merge_cells(f'A{row}:G{row}')
     ws[f'A{row}'] = "COST SUMMARY"
     ws[f'A{row}'].font = sub_header_font
     ws[f'A{row}'].fill = light_blue_fill
@@ -528,76 +598,76 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     total_vat = 0  # VAT not used
     grand_total_with_vat = subtotal_after_discount + total_vat
 
-    # Items Subtotal
-    ws.merge_cells(f'A{row}:E{row}')
+    # Items Subtotal - Updated for image column
+    ws.merge_cells(f'A{row}:F{row}')
     ws[f'A{row}'] = "Items Subtotal:"
     ws[f'A{row}'].font = bold_font
     ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
-    ws[f'F{row}'] = round(items_subtotal, 2)
-    ws[f'F{row}'].font = bold_font
-    ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
-    ws[f'F{row}'].number_format = '#,##0.00'
+    ws[f'G{row}'] = round(items_subtotal, 2)
+    ws[f'G{row}'].font = bold_font
+    ws[f'G{row}'].alignment = Alignment(horizontal='right', vertical='center')
+    ws[f'G{row}'].number_format = '#,##0.00'
     row += 1
 
     # Preliminary Amount (if exists)
     if preliminary_amount > 0:
-        ws.merge_cells(f'A{row}:E{row}')
+        ws.merge_cells(f'A{row}:F{row}')
         ws[f'A{row}'] = "Preliminary Amount:"
         ws[f'A{row}'].font = bold_font
         ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'] = round(preliminary_amount, 2)
-        ws[f'F{row}'].font = bold_font
-        ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'].number_format = '#,##0.00'
+        ws[f'G{row}'] = round(preliminary_amount, 2)
+        ws[f'G{row}'].font = bold_font
+        ws[f'G{row}'].alignment = Alignment(horizontal='right', vertical='center')
+        ws[f'G{row}'].number_format = '#,##0.00'
         row += 1
 
         # Combined Subtotal
-        ws.merge_cells(f'A{row}:E{row}')
+        ws.merge_cells(f'A{row}:F{row}')
         ws[f'A{row}'] = "Combined Subtotal:"
         ws[f'A{row}'].font = Font(bold=True, size=11)
         ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'] = round(combined_subtotal, 2)
-        ws[f'F{row}'].font = Font(bold=True, size=11)
-        ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'].number_format = '#,##0.00'
+        ws[f'G{row}'] = round(combined_subtotal, 2)
+        ws[f'G{row}'].font = Font(bold=True, size=11)
+        ws[f'G{row}'].alignment = Alignment(horizontal='right', vertical='center')
+        ws[f'G{row}'].number_format = '#,##0.00'
         row += 1
 
     # Discount (only if exists)
     if discount_amount > 0:
-        ws.merge_cells(f'A{row}:E{row}')
+        ws.merge_cells(f'A{row}:F{row}')
         ws[f'A{row}'] = f"Discount ({discount_percentage:.1f}%):"
         ws[f'A{row}'].font = bold_font
         ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'] = -round(discount_amount, 2)
-        ws[f'F{row}'].font = Font(bold=True, color="EF4444")
-        ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'].number_format = '#,##0.00'
+        ws[f'G{row}'] = -round(discount_amount, 2)
+        ws[f'G{row}'].font = Font(bold=True, color="EF4444")
+        ws[f'G{row}'].alignment = Alignment(horizontal='right', vertical='center')
+        ws[f'G{row}'].number_format = '#,##0.00'
         row += 1
 
-        ws.merge_cells(f'A{row}:E{row}')
+        ws.merge_cells(f'A{row}:F{row}')
         ws[f'A{row}'] = "After Discount:"
         ws[f'A{row}'].font = bold_font
         ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'] = round(subtotal_after_discount, 2)
-        ws[f'F{row}'].font = bold_font
-        ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
-        ws[f'F{row}'].number_format = '#,##0.00'
+        ws[f'G{row}'] = round(subtotal_after_discount, 2)
+        ws[f'G{row}'].font = bold_font
+        ws[f'G{row}'].alignment = Alignment(horizontal='right', vertical='center')
+        ws[f'G{row}'].number_format = '#,##0.00'
         row += 1
 
     # VAT row removed (not used)
     row += 1
 
     # Grand Total
-    ws.merge_cells(f'A{row}:E{row}')
+    ws.merge_cells(f'A{row}:F{row}')
     ws[f'A{row}'] = "TOTAL PROJECT VALUE (Excluding VAT):"
     ws[f'A{row}'].font = Font(bold=True, size=12, color="FFFFFF")
     ws[f'A{row}'].fill = green_fill
     ws[f'A{row}'].alignment = Alignment(horizontal='right', vertical='center')
-    ws[f'F{row}'] = round(grand_total_with_vat, 2)
-    ws[f'F{row}'].font = Font(bold=True, size=12, color="FFFFFF")
-    ws[f'F{row}'].fill = green_fill
-    ws[f'F{row}'].alignment = Alignment(horizontal='right', vertical='center')
-    ws[f'F{row}'].number_format = '#,##0.00'
+    ws[f'G{row}'] = round(grand_total_with_vat, 2)
+    ws[f'G{row}'].font = Font(bold=True, size=12, color="FFFFFF")
+    ws[f'G{row}'].fill = green_fill
+    ws[f'G{row}'].alignment = Alignment(horizontal='right', vertical='center')
+    ws[f'G{row}'].number_format = '#,##0.00'
     row += 2
 
     # Preliminaries
@@ -607,12 +677,12 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
 
     if prelim_items or prelim_notes:
         row += 1
-        ws.merge_cells(f'A{row}:F{row}')
+        ws.merge_cells(f'A{row}:G{row}')
         ws[f'A{row}'] = "PRELIMINARIES & APPROVAL WORKS"
         ws[f'A{row}'].font = Font(bold=True, size=11, color="643CCA")
         row += 1
 
-        ws.merge_cells(f'A{row}:F{row}')
+        ws.merge_cells(f'A{row}:G{row}')
         ws[f'A{row}'] = "Selected conditions and terms"
         ws[f'A{row}'].font = Font(italic=True, size=9, color="666666")
         row += 2
@@ -629,29 +699,30 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
                 prefix = "✓ "
 
             if desc:  # Only add if text exists
-                ws.merge_cells(f'A{row}:F{row}')
+                ws.merge_cells(f'A{row}:G{row}')
                 ws[f'A{row}'] = f"{prefix}{desc}"
                 ws[f'A{row}'].font = normal_font
                 row += 1
 
         if prelim_notes:
             row += 1
-            ws.merge_cells(f'A{row}:F{row}')
+            ws.merge_cells(f'A{row}:G{row}')
             ws[f'A{row}'] = "Additional Notes:"
             ws[f'A{row}'].font = bold_font
             row += 1
-            ws.merge_cells(f'A{row}:F{row}')
+            ws.merge_cells(f'A{row}:G{row}')
             ws[f'A{row}'] = prelim_notes
             ws[f'A{row}'].font = Font(italic=True, size=9)
             ws[f'A{row}'].alignment = Alignment(wrap_text=True)
 
-    # Column widths
-    ws.column_dimensions['A'].width = 30
-    ws.column_dimensions['B'].width = 25
-    ws.column_dimensions['C'].width = 10
-    ws.column_dimensions['D'].width = 10
-    ws.column_dimensions['E'].width = 15
-    ws.column_dimensions['F'].width = 18
+    # Column widths - Updated for image column
+    ws.column_dimensions['A'].width = 28  # Sub-Item Description
+    ws.column_dimensions['B'].width = 22  # Scope / Size
+    ws.column_dimensions['C'].width = 12  # Image (new)
+    ws.column_dimensions['D'].width = 8   # Qty
+    ws.column_dimensions['E'].width = 8   # Unit
+    ws.column_dimensions['F'].width = 15  # Rate
+    ws.column_dimensions['G'].width = 18  # Amount
 
     # Save to BytesIO
     excel_buffer = BytesIO()
@@ -660,16 +731,17 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     return excel_buffer.read()
 
 
-def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None):
+def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, include_images=True):
     """
     Generate Client PDF - MODERN PROFESSIONAL CORPORATE FORMAT
     Uses unified ModernBOQPDFGenerator
 
     Args:
         terms_text: Optional custom Terms & Conditions text
+        include_images: If True, include images (slower). Default False for email speed.
     """
     if boq_json is None:
         boq_json = {}
 
     generator = ModernBOQPDFGenerator()
-    return generator.generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text)
+    return generator.generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text, include_images)

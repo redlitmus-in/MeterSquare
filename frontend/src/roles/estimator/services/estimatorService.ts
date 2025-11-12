@@ -855,6 +855,7 @@ class EstimatorService {
     params: { client_email?: string; message?: string; formats?: string[]; custom_email_body?: string; terms_text?: string }
   ): Promise<{ success: boolean; message: string }> {
     try {
+      // Extended timeout for image processing (2 minutes to allow backend to fetch images)
       const response = await apiClient.post('/send_boq_to_client', {
         boq_id: boqId,
         client_email: params.client_email,
@@ -862,6 +863,8 @@ class EstimatorService {
         formats: params.formats || ['excel', 'pdf'],
         custom_email_body: params.custom_email_body,
         terms_text: params.terms_text
+      }, {
+        timeout: 120000  // 2 minutes (120 seconds) timeout for email with images
       });
       return {
         success: response.data.success !== false,

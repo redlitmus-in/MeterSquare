@@ -3,7 +3,7 @@ BOQ PDF & Excel Download Controller
 Provides endpoints for downloading BOQ PDFs and Excel files (Internal and Client versions)
 """
 from flask import request, jsonify, send_file
-from models.boq import BOQ, BOQDetails
+from models.boq import *
 from models.project import Project
 from utils.modern_boq_pdf_generator import ModernBOQPDFGenerator
 from controllers.boq_internal_excel_generator import generate_internal_excel
@@ -12,6 +12,7 @@ from utils.boq_calculation_helper import calculate_boq_values
 from config.logging import get_logger
 from io import BytesIO
 from datetime import date
+
 
 log = get_logger()
 
@@ -82,11 +83,12 @@ def download_internal_pdf():
 def download_client_pdf():
     """
     Download BOQ as Client PDF (clean view)
-    GET /api/boq/download/client/<boq_id>?terms_text=custom+terms
+    GET /api/boq/download/client/<boq_id>?terms_text=custom+terms&include_images=true
     """
     try:
         boq_id = request.view_args.get('boq_id')
         terms_text = request.args.get('terms_text', None)  # Get custom terms from query string
+        include_images = request.args.get('include_images', 'true').lower() == 'true'  # Default: include images
 
         if not boq_id:
             return jsonify({"success": False, "error": "boq_id is required"}), 400
@@ -115,15 +117,27 @@ def download_client_pdf():
         # Calculate all values (this populates selling_price, overhead_amount, etc.)
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
+        # Fetch sub_item images from database and add to items
+        for item in items:
+            if item.get('has_sub_items'):
+                sub_items = item.get('sub_items', [])
+                for sub_item in sub_items:
+                    sub_item_id = sub_item.get('sub_item_id')
+                    if sub_item_id:
+                        # Fetch from database
+                        db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
+                        if db_sub_item and db_sub_item.sub_item_image:
+                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+
         # Get project
         project = boq.project
         if not project:
             return jsonify({"success": False, "error": "Project not found"}), 404
 
-        # Generate PDF with optional custom terms
+        # Generate PDF with optional custom terms and image control
         generator = ModernBOQPDFGenerator()
         pdf_data = generator.generate_client_pdf(
-            project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text
+            project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text, include_images
         )
 
         # Send file
@@ -174,7 +188,7 @@ def download_internal_excel():
             items = boq_json.get('items', [])
 
         # Calculate all values
-        total_material_cost, total_labour_cost, grand_total = calculate_boq_values(items)
+        total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
         # Get project
         project = boq.project
@@ -234,7 +248,19 @@ def download_client_excel():
             items = boq_json.get('items', [])
 
         # Calculate all values
-        total_material_cost, total_labour_cost, grand_total = calculate_boq_values(items)
+        total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
+
+        # Fetch sub_item images from database and add to items
+        for item in items:
+            if item.get('has_sub_items'):
+                sub_items = item.get('sub_items', [])
+                for sub_item in sub_items:
+                    sub_item_id = sub_item.get('sub_item_id')
+                    if sub_item_id:
+                        # Fetch from database
+                        db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
+                        if db_sub_item and db_sub_item.sub_item_image:
+                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
 
         # Get project
         project = boq.project

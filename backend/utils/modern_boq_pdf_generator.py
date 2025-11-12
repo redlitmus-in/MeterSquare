@@ -12,6 +12,8 @@ from reportlab.pdfgen import canvas
 from io import BytesIO
 from datetime import date
 import os
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class ModernBOQPDFGenerator:
@@ -20,6 +22,7 @@ class ModernBOQPDFGenerator:
     def __init__(self):
         self.styles = getSampleStyleSheet()
         self._setup_styles()
+        self.image_cache = {}  # Cache for downloaded images
 
     def _setup_styles(self):
         """Setup modern professional styles"""
@@ -51,16 +54,14 @@ class ModernBOQPDFGenerator:
             except:
                 pass
 
-    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, selected_terms=None):
+    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, include_images=True):
         """Generate clean CLIENT quotation PDF
 
         Args:
-            terms_text: Optional custom terms and conditions text (legacy).
+            terms_text: Optional custom terms and conditions text.
                        Can be multi-line string with bullet points.
                        If None, uses default hardcoded terms.
-            selected_terms: Optional list of selected terms from database (new system).
-                           List of dicts with {'terms_text': '...'}
-                           Takes precedence over terms_text.
+            include_images: If False, skip image loading for faster generation
         """
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4,
@@ -72,13 +73,13 @@ class ModernBOQPDFGenerator:
         elements.extend(self._client_header(project, boq_json))
 
         # Main items table
-        elements.extend(self._client_items_table(items, boq_json))
+        elements.extend(self._client_items_table(items, boq_json, include_images))
 
         # Summary (pass boq_json for discount info)
         elements.extend(self._client_summary(items, grand_total, boq_json))
 
-        # Terms (pass selected terms from new system, or fallback to legacy)
-        elements.extend(self._client_terms(terms_text=terms_text, selected_terms=selected_terms))
+        # Terms (pass custom terms if provided)
+        elements.extend(self._client_terms(terms_text=terms_text))
 
         doc.build(elements, onFirstPage=self._add_watermark, onLaterPages=self._add_watermark)
         buffer.seek(0)
@@ -232,16 +233,79 @@ class ModernBOQPDFGenerator:
 
         return elements
 
-    def _client_items_table(self, items, boq_json):
+    def _fetch_image(self, image_url):
+        """Fetch a single image with caching and timeout"""
+        # Check cache first
+        if image_url in self.image_cache:
+            return self.image_cache[image_url]
+
+        try:
+            # Ensure URL is absolute
+            if not image_url.startswith('http'):
+                image_url = f'https://wgddnoiakkoskbbkbygw.supabase.co/storage/v1/object/public/boq_file/{image_url}'
+
+            # Fetch image with aggressive timeout (1 second max)
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+            response = requests.get(image_url, timeout=1, verify=False, stream=True)
+
+            if response.status_code == 200 and len(response.content) > 0:
+                img_bytes = BytesIO(response.content)
+                img = Image(img_bytes, width=0.5*inch, height=0.5*inch, kind='proportional')
+                self.image_cache[image_url] = img
+                return img
+        except Exception as e:
+            pass
+
+        return None
+
+    def _prefetch_all_images(self, items):
+        """Prefetch all images in parallel before rendering"""
+        image_urls = []
+
+        # Collect all image URLs
+        for item in items:
+            if item.get('has_sub_items'):
+                sub_items = item.get('sub_items', [])
+                for sub_item in sub_items:
+                    sub_item_images = sub_item.get('sub_item_image', [])
+                    if sub_item_images and isinstance(sub_item_images, list):
+                        for img_obj in sub_item_images:
+                            if isinstance(img_obj, dict):
+                                url = img_obj.get('url', '')
+                                if url:
+                                    if not url.startswith('http'):
+                                        url = f'https://wgddnoiakkoskbbkbygw.supabase.co/storage/v1/object/public/boq_file/{url}'
+                                    image_urls.append(url)
+
+        # Fetch all images in parallel (max 50 concurrent requests for maximum speed)
+        if len(image_urls) > 0:
+            with ThreadPoolExecutor(max_workers=50) as executor:
+                future_to_url = {executor.submit(self._fetch_image, url): url for url in image_urls}
+                # Wait for all to complete with very short timeout (10 seconds max total)
+                try:
+                    for future in as_completed(future_to_url, timeout=10):
+                        pass  # Images are cached in self.image_cache
+                except Exception:
+                    # If timeout, continue with whatever images we got
+                    pass
+
+    def _client_items_table(self, items, boq_json, include_images=True):
         """Clean client items table - only quantities and prices"""
         elements = []
 
+        # Prefetch all images in parallel (only if images are requested)
+        if include_images:
+            self._prefetch_all_images(items)
+
         table_data = []
 
-        # Header
+        # Header - Added Image column
         table_data.append([
             Paragraph('<b>S.No</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=8, alignment=TA_CENTER)),
             Paragraph('<b>Description</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=8)),
+            Paragraph('<b>Image</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=8, alignment=TA_CENTER)),
             Paragraph('<b>Qty</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=8, alignment=TA_CENTER)),
             Paragraph('<b>Unit</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=8, alignment=TA_CENTER)),
             Paragraph('<b>Rate (AED)</b>', ParagraphStyle('H', parent=self.styles['Normal'], fontSize=8, alignment=TA_RIGHT)),
@@ -292,6 +356,7 @@ class ModernBOQPDFGenerator:
                 table_data.append([
                     str(item_index),
                     Paragraph(prelim_description, ParagraphStyle('Prelim', parent=self.styles['Normal'], fontSize=8)),
+                    '',  # No image for preliminaries
                     '1',
                     'lot',
                     f'{preliminary_amount:,.2f}',
@@ -310,7 +375,7 @@ class ModernBOQPDFGenerator:
                     str(item_index),
                     Paragraph(f'<b>{item.get("item_name", "N/A")}</b>',
                              ParagraphStyle('Item', parent=self.styles['Normal'], fontSize=9)),
-                    '', '', '', ''
+                    '', '', '', '', ''
                 ])
 
                 # Sub-items
@@ -323,9 +388,48 @@ class ModernBOQPDFGenerator:
                     if sub_item.get('scope'):
                         desc += f' - {sub_item["scope"]}'
 
+                    # Get all images from sub_item_image JSONB array (from cache)
+                    image_cell = ''
+
+                    if include_images:
+                        sub_item_images = sub_item.get('sub_item_image', [])
+
+                        if sub_item_images and isinstance(sub_item_images, list) and len(sub_item_images) > 0:
+                            # Load all images from cache
+                            loaded_images = []
+                            for img_data_obj in sub_item_images:
+                                if isinstance(img_data_obj, dict):
+                                    image_url = img_data_obj.get('url', '')
+                                    if image_url:
+                                        # Normalize URL
+                                        if not image_url.startswith('http'):
+                                            image_url = f'https://wgddnoiakkoskbbkbygw.supabase.co/storage/v1/object/public/boq_file/{image_url}'
+
+                                        # Get from cache
+                                        img = self.image_cache.get(image_url)
+                                        if img:
+                                            loaded_images.append(img)
+
+                            # If we loaded multiple images, create a mini table to display them
+                            if len(loaded_images) > 0:
+                                if len(loaded_images) == 1:
+                                    image_cell = loaded_images[0]
+                                else:
+                                    # Create a vertical stack of images
+                                    img_rows = [[img] for img in loaded_images]
+                                    img_table = Table(img_rows, colWidths=[0.5*inch])
+                                    img_table.setStyle(TableStyle([
+                                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                                        ('TOPPADDING', (0,0), (-1,-1), 2),
+                                        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                                    ]))
+                                    image_cell = img_table
+
                     table_data.append([
                         f'{item_index}.{sub_idx}',
                         Paragraph(desc, ParagraphStyle('Sub', parent=self.styles['Normal'], fontSize=8)),
+                        image_cell,
                         f'{qty:.0f}',
                         sub_item.get('unit', 'nos'),
                         f'{rate:,.2f}',
@@ -341,6 +445,7 @@ class ModernBOQPDFGenerator:
                     str(item_index),
                     Paragraph(item.get('item_name', 'N/A'),
                              ParagraphStyle('Item', parent=self.styles['Normal'], fontSize=8)),
+                    '',  # No image for single items (old format)
                     f'{qty:.0f}',
                     item.get('unit', 'nos'),
                     f'{rate:,.2f}',
@@ -349,8 +454,9 @@ class ModernBOQPDFGenerator:
 
             item_index += 1
 
-        # Create table
-        main_table = Table(table_data, colWidths=[0.4*inch, 3.2*inch, 0.5*inch, 0.5*inch, 0.9*inch, 1*inch])
+        # Create table with updated column widths for image column
+        # Columns: S.No | Description | Image | Qty | Unit | Rate | Amount
+        main_table = Table(table_data, colWidths=[0.35*inch, 2.2*inch, 0.7*inch, 0.45*inch, 0.45*inch, 0.8*inch, 0.9*inch])
         main_table.setStyle(TableStyle([
             # Header
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')),
@@ -364,12 +470,13 @@ class ModernBOQPDFGenerator:
             ('FONTSIZE', (0,1), (-1,-1), 8),
             ('TOPPADDING', (0,1), (-1,-1), 3),
             ('BOTTOMPADDING', (0,1), (-1,-1), 3),
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
 
             # Alignment
-            ('ALIGN', (0,0), (0,-1), 'CENTER'),
-            ('ALIGN', (2,0), (3,-1), 'CENTER'),
-            ('ALIGN', (4,0), (-1,-1), 'RIGHT'),
+            ('ALIGN', (0,0), (0,-1), 'CENTER'),  # S.No
+            ('ALIGN', (2,0), (2,-1), 'CENTER'),  # Image
+            ('ALIGN', (3,0), (4,-1), 'CENTER'),  # Qty and Unit
+            ('ALIGN', (5,0), (-1,-1), 'RIGHT'),  # Rate and Amount
 
             # Borders
             ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#cccccc')),
