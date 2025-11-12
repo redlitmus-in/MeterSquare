@@ -1,3 +1,27 @@
+# Frontend
 frontend/node_modules/.vite/deps/lucide-react.js
 /frontend/node_modules/.vite/deps
 frontend/node_modules/@babel/core/lib/config/util.js
+frontend/node_modules/
+
+# Backend
+venv/
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/logs/
+*.pyc
+__pycache__/
+
+# Environment variables
+.env
+**/.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

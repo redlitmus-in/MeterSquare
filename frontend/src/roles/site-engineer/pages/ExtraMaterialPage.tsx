@@ -45,6 +45,10 @@ interface ExtraMaterialRequest {
   rejection_reason?: string;
   rejected_by?: string;
   rejected_at?: string;
+  materials_count?: number;
+  all_materials?: any[];
+  purchase_completed_by?: string;
+  purchase_completion_date?: string;
 }
 
 const ExtraMaterialPage: React.FC = () => {
@@ -82,7 +86,7 @@ const ExtraMaterialPage: React.FC = () => {
 
       console.log('🔍 User Role:', user?.role, 'Is Admin:', isAdmin);
       console.log('🔍 Total Requests After Filter:', seRequests.length);
-      console.log('🔍 Request Details:', seRequests.map(r => ({ cr_id: r.cr_id, status: r.status, requested_by: r.requested_by_user_id, requested_by_role: r.requested_by_role, requested_by_name: r.requested_by_name })));
+      console.log('🔍 Request Details:', seRequests.map((r: any) => ({ cr_id: r.cr_id, status: r.status, requested_by: r.requested_by_user_id, requested_by_role: r.requested_by_role, requested_by_name: r.requested_by_name })));
 
       // Transform pending materials (status: 'pending' - not yet sent to PM)
       const filteredPending = seRequests
@@ -438,6 +442,13 @@ const ExtraMaterialPage: React.FC = () => {
                 <h1 className="text-3xl font-bold text-gray-900 mb-2">Material Purchase</h1>
                 <p className="text-gray-600">Request additional sub-items for assigned projects</p>
               </div>
+              <button
+                onClick={() => setShowForm(true)}
+                className="inline-flex items-center px-4 py-2 bg-[#243d8a] text-white rounded-lg hover:bg-[#1e3270] transition-colors shadow-md"
+              >
+                <PlusIcon className="w-5 h-5 mr-2" />
+                NEW MATERIAL PURCHASE
+              </button>
             </div>
           </div>
         </motion.div>
@@ -549,17 +560,6 @@ const ExtraMaterialPage: React.FC = () => {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.3 }}
           >
-            {/* NEW MATERIAL PURCHASE Button */}
-            <div className="mb-6 flex justify-end">
-              <button
-                onClick={() => setShowForm(true)}
-                className="inline-flex items-center px-4 py-2 bg-[#243d8a] text-white rounded-lg hover:bg-[#1e3270] transition-colors shadow-md"
-              >
-                <PlusIcon className="w-5 h-5 mr-2" />
-                NEW MATERIAL PURCHASE
-              </button>
-            </div>
-
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Pending Requests</h2>
             {/* Pending List */}
             {loading ? (
@@ -574,7 +574,7 @@ const ExtraMaterialPage: React.FC = () => {
               </div>
             ) : viewMode === 'card' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {pendingMaterials.map((request) => (
+                {pendingMaterials.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -606,7 +606,7 @@ const ExtraMaterialPage: React.FC = () => {
                         <div>
                           <p className="text-xs text-gray-500">Sub-Item</p>
                           <p className="font-medium">{request.sub_item_name}</p>
-                          {request.materials_count > 1 && (
+                          {request.materials_count && request.materials_count > 1 && (
                             <p className="text-xs text-purple-600 mt-1">+ {request.materials_count - 1} more material(s)</p>
                           )}
                         </div>
@@ -677,7 +677,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {pendingMaterials.map((request) => (
+                      {pendingMaterials.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -755,7 +755,7 @@ const ExtraMaterialPage: React.FC = () => {
               </div>
             ) : viewMode === 'card' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {underReviewMaterials.map((request) => (
+                {underReviewMaterials.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -846,7 +846,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {underReviewMaterials.map((request) => (
+                      {underReviewMaterials.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -969,7 +969,7 @@ const ExtraMaterialPage: React.FC = () => {
               </div>
             ) : viewMode === 'card' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {approvedMaterials.map((request) => (
+                {approvedMaterials.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -1046,7 +1046,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {approvedMaterials.map((request) => (
+                      {approvedMaterials.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -1102,7 +1102,7 @@ const ExtraMaterialPage: React.FC = () => {
               </div>
             ) : viewMode === 'card' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {rejectedMaterials.map((request) => (
+                {rejectedMaterials.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -1203,7 +1203,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {rejectedMaterials.map((request) => (
+                      {rejectedMaterials.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -1273,7 +1273,7 @@ const ExtraMaterialPage: React.FC = () => {
               </div>
             ) : viewMode === 'card' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {completedMaterials.map((request) => (
+                {completedMaterials.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -1378,7 +1378,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {completedMaterials.map((request) => (
+                      {completedMaterials.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -1471,7 +1471,6 @@ const ExtraMaterialPage: React.FC = () => {
           }}
           changeRequest={selectedRequest}
           canApprove={false}
-          canReject={false}
         />
       </div>
     </div>

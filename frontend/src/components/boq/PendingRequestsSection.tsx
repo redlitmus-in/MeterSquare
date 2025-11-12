@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Clock, Package, AlertCircle, Eye, Send, CheckCircle, XCircle } from 'lucide-react';
+import { Clock, Package, Eye, Send, CheckCircle, XCircle } from 'lucide-react';
 import { ChangeRequestItem, changeRequestService } from '@/services/changeRequestService';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
@@ -106,7 +106,6 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
   };
 
   const renderRequestCard = (request: ChangeRequestItem, showApproveButtons: boolean) => {
-          const isOverBudget = request.overhead_analysis.balance_type === 'negative';
           const isSending = sendingCrId === request.cr_id;
 
           // Check if this is user's own request
@@ -162,20 +161,12 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
                 </div>
               </div>
 
-              {/* Cost and Budget Warning */}
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3 pb-3 border-b border-gray-200">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs sm:text-sm font-semibold text-gray-700">Total Cost:</span>
-                  <span className="text-base sm:text-lg font-bold text-yellow-600">
-                    {formatCurrency(request.materials_total_cost)}
-                  </span>
-                </div>
-                {isOverBudget && (
-                  <div className="flex items-center gap-1 sm:gap-2 text-red-600">
-                    <AlertCircle className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                    <span className="text-[10px] sm:text-xs font-semibold">EXCEEDS OVERHEAD</span>
-                  </div>
-                )}
+              {/* Total Cost */}
+              <div className="flex items-center gap-2 mb-3 pb-3 border-b border-gray-200">
+                <span className="text-xs sm:text-sm font-semibold text-gray-700">Total Cost:</span>
+                <span className="text-base sm:text-lg font-bold text-yellow-600">
+                  {formatCurrency(request.materials_total_cost)}
+                </span>
               </div>
 
               {/* Action Buttons */}

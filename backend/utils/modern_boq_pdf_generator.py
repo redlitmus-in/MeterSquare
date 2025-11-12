@@ -51,13 +51,16 @@ class ModernBOQPDFGenerator:
             except:
                 pass
 
-    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None):
+    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, selected_terms=None):
         """Generate clean CLIENT quotation PDF
 
         Args:
-            terms_text: Optional custom terms and conditions text.
+            terms_text: Optional custom terms and conditions text (legacy).
                        Can be multi-line string with bullet points.
                        If None, uses default hardcoded terms.
+            selected_terms: Optional list of selected terms from database (new system).
+                           List of dicts with {'terms_text': '...'}
+                           Takes precedence over terms_text.
         """
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4,
@@ -74,8 +77,8 @@ class ModernBOQPDFGenerator:
         # Summary (pass boq_json for discount info)
         elements.extend(self._client_summary(items, grand_total, boq_json))
 
-        # Terms (pass custom terms if provided)
-        elements.extend(self._client_terms(terms_text=terms_text))
+        # Terms (pass selected terms from new system, or fallback to legacy)
+        elements.extend(self._client_terms(terms_text=terms_text, selected_terms=selected_terms))
 
         doc.build(elements, onFirstPage=self._add_watermark, onLaterPages=self._add_watermark)
         buffer.seek(0)
@@ -1070,13 +1073,16 @@ class ModernBOQPDFGenerator:
 
         return elements
 
-    def _client_terms(self, terms_text=None):
+    def _client_terms(self, terms_text=None, selected_terms=None):
         """Simple terms section
 
         Args:
-            terms_text: Optional custom terms and conditions.
+            terms_text: Optional custom terms and conditions (legacy, single text string).
                        Can be multi-line string with bullet points (• or -).
                        Each line will be rendered as a separate paragraph.
+            selected_terms: Optional list of selected terms dictionaries from database.
+                           Each dict should have {'terms_text': '...'}
+                           Takes precedence over terms_text if provided.
         """
         elements = []
         elements.append(Spacer(1, 10))
@@ -1086,9 +1092,17 @@ class ModernBOQPDFGenerator:
 
         elements.append(Paragraph('<b>TERMS & CONDITIONS:</b>', terms_style))
 
-        # Use custom terms if provided, otherwise use defaults
-        if terms_text and terms_text.strip():
-            # Parse custom terms - handle multi-line with bullet points
+        # Priority: selected_terms (new system) > terms_text (legacy) > defaults
+        if selected_terms and len(selected_terms) > 0:
+            # New system: Use selected terms from database
+            for idx, term in enumerate(selected_terms, 1):
+                term_text = term.get('terms_text', '').strip()
+                if term_text:
+                    # Add numbered bullet point
+                    formatted_text = f'{idx}. {term_text}'
+                    elements.append(Paragraph(formatted_text, terms_style))
+        elif terms_text and terms_text.strip():
+            # Legacy system: Parse custom terms - handle multi-line with bullet points
             lines = terms_text.strip().split('\n')
             for line in lines:
                 line = line.strip()

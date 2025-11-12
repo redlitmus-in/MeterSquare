@@ -468,3 +468,84 @@ export interface BOQListResponse {
     created_by: string;
   }[];
 }
+
+// ===== TERMS & CONDITIONS TYPES =====
+
+/**
+ * Terms & Conditions Item
+ * Represents a single term that can be selected for a BOQ
+ */
+export interface TermsConditionsItem {
+  id: string;                    // Frontend ID: term-{term_id} or custom-{timestamp}
+  term_id?: number;              // Database ID from boq_terms master table
+  template_name?: string;        // Optional short name (can be null)
+  terms_text: string;            // The actual term content
+  checked: boolean;              // Whether this term is selected for the BOQ
+  isCustom?: boolean;            // Whether this is a custom term added by user
+  display_order?: number;        // Sort order
+}
+
+/**
+ * API Response for getting terms for a BOQ
+ */
+export interface BOQTermsResponse {
+  success: boolean;
+  boq_id: number;
+  data: TermsConditionsItem[];
+  count: number;
+  selected_count: number;
+}
+
+/**
+ * API Response for getting only selected terms
+ */
+export interface BOQSelectedTermsResponse {
+  success: boolean;
+  boq_id: number;
+  data: {
+    term_id: number;
+    template_name?: string;
+    terms_text: string;
+    display_order?: number;
+  }[];
+  count: number;
+}
+
+/**
+ * API Response for terms master list
+ */
+export interface TermsMasterResponse {
+  success: boolean;
+  data: {
+    term_id: number;
+    template_name?: string;
+    terms_text: string;
+    display_order?: number;
+    is_default?: boolean;
+  }[];
+  count: number;
+}
+
+/**
+ * Payload for saving terms selections
+ */
+export interface SaveTermsSelectionsPayload {
+  selections: {
+    term_id: number;
+    is_checked: boolean;
+  }[];
+}
+
+/**
+ * Payload for creating a new term master
+ */
+export interface CreateTermMasterPayload {
+  terms_text: string;
+}
+
+/**
+ * Payload for updating a term master
+ */
+export interface UpdateTermMasterPayload {
+  terms_text: string;
+}

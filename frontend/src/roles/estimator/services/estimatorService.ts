@@ -1899,6 +1899,134 @@ class EstimatorService {
     }
   }
 
+  // ===== TERMS & CONDITIONS API METHODS =====
+
+  /**
+   * Get all active terms & conditions master list
+   * For dropdown/selection in BOQ creation
+   */
+  async getAllTermsMasters() {
+    try {
+      const response = await apiClient.get('/terms-master');
+      return response.data;
+    } catch (error: any) {
+      console.error('Failed to fetch terms masters:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to fetch terms',
+        data: []
+      };
+    }
+  }
+
+  /**
+   * Get all terms with selection status for a specific BOQ
+   * Returns all active terms with their checked status
+   */
+  async getBOQTerms(boqId: number) {
+    try {
+      const response = await apiClient.get(`/boq/${boqId}/terms`);
+      return response.data;
+    } catch (error: any) {
+      console.error(`Failed to fetch terms for BOQ ${boqId}:`, error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to fetch BOQ terms',
+        data: []
+      };
+    }
+  }
+
+  /**
+   * Get only selected terms for a BOQ (for display/PDF)
+   */
+  async getBOQSelectedTerms(boqId: number) {
+    try {
+      const response = await apiClient.get(`/boq/${boqId}/terms/selected`);
+      return response.data;
+    } catch (error: any) {
+      console.error(`Failed to fetch selected terms for BOQ ${boqId}:`, error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to fetch selected terms',
+        data: []
+      };
+    }
+  }
+
+  /**
+   * Save term selections for a BOQ
+   * @param boqId BOQ ID
+   * @param selections Array of {term_id, is_checked}
+   */
+  async saveBOQTerms(boqId: number, selections: { term_id: number; is_checked: boolean }[]) {
+    try {
+      const response = await apiClient.post(`/boq/${boqId}/terms`, {
+        selections: selections
+      });
+
+      return {
+        success: true,
+        message: response.data.message || 'Terms selections saved successfully'
+      };
+    } catch (error: any) {
+      console.error('Failed to save terms selections:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to save terms selections'
+      };
+    }
+  }
+
+  /**
+   * Create a new term master
+   * Used when user adds a custom term
+   */
+  async createTermMaster(data: { terms_text: string }) {
+    try {
+      const response = await apiClient.post('/terms-master', data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Failed to create term:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to create term'
+      };
+    }
+  }
+
+  /**
+   * Update a term master
+   */
+  async updateTermMaster(termId: number, data: { terms_text: string }) {
+    try {
+      const response = await apiClient.put(`/terms-master/${termId}`, data);
+      return response.data;
+    } catch (error: any) {
+      console.error(`Failed to update term ${termId}:`, error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to update term'
+      };
+    }
+  }
+
+  /**
+   * Delete a term master (soft delete)
+   */
+  async deleteTermMaster(termId: number) {
+    try {
+      const response = await apiClient.delete(`/terms-master/${termId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error(`Failed to delete term ${termId}:`, error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to delete term'
+      };
+    }
+  }
+
 }
 
 export const estimatorService = new EstimatorService();

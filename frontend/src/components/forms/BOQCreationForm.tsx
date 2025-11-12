@@ -23,7 +23,9 @@ import {
   Check,
   Image as ImageIcon,
   Eye,
-  GripVertical
+  GripVertical,
+  Edit2,
+  FileCheck
 } from 'lucide-react';
 import {
   DndContext,
@@ -43,7 +45,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { toast } from 'sonner';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
-import { ProjectOption, BOQMaterial, BOQLabour, BOQCreatePayload, WorkType } from '@/roles/estimator/types';
+import { ProjectOption, BOQMaterial, BOQLabour, BOQCreatePayload, WorkType, TermsConditionsItem } from '@/roles/estimator/types';
 import { ModernSelect } from '@/components/ui/modern-select';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 
@@ -278,6 +280,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [materialSearchTerms, setMaterialSearchTerms] = useState<Record<string, string>>({});
   const [labourSearchTerms, setLabourSearchTerms] = useState<Record<string, string>>({});
 
+  // Delete state
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+
   // VAT mode state - tracks which items use per-material VAT (REMOVED - No longer needed)
 
   // Preliminaries state
@@ -303,16 +308,32 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [customUnits, setCustomUnits] = useState<Array<{ value: string; label: string }>>([]);
   const [allUnitOptions, setAllUnitOptions] = useState<Array<{ value: string; label: string }>>(UNIT_OPTIONS);
 
+  // Terms & Conditions state
+  const [termsConditions, setTermsConditions] = useState<TermsConditionsItem[]>([]);
+  const [termsExpanded, setTermsExpanded] = useState(false);
+  const [termsListExpanded, setTermsListExpanded] = useState(false);
+  const [editingTermId, setEditingTermId] = useState<string | null>(null);
+
   // Load projects and master items on mount
   useEffect(() => {
     if (isOpen) {
+      console.log('🔵 BOQCreationForm opened - editMode:', editMode, 'isRevision:', isRevision);
       loadProjects();
       loadMasterItems();
       // Always load master preliminaries to show available options
       loadMasterPreliminaries();
       loadCustomUnits();
+
+      // Only load master terms for NEW BOQs (not when editing/viewing existing)
+      // For existing BOQs, terms are loaded in the loadExistingBoqData useEffect
+      if (!editMode && !isRevision) {
+        console.log('🟢 Calling loadMasterTerms() for NEW BOQ');
+        loadMasterTerms();
+      } else {
+        console.log('🔴 Skipping loadMasterTerms() - editMode:', editMode, 'isRevision:', isRevision);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, editMode, isRevision]);
 
   const loadProjects = async () => {
     setIsLoadingProjects(true);
@@ -435,6 +456,40 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     } catch (error) {
       console.error('Failed to save custom unit:', error);
       // Don't show error toast - units will still work locally
+    }
+  };
+
+  const loadMasterTerms = async () => {
+    try {
+      console.log('🔵 loadMasterTerms() called - Starting API request...');
+      const response = await estimatorService.getAllTermsMasters();
+      console.log('✅ Terms API response received:', response);
+
+      if (response.success && response.data) {
+        console.log(`✅ Loaded ${response.data.length} terms from database`);
+
+        // Map terms masters to UI format
+        const items = response.data.map((item: any) => ({
+          id: `term-${item.term_id}`,
+          term_id: item.term_id,
+          terms_text: item.terms_text || '',
+          checked: false, // Start with all unchecked for new BOQ
+          isCustom: false,
+          display_order: item.display_order || 0
+        }));
+
+        setTermsConditions(items);
+        console.log('✅ Terms state updated with', items.length, 'items');
+      } else {
+        console.warn('⚠️ No terms data in response:', response);
+        // If no items in database, start with empty
+        setTermsConditions([]);
+      }
+    } catch (error: any) {
+      console.error('❌ Failed to load master terms:', error);
+      console.error('❌ Error details:', error.response?.data || error.message);
+      toast.error('Failed to load terms & conditions');
+      setTermsConditions([]);
     }
   };
 
@@ -635,6 +690,46 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         // Load preliminary notes if available
         if (prelimsData.notes) {
           setPreliminaryNotes(prelimsData.notes);
+        }
+
+        // Load terms & conditions with master list
+        const termsData = boqDetails.terms_conditions || {};
+        if (boqDetails.boq_id) {
+          try {
+            // Get all master terms
+            const masterTermsResponse = await estimatorService.getAllTermsMasters();
+
+            if (masterTermsResponse.success && masterTermsResponse.data) {
+              // Try to get BOQ-specific term selections
+              let selectedTermsMap = new Map();
+
+              try {
+                const boqTermsResponse = await estimatorService.getBOQTerms(boqDetails.boq_id);
+                if (boqTermsResponse.success && boqTermsResponse.data) {
+                  boqTermsResponse.data.forEach((term: any) => {
+                    selectedTermsMap.set(term.term_id, term.checked || term.is_checked);
+                  });
+                }
+              } catch (error) {
+                console.log('Could not load BOQ term selections, using defaults');
+              }
+
+              // Merge master terms with selections
+              const mergedTerms = masterTermsResponse.data.map((masterTerm: any) => ({
+                id: `term-${masterTerm.term_id}`,
+                term_id: masterTerm.term_id,
+                terms_text: masterTerm.terms_text || '',
+                checked: selectedTermsMap.get(masterTerm.term_id) || false,
+                isCustom: false,
+                display_order: masterTerm.display_order || 0
+              }));
+
+              setTermsConditions(mergedTerms);
+              console.log(`Loaded ${mergedTerms.length} terms for existing BOQ ${boqDetails.boq_id}`);
+            }
+          } catch (error) {
+            console.error('Failed to load terms for existing BOQ:', error);
+          }
         }
 
         // Load overall discount if available
@@ -956,9 +1051,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     ).slice(0, 10); // Limit to 10 results
   };
 
-  const removeItem = (itemId: string) => {
+  const removeItem = async (itemId: string, itemName: string) => {
+    setDeletingItemId(itemId);
+    // Simulate a brief delay for better UX
+    await new Promise(resolve => setTimeout(resolve, 300));
+
     setItems(items.filter(item => item.id !== itemId));
     setExpandedItems(expandedItems.filter(id => id !== itemId));
+
+    setDeletingItemId(null);
+    toast.success(`"${itemName}" deleted successfully`);
   };
 
   // Drag and drop configuration - Professional implementation
@@ -1531,6 +1633,113 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     setPreliminaries(preliminaries.filter(item => item.id !== id));
   };
 
+  // ===== TERMS & CONDITIONS HANDLERS =====
+
+  const toggleTerm = (id: string) => {
+    setTermsConditions(prev => prev.map(term =>
+      term.id === id ? { ...term, checked: !term.checked } : term
+    ));
+  };
+
+  const addCustomTerm = () => {
+    const newTerm: TermsConditionsItem = {
+      id: `custom-${Date.now()}`,
+      terms_text: '',
+      checked: true,
+      isCustom: true
+    };
+    setTermsConditions([...termsConditions, newTerm]);
+    setEditingTermId(newTerm.id);
+    setTermsExpanded(true);
+    setTermsListExpanded(true);
+  };
+
+  const updateTermText = (id: string, text: string) => {
+    setTermsConditions(prev => prev.map(t =>
+      t.id === id ? { ...t, terms_text: text } : t
+    ));
+  };
+
+  const saveTermEdit = async (term: TermsConditionsItem) => {
+    if (!term.terms_text.trim()) {
+      toast.error('Term text cannot be empty');
+      return;
+    }
+
+    try {
+      if (term.isCustom) {
+        // Create new master term
+        toast.loading('Saving term...', { id: 'save-term' });
+        const response = await estimatorService.createTermMaster({
+          terms_text: term.terms_text.trim()
+        });
+
+        if (response.success && response.data) {
+          // Update with real term_id
+          const newTermId = response.data.term_id;
+          setTermsConditions(prev => prev.map(t =>
+            t.id === term.id
+              ? { ...t, term_id: newTermId, id: `term-${newTermId}`, isCustom: false }
+              : t
+          ));
+          toast.success('Term saved successfully', { id: 'save-term' });
+        } else {
+          toast.error(response.message || 'Failed to save term', { id: 'save-term' });
+          return;
+        }
+      } else if (term.term_id) {
+        // Update existing master term
+        toast.loading('Updating term...', { id: 'update-term' });
+        const response = await estimatorService.updateTermMaster(term.term_id, {
+          terms_text: term.terms_text.trim()
+        });
+
+        if (response.success) {
+          toast.success('Term updated successfully', { id: 'update-term' });
+        } else {
+          toast.error(response.message || 'Failed to update term', { id: 'update-term' });
+          return;
+        }
+      }
+      setEditingTermId(null);
+    } catch (error: any) {
+      console.error('Error saving term:', error);
+      toast.error(error.message || 'An error occurred while saving', { id: 'save-term' });
+    }
+  };
+
+  const removeTerm = async (id: string) => {
+    const term = termsConditions.find(t => t.id === id);
+
+    if (!term) return;
+
+    try {
+      // If it's a saved term (has term_id), delete from backend
+      if (term.term_id) {
+        toast.loading('Deleting term...', { id: 'delete-term' });
+        const response = await estimatorService.deleteTermMaster(term.term_id);
+
+        if (response.success) {
+          toast.success('Term deleted successfully', { id: 'delete-term' });
+        } else {
+          toast.error(response.message || 'Failed to delete term', { id: 'delete-term' });
+          return;
+        }
+      }
+
+      // Remove from local state
+      setTermsConditions(prev => prev.filter(t => t.id !== id));
+
+      // If editing this term, clear editing state
+      if (editingTermId === id) {
+        setEditingTermId(null);
+      }
+    } catch (error: any) {
+      console.error('Error deleting term:', error);
+      toast.error(error.message || 'An error occurred while deleting', { id: 'delete-term' });
+    }
+  };
+
   const handleDownloadTemplate = async () => {
     try {
       // Download the Excel template
@@ -1723,6 +1932,36 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       toast.success('Custom preliminaries saved to master list');
     }
 
+    // Save custom terms to master table before submitting BOQ
+    const customTerms = termsConditions.filter(t => t.isCustom && t.terms_text?.trim() && !t.term_id);
+
+    if (customTerms.length > 0) {
+      toast.info('Saving custom terms...');
+
+      for (const customTerm of customTerms) {
+        try {
+          const result = await estimatorService.createTermMaster({
+            terms_text: customTerm.terms_text.trim()
+          });
+
+          if (result.success && result.data?.term_id) {
+            // Update the term with the new master ID
+            customTerm.term_id = result.data.term_id;
+            console.log(`✅ Assigned term_id ${result.data.term_id} to custom term: ${customTerm.terms_text}`);
+          } else {
+            console.error('Failed to get term_id from response:', result);
+          }
+        } catch (error) {
+          console.error('Failed to save custom term:', customTerm.terms_text, error);
+          // Continue even if one fails - dont block the entire BOQ submission
+        }
+      }
+
+      // Update state with new term_ids
+      setTermsConditions([...termsConditions]);
+      toast.success('Custom terms saved to master list');
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -1766,6 +2005,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             },
             notes: preliminaryNotes
           },
+          terms_conditions: termsConditions.map(t => ({
+            id: t.id,
+            term_id: t.term_id,
+            terms_text: t.terms_text,
+            checked: t.checked,
+            isCustom: t.isCustom || false
+          })),
           items: items.map(item => {
             const costs = calculateItemCost(item);
             return {
@@ -2048,6 +2294,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             },
             notes: preliminaryNotes
           },
+          terms_conditions: termsConditions.map(t => ({
+            id: t.id,
+            term_id: t.term_id, // IMPORTANT: Include database ID
+            terms_text: t.terms_text,
+            checked: t.checked,
+            isCustom: t.isCustom || false
+          })),
           combined_summary: {
             total_cost: totalCostAfterDiscount,
             selling_price: totalCostAfterDiscount,
@@ -2254,6 +2507,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             },
             notes: preliminaryNotes
           },
+          terms_conditions: termsConditions.map(t => ({
+            id: t.id,
+            term_id: t.term_id,
+            terms_text: t.terms_text,
+            checked: t.checked,
+            isCustom: t.isCustom || false
+          })),
           items: items.map(item => {
             const costs = calculateItemCost(item);
             return {
@@ -2934,20 +3194,22 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                         {({ attributes, listeners, isDragging }) => (
                           <div className="border border-gray-200 rounded-lg relative">
                             <div className="bg-gray-50 px-4 py-3">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 flex-1">
-                                  <button
-                                    type="button"
-                                    {...attributes}
-                                    {...listeners}
-                                    className="group p-2 hover:bg-blue-50 rounded-lg cursor-grab active:cursor-grabbing transition-all duration-200 flex-shrink-0 relative"
-                                    aria-label="Drag to reorder"
-                                  >
-                                    <GripVertical className="w-4 h-4 text-gray-400 group-hover:text-blue-600 transition-colors" />
-                                    <span className="absolute left-1/2 -translate-x-1/2 -bottom-8 bg-gray-900 text-white text-xs px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
-                                      Drag to reorder
-                                    </span>
-                                  </button>
+                              <div className="flex items-center gap-3">
+                                {/* Drag Handle */}
+                                <button
+                                  type="button"
+                                  {...attributes}
+                                  {...listeners}
+                                  className="group p-2 hover:bg-blue-50 rounded-lg cursor-grab active:cursor-grabbing transition-all duration-200 flex-shrink-0 relative"
+                                  aria-label="Drag to reorder"
+                                >
+                                  <GripVertical className="w-4 h-4 text-gray-400 group-hover:text-blue-600 transition-colors" />
+                                  <span className="absolute left-1/2 -translate-x-1/2 -bottom-8 bg-gray-900 text-white text-xs px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                                    Drag to reorder
+                                  </span>
+                                </button>
+
+                                {/* Expand/Collapse Button */}
                                 <button
                                   type="button"
                                   onClick={() => toggleItemExpanded(item.id)}
@@ -2961,7 +3223,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     <ChevronRight className="w-4 h-4" />
                                   )}
                                 </button>
-                                <div className="flex items-center gap-2">
+
+                                {/* Item Number and Badges */}
+                                <div className="flex items-center gap-2 flex-shrink-0">
                                   <span className="text-sm font-semibold text-gray-800">Item #{index + 1}</span>
                                   {item.master_item_id && (
                                     <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">
@@ -2974,93 +3238,102 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     </span>
                                   )}
                                 </div>
-                                <div className="w-64 relative item-dropdown-container">
-                            <div className="relative">
-                              <input
-                                type="text"
-                                value={itemSearchTerms[item.id] || item.item_name}
-                                onChange={(e) => handleItemNameChange(item.id, e.target.value)}
-                                className="w-full px-3 py-2 pr-8 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                                placeholder="Search or type item name"
-                                disabled={isSubmitting || loadingItemData[item.id]}
-                                onFocus={() => setItemDropdownOpen(prev => ({ ...prev, [item.id]: true }))}
-                              />
-                              {loadingItemData[item.id] ? (
-                                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
-                              ) : (
-                                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                              )}
-                            </div>
-                            {itemDropdownOpen[item.id] && (
-                              <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
-                                {(() => {
-                                  const filtered = getFilteredItems(itemSearchTerms[item.id] || '');
-                                  const showNewOption = itemSearchTerms[item.id] &&
-                                    !filtered.some(i => i.item_name.toLowerCase() === itemSearchTerms[item.id].toLowerCase());
 
-                                  if (filtered.length === 0 && !showNewOption) {
-                                    return (
-                                      <div className="px-3 py-2 text-sm text-gray-500">
-                                        {masterItems.length === 0 ? 'No master items available yet' : 'Type to search items or add new'}
-                                      </div>
-                                    );
-                                  }
-
-                                  return (
-                                    <>
-                                      {filtered.map(masterItem => (
-                                        <button
-                                          key={masterItem.item_id}
-                                          type="button"
-                                          onClick={() => selectMasterItem(item.id, masterItem)}
-                                          className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors flex items-center justify-between group"
-                                        >
-                                          <div>
-                                            <div className="font-medium text-gray-900">{masterItem.item_name}</div>
-                                            {masterItem.description && (
-                                              <div className="text-xs text-gray-500 truncate">{masterItem.description}</div>
-                                            )}
-                                          </div>
-                                          <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            Select
-                                          </span>
-                                        </button>
-                                      ))}
-                                      {showNewOption && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            updateItem(item.id, 'item_name', itemSearchTerms[item.id]);
-                                            updateItem(item.id, 'is_new', true);
-                                            setItemDropdownOpen(prev => ({ ...prev, [item.id]: false }));
-                                          }}
-                                          className="w-full px-3 py-2 text-left text-sm bg-green-50 hover:bg-green-100 transition-colors border-t border-gray-200"
-                                        >
-                                          <div className="flex items-center gap-2">
-                                            <PlusCircle className="w-4 h-4 text-green-600" />
-                                            <span className="font-medium text-green-700">
-                                              Add "{itemSearchTerms[item.id]}" as new item
-                                            </span>
-                                          </div>
-                                        </button>
-                                      )}
-                                    </>
-                                  );
-                                })()}
-                              </div>
-                            )}
+                                {/* Item Name Input - Takes remaining space */}
+                                <div className="flex-1 relative item-dropdown-container">
+                                  <div className="relative">
+                                    <input
+                                      type="text"
+                                      value={itemSearchTerms[item.id] || item.item_name}
+                                      onChange={(e) => handleItemNameChange(item.id, e.target.value)}
+                                      className="w-full px-3 py-2 pr-8 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                      placeholder="Search or type item name"
+                                      disabled={isSubmitting || loadingItemData[item.id]}
+                                      onFocus={() => setItemDropdownOpen(prev => ({ ...prev, [item.id]: true }))}
+                                    />
+                                    {loadingItemData[item.id] ? (
+                                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />
+                                    ) : (
+                                      <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    )}
                                   </div>
+                                  {itemDropdownOpen[item.id] && (
+                                    <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                                      {(() => {
+                                        const filtered = getFilteredItems(itemSearchTerms[item.id] || '');
+                                        const showNewOption = itemSearchTerms[item.id] &&
+                                          !filtered.some(i => i.item_name.toLowerCase() === itemSearchTerms[item.id].toLowerCase());
+
+                                        if (filtered.length === 0 && !showNewOption) {
+                                          return (
+                                            <div className="px-3 py-2 text-sm text-gray-500">
+                                              {masterItems.length === 0 ? 'No master items available yet' : 'Type to search items or add new'}
+                                            </div>
+                                          );
+                                        }
+
+                                        return (
+                                          <>
+                                            {filtered.map(masterItem => (
+                                              <button
+                                                key={masterItem.item_id}
+                                                type="button"
+                                                onClick={() => selectMasterItem(item.id, masterItem)}
+                                                className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors flex items-center justify-between group"
+                                              >
+                                                <div>
+                                                  <div className="font-medium text-gray-900">{masterItem.item_name}</div>
+                                                  {masterItem.description && (
+                                                    <div className="text-xs text-gray-500 truncate">{masterItem.description}</div>
+                                                  )}
+                                                </div>
+                                                <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                  Select
+                                                </span>
+                                              </button>
+                                            ))}
+                                            {showNewOption && (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  updateItem(item.id, 'item_name', itemSearchTerms[item.id]);
+                                                  updateItem(item.id, 'is_new', true);
+                                                  setItemDropdownOpen(prev => ({ ...prev, [item.id]: false }));
+                                                }}
+                                                className="w-full px-3 py-2 text-left text-sm bg-green-50 hover:bg-green-100 transition-colors border-t border-gray-200"
+                                              >
+                                                <div className="flex items-center gap-2">
+                                                  <PlusCircle className="w-4 h-4 text-green-600" />
+                                                  <span className="font-medium text-green-700">
+                                                    Add "{itemSearchTerms[item.id]}" as new item
+                                                  </span>
+                                                </div>
+                                              </button>
+                                            )}
+                                          </>
+                                        );
+                                      })()}
+                                    </div>
+                                  )}
                                 </div>
-                              </div>
-                              <div className="flex items-center gap-3">
+
+                                {/* Delete Button - On the Right */}
                                 <button
                                   type="button"
-                                  onClick={() => removeItem(item.id)}
-                                  className="p-1 text-red-500 hover:bg-red-50 rounded"
-                                  disabled={isSubmitting}
-                                  aria-label="Remove item"
+                                  onClick={() => removeItem(item.id, item.item_name || `Item #${index + 1}`)}
+                                  className={`p-2 rounded-lg transition-all flex-shrink-0 flex items-center justify-center min-w-[40px] ${
+                                    deletingItemId === item.id
+                                      ? 'bg-red-100 cursor-not-allowed'
+                                      : 'text-red-500 hover:bg-red-50 hover:scale-110'
+                                  }`}
+                                  disabled={isSubmitting || deletingItemId === item.id}
+                                  aria-label="Delete item"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  {deletingItemId === item.id ? (
+                                    <Loader2 className="w-5 h-5 text-red-500 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="w-5 h-5" />
+                                  )}
                                 </button>
                               </div>
                             </div>
@@ -4605,6 +4878,269 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 </>
               );
             })()}
+
+            {/* Terms & Conditions Section - AT THE BOTTOM */}
+            <div className="mt-8 mb-6">
+              <div
+                className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg cursor-pointer hover:from-blue-100 hover:to-blue-200 transition-all"
+                onClick={() => setTermsExpanded(!termsExpanded)}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-500 rounded-lg">
+                    <FileCheck className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">Terms & Conditions</h3>
+                    <p className="text-xs text-gray-600">Select applicable conditions and terms</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="px-3 py-1 text-xs bg-blue-500 text-white rounded-full font-medium">
+                    {termsConditions.filter(t => t.checked).length} / {termsConditions.length} selected
+                  </span>
+                  {termsExpanded ? (
+                    <ChevronUp className="w-5 h-5 text-gray-500" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-gray-500" />
+                  )}
+                </div>
+              </div>
+
+              {termsExpanded && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mt-4 p-6 bg-white rounded-lg border border-blue-200 shadow-sm"
+                  style={{ overflow: 'visible' }}
+                >
+                  {termsConditions.length === 0 ? (
+                    <div className="text-center py-8">
+                      <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                      <p className="text-gray-500 text-sm mb-4">No terms & conditions available</p>
+                      <button
+                        type="button"
+                        onClick={addCustomTerm}
+                        className="flex items-center gap-2 px-4 py-2 mx-auto text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 transition-all font-medium"
+                        disabled={isSubmitting}
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add Custom Item
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Checklist Items - Show only 6 by default, expandable */}
+                      <div className="space-y-2 mb-3">
+                        {(termsListExpanded ? termsConditions : termsConditions.slice(0, 6)).map((term) => (
+                      <div
+                        key={term.id}
+                        onClick={() => editingTermId !== term.id && toggleTerm(term.id)}
+                        className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={term.checked}
+                          onChange={() => toggleTerm(term.id)}
+                          className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 pointer-events-none"
+                          disabled={isSubmitting}
+                        />
+                        {editingTermId === term.id ? (
+                          <div className="flex-1 flex items-start gap-2">
+                            <textarea
+                              value={term.terms_text}
+                              onChange={(e) => {
+                                updateTermText(term.id, e.target.value);
+                                // Auto-resize textarea
+                                e.target.style.height = 'auto';
+                                e.target.style.height = e.target.scrollHeight + 'px';
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              onFocus={(e) => {
+                                // Auto-resize on focus
+                                e.target.style.height = 'auto';
+                                e.target.style.height = e.target.scrollHeight + 'px';
+                              }}
+                              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-hidden"
+                              placeholder="Enter term text..."
+                              rows={1}
+                              disabled={isSubmitting}
+                              autoFocus={true}
+                              style={{ minHeight: '38px' }}
+                            />
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  saveTermEdit(term);
+                                }}
+                                className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                disabled={isSubmitting || !term.terms_text.trim()}
+                                title="Save changes"
+                              >
+                                <Check className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (term.isCustom && !term.term_id) {
+                                    await removeTerm(term.id);
+                                  } else {
+                                    setEditingTermId(null);
+                                  }
+                                }}
+                                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                                disabled={isSubmitting}
+                                title="Cancel"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                              {term.term_id && (
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (window.confirm('Are you sure you want to delete this term from the master list?')) {
+                                      setEditingTermId(null);
+                                      await removeTerm(term.id);
+                                    }
+                                  }}
+                                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                  disabled={isSubmitting}
+                                  title="Delete term"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : term.isCustom ? (
+                          <div className="flex-1 flex items-start gap-2">
+                            <textarea
+                              value={term.terms_text}
+                              onChange={(e) => {
+                                updateTermText(term.id, e.target.value);
+                                // Auto-resize textarea
+                                e.target.style.height = 'auto';
+                                e.target.style.height = e.target.scrollHeight + 'px';
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              onFocus={(e) => {
+                                // Auto-resize on focus
+                                e.target.style.height = 'auto';
+                                e.target.style.height = e.target.scrollHeight + 'px';
+                              }}
+                              className="flex-1 px-3 py-2 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-hidden bg-blue-50"
+                              placeholder="Enter custom term..."
+                              rows={1}
+                              disabled={isSubmitting}
+                              style={{ minHeight: '38px' }}
+                            />
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  saveTermEdit(term);
+                                }}
+                                className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                disabled={isSubmitting || !term.terms_text.trim()}
+                                title="Save term"
+                              >
+                                <Check className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await removeTerm(term.id);
+                                }}
+                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                disabled={isSubmitting}
+                                title="Remove term"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex-1 flex items-center gap-3">
+                            <span className="text-sm text-gray-700 flex-1 leading-relaxed">
+                              {term.terms_text}
+                            </span>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingTermId(term.id);
+                                }}
+                                className="p-1.5 bg-white border border-blue-300 text-blue-600 hover:text-white hover:bg-blue-600 rounded-md transition-all active:scale-95 shadow-sm"
+                                disabled={isSubmitting}
+                                title="Edit term"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (window.confirm('Are you sure you want to delete this term from the master list?\n\nThis will remove it from the master library but won\'t affect existing BOQs that already use it.')) {
+                                    await removeTerm(term.id);
+                                  }
+                                }}
+                                className="p-1.5 bg-white border border-red-300 text-red-600 hover:text-white hover:bg-red-600 rounded-md transition-all active:scale-95 shadow-sm"
+                                disabled={isSubmitting}
+                                title="Delete term"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Show More/Less Button */}
+                  {termsConditions.length > 6 && (
+                    <button
+                      type="button"
+                      onClick={() => setTermsListExpanded(!termsListExpanded)}
+                      className="flex items-center justify-center gap-2 w-full px-4 py-2 mb-3 text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 transition-all font-medium text-sm"
+                      disabled={isSubmitting}
+                    >
+                      {termsListExpanded ? (
+                        <>
+                          <ChevronUp className="w-4 h-4" />
+                          Show Less
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="w-4 h-4" />
+                          Show More ({termsConditions.length - 6} more)
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  {/* Add Custom Item Button */}
+                  <button
+                    type="button"
+                    onClick={addCustomTerm}
+                    className="flex items-center gap-2 px-4 py-2 mb-4 text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 transition-all font-medium"
+                    disabled={isSubmitting}
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Custom Item
+                  </button>
+                    </>
+                  )}
+                </motion.div>
+              )}
+            </div>
           </div>
 
           {/* Footer - Match TD Style */}

@@ -10,6 +10,7 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from io import BytesIO
 from utils.modern_boq_pdf_generator import ModernBOQPDFGenerator
 from utils.boq_calculation_helper import calculate_boq_values
+from sqlalchemy import text
 import os
 
 log = get_logger()
@@ -105,6 +106,29 @@ def send_boq_to_client():
             'location': project.location or 'N/A'
         }
 
+        # Fetch selected terms & conditions from database (new system)
+        selected_terms = []
+        try:
+            query = """
+                SELECT t.term_id, t.terms_text, t.display_order
+                FROM boq_terms t
+                INNER JOIN boq_terms_selections s ON t.term_id = s.term_id
+                WHERE s.boq_id = :boq_id AND s.is_checked = TRUE
+                ORDER BY t.display_order, t.term_id
+            """
+            cursor = db.session.execute(text(query), {'boq_id': boq_id})
+            for row in cursor:
+                selected_terms.append({
+                    'term_id': row[0],
+                    'terms_text': row[1],
+                    'display_order': row[2]
+                })
+            log.info(f"Fetched {len(selected_terms)} selected terms for BOQ {boq_id}")
+        except Exception as e:
+            log.warning(f"Could not fetch selected terms for BOQ {boq_id}: {str(e)}")
+            # Continue with legacy terms_text or defaults
+            selected_terms = []
+
         # Generate files - Pass CLIENT BASE COST (not selling price)
         excel_file = None
         pdf_file = None
@@ -116,7 +140,8 @@ def send_boq_to_client():
 
         if 'pdf' in formats:
             pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
-            pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text)
+            # Pass both selected_terms (new system) and terms_text (legacy fallback)
+            pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text, selected_terms)
             pdf_file = (pdf_filename, pdf_data)
 
         # Send email to all recipients - Pass selling price (overhead/profit distributed)

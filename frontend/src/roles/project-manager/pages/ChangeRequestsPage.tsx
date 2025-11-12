@@ -50,6 +50,7 @@ const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
   const isExtraMaterial = location.pathname.includes('extra-material');
   const [activeTab, setActiveTab] = useState(isExtraMaterial ? 'requested' : 'pending');
+  const [pendingSubTab, setPendingSubTab] = useState<'drafts' | 'sent'>('drafts'); // Sub-tab for Pending
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
@@ -105,15 +106,9 @@ const ChangeRequestsPage: React.FC = () => {
 
   const handleApprove = async (crId: number) => {
     try {
-      // Find the request to show routing info
-      const request = changeRequests.find(r => r.cr_id === crId);
-      const overheadPercent = request?.percentage_of_item_overhead || 0;
-
       const response = await changeRequestService.approve(crId, 'Approved by PM');
       if (response.success) {
-        // Enhanced message showing where request is being routed based on backend logic
-        const routedTo = overheadPercent > 40 ? 'Technical Director' : 'Estimator';
-        toast.success(response.message || `Approved! Forwarded to ${routedTo} (${overheadPercent.toFixed(1)}% overhead)`);
+        toast.success(response.message || 'Change request approved successfully');
         refetch(); // Trigger background refresh
       } else {
         toast.error(response.message);
@@ -262,7 +257,8 @@ const ChangeRequestsPage: React.FC = () => {
       // Extra Material tab filtering
       // Separate SE requests (Requested tab) from PM's own requests (Pending tab)
       const isPMRequest = req.requested_by_user_id === user?.user_id;
-      const isPMApprovedAndSent = req.status === 'under_review' && ['estimator', 'technical_director'].includes(req.approval_required_from || '');
+      // Only SE requests that PM approved and sent forward (NOT PM's own requests)
+      const isPMApprovedAndSent = !isPMRequest && req.status === 'under_review' && ['estimator', 'technical_director'].includes(req.approval_required_from || '');
 
       // For Admin:
       // - Pending tab shows only status='pending' (drafts not sent yet)
@@ -275,8 +271,8 @@ const ChangeRequestsPage: React.FC = () => {
         // Admin user logic
         matchesTab = (
           (activeTab === 'requested' && req.status === 'under_review') ||  // All under_review requests in Request tab
-          (activeTab === 'pending' && req.status === 'pending') ||  // Only pending drafts in Pending tab
-          (activeTab === 'accepted' && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||
+          (activeTab === 'pending' && isPMRequest && ['pending', 'under_review'].includes(req.status)) ||  // PM's own requests (all statuses)
+          (activeTab === 'accepted' && !isPMRequest && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||  // Only SE requests PM approved
           (activeTab === 'completed' && req.status === 'purchase_completed') ||
           (activeTab === 'rejected' && req.status === 'rejected')
         );
@@ -284,8 +280,8 @@ const ChangeRequestsPage: React.FC = () => {
         // Non-admin user logic
         matchesTab = (
           (activeTab === 'requested' && req.status === 'under_review' && req.approval_required_from === 'project_manager') ||  // Requests waiting for PM approval
-          (activeTab === 'pending' && req.status === 'pending' && isPMRequest) ||  // User's own pending requests
-          (activeTab === 'accepted' && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||
+          (activeTab === 'pending' && isPMRequest && ['pending', 'under_review'].includes(req.status)) ||  // User's own requests (all statuses)
+          (activeTab === 'accepted' && !isPMRequest && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||  // Only SE requests PM approved
           (activeTab === 'completed' && req.status === 'purchase_completed') ||
           (activeTab === 'rejected' && req.status === 'rejected')
         );
@@ -311,8 +307,8 @@ const ChangeRequestsPage: React.FC = () => {
     my_requests: isAdminUser
       ? changeRequests.filter(r => r.status === 'under_review').length  // Admin: all under_review in Request tab
       : changeRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'project_manager').length,  // Non-admin: only PM approval pending
-    pending_approval: changeRequests.filter(r => r.status === 'pending').length,  // All pending drafts (not sent yet)
-    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || (r.status === 'under_review' && ['estimator', 'technical_director'].includes(r.approval_required_from || '')) || r.status === 'assigned_to_buyer').length,
+    pending_approval: changeRequests.filter(r => r.requested_by_user_id === user?.user_id && ['pending', 'under_review'].includes(r.status)).length,  // PM's own requests (pending + under_review)
+    accepted: changeRequests.filter(r => r.requested_by_user_id !== user?.user_id && (r.status === 'approved_by_pm' || (r.status === 'under_review' && ['estimator', 'technical_director'].includes(r.approval_required_from || '')) || r.status === 'assigned_to_buyer')).length,  // Only SE requests PM approved
     completed_extra: changeRequests.filter(r => r.status === 'purchase_completed').length
   };
 
@@ -335,7 +331,6 @@ const ChangeRequestsPage: React.FC = () => {
             <TableHead>Date</TableHead>
             <TableHead>New Items</TableHead>
             <TableHead>Additional Cost</TableHead>
-            <TableHead>Increase %</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -354,11 +349,6 @@ const ChangeRequestsPage: React.FC = () => {
                 <TableCell>{new Date(request.created_at).toLocaleDateString()}</TableCell>
                 <TableCell>{request.materials_data?.length || 0}</TableCell>
                 <TableCell className="font-semibold">{formatCurrency(request.materials_total_cost)}</TableCell>
-                <TableCell>
-                  <span className={`font-semibold ${getPercentageColor(request.budget_impact?.increase_percentage || request.percentage_of_item_overhead || 0)}`}>
-                    +{(request.budget_impact?.increase_percentage || request.percentage_of_item_overhead || 0).toFixed(1)}%
-                  </span>
-                </TableCell>
                 <TableCell>
                   <Badge className={getStatusColor(request.status)}>
                     {getStatusLabel(request.status, request.approval_required_from)}
@@ -446,7 +436,7 @@ const ChangeRequestsPage: React.FC = () => {
                 </p>
               </div>
             </div>
-            {isExtraMaterial && activeTab === 'requested' && (
+            {isExtraMaterial && (
               <Button
                 onClick={() => setShowExtraForm(true)}
                 className="bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] hover:from-[#1e3270] hover:to-[#3d4f8a] text-white px-6 py-3 font-semibold shadow-md"
@@ -1063,106 +1053,226 @@ const ChangeRequestsPage: React.FC = () => {
               <TabsContent value="pending" className="mt-0 p-0">
                 <div className="space-y-4 sm:space-y-6">
                   <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending</h2>
-                  {filteredRequests.length === 0 ? (
-                    <div className="text-center py-12">
-                      <Clock className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                      <p className="text-gray-500 text-lg">No requests under review</p>
-                    </div>
-                  ) : viewMode === 'table' ? (
-                    <RequestsTable requests={filteredRequests} />
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                      {filteredRequests.map((request, index) => (
-                        <motion.div
-                          key={request.cr_id}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.05 * index }}
-                          className="bg-white rounded-lg border border-yellow-200 shadow-sm hover:shadow-lg transition-all duration-200"
-                        >
-                          <div className="p-4">
-                            <div className="flex items-start justify-between mb-2">
-                              <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
-                              <Badge className={getStatusColor(request.status)}>
-                                {request.status.replace('_', ' ').toUpperCase()}
-                              </Badge>
-                            </div>
 
-                            <div className="space-y-1 text-sm text-gray-600">
-                              <div className="flex items-center gap-1.5">
-                                <Package className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate">By: {request.requested_by_name}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <Calendar className="h-3.5 w-3.5 text-gray-400" />
-                                <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
-                              </div>
-                            </div>
-                          </div>
+                  {/* Sub-tabs for Pending */}
+                  <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
+                    <button
+                      onClick={() => setPendingSubTab('drafts')}
+                      className={`px-4 py-2 rounded-t-lg text-sm font-semibold transition-all ${
+                        pendingSubTab === 'drafts'
+                          ? 'bg-[#243d8a] text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Pencil className="w-4 h-4" />
+                        <span>Drafts (Not Sent)</span>
+                        <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
+                          pendingSubTab === 'drafts' ? 'bg-white/20' : 'bg-gray-200'
+                        }`}>
+                          ({filteredRequests.filter(r => r.status === 'pending').length})
+                        </span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setPendingSubTab('sent')}
+                      className={`px-4 py-2 rounded-t-lg text-sm font-semibold transition-all ${
+                        pendingSubTab === 'sent'
+                          ? 'bg-[#243d8a] text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4" />
+                        <span>Sent for Review</span>
+                        <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
+                          pendingSubTab === 'sent' ? 'bg-white/20' : 'bg-gray-200'
+                        }`}>
+                          ({filteredRequests.filter(r => r.status === 'under_review').length})
+                        </span>
+                      </div>
+                    </button>
+                  </div>
 
-                          <div className="px-4 pb-3 text-center text-sm">
-                            <span className="font-bold text-yellow-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
-                            <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
-                          </div>
-
-                          <div className="px-4 pb-3 space-y-1.5 text-xs">
-                            <div className="flex justify-between">
-                              <span className="text-gray-500">Additional Cost:</span>
-                              <span className="font-bold text-yellow-600">{formatCurrency(request.materials_total_cost)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-500">% of Item Overhead:</span>
-                              <span className={`font-semibold ${getPercentageColor(request.percentage_of_item_overhead || 0)}`}>
-                                {(request.percentage_of_item_overhead || 0).toFixed(1)}%
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
-                            <div className="grid grid-cols-2 gap-2">
-                              <button
-                                onClick={() => handleReview(request.cr_id)}
-                                className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
-                                style={{ backgroundColor: 'rgb(36, 61, 138)' }}
-                              >
-                                <Eye className="h-4 w-4" />
-                                <span>Review</span>
-                              </button>
-                              <button
-                                onClick={() => handleEdit(request.cr_id)}
-                                className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
-                              >
-                                <Pencil className="h-4 w-4" />
-                                <span>Edit</span>
-                              </button>
-                            </div>
-                            {/* Smart Send for Review button based on recommended routing */}
-                            <button
-                              onClick={() => {
-                                // Use recommended_next_approver if available, fallback to routing_percentage check
-                                const routeTo = request.recommended_next_approver ||
-                                              ((request.routing_percentage || request.percentage_of_item_overhead || 0) > 40 ? 'technical_director' : 'estimator');
-                                handleSendForReview(request.cr_id, routeTo);
-                              }}
-                              className={`w-full text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold ${
-                                (request.recommended_next_approver === 'technical_director') ||
-                                (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
-                                  ? 'bg-orange-600 hover:bg-orange-700'
-                                  : 'bg-purple-600 hover:bg-purple-700'
-                              }`}
+                  {/* Drafts Sub-tab Content */}
+                  {pendingSubTab === 'drafts' && (
+                    <>
+                      {filteredRequests.filter(r => r.status === 'pending').length === 0 ? (
+                        <div className="text-center py-12">
+                          <Pencil className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                          <p className="text-gray-500 text-lg">No draft requests found</p>
+                        </div>
+                      ) : viewMode === 'table' ? (
+                        <RequestsTable requests={filteredRequests.filter(r => r.status === 'pending')} />
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                          {filteredRequests.filter(r => r.status === 'pending').map((request, index) => (
+                            <motion.div
+                              key={request.cr_id}
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.05 * index }}
+                              className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-200"
                             >
-                              <Check className="h-4 w-4" />
-                              <span>Send for Review {
-                                (request.recommended_next_approver === 'technical_director') ||
-                                (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
-                                  ? '(TD)'
-                                  : '(Est.)'
-                              }</span>
-                            </button>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </div>
+                              <div className="p-4">
+                                <div className="flex items-start justify-between mb-2">
+                                  <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
+                                  <Badge className="bg-gray-100 text-gray-800">DRAFT</Badge>
+                                </div>
+
+                                <div className="space-y-1 text-sm text-gray-600">
+                                  <div className="flex items-center gap-1.5">
+                                    <Package className="h-3.5 w-3.5 text-gray-400" />
+                                    <span className="truncate">By: {request.requested_by_name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                                    <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="px-4 pb-3 text-center text-sm">
+                                <span className="font-bold text-gray-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
+                                <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                              </div>
+
+                              <div className="px-4 pb-3 space-y-1.5 text-xs">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-500">Additional Cost:</span>
+                                  <span className="font-bold text-gray-900">{formatCurrency(request.materials_total_cost)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-500">% of Item Overhead:</span>
+                                  <span className={`font-semibold ${getPercentageColor(request.percentage_of_item_overhead || 0)}`}>
+                                    {(request.percentage_of_item_overhead || 0).toFixed(1)}%
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <button
+                                    onClick={() => handleReview(request.cr_id)}
+                                    className="text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                    style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                    <span>Review</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleEdit(request.cr_id)}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                    <span>Edit</span>
+                                  </button>
+                                </div>
+                                {/* Smart Send for Review button based on recommended routing */}
+                                <button
+                                  onClick={() => {
+                                    // Use recommended_next_approver if available, fallback to routing_percentage check
+                                    const routeTo = request.recommended_next_approver ||
+                                                  ((request.routing_percentage || request.percentage_of_item_overhead || 0) > 40 ? 'technical_director' : 'estimator');
+                                    handleSendForReview(request.cr_id, routeTo);
+                                  }}
+                                  className={`w-full text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold ${
+                                    (request.recommended_next_approver === 'technical_director') ||
+                                    (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
+                                      ? 'bg-orange-600 hover:bg-orange-700'
+                                      : 'bg-purple-600 hover:bg-purple-700'
+                                  }`}
+                                >
+                                  <Check className="h-4 w-4" />
+                                  <span>Send for Review {
+                                    (request.recommended_next_approver === 'technical_director') ||
+                                    (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
+                                      ? '(TD)'
+                                      : '(Est.)'
+                                  }</span>
+                                </button>
+                              </div>
+                            </motion.div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Sent for Review Sub-tab Content */}
+                  {pendingSubTab === 'sent' && (
+                    <>
+                      {filteredRequests.filter(r => r.status === 'under_review').length === 0 ? (
+                        <div className="text-center py-12">
+                          <Clock className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                          <p className="text-gray-500 text-lg">No requests under review</p>
+                        </div>
+                      ) : viewMode === 'table' ? (
+                        <RequestsTable requests={filteredRequests.filter(r => r.status === 'under_review')} />
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                          {filteredRequests.filter(r => r.status === 'under_review').map((request, index) => (
+                            <motion.div
+                              key={request.cr_id}
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.05 * index }}
+                              className="bg-white rounded-lg border border-yellow-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                            >
+                              <div className="p-4">
+                                <div className="flex items-start justify-between mb-2">
+                                  <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
+                                  <Badge className={getStatusColor(request.status)}>
+                                    {getStatusLabel(request.status, request.approval_required_from)}
+                                  </Badge>
+                                </div>
+
+                                <div className="space-y-1 text-sm text-gray-600">
+                                  <div className="flex items-center gap-1.5">
+                                    <Package className="h-3.5 w-3.5 text-gray-400" />
+                                    <span className="truncate">By: {request.requested_by_name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                                    <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="px-4 pb-3 text-center text-sm">
+                                <span className="font-bold text-yellow-600 text-lg">{(request.sub_items_data?.length || request.materials_data?.length || 0)}</span>
+                                <span className="text-gray-600 ml-1">Material{((request.sub_items_data?.length || request.materials_data?.length || 0) > 1) ? 's' : ''}</span>
+                              </div>
+
+                              <div className="px-4 pb-3 space-y-1.5 text-xs">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-500">Additional Cost:</span>
+                                  <span className="font-bold text-yellow-600">{formatCurrency(request.materials_total_cost)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-500">% of Item Overhead:</span>
+                                  <span className={`font-semibold ${getPercentageColor(request.percentage_of_item_overhead || 0)}`}>
+                                    {(request.percentage_of_item_overhead || 0).toFixed(1)}%
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* View-only: Only show Review button */}
+                              <div className="border-t border-gray-200 p-2 sm:p-3">
+                                <button
+                                  onClick={() => handleReview(request.cr_id)}
+                                  className="w-full text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                  style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  <span>View Details</span>
+                                </button>
+                              </div>
+                            </motion.div>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </TabsContent>

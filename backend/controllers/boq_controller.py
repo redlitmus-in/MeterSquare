@@ -1018,7 +1018,7 @@ def create_boq():
 
         log.info(f"BOQ {boq.boq_id} create totals - Items: {total_boq_cost}, Preliminaries: {preliminary_amount}, Combined: {combined_subtotal}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), Final: {final_boq_cost}")
 
-        # Create BOQ details JSON
+        # Create BOQ details JSON (without terms - stored in junction table)
         boq_details_json = {
             "boq_id": boq.boq_id,
             "preliminaries": preliminaries,
@@ -1062,6 +1062,33 @@ def create_boq():
                 db.session.add(boq_prelim)
 
             log.info(f"Saved {len(preliminary_selections_to_save)} preliminary selections to boq_preliminaries for BOQ {boq.boq_id}")
+
+        # Save terms & conditions selections to boq_terms_selections junction table
+        terms_conditions = data.get("terms_conditions", [])
+        log.info(f"Received terms_conditions payload: {len(terms_conditions) if terms_conditions else 0} terms")
+
+        if terms_conditions and isinstance(terms_conditions, list):
+            from sqlalchemy import text
+            for term in terms_conditions:
+                term_id = term.get('term_id')
+                is_checked = term.get('checked', False)
+
+                if term_id:  # Only save if it has a term_id (from master table)
+                    # Insert or update term selection
+                    db.session.execute(text("""
+                        INSERT INTO boq_terms_selections (boq_id, term_id, is_checked, created_at, updated_at)
+                        VALUES (:boq_id, :term_id, :is_checked, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT (boq_id, term_id)
+                        DO UPDATE SET is_checked = :is_checked, updated_at = CURRENT_TIMESTAMP
+                    """), {
+                        'boq_id': boq.boq_id,
+                        'term_id': term_id,
+                        'is_checked': is_checked
+                    })
+
+            log.info(f"✅ Saved terms selections to boq_terms_selections for BOQ {boq.boq_id}")
+        else:
+            log.warning(f"No terms_conditions in payload for BOQ {boq.boq_id}")
 
         db.session.commit()
 
@@ -1524,6 +1551,43 @@ def get_boq(boq_id):
         discount_percentage = boq_details.boq_details.get("discount_percentage", 0) if boq_details.boq_details else 0
         discount_amount = boq_details.boq_details.get("discount_amount", 0) if boq_details.boq_details else 0
 
+        # Get terms & conditions from boq_terms_selections junction table using JOIN
+        try:
+            from sqlalchemy import text
+            # Query to join boq_terms_selections with boq_terms to get term details
+            query = text("""
+                SELECT
+                    bt.term_id,
+                    bt.terms_text,
+                    bt.display_order,
+                    bts.is_checked,
+                    bts.id as selection_id
+                FROM boq_terms_selections bts
+                INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
+                WHERE bts.boq_id = :boq_id
+                AND bt.is_active = TRUE AND bt.is_deleted = FALSE
+                ORDER BY bt.display_order, bt.term_id
+            """)
+
+            terms_result = db.session.execute(query, {'boq_id': boq_id})
+            terms_items = []
+
+            for row in terms_result:
+                terms_items.append({
+                    'id': f'term-{row[0]}',
+                    'term_id': row[0],
+                    'terms_text': row[1],
+                    'display_order': row[2],
+                    'checked': row[3],
+                    'isCustom': False
+                })
+
+            terms_conditions = {'items': terms_items}
+            log.info(f"Retrieved {len(terms_items)} terms from boq_terms_selections for BOQ {boq.boq_id}")
+        except Exception as e:
+            log.error(f"Error fetching terms for BOQ {boq.boq_id}: {str(e)}")
+            terms_conditions = {'items': []}
+
         # Build response with project details
         response_data = {
             "boq_id": boq.boq_id,
@@ -1537,6 +1601,7 @@ def get_boq(boq_id):
             "discount_percentage": discount_percentage,
             "discount_amount": discount_amount,
             "preliminaries": preliminaries,
+            "terms_conditions": terms_conditions,
             "project_details": {
                 "project_name": project.project_name if project else None,
                 "location": project.location if project else None,

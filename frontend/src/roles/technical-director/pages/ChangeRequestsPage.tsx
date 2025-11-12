@@ -471,7 +471,6 @@ const ChangeRequestsPage: React.FC = () => {
             <TableHead>Date</TableHead>
             <TableHead>New Items</TableHead>
             <TableHead>Additional Cost</TableHead>
-            <TableHead>Increase %</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -486,11 +485,6 @@ const ChangeRequestsPage: React.FC = () => {
                 <TableCell>{new Date(request.created_at).toLocaleDateString()}</TableCell>
                 <TableCell>{(request.materials_data?.length || 0)}</TableCell>
                 <TableCell className="font-semibold">{formatCurrency(request.materials_total_cost)}</TableCell>
-                <TableCell>
-                  <span className={`font-semibold ${getPercentageColor((request.budget_impact?.increase_percentage || 0))}`}>
-                    +{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%
-                  </span>
-                </TableCell>
                 <TableCell>
                   <Badge className={getStatusColor(request.status)}>
                     {request.status.replace('_', ' ').toUpperCase()}
@@ -712,14 +706,8 @@ const ChangeRequestsPage: React.FC = () => {
                           {/* Financial Impact - Compact */}
                           <div className="px-2 pb-2 space-y-0.5 text-[9px]">
                             <div className="flex justify-between">
-                              <span className="text-gray-500">Cost:</span>
+                              <span className="text-gray-500">Total Cost:</span>
                               <span className="font-bold text-gray-900">{formatCurrency(request.materials_total_cost)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-500">Increase:</span>
-                              <span className={`font-semibold ${getPercentageColor((request.budget_impact?.increase_percentage || 0))}`}>
-                                +{(request.budget_impact?.increase_percentage || 0).toFixed(1)}%
-                              </span>
                             </div>
                           </div>
 

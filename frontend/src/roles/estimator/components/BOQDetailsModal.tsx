@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
   FileText,
+  FileCheck,
   Package,
   Users,
   Calculator,
@@ -1861,6 +1862,40 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 );
                               })()}
                             </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* TERMS & CONDITIONS SECTION - AT THE VERY END */}
+                    {boqData.terms_conditions && boqData.terms_conditions.items?.length > 0 && (
+                      <div className="mt-8 mb-6">
+                        {/* Header */}
+                        <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-300 rounded-t-lg p-4 flex items-center gap-3">
+                          <FileCheck className="w-6 h-6 text-blue-700" />
+                          <div>
+                            <h3 className="text-lg font-bold text-gray-900">Terms & Conditions</h3>
+                            <p className="text-xs text-gray-600">Selected terms and conditions</p>
+                          </div>
+                        </div>
+
+                        {/* Terms List */}
+                        <div className="bg-white border-x border-b border-blue-300 rounded-b-lg p-4">
+                          <div className="space-y-2">
+                            {boqData.terms_conditions.items
+                              .filter((term: any) => term.checked)
+                              .map((term: any, index: number) => (
+                              <div key={term.term_id || index} className="bg-blue-50 rounded-lg p-3 border border-blue-200 hover:shadow-sm transition-shadow">
+                                <div className="flex items-start gap-3">
+                                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">
+                                    {index + 1}
+                                  </span>
+                                  <div className="flex-1">
+                                    <p className="text-sm text-gray-800 leading-relaxed">{term.terms_text}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     )}

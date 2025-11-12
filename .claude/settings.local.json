@@ -13,7 +13,14 @@
       "Bash(cat:*)",
       "Bash(PGPASSWORD=postgres psql:*)",
       "Bash(sed:*)",
-      "Bash(\"/c/Users/admin/AppData/Local/Programs/Python/Python312/python\" app.py)"
+      "Bash(\"/c/Users/admin/AppData/Local/Programs/Python/Python312/python\" app.py)",
+      "Bash(source venv/bin/activate)",
+      "Bash(pip uninstall:*)",
+      "Bash(pip install:*)",
+      "Bash(sudo apt-get:*)",
+      "Bash(flask run:*)",
+      "Bash(python3:*)",
+      "Bash(psql:*)"
     ],
     "deny": [],
     "ask": []

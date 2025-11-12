@@ -1,12 +1,10 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Package, DollarSign, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Send, Edit } from 'lucide-react';
-import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
-import { toast } from 'sonner';
-import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send } from 'lucide-react';
+import { ChangeRequestItem } from '@/services/changeRequestService';
 import { useAuthStore } from '@/store/authStore';
 import { formatCurrency } from '@/utils/formatters';
-import { isSiteEngineer, isProjectManager, isEstimator, isTechnicalDirector } from '@/utils/roleHelpers';
+import { isEstimator, isTechnicalDirector } from '@/utils/roleHelpers';
 import EditChangeRequestModal from './EditChangeRequestModal';
 
 interface ChangeRequestDetailsModalProps {
@@ -16,7 +14,6 @@ interface ChangeRequestDetailsModalProps {
   onApprove?: () => void;
   onReject?: () => void;
   canApprove?: boolean;
-  onEdit?: () => void;
 }
 
 const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
@@ -25,12 +22,10 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   changeRequest,
   onApprove,
   onReject,
-  canApprove: canApproveFromParent,
-  onEdit
+  canApprove: canApproveFromParent
 }) => {
   const { user } = useAuthStore();
   const [showEditModal, setShowEditModal] = useState(false);
-  const [sendingForReview, setSendingForReview] = useState(false);
 
   if (!isOpen || !changeRequest) return null;
 
@@ -64,7 +59,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     return labels[status as keyof typeof labels] || status.toUpperCase();
   };
 
-  // Calculate costs: Total vs NEW materials only
+  // Calculate costs: Total materials cost
   const materialsData = changeRequest.sub_items_data || changeRequest.materials_data || [];
 
   // Total cost of ALL materials (for display)
@@ -72,24 +67,9 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     sum + (mat.total_price || (mat.quantity * mat.unit_price) || 0), 0
   );
 
-  // Cost of ONLY NEW materials (not from BOQ) - for budget impact
-  // A material is NEW if master_material_id is null/undefined (means it was added manually, not selected from BOQ)
-  const newMaterialsCost = materialsData.reduce((sum: number, mat: any) => {
-    const isNewMaterial = mat.master_material_id === null || mat.master_material_id === undefined;
-    return isNewMaterial ? sum + (mat.total_price || (mat.quantity * mat.unit_price) || 0) : sum;
-  }, 0);
-
-  // Check if there are ANY new materials at all
-  const hasNewMaterials = materialsData.some((mat: any) =>
-    mat.master_material_id === null || mat.master_material_id === undefined
-  );
-
-  const isOverBudget = changeRequest.overhead_analysis?.balance_type === 'negative';
   const isHighValue = changeRequest.approval_required_from === 'technical_director';
 
   // Use role helper functions instead of hardcoded IDs
-  const userIsSiteEngineer = isSiteEngineer(user);
-  const userIsProjectManager = isProjectManager(user);
   const userIsEstimator = isEstimator(user);
   const userIsTechnicalDirector = isTechnicalDirector(user);
 
@@ -108,52 +88,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       !isFinalStatus &&
       !isApprovedAndSentForward;
 
-  // Can edit if:
-  // 1. Status is pending AND user is requester or PM
-  // 2. OR user is Estimator/TD reviewing the request (under_review or approved_by_pm)
-  const canEdit = (
-    // Case 1: Pending status - requester or PM can edit
-    (changeRequest.status === 'pending' &&
-     (changeRequest.requested_by_user_id === user?.user_id || userIsProjectManager)) ||
-    // Case 2: Estimator/TD can edit when reviewing (approved_by_pm status)
-    ((userIsEstimator || userIsTechnicalDirector) &&
-     changeRequest.status === 'approved_by_pm')
-  ) &&
-  // Exclude truly final statuses
-  !['approved', 'rejected', 'purchase_completed', 'assigned_to_buyer', 'approved_by_td'].includes(changeRequest.status);
-
-  // Debug logging
-  console.log('[ChangeRequestDetails] Edit Check:', {
-    canEdit,
-    status: changeRequest.status,
-    userIsEstimator,
-    userIsTechnicalDirector,
-    userRole: user?.role
-  });
-
-  // Can send for review if the request is pending and user is the requester
-  const canSendForReview = changeRequest.status === 'pending' &&
-                           changeRequest.requested_by_user_id === user?.user_id;
-
-  const handleSendForReview = async () => {
-    if (!changeRequest) return;
-
-    setSendingForReview(true);
-    try {
-      const response = await changeRequestService.sendForReview(changeRequest.cr_id);
-      if (response.success) {
-        toast.success('Request sent for review successfully');
-        // Reload to update the status
-        window.location.reload();
-      } else {
-        toast.error(response.message || 'Failed to send for review');
-      }
-    } catch (error) {
-      toast.error('Failed to send request for review');
-    } finally {
-      setSendingForReview(false);
-    }
-  };
 
   return (
     <AnimatePresence>
@@ -176,7 +110,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
             className="bg-white rounded-lg sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden pointer-events-auto my-4 sm:my-0"
           >
             {/* Header - Responsive */}
-            <div className={`px-4 sm:px-6 py-4 sm:py-5 border-b-2 ${isOverBudget ? 'bg-gradient-to-r from-red-500 to-red-600' : 'bg-gradient-to-r from-purple-500 to-purple-600'}`}>
+            <div className="px-4 sm:px-6 py-4 sm:py-5 border-b-2 bg-gradient-to-r from-purple-500 to-purple-600">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                   <div className="p-1.5 sm:p-2 bg-white/20 rounded-lg flex-shrink-0">
@@ -394,87 +328,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                 </div>
               </div>
 
-              {/* Compact Budget Analysis & Cost Breakdown - Only show if there are NEW materials */}
-              {hasNewMaterials && (
-                <div className="mb-4 sm:mb-6">
-                  <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                    <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
-                    Budget & Cost Summary
-                  </h3>
-                  {newMaterialsCost < totalMaterialsCost && (
-                    <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-                      <p className="text-[10px] text-blue-800 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" />
-                        <span><strong>Note:</strong> Budget impact is calculated only from new materials (not from BOQ). Existing BOQ materials don't affect the budget.</span>
-                      </p>
-                    </div>
-                  )}
-                  <div className={`rounded-lg p-3 border ${isOverBudget ? 'bg-red-50 border-red-300' : 'bg-green-50 border-green-300'}`}>
-                  {/* Compact Budget Status */}
-                  <div className={`flex items-center gap-2 mb-3 p-2 rounded ${isOverBudget ? 'bg-red-100' : 'bg-green-100'}`}>
-                    {isOverBudget ? (
-                      <>
-                        <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
-                        <p className="font-bold text-red-900 text-xs">⚠️ BUDGET EXCEEDED - Remaining: {formatCurrency(changeRequest.overhead_analysis?.remaining_after_approval || 0)}</p>
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
-                        <p className="font-bold text-green-900 text-xs">✓ WITHIN BUDGET - Remaining: {formatCurrency(changeRequest.overhead_analysis?.remaining_after_approval || 0)}</p>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Compact Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                    <div className="bg-white/50 rounded p-2">
-                      <p className="text-gray-600 mb-0.5">Materials Cost</p>
-                      <p className="font-bold text-purple-900">{formatCurrency(totalMaterialsCost)}</p>
-                      {newMaterialsCost < totalMaterialsCost && (
-                        <p className="text-[9px] text-gray-500">New: {formatCurrency(newMaterialsCost)}</p>
-                      )}
-                    </div>
-                    <div className="bg-white/50 rounded p-2">
-                      <p className="text-gray-600 mb-0.5">Budget Used</p>
-                      <p className="font-bold text-orange-600">
-                        {formatCurrency(newMaterialsCost)}
-                        {changeRequest.overhead_analysis?.original_allocated && (
-                          <span className="text-[10px] text-gray-600 ml-1">
-                            ({((newMaterialsCost / changeRequest.overhead_analysis.original_allocated) * 100).toFixed(1)}%)
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-[9px] text-gray-500 italic">From new materials</p>
-                    </div>
-                    <div className="bg-white/50 rounded p-2">
-                      <p className="text-gray-600 mb-0.5">Items Count</p>
-                      <p className="font-bold text-gray-900">{materialsData.length || 0} items</p>
-                      {materialsData.filter((m: any) => m.master_material_id === null || m.master_material_id === undefined).length > 0 && (
-                        <p className="text-[9px] text-gray-500">
-                          {materialsData.filter((m: any) => m.master_material_id === null || m.master_material_id === undefined).length} new
-                        </p>
-                      )}
-                    </div>
-                    <div className="bg-white/50 rounded p-2">
-                      <p className="text-gray-600 mb-0.5">Status</p>
-                      <div className="flex items-center gap-1">
-                        {changeRequest.overhead_analysis?.balance_type === 'negative' ? (
-                          <>
-                            <AlertCircle className="w-3 h-3 text-red-600" />
-                            <p className="font-bold text-red-600 text-[10px]">Over Budget</p>
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle className="w-3 h-3 text-green-600" />
-                            <p className="font-bold text-green-600 text-[10px]">Within Budget</p>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              )}
 
               {/* Vendor Details - Only show if TD approved vendor */}
               {changeRequest.vendor_approved_by_td_id && (
@@ -551,40 +404,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
             {/* Hide footer completely if in accepted/final state */}
             {!(isFinalStatus || isApprovedAndSentForward) && (
               <div className="border-t border-gray-200 px-4 sm:px-6 py-3 sm:py-4 bg-gray-50 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3">
-                {/* {canSendForReview && (
-                  <button
-                    onClick={handleSendForReview}
-                    disabled={sendingForReview}
-                    className="w-full sm:w-auto px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base disabled:bg-gray-400"
-                  >
-                    {sendingForReview ? (
-                      <>
-                        <ModernLoadingSpinners variant="dots" size="small" color="white" />
-                        Sending...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="w-4 h-4" />
-                        Send for Review
-                      </>
-                    )}
-                  </button>
-                )} */}
-                {/* {canEdit && (
-                  <button
-                    onClick={() => {
-                      if (onEdit) {
-                        onEdit();
-                      } else {
-                        setShowEditModal(true);
-                      }
-                    }}
-                    className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base"
-                  >
-                    <Edit className="w-4 h-4" />
-                    Edit Request
-                  </button>
-                )} */}
                 {canApproveReject ? (
                   <>
                     <button
@@ -602,14 +421,12 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                     </button>
                   </>
                 ) : (
-                  !canEdit && (
-                    <button
-                      onClick={onClose}
-                      className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium text-sm sm:text-base"
-                    >
-                      Close
-                    </button>
-                  )
+                  <button
+                    onClick={onClose}
+                    className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium text-sm sm:text-base"
+                  >
+                    Close
+                  </button>
                 )}
               </div>
             )}
