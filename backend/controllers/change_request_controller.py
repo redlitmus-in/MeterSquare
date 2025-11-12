@@ -760,7 +760,11 @@ def get_all_change_requests():
             else:
                 # Regular PM: Filter ONLY by their assigned projects
                 # Get projects where this user is the project manager (user_id field in Project table)
-                pm_projects = Project.query.filter_by(user_id=user_id, is_deleted=False).all()
+                # Use JSONB contains operator since user_id is now a JSONB array
+                pm_projects = Project.query.filter(
+                    Project.user_id.contains([user_id]),
+                    Project.is_deleted == False
+                ).all()
                 pm_project_ids = [p.project_id for p in pm_projects]
 
                 log.info(f"Regular PM {user_id} - has {len(pm_project_ids)} assigned projects")
