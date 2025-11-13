@@ -9,6 +9,7 @@ export interface PurchaseMaterial {
   unit: string;
   unit_price: number;
   total_price: number;
+  master_material_id?: number | null;  // Null for NEW materials, number for existing BOQ materials
 }
 
 export interface Purchase {
@@ -40,6 +41,17 @@ export interface Purchase {
   vendor_contact_person?: string | null;
   vendor_selection_pending_td_approval?: boolean;
   vendor_email_sent?: boolean;
+  overhead_analysis?: {
+    original_allocated: number;
+    overhead_percentage: number;
+    consumed_before_request: number;
+    available_before_request: number;
+    consumed_by_this_request: number;
+    remaining_after_approval: number;
+    is_within_budget: boolean;
+    balance_type: 'positive' | 'negative';
+    balance_amount: number;
+  };
 }
 
 export interface SelectVendorRequest {

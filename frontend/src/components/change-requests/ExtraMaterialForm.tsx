@@ -64,6 +64,8 @@ interface MaterialItem {
   unitRate: number;
   reasonForNew?: string;
   justification: string;  // Per-material justification (required for all materials)
+  brand?: string;  // Brand for new materials
+  specification?: string;  // Specification for new materials
 }
 
 interface ExtraMaterialFormProps {
@@ -73,6 +75,28 @@ interface ExtraMaterialFormProps {
   onSuccess?: () => void;  // Called after successful create/update
   initialData?: any;  // For editing existing change requests
 }
+
+// Common units for dropdown
+const COMMON_UNITS = [
+  'nos',
+  'sqm',
+  'sqft',
+  'lm',
+  'rmt',
+  'cum',
+  'cuft',
+  'kg',
+  'ton',
+  'bags',
+  'boxes',
+  'pcs',
+  'sets',
+  'rolls',
+  'sheets',
+  'length',
+  'pair',
+  'lot'
+];
 
 const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCancel, onClose, onSuccess, initialData }) => {
   const { user } = useAuthStore();
@@ -178,7 +202,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                 unit: mat.unit || 'nos',
                 unitRate: mat.unit_price || 0,
                 reasonForNew: mat.reason || '',
-                justification: mat.justification || initialData.justification || ''
+                justification: mat.justification || initialData.justification || '',
+                brand: mat.brand || '',
+                specification: mat.specification || ''
               }));
               setMaterials(transformedMaterials);
             }
@@ -446,7 +472,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         unit_rate: mat.isNew ? 0 : mat.unitRate,  // Set to 0 for new materials (no rate field)
         master_material_id: mat.isNew ? null : mat.materialId,  // Material ID
         reason: mat.isNew ? mat.reasonForNew : null,
-        justification: mat.justification  // Per-material justification
+        justification: mat.justification,  // Per-material justification
+        brand: mat.isNew ? mat.brand : null,  // Brand for new materials
+        specification: mat.isNew ? mat.specification : null  // Specification for new materials
       })),
       justification,
       remarks
@@ -486,7 +514,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             unit_price: mat.unitRate,
             master_material_id: mat.isNew ? null : mat.materialId,
             reason: mat.isNew ? mat.reasonForNew : null,
-            justification: mat.justification
+            justification: mat.justification,
+            brand: mat.isNew ? mat.brand : null,
+            specification: mat.isNew ? mat.specification : null
           }))
         };
 
@@ -523,7 +553,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             unit_price: mat.unitRate,
             master_material_id: mat.isNew ? null : mat.materialId,  // The material ID like "mat_331_1_3_1"
             reason: mat.isNew ? mat.reasonForNew : null,
-            justification: mat.justification  // Per-material justification
+            justification: mat.justification,  // Per-material justification
+            brand: mat.isNew ? mat.brand : null,  // Brand for new materials
+            specification: mat.isNew ? mat.specification : null  // Specification for new materials
           }))
         };
 
@@ -952,10 +984,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         subItemName: subItem.sub_item_name,
                         materialName: '',
                         quantity: 0,
-                        unit: '',
+                        unit: 'nos',
                         unitRate: 0,
                         reasonForNew: '',
-                        justification: ''
+                        justification: '',
+                        brand: '',
+                        specification: ''
                       };
                       setMaterials([...materials, newMaterial]);
                     }}
@@ -1008,6 +1042,32 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                               placeholder="Enter material name"
                             />
                           </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                Brand
+                              </label>
+                              <input
+                                type="text"
+                                value={material.brand || ''}
+                                onChange={(e) => updateMaterial(material.id, { brand: e.target.value })}
+                                className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                                placeholder="Enter brand"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                Specification
+                              </label>
+                              <input
+                                type="text"
+                                value={material.specification || ''}
+                                onChange={(e) => updateMaterial(material.id, { specification: e.target.value })}
+                                className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                                placeholder="Enter spec"
+                              />
+                            </div>
+                          </div>
                         </div>
                       ) : (
                         <div className="mb-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
@@ -1039,17 +1099,31 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           <label className="block text-xs font-medium text-gray-700 mb-1">
                             Unit {material.isNew && <span className="text-red-500">*</span>}
                           </label>
-                          <input
-                            type="text"
-                            value={material.unit}
-                            onChange={(e) => material.isNew && updateMaterial(material.id, { unit: e.target.value })}
-                            className={`w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg ${
-                              material.isNew ? 'bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]' : 'bg-gray-100 cursor-not-allowed'
-                            }`}
-                            placeholder={material.isNew ? "Unit" : ""}
-                            readOnly={!material.isNew}
-                            disabled={!material.isNew}
-                          />
+                          {material.isNew ? (
+                            <div className="relative">
+                              <input
+                                type="text"
+                                list={`units-${material.id}`}
+                                value={material.unit}
+                                onChange={(e) => updateMaterial(material.id, { unit: e.target.value })}
+                                className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                                placeholder="Select or type unit"
+                              />
+                              <datalist id={`units-${material.id}`}>
+                                {COMMON_UNITS.map(unit => (
+                                  <option key={unit} value={unit} />
+                                ))}
+                              </datalist>
+                            </div>
+                          ) : (
+                            <input
+                              type="text"
+                              value={material.unit}
+                              className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+                              readOnly
+                              disabled
+                            />
+                          )}
                         </div>
                       </div>
                     </div>

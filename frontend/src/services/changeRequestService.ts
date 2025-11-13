@@ -448,6 +448,31 @@ class ChangeRequestService {
       };
     }
   }
+
+  /**
+   * Get all buyers
+   * GET /api/buyers
+   */
+  async getBuyers(): Promise<{ success: boolean; message?: string; data?: Array<{ user_id: number; full_name: string; username: string }> }> {
+    try {
+      const response = await axios.get(
+        `${API_BASE_URL}/buyers`,
+        this.getAuthHeaders()
+      );
+
+      return {
+        success: true,
+        data: response.data.buyers || []
+      };
+    } catch (error: any) {
+      console.error('Error fetching buyers:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to fetch buyers'
+      };
+    }
+  }
+
   // REMOVED: updateChangeRequestStatus - DEPRECATED
   // Use sendForReview() method instead
   // The backend endpoint /api/change-request/{cr_id}/status has been removed

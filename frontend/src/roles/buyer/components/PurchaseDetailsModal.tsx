@@ -405,9 +405,21 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {(isEditing ? editedMaterials : purchase.materials).map((material, idx) => (
+                        {(isEditing ? editedMaterials : purchase.materials).map((material, idx) => {
+                          // Check if material is NEW
+                          const isNewMaterial = material.master_material_id === null || material.master_material_id === undefined;
+                          return (
                           <TableRow key={idx} className="hover:bg-gray-50">
-                            <TableCell className="font-medium text-sm">{material.material_name}</TableCell>
+                            <TableCell className="font-medium text-sm">
+                              <div className="flex items-center gap-2">
+                                <span>{material.material_name}</span>
+                                {isNewMaterial && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
+                                    NEW
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
                             <TableCell className="text-sm">
                               {material.sub_item_name && (
                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
@@ -448,7 +460,8 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                               {formatCurrency(material.total_price)}
                             </TableCell>
                           </TableRow>
-                        ))}
+                          );
+                        })}
                         <TableRow className="bg-blue-50 font-bold">
                           <TableCell colSpan={5} className="text-right text-sm">Total Cost:</TableCell>
                           <TableCell className="text-right text-green-700 text-base">
@@ -463,6 +476,64 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                     </Table>
                   </div>
                 </div>
+
+                {/* Negotiable Price Summary - Show if has new materials */}
+                {purchase.materials.some(mat => mat.master_material_id === null || mat.master_material_id === undefined) && purchase.overhead_analysis && (
+                  <div className="mt-6 p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border border-purple-200">
+                    <h3 className="text-base font-bold text-purple-900 mb-3 flex items-center gap-2">
+                      <DollarSign className="w-5 h-5" />
+                      Negotiable Price Summary
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <span className="text-purple-700 text-xs font-medium">Original Allocated:</span>
+                        <p className="font-bold text-purple-900 mt-1">
+                          {formatCurrency(purchase.overhead_analysis.original_allocated || 0)}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-purple-700 text-xs font-medium">Already Consumed:</span>
+                        <p className="font-bold text-orange-600 mt-1">
+                          {formatCurrency(purchase.overhead_analysis.consumed_before_request || 0)}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-purple-700 text-xs font-medium">This Purchase:</span>
+                        <p className="font-bold text-blue-600 mt-1">
+                          {formatCurrency(purchase.total_cost || 0)}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-purple-700 text-xs font-medium">Remaining After:</span>
+                        <p className={`font-bold mt-1 ${purchase.overhead_analysis.remaining_after_approval < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          {formatCurrency(purchase.overhead_analysis.remaining_after_approval || 0)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-purple-300">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-purple-700 font-medium">Total Negotiable Price Consumption:</span>
+                        <span className={`text-lg font-bold ${
+                          ((purchase.overhead_analysis.consumed_before_request + purchase.total_cost) / purchase.overhead_analysis.original_allocated * 100) > 40
+                            ? 'text-red-600'
+                            : 'text-green-600'
+                        }`}>
+                          {purchase.overhead_analysis.original_allocated > 0
+                            ? (((purchase.overhead_analysis.consumed_before_request + purchase.total_cost) / purchase.overhead_analysis.original_allocated) * 100).toFixed(1)
+                            : '0.0'
+                          }%
+                        </span>
+                      </div>
+                      {purchase.overhead_analysis.original_allocated > 0 &&
+                       ((purchase.overhead_analysis.consumed_before_request + purchase.total_cost) / purchase.overhead_analysis.original_allocated * 100) > 40 && (
+                        <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+                          <AlertCircle className="w-4 h-4" />
+                          <span>Exceeds 40% threshold - TD approval was required</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Footer */}

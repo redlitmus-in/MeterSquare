@@ -17,6 +17,9 @@ interface MaterialItem {
   id: string;
   material_name: string;
   sub_item_name: string;
+  brand?: string;
+  size?: string;
+  specification?: string;
   quantity: number;
   unit: string;
   unit_price: number;
@@ -48,6 +51,9 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
           id: `existing-${index}`,
           material_name: item.material_name || item.sub_item_name || '',
           sub_item_name: item.sub_item_name || item.material_name || '',
+          brand: item.brand || '',
+          size: item.size || '',
+          specification: item.specification || '',
           quantity: parseFloat(item.quantity || item.qty || 0),
           unit: item.unit || 'nos',
           unit_price: parseFloat(item.unit_price || item.unit_rate || 0),
@@ -142,6 +148,9 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
       const materialsData = materials.map(m => ({
         material_name: m.material_name,
         sub_item_name: m.sub_item_name,
+        brand: m.brand || '',
+        size: m.size || '',
+        specification: m.specification || '',
         quantity: m.quantity,
         unit: m.unit,
         unit_price: m.unit_price,
@@ -174,15 +183,29 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
 
   const { totalCost } = calculateTotals();
 
-  // Calculate overhead info
+  // Calculate negotiable price (overhead) info
+  const overhead = changeRequest.overhead_analysis || {
+    original_allocated: 0,
+    consumed_before_request: 0,
+    consumed_by_this_request: 0,
+    remaining_after_approval: 0
+  };
+
   const overheadInfo = {
-    originalAllocated: changeRequest.original_overhead_allocated || 0,
-    consumed: changeRequest.overhead_consumed || 0,
+    // Original negotiable price allocated for the project
+    originalAllocated: overhead.original_allocated || 0,
+    // Already consumed before this request (from previous approved CRs)
+    consumed: overhead.consumed_before_request || 0,
+    // New request total from current edit
     newRequest: totalCost,
-    totalConsumedAfterEdit: (changeRequest.overhead_consumed || 0) - (changeRequest.materials_total_cost || 0) + totalCost,
-    available: (changeRequest.original_overhead_allocated || 0) - (changeRequest.overhead_consumed || 0) + (changeRequest.materials_total_cost || 0) - totalCost,
-    percentageOfOverhead: ((changeRequest.original_overhead_allocated || 0) > 0)
-      ? (((changeRequest.overhead_consumed || 0) - (changeRequest.materials_total_cost || 0) + totalCost) / (changeRequest.original_overhead_allocated || 0) * 100)
+    // Calculate total consumption after this edit:
+    // = consumed_before + new_request
+    totalConsumedAfterEdit: (overhead.consumed_before_request || 0) + totalCost,
+    // Available after edit: original - consumed_before - new_request
+    available: (overhead.original_allocated || 0) - (overhead.consumed_before_request || 0) - totalCost,
+    // Percentage of negotiable price consumed
+    percentageOfOverhead: ((overhead.original_allocated || 0) > 0)
+      ? (((overhead.consumed_before_request || 0) + totalCost) / (overhead.original_allocated || 0) * 100)
       : 0
   };
 
@@ -255,9 +278,9 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Miscellaneous Summary */}
+                  {/* Negotiable Price Summary */}
                   <div className="mb-6 p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200">
-                    <h4 className="text-sm font-semibold text-purple-900 mb-3">Miscellaneous Budget Summary</h4>
+                    <h4 className="text-sm font-semibold text-purple-900 mb-3">Negotiable Price Summary</h4>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                       <div>
                         <span className="text-purple-700 text-xs">Original Allocated:</span>
@@ -280,7 +303,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                     </div>
                     <div className="mt-3 pt-3 border-t border-purple-300">
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-purple-700">Total Miscellaneous Consumption After Edit:</span>
+                        <span className="text-sm text-purple-700">Total Negotiable Price Consumption:</span>
                         <span className={`text-lg font-bold ${overheadInfo.percentageOfOverhead > 40 ? 'text-red-600' : 'text-green-600'}`}>
                           {overheadInfo.percentageOfOverhead.toFixed(1)}%
                         </span>
@@ -357,6 +380,51 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                                 placeholder="Enter material or sub-item name"
                                 required
+                                disabled={loading}
+                              />
+                            </div>
+
+                            {/* Brand */}
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">
+                                Brand
+                              </label>
+                              <input
+                                type="text"
+                                value={material.brand || ''}
+                                onChange={(e) => handleMaterialChange(material.id, 'brand', e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                placeholder="Enter brand name"
+                                disabled={loading}
+                              />
+                            </div>
+
+                            {/* Size */}
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">
+                                Size
+                              </label>
+                              <input
+                                type="text"
+                                value={material.size || ''}
+                                onChange={(e) => handleMaterialChange(material.id, 'size', e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                placeholder="Enter size/dimensions"
+                                disabled={loading}
+                              />
+                            </div>
+
+                            {/* Specification */}
+                            <div className="md:col-span-2">
+                              <label className="block text-xs font-medium text-gray-600 mb-1">
+                                Specification
+                              </label>
+                              <textarea
+                                value={material.specification || ''}
+                                onChange={(e) => handleMaterialChange(material.id, 'specification', e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                placeholder="Enter detailed specifications"
+                                rows={2}
                                 disabled={loading}
                               />
                             </div>
