@@ -1815,7 +1815,7 @@ class BOQEmailService:
         buyer_phone = buyer_data.get('buyer_phone', 'N/A')
 
         materials = purchase_data.get('materials', [])
-        total_cost = purchase_data.get('total_cost', 0)
+        total_cost = purchase_data.get('total_cost') or 0
 
         # Convert logo to base64 for inline embedding
         logo_data_uri = LOGO_URL  # Default to URL
@@ -1835,10 +1835,10 @@ class BOQEmailService:
         materials_table_rows = ""
         for idx, material in enumerate(materials, 1):
             material_name = material.get('material_name', 'N/A')
-            quantity = material.get('quantity', 0)
+            quantity = material.get('quantity') or 0
             unit = material.get('unit', 'unit')
-            unit_price = material.get('unit_price', 0)
-            total_price = material.get('total_price', 0)
+            unit_price = material.get('unit_price') or 0
+            total_price = material.get('total_price') or 0
 
             # Alternate row background color
             bg_color = '#f0f9ff' if idx % 2 == 0 else '#ffffff'

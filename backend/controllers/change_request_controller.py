@@ -137,8 +137,11 @@ def create_change_request():
                     'unit': mat.get('unit', 'nos'),
                     'unit_price': mat.get('unit_price'),
                     'total_price': mat.get('quantity', 0) * mat.get('unit_price', 0),
+                    'master_material_id': mat.get('master_material_id'),  # Include material ID from BOQ
                     'is_new': mat.get('master_material_id') is None,
-                    'reason': mat.get('reason')
+                    'reason': mat.get('reason'),
+                    'brand': mat.get('brand'),  # Brand for new materials
+                    'specification': mat.get('specification')  # Specification for new materials
                 })
 
         # Get item info from request data or extra_material_data
@@ -554,24 +557,11 @@ def send_for_review(cr_id):
                         next_approver_id = assigned_estimator.user_id
                         log.info(f"Auto-routing CR {cr_id} to Estimator: {next_approver} (user_id={next_approver_id})")
                 else:
-                    next_role, next_approver = workflow_service.determine_initial_approver(user_role, change_request)
-
-                    # If routing to estimator, get the project-assigned one
-                    if next_role == CR_CONFIG.ROLE_ESTIMATOR:
-                        project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
-                        if not project or not project.estimator_id:
-                            return jsonify({"error": "No Estimator assigned for this project"}), 400
-
-                        # Fetch estimator details from User table
-                        assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
-                        if not assigned_estimator:
-                            return jsonify({"error": "Assigned Estimator user record not found"}), 400
-
-                        next_approver = assigned_estimator.full_name or assigned_estimator.username
-                        next_approver_id = assigned_estimator.user_id
-                        log.info(f"Auto-routing CR {cr_id} to Estimator: {next_approver} (user_id={next_approver_id})")
-                    else:
-                        next_approver_id = None
+                    # All materials are existing (external buy) → Route to Buyer
+                    log.info(f"All materials are existing (external buy) - routing CR {cr_id} to Buyer")
+                    next_role = CR_CONFIG.ROLE_BUYER
+                    next_approver = "Buyer"
+                    next_approver_id = None  # Will be assigned by Estimator/TD later
 
         elif is_admin:
             # Admin sends to assigned PM
@@ -824,49 +814,50 @@ def get_all_change_requests():
                     )
 
         elif user_role == 'estimator':
-            # Estimator sees only requests from their assigned projects:
-            # 1. Requests needing estimator approval from THEIR projects (approval_required_from = 'estimator' AND project.estimator_id = user_id)
+            # Estimator sees:
+            # 1. Requests from their assigned projects that need estimator approval
             # 2. Requests they approved (approved_by_user_id = user_id)
-            # 3. Completed requests from their assigned projects
+            # 3. Completed purchases from their projects (to see pricing history)
             from sqlalchemy import or_, and_
 
             log.info(f"Estimator filter - user_id: {user_id}, is_admin_viewing: {is_admin_viewing}")
 
             if is_admin_viewing:
-                # Admin viewing as estimator sees all estimator-related requests
+                # Admin viewing as estimator sees ALL estimator-related requests
                 query = query.filter(
                     or_(
-                        ChangeRequest.approval_required_from == 'estimator',  # All pending estimator requests
-                        ChangeRequest.approved_by_user_id.isnot(None),  # All estimator-approved requests
-                        ChangeRequest.status == 'purchase_completed'  # All completed purchases
+                        ChangeRequest.approval_required_from == 'estimator',
+                        ChangeRequest.approved_by_user_id == user_id,
+                        ChangeRequest.status == 'purchase_completed'
                     )
                 )
             else:
-                # Regular estimator: Filter by their assigned projects
-                # Get projects assigned to this estimator
+                # Regular estimator: filter by assigned projects
                 estimator_projects = Project.query.filter_by(estimator_id=user_id, is_deleted=False).all()
                 estimator_project_ids = [p.project_id for p in estimator_projects]
 
-                log.info(f"Estimator {user_id} has {len(estimator_project_ids)} assigned projects: {estimator_project_ids}")
+                log.info(f"Regular Estimator {user_id} - has {len(estimator_project_ids)} assigned projects")
 
                 if estimator_project_ids:
+                    # Estimator sees requests from their assigned projects only
                     query = query.filter(
                         or_(
                             and_(
                                 ChangeRequest.approval_required_from == 'estimator',
-                                ChangeRequest.project_id.in_(estimator_project_ids)  # Requests from their projects needing estimator approval
+                                ChangeRequest.project_id.in_(estimator_project_ids)
                             ),
-                            ChangeRequest.approved_by_user_id == user_id,  # Requests approved by this estimator
+                            ChangeRequest.approved_by_user_id == user_id,
                             and_(
                                 ChangeRequest.status == 'purchase_completed',
-                                ChangeRequest.project_id.in_(estimator_project_ids)  # Completed from their projects
+                                ChangeRequest.project_id.in_(estimator_project_ids)
                             )
                         )
                     )
                 else:
-                    # If estimator has no projects, only show requests they've approved
+                    # If estimator has no assigned projects, show only their own requests
+                    log.warning(f"Estimator {user_id} has no assigned projects, showing only their own requests")
                     query = query.filter(
-                        ChangeRequest.approved_by_user_id == user_id
+                        ChangeRequest.requested_by_user_id == user_id
                     )
         elif user_role in ['technical_director', 'technicaldirector']:
             # TD sees:
@@ -927,6 +918,34 @@ def get_all_change_requests():
                 cr_dict['boq_name'] = cr.boq.boq_name
                 cr_dict['boq_status'] = cr.boq.status
 
+            # RECALCULATE consumed amount dynamically for accurate display
+            current_consumed = db.session.query(
+                db.func.coalesce(db.func.sum(ChangeRequest.overhead_consumed), 0)
+            ).filter(
+                ChangeRequest.boq_id == cr.boq_id,
+                ChangeRequest.is_deleted == False,
+                ChangeRequest.created_at < cr.created_at,
+                ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
+            ).scalar() or 0
+
+            # Recalculate values based on current consumption
+            original_allocated = cr.original_overhead_allocated or 0
+            current_available = original_allocated - current_consumed
+            remaining_after = current_available - (cr.overhead_consumed or 0)
+
+            # Update overhead analysis with CURRENT values
+            cr_dict['overhead_analysis'] = {
+                'original_allocated': original_allocated,
+                'overhead_percentage': cr.original_overhead_percentage,
+                'consumed_before_request': current_consumed,
+                'available_before_request': current_available,
+                'consumed_by_this_request': cr.overhead_consumed,
+                'remaining_after_approval': remaining_after,
+                'is_within_budget': remaining_after >= 0,
+                'balance_type': 'negative' if remaining_after < 0 else 'positive',
+                'balance_amount': remaining_after
+            }
+
             # Skip material lookup - master_material_id values like 'mat_198_1_2'
             # are not database IDs but sub_item identifiers
 
@@ -966,6 +985,34 @@ def get_change_request_by_id(cr_id):
         if change_request.boq:
             result['boq_name'] = change_request.boq.boq_name
             result['boq_status'] = change_request.boq.status
+
+        # RECALCULATE consumed amount dynamically for accurate display
+        current_consumed = db.session.query(
+            db.func.coalesce(db.func.sum(ChangeRequest.overhead_consumed), 0)
+        ).filter(
+            ChangeRequest.boq_id == change_request.boq_id,
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.created_at < change_request.created_at,
+            ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
+        ).scalar() or 0
+
+        # Recalculate values based on current consumption
+        original_allocated = change_request.original_overhead_allocated or 0
+        current_available = original_allocated - current_consumed
+        remaining_after = current_available - (change_request.overhead_consumed or 0)
+
+        # Add/update overhead analysis with CURRENT values
+        result['overhead_analysis'] = {
+            'original_allocated': original_allocated,
+            'overhead_percentage': change_request.original_overhead_percentage,
+            'consumed_before_request': current_consumed,
+            'available_before_request': current_available,
+            'consumed_by_this_request': change_request.overhead_consumed,
+            'remaining_after_approval': remaining_after,
+            'is_within_budget': remaining_after >= 0,
+            'balance_type': 'negative' if remaining_after < 0 else 'positive',
+            'balance_amount': remaining_after
+        }
 
         # Skip material lookup - master_material_id values like 'mat_198_1_2'
         # are not database IDs but sub_item identifiers
@@ -1038,30 +1085,62 @@ def approve_change_request(cr_id):
         # Get request data
         data = request.get_json() or {}
         comments = data.get('comments', '')
-        selected_buyer_id = data.get('buyer_id')  # Optional: Estimator/TD can specify which buyer
+        selected_buyer_id = data.get('buyer_id')  # Required when PM approves external buy
 
         # Multi-stage approval logic
         if normalized_role in ['projectmanager']:
-            # PM approves - route to Estimator (simplified linear workflow)
+            # PM approves - route based on material type
             change_request.pm_approved_by_user_id = approver_id
             change_request.pm_approved_by_name = approver_name
             change_request.pm_approval_date = datetime.utcnow()
             change_request.status = CR_CONFIG.STATUS_APPROVED_BY_PM
 
-            # Simplified workflow: Always route to Estimator
-            project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
-            if not project or not project.estimator_id:
-                return jsonify({"error": "No Estimator assigned for this project"}), 400
+            # Check if all materials are existing (external buy)
+            has_new_materials = any(mat.get('master_material_id') is None for mat in (change_request.materials_data or []))
 
-            # Fetch estimator details from User table
-            assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
-            if not assigned_estimator:
-                return jsonify({"error": "Assigned Estimator user record not found"}), 400
+            if has_new_materials:
+                # Has NEW materials → Route to Estimator for pricing
+                project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
+                if not project or not project.estimator_id:
+                    return jsonify({"error": "No Estimator assigned for this project"}), 400
 
-            next_role = CR_CONFIG.ROLE_ESTIMATOR
-            next_approver = assigned_estimator.full_name or assigned_estimator.username
-            next_approver_id = assigned_estimator.user_id
-            log.info(f"PM approved CR {cr_id} → Routing to Estimator: {next_approver} (user_id={next_approver_id}) [Simplified workflow]")
+                # Fetch estimator details from User table
+                assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
+                if not assigned_estimator:
+                    return jsonify({"error": "Assigned Estimator user record not found"}), 400
+
+                next_role = CR_CONFIG.ROLE_ESTIMATOR
+                next_approver = assigned_estimator.full_name or assigned_estimator.username
+                next_approver_id = assigned_estimator.user_id
+                log.info(f"PM approved CR {cr_id} with NEW materials → Routing to Estimator: {next_approver} (user_id={next_approver_id})")
+            else:
+                # All materials are existing (external buy) → PM MUST select a Buyer
+                if not selected_buyer_id:
+                    return jsonify({
+                        "error": "Buyer selection required",
+                        "message": "Please select a buyer to assign this external buy request"
+                    }), 400
+
+                # Validate buyer exists and has buyer role
+                selected_buyer = User.query.filter_by(user_id=selected_buyer_id, is_deleted=False).first()
+                if not selected_buyer:
+                    return jsonify({"error": "Selected buyer not found"}), 404
+
+                buyer_role = selected_buyer.role.role.lower() if selected_buyer.role else ''
+                if buyer_role != 'buyer':
+                    return jsonify({"error": "Selected user is not a buyer"}), 400
+
+                next_role = CR_CONFIG.ROLE_BUYER
+                next_approver = selected_buyer.full_name or selected_buyer.username
+                next_approver_id = selected_buyer.user_id
+
+                # Assign to buyer immediately since PM selected them
+                change_request.assigned_to_buyer_user_id = next_approver_id
+                change_request.assigned_to_buyer_name = next_approver
+                change_request.assigned_to_buyer_date = datetime.utcnow()
+                change_request.status = CR_CONFIG.STATUS_ASSIGNED_TO_BUYER
+
+                log.info(f"PM approved CR {cr_id} with EXISTING materials → Assigned to Buyer: {next_approver} (user_id={next_approver_id})")
 
             change_request.approval_required_from = next_role
             change_request.current_approver_role = next_role
@@ -1410,29 +1489,13 @@ def complete_purchase_and_merge_to_boq(cr_id):
         change_request.purchase_completion_date = datetime.utcnow()
         change_request.purchase_notes = purchase_notes
 
-        # Simplified workflow: After Buyer completes purchase, route to TD for final approval
-        change_request.status = CR_CONFIG.STATUS_APPROVED_BY_PM  # Use existing status that allows TD approval
-        change_request.approval_required_from = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
-        change_request.current_approver_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
+        # Set status to purchase_completed
+        change_request.status = 'purchase_completed'
         change_request.updated_at = datetime.utcnow()
 
-        log.info(f"Buyer {buyer_name} marked purchase complete for CR {cr_id} - Routing to TD for final approval")
+        log.info(f"Buyer {buyer_name} marked purchase complete for CR {cr_id} - Merging materials to BOQ")
 
-        db.session.commit()
 
-        log.info(f"CR #{cr_id} routed to TD for final approval")
-
-        # Return success with next approver info
-        return jsonify({
-            "success": True,
-            "message": "Purchase completed. Forwarded to Technical Director for final approval.",
-            "cr_id": cr_id,
-            "status": change_request.status,
-            "next_approver": "Technical Director"
-        }), 200
-
-        # OLD CODE BELOW - COMMENTED OUT TO PRESERVE BOQ IMMUTABILITY
-        """
         # Now merge materials into BOQ
         boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
         if not boq_details:
@@ -1638,18 +1701,27 @@ def complete_purchase_and_merge_to_boq(cr_id):
                 material['master_material_id'] = existing_master_material.material_id
             else:
                 # Create new material in boq_material table
+                # Add description to mark it as from change request
+                material_justification = material.get('justification', '') or material.get('reason', '') or change_request.justification or ''
+                description_text = f"[From Change Request CR#{cr_id}] {material_justification}".strip()
+
                 new_master_material = MasterMaterial(
                     material_name=material_name,
                     item_id=item_id_for_materials,  # Store the extracted item_id
                     default_unit=unit,
                     current_market_price=unit_price,
+                    description=description_text,  # Mark as from change request
+                    brand=material.get('brand'),
+                    size=material.get('size'),
+                    specification=material.get('specification'),
+                    quantity=material.get('quantity', 0),
                     is_active=True,
                     created_at=datetime.utcnow(),
                     created_by=buyer_name
                 )
                 db.session.add(new_master_material)
                 db.session.flush()  # Get the new material_id
-                log.info(f"Created new MasterMaterial '{material_name}' with ID {new_master_material.material_id}, item_id: {item_id_for_materials}")
+                log.info(f"Created new MasterMaterial '{material_name}' with ID {new_master_material.material_id}, item_id: {item_id_for_materials}, marked as from CR#{cr_id}")
 
                 # Update material dict with the new integer master_material_id
                 material['master_material_id'] = new_master_material.material_id
@@ -1778,21 +1850,18 @@ def complete_purchase_and_merge_to_boq(cr_id):
 
         db.session.commit()
 
-        log.info(f"Buyer {buyer_name} completed purchase for CR {cr_id} - BOQ remains unchanged")
+        log.info(f"Buyer {buyer_name} completed purchase for CR {cr_id} and merged materials to BOQ")
 
-        # Close the docstring from above
-        """
-
-        # This return was moved to line 1150 above - old code commented out
-        # return jsonify({
-        #     "success": True,
-        #     "message": "Purchase completed and materials merged to BOQ",
-        #     "cr_id": cr_id,
-        #     "status": CR_CONFIG.STATUS_PURCHASE_COMPLETE,
-        #     "purchase_completed_by": buyer_name,
-        #     "purchase_completion_date": change_request.purchase_completion_date.isoformat() if change_request.purchase_completion_date else None,
-        #     "boq_updated": True
-        # }), 200
+        # Return success response
+        return jsonify({
+            "success": True,
+            "message": "Purchase completed and materials merged to BOQ",
+            "cr_id": cr_id,
+            "status": 'purchase_completed',
+            "purchase_completed_by": buyer_name,
+            "purchase_completion_date": change_request.purchase_completion_date.isoformat() if change_request.purchase_completion_date else None,
+            "boq_updated": True
+        }), 200
 
     except SQLAlchemyError as e:
         db.session.rollback()
@@ -1831,17 +1900,33 @@ def get_boq_change_requests(boq_id):
         for cr in change_requests:
             request_data = cr.to_dict()
 
-            # Add overhead analysis
+            # RECALCULATE consumed amount dynamically (not using stored historical value)
+            # Sum overhead consumed by all approved/completed CRs created before this one
+            current_consumed = db.session.query(
+                db.func.coalesce(db.func.sum(ChangeRequest.overhead_consumed), 0)
+            ).filter(
+                ChangeRequest.boq_id == cr.boq_id,
+                ChangeRequest.is_deleted == False,
+                ChangeRequest.created_at < cr.created_at,
+                ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
+            ).scalar() or 0
+
+            # Recalculate available and remaining based on current consumption
+            original_allocated = cr.original_overhead_allocated or 0
+            current_available = original_allocated - current_consumed
+            remaining_after = current_available - (cr.overhead_consumed or 0)
+
+            # Add overhead analysis with CURRENT values
             request_data['overhead_analysis'] = {
-                'original_allocated': cr.original_overhead_allocated,
+                'original_allocated': original_allocated,
                 'overhead_percentage': cr.original_overhead_percentage,
-                'consumed_before_request': cr.original_overhead_used,
-                'available_before_request': cr.original_overhead_remaining,
+                'consumed_before_request': current_consumed,  # CURRENT consumed, not historical
+                'available_before_request': current_available,  # CURRENT available
                 'consumed_by_this_request': cr.overhead_consumed,
-                'remaining_after_approval': cr.new_overhead_remaining,
-                'is_within_budget': not cr.is_over_budget,
-                'balance_type': 'negative' if cr.is_over_budget else 'positive',
-                'balance_amount': cr.new_overhead_remaining
+                'remaining_after_approval': remaining_after,  # RECALCULATED
+                'is_within_budget': remaining_after >= 0,  # RECALCULATED
+                'balance_type': 'negative' if remaining_after < 0 else 'positive',
+                'balance_amount': remaining_after
             }
 
             # Add budget impact
@@ -1891,7 +1976,7 @@ def update_change_request(cr_id):
 
         # Check edit permissions
         user_role = current_user.get('role_name', '').lower()
-        normalized_role = workflow_service.normalize_role(user_role_lower)
+        normalized_role = workflow_service.normalize_role(user_role)
 
         # PM can edit any pending request, SE can only edit their own, Estimator can edit requests assigned to them
         if user_role in ['projectmanager', 'project_manager']:
@@ -1945,7 +2030,9 @@ def update_change_request(cr_id):
                 'unit_price': unit_price,
                 'total_price': total_price,
                 'master_material_id': mat.get('master_material_id'),
-                'justification': mat.get('justification', '')  # Per-material justification
+                'justification': mat.get('justification', ''),  # Per-material justification
+                'brand': mat.get('brand'),  # Brand for new materials
+                'specification': mat.get('specification')  # Specification for new materials
             })
 
             sub_items_data.append({
@@ -1958,7 +2045,9 @@ def update_change_request(cr_id):
                 'total_price': total_price,
                 'is_new': mat.get('master_material_id') is None,
                 'reason': mat.get('reason'),
-                'justification': mat.get('justification', '')  # Per-material justification
+                'justification': mat.get('justification', ''),  # Per-material justification
+                'brand': mat.get('brand'),  # Brand for new materials
+                'specification': mat.get('specification')  # Specification for new materials
             })
 
         # Get BOQ details for recalculation
@@ -2301,4 +2390,58 @@ def get_all_buyers():
         log.error(f"Error fetching buyers: {str(e)}")
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+def delete_change_request(cr_id):
+    """
+    Delete a change request (soft delete)
+    DELETE /api/change-request/{cr_id}
+
+    Only the creator or admin can delete.
+    Only pending or rejected requests can be deleted.
+    """
+    try:
+        current_user = getattr(g, 'user', None)
+        if not current_user:
+            return jsonify({"error": "User not authenticated"}), 401
+
+        user_id = current_user.get('user_id')
+        user_role = current_user.get('role_name', '').lower()
+
+        # Get change request
+        change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+        if not change_request:
+            return jsonify({"error": "Change request not found"}), 404
+
+        # Check permissions - only creator or admin can delete
+        is_admin = user_role == 'admin'
+        is_creator = change_request.requested_by_user_id == user_id
+
+        if not (is_admin or is_creator):
+            return jsonify({"error": "You don't have permission to delete this request"}), 403
+
+        # Only pending or rejected requests can be deleted
+        if change_request.status not in ['pending', 'rejected']:
+            return jsonify({
+                "error": f"Cannot delete a request with status '{change_request.status}'. Only pending or rejected requests can be deleted."
+            }), 400
+
+        # Soft delete
+        change_request.is_deleted = True
+        change_request.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        log.info(f"Change request {cr_id} deleted by user {user_id}")
+
+        return jsonify({
+            "success": True,
+            "message": "Change request deleted successfully"
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error deleting change request {cr_id}: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        db.session.rollback()
         return jsonify({"error": str(e)}), 500

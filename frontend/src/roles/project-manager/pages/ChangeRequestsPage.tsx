@@ -45,6 +45,12 @@ import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 import { useChangeRequestsAutoSync } from '@/hooks/useAutoSync';
 import { permissions } from '@/utils/rolePermissions';
 
+interface Buyer {
+  user_id: number;
+  full_name: string;
+  username: string;
+}
+
 const ChangeRequestsPage: React.FC = () => {
   const location = useLocation();
   const { user } = useAuthStore();
@@ -59,6 +65,10 @@ const ChangeRequestsPage: React.FC = () => {
   const [showRejectionModal, setShowRejectionModal] = useState(false);
   const [rejectingCrId, setRejectingCrId] = useState<number | null>(null);
   const [showExtraForm, setShowExtraForm] = useState(false);
+  const [showBuyerSelectionModal, setShowBuyerSelectionModal] = useState(false);
+  const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
+  const [buyers, setBuyers] = useState<Buyer[]>([]);
+  const [selectedBuyerId, setSelectedBuyerId] = useState<number | null>(null);
 
   // Real-time auto-sync hook - no manual polling needed
   const { data: changeRequestsData, isLoading, isFetching, refetch } = useChangeRequestsAutoSync(
@@ -82,11 +92,12 @@ const ChangeRequestsPage: React.FC = () => {
 
   const initialLoad = isLoading;
 
-  const handleSendForReview = async (crId: number, routeTo?: 'technical_director' | 'estimator') => {
+  const handleSendForReview = async (crId: number) => {
+    // Always route to Estimator for new material requests
     try {
-      const response = await changeRequestService.sendForReview(crId, routeTo);
+      const response = await changeRequestService.sendForReview(crId, 'estimator');
       if (response.success) {
-        toast.success(response.message || 'Request sent for review');
+        toast.success(response.message || 'Request sent to Estimator for pricing');
         refetch(); // Trigger background refresh
       } else {
         toast.error(response.message);
@@ -96,17 +107,24 @@ const ChangeRequestsPage: React.FC = () => {
     }
   };
 
-  const handleSendToTD = async (crId: number) => {
-    await handleSendForReview(crId, 'technical_director');
-  };
+  const handleApprove = async (crId: number, buyerId?: number) => {
+    // Check if this is an external buy request (all materials have master_material_id)
+    const request = changeRequests.find(r => r.cr_id === crId);
+    if (request) {
+      const allExternal = request.materials_data?.every(mat => mat.master_material_id !== null && mat.master_material_id !== undefined);
 
-  const handleSendToEstimator = async (crId: number) => {
-    await handleSendForReview(crId, 'estimator');
-  };
+      if (allExternal && !buyerId) {
+        // External buy - need to select buyer first
+        setApprovingCrId(crId);
+        await fetchBuyers();
+        setShowBuyerSelectionModal(true);
+        return;
+      }
+    }
 
-  const handleApprove = async (crId: number) => {
+    // Proceed with approval
     try {
-      const response = await changeRequestService.approve(crId, 'Approved by PM');
+      const response = await changeRequestService.approve(crId, 'Approved by PM', buyerId);
       if (response.success) {
         toast.success(response.message || 'Change request approved successfully');
         refetch(); // Trigger background refresh
@@ -116,6 +134,30 @@ const ChangeRequestsPage: React.FC = () => {
     } catch (error) {
       toast.error('Failed to approve change request');
     }
+  };
+
+  const fetchBuyers = async () => {
+    try {
+      const response = await changeRequestService.getBuyers();
+      if (response.success && response.data) {
+        setBuyers(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching buyers:', error);
+      toast.error('Failed to load buyers');
+    }
+  };
+
+  const handleBuyerSelection = async () => {
+    if (!selectedBuyerId || !approvingCrId) {
+      toast.error('Please select a buyer');
+      return;
+    }
+
+    setShowBuyerSelectionModal(false);
+    await handleApprove(approvingCrId, selectedBuyerId);
+    setApprovingCrId(null);
+    setSelectedBuyerId(null);
   };
 
   const handleReject = (crId: number) => {
@@ -386,25 +428,10 @@ const ChangeRequestsPage: React.FC = () => {
                         </Button>
                         <Button
                           size="sm"
-                          className={`${
-                            (request.recommended_next_approver === 'technical_director') ||
-                            (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
-                              ? 'bg-orange-600 hover:bg-orange-700'
-                              : 'bg-purple-600 hover:bg-purple-700'
-                          }`}
-                          onClick={() => {
-                            // Use recommended_next_approver if available, fallback to percentage check
-                            const routeTo = request.recommended_next_approver ||
-                                          ((request.routing_percentage || request.percentage_of_item_overhead || 0) > 40 ? 'technical_director' : 'estimator');
-                            handleSendForReview(request.cr_id, routeTo);
-                          }}
+                          className="bg-purple-600 hover:bg-purple-700"
+                          onClick={() => handleSendForReview(request.cr_id)}
                         >
-                          Send {
-                            (request.recommended_next_approver === 'technical_director') ||
-                            (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
-                              ? 'TD'
-                              : 'Est'
-                          }
+                          Send to Estimator
                         </Button>
                       </>
                     )}
@@ -678,22 +705,13 @@ const ChangeRequestsPage: React.FC = () => {
                                 <Pencil className="h-4 w-4" />
                                 <span>Edit</span>
                               </button>
-                              <div className="grid grid-cols-2 gap-2">
-                                <button
-                                  onClick={() => handleSendToTD(request.cr_id)}
-                                  className="bg-orange-600 hover:bg-orange-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold"
-                                >
-                                  <Check className="h-4 w-4" />
-                                  <span>Send to TD</span>
-                                </button>
-                                <button
-                                  onClick={() => handleSendToEstimator(request.cr_id)}
-                                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold"
-                                >
-                                  <Check className="h-4 w-4" />
-                                  <span>Send to Est.</span>
-                                </button>
-                              </div>
+                              <button
+                                onClick={() => handleSendForReview(request.cr_id)}
+                                className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold"
+                              >
+                                <Check className="h-4 w-4" />
+                                <span>Send to Estimator</span>
+                              </button>
                             </div>
                           )}
 
@@ -1022,15 +1040,10 @@ const ChangeRequestsPage: React.FC = () => {
                             <div className="grid grid-cols-2 gap-2">
                               <button
                                 onClick={() => handleApprove(request.cr_id)}
-                                className="bg-green-600 hover:bg-green-700 text-white text-xs h-9 rounded transition-all flex flex-col items-center justify-center font-semibold"
+                                className="bg-green-600 hover:bg-green-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold"
                               >
-                                <div className="flex items-center gap-1">
-                                  <Check className="h-3.5 w-3.5" />
-                                  <span>Approve</span>
-                                </div>
-                                <span className="text-[9px] opacity-80">
-                                  → {request.recommended_next_approver === 'technical_director' ? 'TD' : 'Est'}
-                                </span>
+                                <Check className="h-3.5 w-3.5" />
+                                <span>Approve</span>
                               </button>
                               <button
                                 onClick={() => handleReject(request.cr_id)}
@@ -1168,28 +1181,13 @@ const ChangeRequestsPage: React.FC = () => {
                                     <span>Edit</span>
                                   </button>
                                 </div>
-                                {/* Smart Send for Review button based on recommended routing */}
+                                {/* Send for Review to Estimator */}
                                 <button
-                                  onClick={() => {
-                                    // Use recommended_next_approver if available, fallback to routing_percentage check
-                                    const routeTo = request.recommended_next_approver ||
-                                                  ((request.routing_percentage || request.percentage_of_item_overhead || 0) > 40 ? 'technical_director' : 'estimator');
-                                    handleSendForReview(request.cr_id, routeTo);
-                                  }}
-                                  className={`w-full text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold ${
-                                    (request.recommended_next_approver === 'technical_director') ||
-                                    (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
-                                      ? 'bg-orange-600 hover:bg-orange-700'
-                                      : 'bg-purple-600 hover:bg-purple-700'
-                                  }`}
+                                  onClick={() => handleSendForReview(request.cr_id)}
+                                  className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
                                 >
                                   <Check className="h-4 w-4" />
-                                  <span>Send for Review {
-                                    (request.recommended_next_approver === 'technical_director') ||
-                                    (!request.recommended_next_approver && (request.routing_percentage || request.percentage_of_item_overhead || 0) > 40)
-                                      ? '(TD)'
-                                      : '(Est.)'
-                                  }</span>
+                                  <span>Send to Estimator</span>
                                 </button>
                               </div>
                             </motion.div>
@@ -1563,6 +1561,183 @@ const ChangeRequestsPage: React.FC = () => {
                   refetch();
                 }}
               />
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Buyer Selection Modal */}
+      {showBuyerSelectionModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+          >
+            {/* Header */}
+            <div className="bg-gradient-to-r from-green-600 to-green-700 px-6 py-4 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white bg-opacity-20 rounded-lg">
+                    <Check className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white">Approve Change Request</h3>
+                    <p className="text-green-50 text-sm">CR-{approvingCrId}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowBuyerSelectionModal(false);
+                    setApprovingCrId(null);
+                    setSelectedBuyerId(null);
+                  }}
+                  className="text-white hover:bg-white hover:bg-opacity-20 rounded-lg p-2 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Content - Scrollable with hidden scrollbar */}
+            <div
+              className="flex-1 overflow-y-auto p-6"
+              style={{
+                scrollbarWidth: 'none',
+                msOverflowStyle: 'none',
+              }}
+            >
+              <style>{`
+                div[class*="overflow-y-auto"]::-webkit-scrollbar {
+                  display: none;
+                }
+              `}</style>
+              {/* Assign to Procurement Section */}
+              <div className="mb-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Package className="w-5 h-5 text-gray-700" />
+                  <label className="text-sm font-semibold text-gray-900">
+                    Assign to Procurement <span className="text-red-500">*</span>
+                  </label>
+                </div>
+
+                {/* Online Status Indicator */}
+                <div className="flex items-center gap-2 mb-4 text-sm">
+                  <div className="flex items-center gap-1.5 text-green-600">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="font-medium">ONLINE</span>
+                  </div>
+                </div>
+
+                {/* Buyers List - Scrollable with hidden scrollbar */}
+                <div
+                  className="space-y-3 max-h-[280px] overflow-y-auto pr-2"
+                  style={{
+                    scrollbarWidth: 'none',
+                    msOverflowStyle: 'none',
+                  }}
+                >
+                  {buyers.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      <Package className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                      <p>No buyers available</p>
+                    </div>
+                  ) : (
+                    buyers.map((buyer) => {
+                      const initials = buyer.full_name
+                        ? buyer.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+                        : buyer.username.slice(0, 2).toUpperCase();
+
+                      return (
+                        <label
+                          key={buyer.user_id}
+                          className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                            selectedBuyerId === buyer.user_id
+                              ? 'border-green-500 bg-green-50 shadow-sm'
+                              : 'border-gray-200 hover:border-green-300 hover:bg-gray-50'
+                          }`}
+                          onClick={() => setSelectedBuyerId(buyer.user_id)}
+                        >
+                          {/* Avatar */}
+                          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-lg ${
+                            selectedBuyerId === buyer.user_id ? 'bg-green-600' : 'bg-blue-600'
+                          }`}>
+                            {initials}
+                          </div>
+
+                          {/* User Info */}
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-gray-900">
+                                {buyer.full_name || buyer.username}
+                              </span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                                Online
+                              </span>
+                            </div>
+                            <div className="text-sm text-gray-500 mt-0.5">
+                              {buyer.username}
+                            </div>
+                          </div>
+
+                          {/* Radio Button */}
+                          <input
+                            type="radio"
+                            name="buyer"
+                            value={buyer.user_id}
+                            checked={selectedBuyerId === buyer.user_id}
+                            onChange={() => setSelectedBuyerId(buyer.user_id)}
+                            className="w-5 h-5 text-green-600 focus:ring-green-500"
+                          />
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Comments Section */}
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-gray-900 mb-2">
+                  Comments (Optional)
+                </label>
+                <textarea
+                  placeholder="Add any approval notes..."
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors resize-none"
+                  rows={3}
+                />
+              </div>
+
+              {/* Info Note */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm text-blue-800">
+                  <span className="font-semibold">Note:</span> Approving this request will assign it to the selected procurement team for purchase and merge the materials into the BOQ.
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-gray-50 px-6 py-4 flex gap-3 justify-end border-t border-gray-200 flex-shrink-0">
+              <button
+                onClick={() => {
+                  setShowBuyerSelectionModal(false);
+                  setApprovingCrId(null);
+                  setSelectedBuyerId(null);
+                }}
+                className="px-5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBuyerSelection}
+                disabled={!selectedBuyerId}
+                className="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600"
+              >
+                <Check className="w-5 h-5" />
+                Approve & Assign
+              </button>
             </div>
           </motion.div>
         </div>

@@ -151,28 +151,36 @@ class ChangeRequest(db.Model):
 
     def calculate_recommended_routing(self):
         """
-        Calculate the recommended routing (TD or Estimator) based on business logic
-        Returns tuple: (route_to, percentage_used)
+        Calculate the recommended routing based on material type only
+        Returns tuple: (route_to, routing_type)
 
-        Uses the percentage_of_item_overhead that was calculated at creation time:
-        - For NEW materials: percentage is calculated against miscellaneous_amount
-        - For existing materials: percentage is calculated against overhead_allocated
-
-        Both calculations are done in the create_change_request controller
+        Routing logic (SIMPLIFIED - NO PERCENTAGE CALCULATIONS):
+        1. Check if ALL materials are external buy (existing BOQ materials with master_material_id)
+           - If yes: Route to 'buyer' (external procurement, prices already set)
+        2. If ANY materials are NEW (no master_material_id):
+           - Route to 'estimator' (needs pricing from estimator)
         """
-        # Use the pre-calculated percentage_of_item_overhead
-        # This was calculated correctly at creation time based on material type
-        percentage = self.percentage_of_item_overhead or 0
+        # Check material type from materials_data or sub_items_data
+        materials = self.materials_data if self.materials_data else self.sub_items_data
 
-        if percentage > 40:
-            return 'technical_director', round(percentage, 2)
-        else:
-            return 'estimator', round(percentage, 2)
+        if materials and isinstance(materials, list) and len(materials) > 0:
+            # Check if ALL materials have master_material_id (external buy)
+            all_external = all(
+                mat.get('master_material_id') is not None
+                for mat in materials
+            )
+
+            # If all materials are existing BOQ materials, route to Buyer
+            if all_external:
+                return 'buyer', 'external_buy'
+
+        # If there are NEW materials, route to Estimator for pricing
+        return 'estimator', 'new_materials'
 
     def to_dict(self):
         """Convert to dictionary for JSON response"""
-        # Calculate recommended routing
-        recommended_route, routing_percentage = self.calculate_recommended_routing()
+        # Calculate recommended routing (based on material type, NOT percentage)
+        recommended_route, routing_type = self.calculate_recommended_routing()
 
         return {
             'cr_id': self.cr_id,
@@ -235,9 +243,9 @@ class ChangeRequest(db.Model):
             'approval_required_from': self.approval_required_from,
             'current_approver_role': self.current_approver_role,
 
-            # Recommended routing (for UI to show correct button)
+            # Recommended routing (based on material type: 'buyer', 'estimator', or 'technical_director')
             'recommended_next_approver': recommended_route,
-            'routing_percentage': routing_percentage,
+            'routing_type': routing_type,  # 'external_buy' or 'new_materials'
 
             # PM Approval
             'pm_approved_by_user_id': self.pm_approved_by_user_id,

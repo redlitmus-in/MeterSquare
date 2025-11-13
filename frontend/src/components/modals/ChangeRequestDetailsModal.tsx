@@ -4,7 +4,7 @@ import { X, Package, AlertCircle, CheckCircle, Clock, XCircle, Send } from 'luci
 import { ChangeRequestItem } from '@/services/changeRequestService';
 import { useAuthStore } from '@/store/authStore';
 import { formatCurrency } from '@/utils/formatters';
-import { isEstimator, isTechnicalDirector } from '@/utils/roleHelpers';
+import { isEstimator, isTechnicalDirector, isSiteEngineer } from '@/utils/roleHelpers';
 import EditChangeRequestModal from './EditChangeRequestModal';
 
 interface ChangeRequestDetailsModalProps {
@@ -72,6 +72,12 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   // Use role helper functions instead of hardcoded IDs
   const userIsEstimator = isEstimator(user);
   const userIsTechnicalDirector = isTechnicalDirector(user);
+  const userIsSiteEngineer = isSiteEngineer(user);
+
+  // Check if request has ANY new materials
+  const hasNewMaterials = materialsData.some((mat: any) =>
+    mat.master_material_id === null || mat.master_material_id === undefined
+  );
 
   // Final statuses where no actions should be allowed
   const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'approved', 'rejected'].includes(changeRequest.status);
@@ -262,15 +268,21 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
               <div className="mb-4 sm:mb-6">
                 <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3">Materials Requested</h3>
                 <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
-                  <table className="w-full min-w-[800px]">
+                  <table className={`w-full ${userIsSiteEngineer ? 'min-w-[800px]' : 'min-w-[1100px]'}`}>
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">Material</th>
+                        <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">Brand</th>
+                        <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">Size / Spec</th>
                         <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">Sub-Item</th>
                         <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">For Item</th>
                         <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Quantity</th>
-                        <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Unit Price</th>
-                        <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Total</th>
+                        {!userIsSiteEngineer && (
+                          <>
+                            <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Unit Price</th>
+                            <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Total</th>
+                          </>
+                        )}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
@@ -287,6 +299,18 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                                     NEW
                                   </span>
                                 )}
+                              </div>
+                            </td>
+                            <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600">
+                              {material.brand || '-'}
+                            </td>
+                            <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600">
+                              <div className="flex flex-col gap-1">
+                                {material.size && <span>{material.size}</span>}
+                                {material.specification && (
+                                  <span className="text-gray-500 text-xs">{material.specification}</span>
+                                )}
+                                {!material.size && !material.specification && '-'}
                               </div>
                             </td>
                           <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600">
@@ -306,28 +330,88 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600 text-right whitespace-nowrap">
                             {material.quantity} {material.unit}
                           </td>
-                          <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600 text-right whitespace-nowrap">
-                            {formatCurrency(material.unit_price)}
-                          </td>
-                          <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-semibold text-gray-900 text-right whitespace-nowrap">
-                            {formatCurrency(material.total_price)}
-                          </td>
+                          {!userIsSiteEngineer && (
+                            <>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600 text-right whitespace-nowrap">
+                                {formatCurrency(material.unit_price || 0)}
+                              </td>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-semibold text-gray-900 text-right whitespace-nowrap">
+                                {formatCurrency(material.total_price || (material.quantity * material.unit_price) || 0)}
+                              </td>
+                            </>
+                          )}
                         </tr>
                         );
                       })}
-                      <tr className="bg-purple-50 font-bold">
-                        <td colSpan={5} className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-purple-900 text-right">
-                          Total Materials Cost:
-                        </td>
-                        <td className="px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-purple-900 text-right whitespace-nowrap">
-                          {formatCurrency(totalMaterialsCost)}
-                        </td>
-                      </tr>
+                      {!userIsSiteEngineer && (
+                        <tr className="bg-purple-50 font-bold">
+                          <td colSpan={7} className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-purple-900 text-right">
+                            Total Cost:
+                          </td>
+                          <td className="px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-purple-900 text-right whitespace-nowrap">
+                            {formatCurrency(totalMaterialsCost)}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
 
+              {/* Negotiable Price Summary - Show if has new materials */}
+              {hasNewMaterials && changeRequest.overhead_analysis && (
+                <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200">
+                  <h3 className="text-xs sm:text-sm font-semibold text-purple-900 mb-2 sm:mb-3">Negotiable Price Summary</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-xs sm:text-sm">
+                    <div>
+                      <span className="text-purple-700 text-[10px] sm:text-xs">Original Allocated:</span>
+                      <p className="font-bold text-purple-900 text-xs sm:text-sm">
+                        {formatCurrency(changeRequest.overhead_analysis.original_allocated || 0)}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-purple-700 text-[10px] sm:text-xs">Already Consumed:</span>
+                      <p className="font-bold text-orange-600 text-xs sm:text-sm">
+                        {formatCurrency(changeRequest.overhead_analysis.consumed_before_request || 0)}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-purple-700 text-[10px] sm:text-xs">This Request:</span>
+                      <p className="font-bold text-blue-600 text-xs sm:text-sm">
+                        {formatCurrency(changeRequest.materials_total_cost || 0)}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-purple-700 text-[10px] sm:text-xs">Remaining After:</span>
+                      <p className={`font-bold text-xs sm:text-sm ${changeRequest.overhead_analysis.remaining_after_approval < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        {formatCurrency(changeRequest.overhead_analysis.remaining_after_approval || 0)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-purple-300">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs sm:text-sm text-purple-700">Total Negotiable Price Consumption:</span>
+                      <span className={`text-base sm:text-lg font-bold ${
+                        ((changeRequest.overhead_analysis.consumed_before_request + changeRequest.materials_total_cost) / changeRequest.overhead_analysis.original_allocated * 100) > 40
+                          ? 'text-red-600'
+                          : 'text-green-600'
+                      }`}>
+                        {changeRequest.overhead_analysis.original_allocated > 0
+                          ? (((changeRequest.overhead_analysis.consumed_before_request + changeRequest.materials_total_cost) / changeRequest.overhead_analysis.original_allocated) * 100).toFixed(1)
+                          : '0.0'
+                        }%
+                      </span>
+                    </div>
+                    {changeRequest.overhead_analysis.original_allocated > 0 &&
+                     ((changeRequest.overhead_analysis.consumed_before_request + changeRequest.materials_total_cost) / changeRequest.overhead_analysis.original_allocated * 100) > 40 && (
+                      <p className="text-[10px] sm:text-xs text-red-600 mt-1 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        <span>Exceeds 40% threshold - TD approval required</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Vendor Details - Only show if TD approved vendor */}
               {changeRequest.vendor_approved_by_td_id && (

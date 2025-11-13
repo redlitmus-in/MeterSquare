@@ -57,29 +57,38 @@ class OverheadCalculator:
                 else:
                     profit_percentage = CR_CONFIG.DEFAULT_PROFIT_PERCENTAGE
 
-            # Calculate original overhead allocated
-            # Overhead is calculated as a percentage of the base cost
-            # Formula: base_cost * (overhead% / 100)
-            original_overhead_allocated = (original_base_cost * overhead_percentage) / 100
+            # CRITICAL: Use ONLY Negotiable Margins (overhead_amount) from BOQ summary
+            # Negotiable Margins = OVERHEAD (e.g., 3,000.00), NOT profit (1,250.00)
+            # Extra materials consume from the overhead budget (negotiable margins)
+            # If overhead_amount exists in summary, use it directly (most accurate)
+            # Otherwise calculate from base_cost * overhead_percentage (fallback)
+            original_overhead_allocated = summary.get('overhead_amount')
+            if original_overhead_allocated is None or original_overhead_allocated == 0:
+                # Fallback: Calculate from base cost if not in summary
+                original_overhead_allocated = (original_base_cost * overhead_percentage) / 100
+                log.warning(f"overhead_amount not found in BOQ summary, calculated from base_cost: {original_overhead_allocated}")
+            else:
+                log.info(f"Using overhead_amount (Negotiable Margins) from BOQ summary: {original_overhead_allocated}")
 
-            # For simplicity, assume overhead hasn't been consumed yet
-            # TODO: In future, track overhead consumption from previous change requests
+            # For simplicity, assume negotiable margin (overhead) hasn't been consumed yet
+            # TODO: In future, track consumption from previous change requests
             original_overhead_used = 0.0
             original_overhead_remaining = original_overhead_allocated - original_overhead_used
 
-            # Calculate overhead consumed by new materials
-            # The extra material cost directly consumes from the overhead budget
+            # Calculate amount consumed by new materials from negotiable margin (overhead)
+            # The extra material cost directly consumes from the negotiable margin budget
             # IMPORTANT: Extra materials are purchased at actual cost from overhead budget
-            # They do NOT add overhead or profit markup
+            # They do NOT add additional overhead or profit markup
             overhead_consumed = new_materials_cost
 
-            # Calculate new overhead remaining after deducting extra materials
+            # Calculate new negotiable margin (overhead) remaining after deducting extra materials
             new_overhead_remaining = original_overhead_remaining - overhead_consumed
             is_over_budget = new_overhead_remaining < 0
 
             # CRITICAL: Extra materials DO NOT change the total BOQ cost
-            # They are purchased from the overhead budget at actual cost
+            # They are purchased from the negotiable margin (overhead) budget at actual cost
             # The original BOQ totals remain unchanged
+            # Profit (1,250.00) remains completely separate and untouched
             new_base_cost = original_base_cost  # Base cost stays the same
             new_overhead_total = original_overhead_allocated  # Overhead allocation doesn't change
             original_profit = (original_base_cost * profit_percentage) / 100

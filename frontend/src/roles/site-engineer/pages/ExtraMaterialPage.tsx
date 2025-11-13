@@ -13,7 +13,8 @@ import {
   Squares2X2Icon,
   PencilIcon,
   PaperAirplaneIcon,
-  CheckBadgeIcon
+  CheckBadgeIcon,
+  TrashIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import axios from 'axios';
@@ -62,6 +63,8 @@ const ExtraMaterialPage: React.FC = () => {
   const [filterArea, setFilterArea] = useState('');
   const [filterItem, setFilterItem] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteRequestId, setDeleteRequestId] = useState<number | null>(null);
 
   const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
   const token = localStorage.getItem('access_token');
@@ -427,6 +430,37 @@ const ExtraMaterialPage: React.FC = () => {
     }
   };
 
+  const handleDelete = (requestId: number) => {
+    // Show custom confirmation modal
+    setDeleteRequestId(requestId);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteRequestId) return;
+
+    try {
+      await axios.delete(
+        `${API_URL}/change-request/${deleteRequestId}`,
+        { headers }
+      );
+      toast.success('Request deleted successfully');
+      setShowDeleteModal(false);
+      setDeleteRequestId(null);
+      refetch();
+    } catch (error: any) {
+      console.error('Error deleting request:', error);
+      toast.error(error.response?.data?.error || 'Failed to delete request');
+      setShowDeleteModal(false);
+      setDeleteRequestId(null);
+    }
+  };
+
+  const cancelDelete = () => {
+    setShowDeleteModal(false);
+    setDeleteRequestId(null);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -626,7 +660,7 @@ const ExtraMaterialPage: React.FC = () => {
                           <EyeIcon className="w-4 h-4" />
                           View Details
                         </button>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                           <button
                             onClick={() => handleEdit(request.id)}
                             className="bg-green-600 hover:bg-green-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
@@ -639,7 +673,14 @@ const ExtraMaterialPage: React.FC = () => {
                             className="bg-[#243d8a] hover:bg-[#1e3270] text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
                           >
                             <PaperAirplaneIcon className="w-4 h-4" />
-                            Send to PM
+                            Send
+                          </button>
+                          <button
+                            onClick={() => handleDelete(request.id)}
+                            className="bg-red-600 hover:bg-red-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
+                          >
+                            <TrashIcon className="w-4 h-4" />
+                            Delete
                           </button>
                         </div>
                       </div>
@@ -723,7 +764,14 @@ const ExtraMaterialPage: React.FC = () => {
                                 className="text-[#243d8a] hover:text-[#1e3270] font-medium"
                               >
                                 <PaperAirplaneIcon className="w-4 h-4 inline mr-1" />
-                                Send to PM
+                                Send
+                              </button>
+                              <button
+                                onClick={() => handleDelete(request.id)}
+                                className="text-red-600 hover:text-red-800 font-medium"
+                              >
+                                <TrashIcon className="w-4 h-4 inline mr-1" />
+                                Delete
                               </button>
                             </div>
                           </td>
@@ -1156,13 +1204,31 @@ const ExtraMaterialPage: React.FC = () => {
                         )}
                       </div>
 
-                      <button
-                        onClick={() => handleViewDetails(request.id)}
-                        className="w-full bg-red-500 hover:bg-red-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
-                      >
-                        <EyeIcon className="w-4 h-4" />
-                        View Details
-                      </button>
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => handleViewDetails(request.id)}
+                          className="w-full bg-red-500 hover:bg-red-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                        >
+                          <EyeIcon className="w-4 h-4" />
+                          View Details
+                        </button>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => handleEdit(request.id)}
+                            className="bg-green-600 hover:bg-green-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
+                          >
+                            <PencilIcon className="w-4 h-4" />
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(request.id)}
+                            className="bg-red-600 hover:bg-red-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
+                          >
+                            <TrashIcon className="w-4 h-4" />
+                            Delete
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </motion.div>
                 ))}
@@ -1237,13 +1303,29 @@ const ExtraMaterialPage: React.FC = () => {
                             {request.rejected_by || 'N/A'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
-                            <button
-                              onClick={() => handleViewDetails(request.id)}
-                              className="text-red-600 hover:text-red-700 font-medium"
-                            >
-                              <EyeIcon className="w-4 h-4 inline mr-1" />
-                              View
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleViewDetails(request.id)}
+                                className="text-red-600 hover:text-red-700 font-medium"
+                              >
+                                <EyeIcon className="w-4 h-4 inline mr-1" />
+                                View
+                              </button>
+                              <button
+                                onClick={() => handleEdit(request.id)}
+                                className="text-green-600 hover:text-green-800 font-medium"
+                              >
+                                <PencilIcon className="w-4 h-4 inline mr-1" />
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDelete(request.id)}
+                                className="text-red-600 hover:text-red-800 font-medium"
+                              >
+                                <TrashIcon className="w-4 h-4 inline mr-1" />
+                                Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1472,6 +1554,55 @@ const ExtraMaterialPage: React.FC = () => {
           changeRequest={selectedRequest}
           canApprove={false}
         />
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+            >
+              {/* Header */}
+              <div className="bg-white border-b border-gray-200 px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-red-100 rounded-lg">
+                    <ExclamationTriangleIcon className="w-6 h-6 text-red-600" />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900">Confirm Delete</h3>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="p-6">
+                <p className="text-gray-700 text-base mb-2">
+                  Are you sure you want to delete this request?
+                </p>
+                <p className="text-sm text-gray-500">
+                  This action cannot be undone. The request will be permanently removed from the system.
+                </p>
+              </div>
+
+              {/* Footer */}
+              <div className="bg-gray-50 px-6 py-4 flex gap-3 justify-end">
+                <button
+                  onClick={cancelDelete}
+                  className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center gap-2"
+                >
+                  <TrashIcon className="w-4 h-4" />
+                  Delete Request
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </div>
     </div>
   );

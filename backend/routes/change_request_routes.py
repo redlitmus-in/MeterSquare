@@ -73,6 +73,17 @@ def update_change_request_route(cr_id):
     return update_change_request(cr_id)
 
 
+# Delete change request (Only for pending/rejected requests by creator)
+@change_request_routes.route('/change-request/<int:cr_id>', methods=['DELETE'])
+@jwt_required
+def delete_change_request_route(cr_id):
+    """Delete pending or rejected change request (creator or Admin)"""
+    access_check = check_cr_access()
+    if access_check:
+        return access_check
+    return delete_change_request(cr_id)
+
+
 # Approve change request (Estimator/TD/Admin)
 @change_request_routes.route('/change-request/<int:cr_id>/approve', methods=['POST'])
 @jwt_required

@@ -797,9 +797,9 @@ def get_purchase_by_id(cr_id):
                             cr_total += material_total
                             materials_list.append({
                                 "material_name": material.get('material_name', ''),
-                                "quantity": material.get('quantity', 0),
+                                "quantity": material.get('quantity') or 0,
                                 "unit": material.get('unit', ''),
-                                "unit_price": material.get('unit_price', 0),
+                                "unit_price": material.get('unit_price') or 0,
                                 "total_price": material_total
                             })
                     else:
@@ -808,9 +808,9 @@ def get_purchase_by_id(cr_id):
                         materials_list.append({
                             "material_name": sub_item.get('material_name', ''),
                             "sub_item_name": sub_item.get('sub_item_name', ''),
-                            "quantity": sub_item.get('quantity', 0),
+                            "quantity": sub_item.get('quantity') or 0,
                             "unit": sub_item.get('unit', ''),
-                            "unit_price": sub_item.get('unit_price', 0),
+                            "unit_price": sub_item.get('unit_price') or 0,
                             "total_price": sub_total
                         })
         else:
@@ -1479,9 +1479,9 @@ def preview_vendor_email(cr_id):
                             cr_total += material_total
                             materials_list.append({
                                 "material_name": material.get('material_name', ''),
-                                "quantity": material.get('quantity', 0),
+                                "quantity": material.get('quantity') or 0,
                                 "unit": material.get('unit', ''),
-                                "unit_price": material.get('unit_price', 0),
+                                "unit_price": material.get('unit_price') or 0,
                                 "total_price": material_total
                             })
                     else:
@@ -1490,9 +1490,9 @@ def preview_vendor_email(cr_id):
                         materials_list.append({
                             "material_name": sub_item.get('material_name', ''),
                             "sub_item_name": sub_item.get('sub_item_name', ''),
-                            "quantity": sub_item.get('quantity', 0),
+                            "quantity": sub_item.get('quantity') or 0,
                             "unit": sub_item.get('unit', ''),
-                            "unit_price": sub_item.get('unit_price', 0),
+                            "unit_price": sub_item.get('unit_price') or 0,
                             "total_price": sub_total
                         })
         else:
@@ -1510,9 +1510,9 @@ def preview_vendor_email(cr_id):
 
         # Prepare data for email template
         vendor_data = {
-            'company_name': vendor.company_name,
-            'contact_person_name': vendor.contact_person_name,
-            'email': vendor.email
+            'company_name': vendor.company_name or 'N/A',
+            'contact_person_name': vendor.contact_person_name or '',
+            'email': vendor.email or 'N/A'
         }
 
         purchase_data = {
@@ -1523,13 +1523,13 @@ def preview_vendor_email(cr_id):
         }
 
         buyer_data = {
-            'buyer_name': buyer.full_name if buyer else 'Procurement Team',
-            'buyer_email': buyer.email if buyer else '',
-            'buyer_phone': buyer.phone if buyer and buyer.phone else 'N/A'
+            'buyer_name': (buyer.full_name if buyer and buyer.full_name else None) or 'Procurement Team',
+            'buyer_email': (buyer.email if buyer and buyer.email else None) or 'N/A',
+            'buyer_phone': (buyer.phone if buyer and buyer.phone else None) or 'N/A'
         }
 
         project_data = {
-            'project_name': project.project_name,
+            'project_name': project.project_name or 'N/A',
             'client': project.client or 'N/A',
             'location': project.location or 'N/A'
         }
@@ -1686,9 +1686,9 @@ def send_vendor_email(cr_id):
                             cr_total += material_total
                             materials_list.append({
                                 "material_name": material.get('material_name', ''),
-                                "quantity": material.get('quantity', 0),
+                                "quantity": material.get('quantity') or 0,
                                 "unit": material.get('unit', ''),
-                                "unit_price": material.get('unit_price', 0),
+                                "unit_price": material.get('unit_price') or 0,
                                 "total_price": material_total
                             })
                     else:
@@ -1697,9 +1697,9 @@ def send_vendor_email(cr_id):
                         materials_list.append({
                             "material_name": sub_item.get('material_name', ''),
                             "sub_item_name": sub_item.get('sub_item_name', ''),
-                            "quantity": sub_item.get('quantity', 0),
+                            "quantity": sub_item.get('quantity') or 0,
                             "unit": sub_item.get('unit', ''),
-                            "unit_price": sub_item.get('unit_price', 0),
+                            "unit_price": sub_item.get('unit_price') or 0,
                             "total_price": sub_total
                         })
         else:
@@ -1729,13 +1729,13 @@ def send_vendor_email(cr_id):
         }
 
         buyer_data = {
-            'buyer_name': buyer.full_name if buyer else 'Procurement Team',
-            'buyer_email': buyer.email if buyer else '',
-            'buyer_phone': buyer.phone if buyer and buyer.phone else 'N/A'
+            'buyer_name': (buyer.full_name if buyer and buyer.full_name else None) or 'Procurement Team',
+            'buyer_email': (buyer.email if buyer and buyer.email else None) or 'N/A',
+            'buyer_phone': (buyer.phone if buyer and buyer.phone else None) or 'N/A'
         }
 
         project_data = {
-            'project_name': project.project_name,
+            'project_name': project.project_name or 'N/A',
             'client': project.client or 'N/A',
             'location': project.location or 'N/A'
         }
