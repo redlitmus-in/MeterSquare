@@ -78,7 +78,21 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
 
     setLoading(true);
     try {
-      const response = await changeRequestService.approve(crId, comments || 'Approved', selectedBuyerId);
+      // Get edited materials if estimator updated prices
+      const editedMaterials = (window as any).__editedMaterials;
+
+      const response = await changeRequestService.approve(
+        crId,
+        comments || 'Approved',
+        selectedBuyerId,
+        editedMaterials // Pass updated materials with prices
+      );
+
+      // Clean up temp storage
+      if (editedMaterials) {
+        delete (window as any).__editedMaterials;
+      }
+
       if (response.success) {
         toast.success(response.message || 'Request approved and assigned to buyer');
         onSuccess();

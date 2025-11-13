@@ -27,6 +27,17 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const { user } = useAuthStore();
   const [showEditModal, setShowEditModal] = useState(false);
 
+  // State to track edited materials with updated prices
+  const [editedMaterials, setEditedMaterials] = useState<any[]>([]);
+
+  // Initialize edited materials when modal opens or changeRequest changes
+  React.useEffect(() => {
+    if (changeRequest) {
+      const materials = changeRequest.sub_items_data || changeRequest.materials_data || [];
+      setEditedMaterials(JSON.parse(JSON.stringify(materials))); // Deep copy
+    }
+  }, [changeRequest?.cr_id]);
+
   if (!isOpen || !changeRequest) return null;
 
   const getStatusColor = (status: string) => {
@@ -59,10 +70,22 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     return labels[status as keyof typeof labels] || status.toUpperCase();
   };
 
-  // Calculate costs: Total materials cost
-  const materialsData = changeRequest.sub_items_data || changeRequest.materials_data || [];
+  // Handler for updating unit price
+  const handlePriceChange = (index: number, newUnitPrice: string) => {
+    const price = parseFloat(newUnitPrice) || 0;
+    const updatedMaterials = [...editedMaterials];
+    updatedMaterials[index] = {
+      ...updatedMaterials[index],
+      unit_price: price,
+      total_price: updatedMaterials[index].quantity * price
+    };
+    setEditedMaterials(updatedMaterials);
+  };
 
-  // Total cost of ALL materials (for display)
+  // Calculate costs: Use editedMaterials for real-time calculations
+  const materialsData = editedMaterials.length > 0 ? editedMaterials : (changeRequest.sub_items_data || changeRequest.materials_data || []);
+
+  // Total cost of ALL materials (for display) - uses editedMaterials
   const totalMaterialsCost = materialsData.reduce((sum: number, mat: any) =>
     sum + (mat.total_price || (mat.quantity * mat.unit_price) || 0), 0
   );
@@ -82,17 +105,26 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   // Final statuses where no actions should be allowed
   const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'approved', 'rejected'].includes(changeRequest.status);
 
-  // Check if the request has been approved by PM and is being sent to Estimator/TD
-  const isApprovedAndSentForward = changeRequest.status === 'under_review' &&
-                                    ['estimator', 'technical_director'].includes(changeRequest.approval_required_from || '');
-
+  // Estimator/TD can approve if request needs their approval
   const canApproveReject = canApproveFromParent !== undefined
     ? canApproveFromParent
     : (userIsEstimator || userIsTechnicalDirector) &&
-      changeRequest.status !== 'approved' &&
-      changeRequest.status !== 'rejected' &&
-      !isFinalStatus &&
-      !isApprovedAndSentForward;
+      changeRequest.status === 'under_review' &&
+      !isFinalStatus;
+
+  // Determine if estimator can edit prices (estimator viewing under_review status)
+  const canEditPrices = userIsEstimator &&
+                        changeRequest.status === 'under_review' &&
+                        changeRequest.approval_required_from === 'estimator';
+
+  // Handler for approval with updated materials
+  const handleApproveWithUpdatedPrices = () => {
+    if (onApprove) {
+      // Store edited materials in changeRequest for parent to access
+      (changeRequest as any)._editedMaterials = editedMaterials;
+      onApprove();
+    }
+  };
 
 
   return (
@@ -286,7 +318,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {(changeRequest.sub_items_data || changeRequest.materials_data)?.map((material: any, idx: number) => {
+                      {materialsData?.map((material: any, idx: number) => {
                         // A material is NEW only if master_material_id is null/undefined
                         const isNewMaterial = material.master_material_id === null || material.master_material_id === undefined;
                         return (
@@ -333,7 +365,19 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           {!userIsSiteEngineer && (
                             <>
                               <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600 text-right whitespace-nowrap">
-                                {formatCurrency(material.unit_price || 0)}
+                                {canEditPrices ? (
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={material.unit_price || 0}
+                                    onChange={(e) => handlePriceChange(idx, e.target.value)}
+                                    className="w-24 px-2 py-1 text-right border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50 text-gray-900 font-medium"
+                                    placeholder="0.00"
+                                  />
+                                ) : (
+                                  formatCurrency(material.unit_price || 0)
+                                )}
                               </td>
                               <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-semibold text-gray-900 text-right whitespace-nowrap">
                                 {formatCurrency(material.total_price || (material.quantity * material.unit_price) || 0)}
@@ -378,13 +422,21 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                     <div>
                       <span className="text-purple-700 text-[10px] sm:text-xs">This Request:</span>
                       <p className="font-bold text-blue-600 text-xs sm:text-sm">
-                        {formatCurrency(changeRequest.materials_total_cost || 0)}
+                        {formatCurrency(totalMaterialsCost)}
                       </p>
                     </div>
                     <div>
                       <span className="text-purple-700 text-[10px] sm:text-xs">Remaining After:</span>
-                      <p className={`font-bold text-xs sm:text-sm ${changeRequest.overhead_analysis.remaining_after_approval < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        {formatCurrency(changeRequest.overhead_analysis.remaining_after_approval || 0)}
+                      <p className={`font-bold text-xs sm:text-sm ${
+                        (changeRequest.overhead_analysis.original_allocated - changeRequest.overhead_analysis.consumed_before_request - totalMaterialsCost) < 0
+                          ? 'text-red-600'
+                          : 'text-green-600'
+                      }`}>
+                        {formatCurrency(
+                          changeRequest.overhead_analysis.original_allocated -
+                          changeRequest.overhead_analysis.consumed_before_request -
+                          totalMaterialsCost
+                        )}
                       </p>
                     </div>
                   </div>
@@ -392,18 +444,18 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                     <div className="flex justify-between items-center">
                       <span className="text-xs sm:text-sm text-purple-700">Total Negotiable Price Consumption:</span>
                       <span className={`text-base sm:text-lg font-bold ${
-                        ((changeRequest.overhead_analysis.consumed_before_request + changeRequest.materials_total_cost) / changeRequest.overhead_analysis.original_allocated * 100) > 40
+                        ((changeRequest.overhead_analysis.consumed_before_request + totalMaterialsCost) / changeRequest.overhead_analysis.original_allocated * 100) > 40
                           ? 'text-red-600'
                           : 'text-green-600'
                       }`}>
                         {changeRequest.overhead_analysis.original_allocated > 0
-                          ? (((changeRequest.overhead_analysis.consumed_before_request + changeRequest.materials_total_cost) / changeRequest.overhead_analysis.original_allocated) * 100).toFixed(1)
+                          ? (((changeRequest.overhead_analysis.consumed_before_request + totalMaterialsCost) / changeRequest.overhead_analysis.original_allocated) * 100).toFixed(1)
                           : '0.0'
                         }%
                       </span>
                     </div>
                     {changeRequest.overhead_analysis.original_allocated > 0 &&
-                     ((changeRequest.overhead_analysis.consumed_before_request + changeRequest.materials_total_cost) / changeRequest.overhead_analysis.original_allocated * 100) > 40 && (
+                     ((changeRequest.overhead_analysis.consumed_before_request + totalMaterialsCost) / changeRequest.overhead_analysis.original_allocated * 100) > 40 && (
                       <p className="text-[10px] sm:text-xs text-red-600 mt-1 flex items-center gap-1">
                         <AlertCircle className="w-3 h-3" />
                         <span>Exceeds 40% threshold - TD approval required</span>
@@ -485,8 +537,8 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
             </div>
 
             {/* Footer - Responsive Actions */}
-            {/* Hide footer completely if in accepted/final state */}
-            {!(isFinalStatus || isApprovedAndSentForward) && (
+            {/* Hide footer completely if in final state */}
+            {!isFinalStatus && (
               <div className="border-t border-gray-200 px-4 sm:px-6 py-3 sm:py-4 bg-gray-50 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3">
                 {canApproveReject ? (
                   <>
@@ -497,7 +549,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                       Reject
                     </button>
                     <button
-                      onClick={onApprove}
+                      onClick={handleApproveWithUpdatedPrices}
                       className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base"
                     >
                       <CheckCircle className="w-4 h-4" />

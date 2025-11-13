@@ -460,23 +460,6 @@ def send_for_review(cr_id):
         route_to = data.get('route_to')
         normalized_role = workflow_service.normalize_role(user_role_lower)
 
-        # --- Helper: get miscellaneous amount ---
-        def get_item_miscellaneous_amount(change_request):
-            try:
-                boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
-                if not boq_details:
-                    return 0
-                boq_json = boq_details.boq_details or {}
-                items = boq_json.get('items', [])
-                for item in items:
-                    item_id = item.get('master_item_id') or f"item_{change_request.boq_id}_{items.index(item) + 1}"
-                    if str(item_id) == str(change_request.item_id):
-                        return item.get('miscellaneous_amount', 0)
-                return 0
-            except Exception as e:
-                log.error(f"Error getting miscellaneous amount: {str(e)}")
-                return 0
-
         # --- Determine next approver ---
         next_approver = None
         next_approver_id = None
@@ -507,61 +490,42 @@ def send_for_review(cr_id):
             log.info(f"Routing CR {cr_id} to PM: {next_approver} (user_id={next_approver_id})")
 
         elif normalized_role in ['projectmanager', 'project_manager', 'mep', 'mepsupervisor']:
-            # PM/MEP explicit or auto-routing
-            if route_to:
-                if route_to == 'technical_director':
-                    next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
-                    next_approver = "Technical Director"
-                elif route_to == 'estimator':
-                    # Route to the project's assigned estimator
-                    project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
-                    if not project or not project.estimator_id:
-                        return jsonify({"error": "No Estimator assigned for this project"}), 400
+            # PM/MEP routing logic:
+            # - New materials (master_material_id is None) → Send to Estimator
+            # - Existing BOQ materials (all have master_material_id) → Send directly to Buyer
 
-                    # Fetch estimator details from User table
-                    assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
-                    if not assigned_estimator:
-                        return jsonify({"error": "Assigned Estimator user record not found"}), 400
+            # Check if all materials are existing (from BOQ) or if there are new materials
+            has_new_materials = any(mat.get('master_material_id') is None for mat in (change_request.materials_data or []))
 
-                    next_role = CR_CONFIG.ROLE_ESTIMATOR
-                    next_approver = assigned_estimator.full_name or assigned_estimator.username
-                    next_approver_id = assigned_estimator.user_id
-                    log.info(f"Routing CR {cr_id} to Estimator: {next_approver} (user_id={next_approver_id})")
-                else:
-                    return jsonify({"error": f"Invalid route_to value: {route_to}. Must be 'technical_director' or 'estimator'"}), 400
+            if has_new_materials:
+                # Has new materials - MUST send to Estimator (route_to required)
+                if not route_to or route_to != 'estimator':
+                    return jsonify({"error": "New materials detected. Must send to Estimator. Set route_to='estimator'"}), 400
+
+                # Route to the project's assigned estimator
+                project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
+                if not project or not project.estimator_id:
+                    return jsonify({"error": "No Estimator assigned for this project"}), 400
+
+                # Fetch estimator details from User table
+                assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
+                if not assigned_estimator:
+                    return jsonify({"error": "Assigned Estimator user record not found"}), 400
+
+                next_role = CR_CONFIG.ROLE_ESTIMATOR
+                next_approver = assigned_estimator.full_name or assigned_estimator.username
+                next_approver_id = assigned_estimator.user_id
+                log.info(f"Routing CR {cr_id} with NEW materials to Estimator: {next_approver} (user_id={next_approver_id}, project_id={change_request.project_id})")
+
             else:
-                # Auto-route logic
-                has_new_materials = any(mat.get('master_material_id') is None for mat in (change_request.materials_data or []))
-                if has_new_materials:
-                    new_materials_cost = sum(mat.get('total_price', 0) for mat in change_request.materials_data if mat.get('master_material_id') is None)
-                    miscellaneous_amount = get_item_miscellaneous_amount(change_request)
-                    percentage = (new_materials_cost / miscellaneous_amount) * 100 if miscellaneous_amount > 0 else 100
+                # All materials are existing (from BOQ) - Send directly to Buyer
+                if route_to and route_to != 'buyer':
+                    return jsonify({"error": "All materials are from BOQ. Must send to Buyer. Set route_to='buyer'"}), 400
 
-                    if percentage > 40:
-                        next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
-                        next_approver = "Technical Director"
-                        next_approver_id = None
-                    else:
-                        # Route to the project's assigned estimator
-                        project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
-                        if not project or not project.estimator_id:
-                            return jsonify({"error": "No Estimator assigned for this project"}), 400
-
-                        # Fetch estimator details from User table
-                        assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
-                        if not assigned_estimator:
-                            return jsonify({"error": "Assigned Estimator user record not found"}), 400
-
-                        next_role = CR_CONFIG.ROLE_ESTIMATOR
-                        next_approver = assigned_estimator.full_name or assigned_estimator.username
-                        next_approver_id = assigned_estimator.user_id
-                        log.info(f"Auto-routing CR {cr_id} to Estimator: {next_approver} (user_id={next_approver_id})")
-                else:
-                    # All materials are existing (external buy) → Route to Buyer
-                    log.info(f"All materials are existing (external buy) - routing CR {cr_id} to Buyer")
-                    next_role = CR_CONFIG.ROLE_BUYER
-                    next_approver = "Buyer"
-                    next_approver_id = None  # Will be assigned by Estimator/TD later
+                next_role = CR_CONFIG.ROLE_BUYER
+                next_approver = "Buyer"
+                next_approver_id = None
+                log.info(f"Routing CR {cr_id} with EXISTING BOQ materials directly to Buyer")
 
         elif is_admin:
             # Admin sends to assigned PM
@@ -836,7 +800,7 @@ def get_all_change_requests():
                 estimator_projects = Project.query.filter_by(estimator_id=user_id, is_deleted=False).all()
                 estimator_project_ids = [p.project_id for p in estimator_projects]
 
-                log.info(f"Regular Estimator {user_id} - has {len(estimator_project_ids)} assigned projects")
+                log.info(f"Regular Estimator {user_id} - has {len(estimator_project_ids)} assigned projects: {estimator_project_ids}")
 
                 if estimator_project_ids:
                     # Estimator sees requests from their assigned projects only
@@ -1315,6 +1279,18 @@ def approve_change_request(cr_id):
             change_request.approval_required_from = CR_CONFIG.ROLE_BUYER
             change_request.current_approver_role = CR_CONFIG.ROLE_BUYER
             change_request.updated_at = datetime.utcnow()
+
+            # Update materials with pricing if estimator provided updated prices
+            updated_materials = data.get('materials_data')
+            if updated_materials:
+                # Recalculate total cost from updated materials
+                total_cost = sum(mat.get('total_price', 0) or (mat.get('quantity', 0) * mat.get('unit_price', 0)) for mat in updated_materials)
+
+                change_request.materials_data = updated_materials
+                change_request.materials_total_cost = total_cost
+                flag_modified(change_request, "materials_data")
+
+                log.info(f"Estimator updated materials pricing for CR {cr_id}. New total: {total_cost}")
 
             # Get buyer role_id
             from models.role import Role

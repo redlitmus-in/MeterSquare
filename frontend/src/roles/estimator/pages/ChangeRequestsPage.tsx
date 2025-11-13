@@ -157,6 +157,14 @@ const ChangeRequestsPage: React.FC = () => {
 
   const handleApproveFromModal = () => {
     if (!selectedChangeRequest) return;
+
+    // Store edited materials if available (from price editing in details modal)
+    const editedMaterials = (selectedChangeRequest as any)._editedMaterials;
+    if (editedMaterials) {
+      // Store in a ref or state that ApprovalWithBuyerModal can access
+      (window as any).__editedMaterials = editedMaterials;
+    }
+
     setShowDetailsModal(false);
     handleApprove(selectedChangeRequest.cr_id);
   };

@@ -266,12 +266,16 @@ class ChangeRequestService {
    * Approve change request
    * POST /api/change-request/{cr_id}/approve
    * @param buyerId - Optional: Estimator/TD can specify which buyer to assign
+   * @param updatedMaterials - Optional: Estimator can provide updated materials with pricing
    */
-  async approve(crId: number, comments?: string, buyerId?: number): Promise<{ success: boolean; message: string }> {
+  async approve(crId: number, comments?: string, buyerId?: number, updatedMaterials?: any[]): Promise<{ success: boolean; message: string }> {
     try {
       const payload: any = { comments: comments || 'Approved' };
       if (buyerId) {
         payload.buyer_id = buyerId;
+      }
+      if (updatedMaterials && updatedMaterials.length > 0) {
+        payload.materials_data = updatedMaterials;
       }
 
       const response = await axios.post(
