@@ -503,8 +503,8 @@ def send_for_review(cr_id):
             next_approver_id = assigned_pm_user.user_id
             log.info(f"Routing CR {cr_id} to PM: {next_approver} (user_id={next_approver_id})")
 
-        elif normalized_role in ['projectmanager', 'project_manager']:
-            # PM explicit or auto-routing
+        elif normalized_role in ['projectmanager', 'project_manager', 'mep', 'mepsupervisor']:
+            # PM/MEP explicit or auto-routing
             if route_to:
                 if route_to == 'technical_director':
                     next_role = CR_CONFIG.ROLE_TECHNICAL_DIRECTOR
@@ -596,7 +596,7 @@ def send_for_review(cr_id):
 
         else:
             log.error(f"Invalid role '{user_role}' attempting to send change request")
-            return jsonify({"error": f"Invalid role for sending request: {user_role}. Only Site Engineers and Project Managers can send requests."}), 403
+            return jsonify({"error": f"Invalid role for sending request: {user_role}. Only Site Engineers, Project Managers, and MEP Supervisors can send requests."}), 403
 
         # --- Update Change Request ---
         change_request.approval_required_from = next_role
@@ -780,6 +780,49 @@ def get_all_change_requests():
                     query = query.filter(
                         ChangeRequest.requested_by_user_id == user_id  # PM's own requests only
                     )
+
+        elif user_role in ['mep', 'mepsupervisor']:
+            # MEP sees ONLY requests from their assigned projects (same logic as PM):
+            # 1. Their own requests from their projects
+            # 2. SE requests from their projects that need MEP approval
+            # 3. All purchase/change requests from their assigned projects
+            from sqlalchemy import or_, and_
+
+            # Check if admin is viewing as MEP (should see ALL MEP data, not user-specific)
+            if is_admin_viewing:
+                # Admin viewing as MEP: Show ALL requests that ANY MEP would see
+                log.info(f"Admin viewing as MEP - showing ALL MEP-related requests (not user-specific)")
+                query = query.filter(
+                    or_(
+                        ChangeRequest.requested_by_role.in_(['mep', 'mepsupervisor']),  # All MEP-created requests
+                        ChangeRequest.approval_required_from == 'mep',  # All SE requests needing MEP approval
+                        ChangeRequest.pm_approved_by_user_id.isnot(None)  # All requests approved by any MEP
+                    )
+                )
+            else:
+                # Regular MEP: Filter ONLY by their assigned projects
+                # Get projects where this user is the MEP supervisor (mep_supervisor_id field in Project table)
+                # Use JSONB contains operator since mep_supervisor_id is a JSONB array
+                mep_projects = Project.query.filter(
+                    Project.mep_supervisor_id.contains([user_id]),
+                    Project.is_deleted == False
+                ).all()
+                mep_project_ids = [p.project_id for p in mep_projects]
+
+                log.info(f"Regular MEP {user_id} - has {len(mep_project_ids)} assigned projects")
+
+                if mep_project_ids:
+                    # MEP sees ALL purchase/change requests from their assigned projects only
+                    query = query.filter(
+                        ChangeRequest.project_id.in_(mep_project_ids)  # Only requests from MEP's assigned projects
+                    )
+                else:
+                    # If MEP has no assigned projects, show only their own requests
+                    log.warning(f"MEP {user_id} has no assigned projects, showing only their own requests")
+                    query = query.filter(
+                        ChangeRequest.requested_by_user_id == user_id  # MEP's own requests only
+                    )
+
         elif user_role == 'estimator':
             # Estimator sees only requests from their assigned projects:
             # 1. Requests needing estimator approval from THEIR projects (approval_required_from = 'estimator' AND project.estimator_id = user_id)

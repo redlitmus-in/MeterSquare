@@ -30,7 +30,6 @@ def send_boq_to_client():
         message = data.get('message', 'Please review the attached BOQ for your project.')
         formats = data.get('formats', ['excel', 'pdf'])
         custom_email_body = data.get('custom_email_body')  # Custom email template from frontend
-        terms_text = data.get('terms_text')  # Custom Terms & Conditions from frontend
 
         if not boq_id or not client_emails_raw:
             return jsonify({"success": False, "error": "boq_id and client_email are required"}), 400
@@ -136,20 +135,40 @@ def send_boq_to_client():
             'location': project.location or 'N/A'
         }
 
+        # Fetch selected Terms & Conditions from database
+        selected_terms = []
+        try:
+            query = text("""
+                SELECT bt.terms_text
+                FROM boq_terms_selections bts
+                INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
+                WHERE bts.boq_id = :boq_id
+                AND bts.is_checked = TRUE
+                AND bt.is_active = TRUE
+                AND bt.is_deleted = FALSE
+                ORDER BY bt.display_order, bt.term_id
+            """)
+            terms_result = db.session.execute(query, {'boq_id': boq_id})
+            for row in terms_result:
+                selected_terms.append({'terms_text': row[0]})
+            log.info(f"Fetched {len(selected_terms)} selected terms for BOQ {boq_id}")
+        except Exception as e:
+            log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
+
         # Generate files - Pass CLIENT BASE COST (not selling price)
         excel_file = None
         pdf_file = None
 
         if 'excel' in formats:
             excel_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.xlsx"
-            excel_data = generate_client_excel(project, items, total_material_cost, total_labour_cost, grand_total, boq_json)
+            excel_data = generate_client_excel(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, selected_terms)
             excel_file = (excel_filename, excel_data)
 
         if 'pdf' in formats:
             try:
                 pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
-                # Generate PDF WITH images
-                pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text, include_images=True)
+                # Generate PDF WITH images and selected terms from database
+                pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, selected_terms=selected_terms, include_images=True)
                 pdf_file = (pdf_filename, pdf_data)
             except Exception as pdf_err:
                 log.error(f"Error generating PDF: {str(pdf_err)}")
@@ -291,11 +310,14 @@ def send_boq_to_client():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-def generate_client_excel(project, items, total_material_cost, total_labour_cost, client_base_cost, boq_json=None):
+def generate_client_excel(project, items, total_material_cost, total_labour_cost, client_base_cost, boq_json=None, selected_terms=None):
     """
     Generate Client Excel file - MODERN PROFESSIONAL FORMAT
     Shows ONLY items and sub-items (NO raw materials/labour details)
     Overhead & Profit already included in selling prices
+
+    Args:
+        selected_terms: List of selected terms from database. Each dict should have {'terms_text': '...'}
     """
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -688,6 +710,28 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
             ws[f'A{row}'].font = Font(italic=True, size=9)
             ws[f'A{row}'].alignment = Alignment(wrap_text=True)
 
+    # Terms & Conditions Section
+    if selected_terms and len(selected_terms) > 0:
+        row += 2
+        ws.merge_cells(f'A{row}:G{row}')
+        ws[f'A{row}'] = "TERMS & CONDITIONS"
+        ws[f'A{row}'].font = Font(bold=True, size=11, color="643CCA")
+        row += 1
+
+        ws.merge_cells(f'A{row}:G{row}')
+        ws[f'A{row}'] = "Selected terms and conditions for this quotation"
+        ws[f'A{row}'].font = Font(italic=True, size=9, color="666666")
+        row += 1
+
+        for idx, term in enumerate(selected_terms, 1):
+            term_text = term.get('terms_text', '').strip()
+            if term_text:  # Only add if text exists
+                ws.merge_cells(f'A{row}:G{row}')
+                ws[f'A{row}'] = f"• {term_text}"
+                ws[f'A{row}'].font = normal_font
+                ws[f'A{row}'].alignment = Alignment(wrap_text=True)
+                row += 1
+
     # Column widths - Updated for image column
     ws.column_dimensions['A'].width = 28  # Sub-Item Description
     ws.column_dimensions['B'].width = 22  # Scope / Size
@@ -704,17 +748,17 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     return excel_buffer.read()
 
 
-def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, include_images=True):
+def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, selected_terms=None, include_images=True):
     """
     Generate Client PDF - MODERN PROFESSIONAL CORPORATE FORMAT
     Uses unified ModernBOQPDFGenerator
 
     Args:
-        terms_text: Optional custom Terms & Conditions text
+        selected_terms: List of selected terms from database. Each dict should have {'terms_text': '...'}
         include_images: If True, include images (slower). Default False for email speed.
     """
     if boq_json is None:
         boq_json = {}
 
     generator = ModernBOQPDFGenerator()
-    return generator.generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text, include_images)
+    return generator.generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text=None, selected_terms=selected_terms, include_images=include_images)

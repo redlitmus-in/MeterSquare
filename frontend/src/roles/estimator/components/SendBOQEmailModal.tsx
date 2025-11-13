@@ -11,7 +11,6 @@ import { toast } from 'sonner';
 import { estimatorService } from '../services/estimatorService';
 import { downloadClientBOQPDF, previewClientBOQPDF } from '@/services/boqPdfService';
 import { downloadClientBOQExcel } from '@/services/boqExcelService';
-import { termsConditionsService, TermsConditionsTemplate } from '@/services/termsConditionsService';
 
 interface SendBOQEmailModalProps {
   isOpen: boolean;
@@ -47,12 +46,6 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
   // Email template editing state
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
   const [emailTemplate, setEmailTemplate] = useState('');
-  // Terms & Conditions state
-  const [termsTemplates, setTermsTemplates] = useState<TermsConditionsTemplate[]>([]);
-  const [selectedTermsId, setSelectedTermsId] = useState<number | null>(null);
-  const [customTermsText, setCustomTermsText] = useState('');
-  const [showTermsEditor, setShowTermsEditor] = useState(false);
-  const [loadingTerms, setLoadingTerms] = useState(false);
   // Preview state
   const [showEmailPreview, setShowEmailPreview] = useState(false);
   const [showPDFPreview, setShowPDFPreview] = useState(false);
@@ -88,34 +81,6 @@ MeterSquare Interiors LLC`;
       setEmailTemplate(getDefaultTemplate());
     }
   }, [isOpen, isClientMode]);
-
-  // Fetch Terms & Conditions templates when modal opens in client mode
-  React.useEffect(() => {
-    const fetchTermsTemplates = async () => {
-      if (isClientMode && isOpen) {
-        setLoadingTerms(true);
-        try {
-          const response = await termsConditionsService.getAllTerms(false); // Only active templates
-          if (response.success && response.data) {
-            setTermsTemplates(response.data);
-
-            // Auto-select default template
-            const defaultTemplate = response.data.find(t => t.is_default);
-            if (defaultTemplate) {
-              setSelectedTermsId(defaultTemplate.term_id);
-              setCustomTermsText(defaultTemplate.terms_text);
-            }
-          }
-        } catch (error) {
-          console.error('Error fetching terms templates:', error);
-        } finally {
-          setLoadingTerms(false);
-        }
-      }
-    };
-
-    fetchTermsTemplates();
-  }, [isClientMode, isOpen]);
 
   // Fetch BOQ data when modal opens in client mode
   React.useEffect(() => {
@@ -258,8 +223,7 @@ MeterSquare Interiors LLC`;
           client_email: recipientEmail.trim() || undefined,
           message: comments.trim() || undefined,
           formats: selectedFormats,
-          custom_email_body: emailTemplate.trim() || undefined,
-          terms_text: customTermsText.trim() || undefined // Include custom T&C
+          custom_email_body: emailTemplate.trim() || undefined
         });
 
         // Track sent/failed counts from response
@@ -317,10 +281,6 @@ MeterSquare Interiors LLC`;
     // Reset template editor
     setShowTemplateEditor(false);
     setEmailTemplate('');
-    // Reset Terms & Conditions
-    setSelectedTermsId(null);
-    setCustomTermsText('');
-    setShowTermsEditor(false);
     onClose();
   };
 
@@ -547,7 +507,7 @@ MeterSquare Interiors LLC`;
                           <h3 className="text-lg font-bold text-blue-900">Customize Email & PDF Content</h3>
                         </div>
                         <p className="text-sm text-gray-700 mb-4">
-                          Customize the email body and PDF terms & conditions that will be sent to the client
+                          Customize the email body that will be sent to the client
                         </p>
 
                         <div className="space-y-4">
@@ -605,98 +565,6 @@ MeterSquare Interiors LLC`;
                                 </p>
                                 <p className="text-xs text-purple-600 mt-2">Click "Edit" to customize</p>
                               </div>
-                            )}
-                          </div>
-
-                          {/* Terms & Conditions Section */}
-                          <div className="bg-white rounded-lg p-4 border border-blue-200">
-                            <div className="flex items-center justify-between mb-3">
-                              <h4 className="font-semibold text-gray-900 flex items-center gap-2">
-                                <FileCheck className="w-4 h-4 text-green-600" />
-                                Terms & Conditions (for PDF)
-                              </h4>
-                              <button
-                                type="button"
-                                onClick={() => setShowTermsEditor(!showTermsEditor)}
-                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors border border-green-300"
-                                disabled={isSending || loadingTerms}
-                              >
-                                {showTermsEditor ? (
-                                  <>
-                                    <EyeOff className="w-3 h-3" />
-                                    Hide
-                                  </>
-                                ) : (
-                                  <>
-                                    <Edit3 className="w-3 h-3" />
-                                    Edit
-                                  </>
-                                )}
-                              </button>
-                            </div>
-
-                            {loadingTerms ? (
-                              <div className="flex items-center justify-center py-4">
-                                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>
-                              </div>
-                            ) : (
-                              <>
-                                {/* Template Selector - Always Visible */}
-                                <div className="mb-3">
-                                  <label className="text-xs font-medium text-gray-700 mb-1 block">Select Template:</label>
-                                  <select
-                                    value={selectedTermsId || ''}
-                                    onChange={(e) => {
-                                      const termId = parseInt(e.target.value);
-                                      setSelectedTermsId(termId);
-                                      const template = termsTemplates.find(t => t.term_id === termId);
-                                      if (template) {
-                                        setCustomTermsText(template.terms_text);
-                                      }
-                                    }}
-                                    disabled={isSending}
-                                    className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                                  >
-                                    <option value="">Select terms template...</option>
-                                    {termsTemplates.map((template) => (
-                                      <option key={template.term_id} value={template.term_id}>
-                                        {template.template_name} {template.is_default ? '(Default)' : ''}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-
-                                {/* T&C Editor or Preview */}
-                                {showTermsEditor ? (
-                                  <div className="space-y-2">
-                                    <p className="text-xs text-gray-600">Customize terms (one per line):</p>
-                                    <Textarea
-                                      id="terms-text"
-                                      placeholder="• Enter Terms & Conditions (one per line)..."
-                                      value={customTermsText}
-                                      onChange={(e) => setCustomTermsText(e.target.value)}
-                                      disabled={isSending}
-                                      rows={8}
-                                      className="resize-none font-mono text-sm border-green-200 focus:border-green-400"
-                                    />
-                                  </div>
-                                ) : customTermsText ? (
-                                  <div className="bg-gray-50 rounded p-3 border border-gray-200">
-                                    <p className="text-xs font-semibold text-gray-700 mb-2">Preview:</p>
-                                    <div className="text-xs text-gray-600 space-y-1">
-                                      {customTermsText.split('\n').slice(0, 3).map((line, idx) => (
-                                        <p key={idx}>{line}</p>
-                                      ))}
-                                      {customTermsText.split('\n').length > 3 && (
-                                        <p className="text-gray-500 italic mt-1">...and {customTermsText.split('\n').length - 3} more</p>
-                                      )}
-                                    </div>
-                                    <p className="text-xs text-green-600 mt-2">Click "Edit" to customize</p>
-                                  </div>
-                                ) : (
-                                  <p className="text-xs text-gray-500 italic">Select a template above</p>
-                                )}
-                              </>
                             )}
                           </div>
                         </div>
@@ -796,7 +664,7 @@ MeterSquare Interiors LLC`;
                                 onClick={async () => {
                                   try {
                                     toast.loading('Generating PDF preview...');
-                                    const pdfUrl = await previewClientBOQPDF(boqId, customTermsText);
+                                    const pdfUrl = await previewClientBOQPDF(boqId);
                                     setPreviewPDFUrl(pdfUrl);
                                     setShowPDFPreview(true);
                                     toast.dismiss();
@@ -839,7 +707,7 @@ MeterSquare Interiors LLC`;
                               onClick={async () => {
                                 try {
                                   toast.loading('Generating PDF file...');
-                                  await downloadClientBOQPDF(boqId, customTermsText);
+                                  await downloadClientBOQPDF(boqId);
                                   toast.dismiss();
                                   toast.success('PDF file downloaded successfully');
                                 } catch (error) {
@@ -982,21 +850,6 @@ MeterSquare Interiors LLC`;
                         )}
                       </div>
                     </div>
-
-                    {/* Terms Preview */}
-                    {customTermsText && (
-                      <div className="mt-4 pt-4 border-t border-gray-300">
-                        <p className="text-sm font-semibold text-gray-700 mb-2">Terms & Conditions (in PDF):</p>
-                        <div className="text-xs text-gray-600 space-y-1 bg-white p-3 rounded border border-gray-200">
-                          {customTermsText.split('\n').slice(0, 3).map((line, idx) => (
-                            <p key={idx}>{line}</p>
-                          ))}
-                          {customTermsText.split('\n').length > 3 && (
-                            <p className="text-gray-500 italic">...and {customTermsText.split('\n').length - 3} more terms</p>
-                          )}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -1078,13 +931,13 @@ MeterSquare Interiors LLC`;
               {/* Footer */}
               <div className="border-t border-gray-200 px-6 py-4 flex justify-between items-center bg-gray-50">
                 <p className="text-sm text-gray-600">
-                  This PDF includes your custom Terms & Conditions
+                  Preview how the PDF will look before sending to client
                 </p>
                 <div className="flex gap-3">
                   <button
                     onClick={async () => {
                       try {
-                        await downloadClientBOQPDF(boqId, customTermsText);
+                        await downloadClientBOQPDF(boqId);
                         toast.success('PDF downloaded successfully');
                       } catch (error) {
                         toast.error('Failed to download PDF');

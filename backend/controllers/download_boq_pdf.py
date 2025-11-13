@@ -95,11 +95,10 @@ def download_internal_pdf():
 def download_client_pdf():
     """
     Download BOQ as Client PDF (clean view)
-    GET /api/boq/download/client/<boq_id>?terms_text=custom+terms&include_images=true
+    GET /api/boq/download/client/<boq_id>?include_images=true
     """
     try:
         boq_id = request.view_args.get('boq_id')
-        terms_text = request.args.get('terms_text', None)  # Get custom terms from query string
         include_images = request.args.get('include_images', 'true').lower() == 'true'  # Default: include images
 
         if not boq_id:
@@ -146,10 +145,33 @@ def download_client_pdf():
         if not project:
             return jsonify({"success": False, "error": "Project not found"}), 404
 
-        # Generate PDF with optional custom terms and image control
+        # Fetch selected Terms & Conditions from database
+        from sqlalchemy import text
+        from config.db import db
+        selected_terms = []
+        try:
+            query = text("""
+                SELECT bt.terms_text
+                FROM boq_terms_selections bts
+                INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
+                WHERE bts.boq_id = :boq_id
+                AND bts.is_checked = TRUE
+                AND bt.is_active = TRUE
+                AND bt.is_deleted = FALSE
+                ORDER BY bt.display_order, bt.term_id
+            """)
+            terms_result = db.session.execute(query, {'boq_id': boq_id})
+            for row in terms_result:
+                selected_terms.append({'terms_text': row[0]})
+            log.info(f"Fetched {len(selected_terms)} selected terms for BOQ {boq_id}")
+        except Exception as e:
+            log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
+
+        # Generate PDF with selected terms from database
         generator = ModernBOQPDFGenerator()
         pdf_data = generator.generate_client_pdf(
-            project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text, include_images
+            project, items, total_material_cost, total_labour_cost, grand_total, boq_json,
+            terms_text=None, selected_terms=selected_terms, include_images=include_images
         )
 
         # Send file
@@ -291,9 +313,30 @@ def download_client_excel():
         if not project:
             return jsonify({"success": False, "error": "Project not found"}), 404
 
-        # Generate Excel
+        # Fetch selected Terms & Conditions from database
+        from sqlalchemy import text
+        selected_terms = []
+        try:
+            query = text("""
+                SELECT bt.terms_text
+                FROM boq_terms_selections bts
+                INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
+                WHERE bts.boq_id = :boq_id
+                AND bts.is_checked = TRUE
+                AND bt.is_active = TRUE
+                AND bt.is_deleted = FALSE
+                ORDER BY bt.display_order, bt.term_id
+            """)
+            terms_result = db.session.execute(query, {'boq_id': boq_id})
+            for row in terms_result:
+                selected_terms.append({'terms_text': row[0]})
+            log.info(f"Fetched {len(selected_terms)} selected terms for BOQ {boq_id}")
+        except Exception as e:
+            log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
+
+        # Generate Excel with selected terms from database
         excel_data = generate_client_excel(
-            project, items, total_material_cost, total_labour_cost, grand_total, boq_json
+            project, items, total_material_cost, total_labour_cost, grand_total, boq_json, selected_terms
         )
 
         # Send file

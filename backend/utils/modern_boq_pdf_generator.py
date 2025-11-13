@@ -54,13 +54,14 @@ class ModernBOQPDFGenerator:
             except:
                 pass
 
-    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, include_images=True):
+    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, selected_terms=None, include_images=True):
         """Generate clean CLIENT quotation PDF
 
         Args:
-            terms_text: Optional custom terms and conditions text.
+            terms_text: Optional custom terms and conditions text (legacy).
                        Can be multi-line string with bullet points.
-                       If None, uses default hardcoded terms.
+            selected_terms: List of selected terms from database (preferred).
+                           Each dict should have {'terms_text': '...'}
             include_images: If False, skip image loading for faster generation
         """
         buffer = BytesIO()
@@ -78,8 +79,8 @@ class ModernBOQPDFGenerator:
         # Summary (pass boq_json for discount info)
         elements.extend(self._client_summary(items, grand_total, boq_json))
 
-        # Terms (pass custom terms if provided)
-        elements.extend(self._client_terms(terms_text=terms_text))
+        # Terms (pass selected terms from database or custom terms)
+        elements.extend(self._client_terms(terms_text=terms_text, selected_terms=selected_terms))
 
         doc.build(elements, onFirstPage=self._add_watermark, onLaterPages=self._add_watermark)
         buffer.seek(0)
