@@ -104,15 +104,6 @@ const RevisionCard: React.FC<RevisionCardProps> = ({
               </div>
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-2xl font-bold text-blue-600">
-              {(() => {
-                console.log(`🎨 [RevisionCard Render] BOQ ${project.boq_id} - Displaying totalCost: ${totalCost}`);
-                return formatCurrency(totalCost);
-              })()}
-            </div>
-            <div className="text-xs text-gray-500">Total Cost</div>
-          </div>
         </div>
       </div>
 

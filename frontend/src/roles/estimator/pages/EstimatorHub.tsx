@@ -303,6 +303,10 @@ const EstimatorHub: React.FC = () => {
   const [showComparisonModal, setShowComparisonModal] = useState(false);
   const [selectedBoqForComparison, setSelectedBoqForComparison] = useState<BOQ | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Draft detection state
+  const [hasSavedDraft, setHasSavedDraft] = useState(false);
+  const [draftData, setDraftData] = useState<any>(null);
   const [totalProjects, setTotalProjects] = useState(0);
   const itemsPerPage = 10; // Fixed at 10 items per page
   const [boqCurrentPage, setBoqCurrentPage] = useState(1); // Pagination for BOQ tabs
@@ -419,6 +423,37 @@ const EstimatorHub: React.FC = () => {
   useEffect(() => {
     setBoqCurrentPage(1);
   }, [activeTab]);
+
+  // Check for saved draft on component mount
+  useEffect(() => {
+    const checkForDraft = () => {
+      try {
+        const savedDraft = localStorage.getItem('boq_draft_autosave');
+        if (savedDraft) {
+          const parsedDraft = JSON.parse(savedDraft);
+          const draftData = parsedDraft.data || parsedDraft;
+          if (draftData && draftData.boqName) {
+            setHasSavedDraft(true);
+            setDraftData(draftData);
+          } else {
+            setHasSavedDraft(false);
+            setDraftData(null);
+          }
+        } else {
+          setHasSavedDraft(false);
+          setDraftData(null);
+        }
+      } catch (error) {
+        console.error('Error checking for draft:', error);
+        setHasSavedDraft(false);
+        setDraftData(null);
+      }
+    };
+
+    checkForDraft();
+    window.addEventListener('focus', checkForDraft);
+    return () => window.removeEventListener('focus', checkForDraft);
+  }, []);
 
   const loadBOQs = async (showLoadingSpinner = true) => {
     try {
@@ -749,6 +784,13 @@ const EstimatorHub: React.FC = () => {
     setShowFullScreenBOQ(false);
     setSelectedProjectForBOQ(null);
     setActiveTab('projects'); // Show pending projects tab
+
+    // Clear draft since BOQ was successfully created
+    localStorage.removeItem('boq_draft_autosave');
+    setHasSavedDraft(false);
+    setDraftData(null);
+    console.log('✅ Draft cleared after successful BOQ creation');
+
     loadBOQs(); // Refresh the BOQ list
   };
 
@@ -1359,17 +1401,6 @@ const EstimatorHub: React.FC = () => {
               <span className="truncate">{boq.project?.location || 'No location'}</span>
             </div>
           </div>
-        </div>
-
-        {/* Stats */}
-        <div className="px-4 pb-3 text-center text-sm">
-          <span className="font-bold text-blue-600 text-lg">
-            {(() => {
-              console.log(`🎨 [Card Render] BOQ ${boq.boq_id} (${boq.title}) - Displaying total_cost: ${boq.total_cost}`);
-              return boq.total_cost ? formatCurrency(boq.total_cost) : 'AED 0';
-            })()}
-          </span>
-          <span className="text-gray-600 ml-1 text-xs">Total Value</span>
         </div>
 
         {/* Info */}
@@ -2137,6 +2168,31 @@ const EstimatorHub: React.FC = () => {
                 onClose={() => {
                   setShowFullScreenBOQ(false);
                   setSelectedProjectForBOQ(null);
+
+                  // Small delay to ensure localStorage write completed
+                  setTimeout(() => {
+                    const savedDraft = localStorage.getItem('boq_draft_autosave');
+                    if (savedDraft) {
+                      try {
+                        const parsedDraft = JSON.parse(savedDraft);
+                        const draftData = parsedDraft.data || parsedDraft;
+                        if (draftData && draftData.boqName) {
+                          setHasSavedDraft(true);
+                          setDraftData(draftData);
+                        } else {
+                          setHasSavedDraft(false);
+                          setDraftData(null);
+                        }
+                      } catch (error) {
+                        console.error('Error parsing draft:', error);
+                        setHasSavedDraft(false);
+                        setDraftData(null);
+                      }
+                    } else {
+                      setHasSavedDraft(false);
+                      setDraftData(null);
+                    }
+                  }, 100);
                 }}
                 onSubmit={handleBOQCreated}
                 selectedProject={selectedProjectForBOQ}
@@ -2453,27 +2509,53 @@ const EstimatorHub: React.FC = () => {
                           <span className="hidden sm:inline">View Details</span>
                           <span className="sm:hidden">View</span>
                         </button>
-                        {boqCount === 0 ? (
-                          <button
-                            className="flex-1 min-w-[90px] bg-transparent border-2 border-red-500 text-red-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
-                            style={{
-                              boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.15)'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.backgroundColor = '#ef4444';
-                              e.currentTarget.style.color = 'white';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.backgroundColor = 'transparent';
-                              e.currentTarget.style.color = '#ef4444';
-                            }}
-                            onClick={() => handleCreateBOQ(project)}
-                          >
-                            <Plus className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                            <span className="hidden sm:inline">Create BOQ</span>
-                            <span className="sm:hidden">Create</span>
-                          </button>
-                        ) : hasSentBoq ? (
+                        {(() => {
+                          // Check if draft is for THIS specific project
+                          const isDraftForThisProject = hasSavedDraft && draftData?.selectedProjectId === project.project_id;
+                          return boqCount === 0 ? (
+                            isDraftForThisProject ? (
+                              <button
+                                className="flex-1 min-w-[90px] bg-transparent border-2 border-orange-500 text-orange-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                                style={{
+                                  boxShadow: '0 0 0 3px rgba(249, 115, 22, 0.15)'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor = '#f97316';
+                                  e.currentTarget.style.color = 'white';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor = 'transparent';
+                                  e.currentTarget.style.color = '#ea580c';
+                                }}
+                                onClick={() => handleCreateBOQ(project)}
+                                title={`Resume draft: ${draftData?.boqName || 'Unsaved BOQ'}`}
+                              >
+                                <Clock className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                                <span className="hidden sm:inline">Resume Draft</span>
+                                <span className="sm:hidden">Draft</span>
+                              </button>
+                            ) : (
+                            <button
+                              className="flex-1 min-w-[90px] bg-transparent border-2 border-red-500 text-red-600 text-[10px] sm:text-xs h-8 rounded transition-all duration-300 flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
+                              style={{
+                                boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.15)'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = '#ef4444';
+                                e.currentTarget.style.color = 'white';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = 'transparent';
+                                e.currentTarget.style.color = '#ef4444';
+                              }}
+                              onClick={() => handleCreateBOQ(project)}
+                            >
+                              <Plus className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                              <span className="hidden sm:inline">Create BOQ</span>
+                              <span className="sm:hidden">Create</span>
+                            </button>
+                            )
+                          ) : hasSentBoq ? (
                           <button
                             className="bg-green-100 text-green-600 text-[10px] sm:text-xs h-8 rounded cursor-not-allowed flex items-center justify-center gap-0.5 sm:gap-1 font-semibold px-1"
                             disabled
@@ -2493,7 +2575,8 @@ const EstimatorHub: React.FC = () => {
                             <span className="hidden sm:inline">BOQ Created</span>
                             <span className="sm:hidden">Created</span>
                           </button>
-                        )}
+                          );
+                        })()}
                         {!hasSentBoq && boqCount > 0 ? (
                           <>
                             <button
@@ -2648,15 +2731,28 @@ const EstimatorHub: React.FC = () => {
                                       <Eye className="h-3.5 w-3.5" />
                                     </Button>
                                     {boqCount === 0 ? (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleCreateBOQ(project)}
-                                        className="h-7 w-7 p-0 hover:bg-green-50"
-                                        title="Create BOQ"
-                                      >
-                                        <Plus className="h-3.5 w-3.5 text-green-600" />
-                                      </Button>
+                                      // Check if draft is for THIS specific project
+                                      hasSavedDraft && draftData?.selectedProjectId === project.project_id ? (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => handleCreateBOQ(project)}
+                                          className="h-7 w-7 p-0 hover:bg-orange-50"
+                                          title={`Resume draft: ${draftData?.boqName || 'Unsaved BOQ'}`}
+                                        >
+                                          <Clock className="h-3.5 w-3.5 text-orange-600" />
+                                        </Button>
+                                      ) : (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => handleCreateBOQ(project)}
+                                          className="h-7 w-7 p-0 hover:bg-green-50"
+                                          title="Create BOQ"
+                                        >
+                                          <Plus className="h-3.5 w-3.5 text-green-600" />
+                                        </Button>
+                                      )
                                     ) : hasSentBoq ? (
                                       <Button
                                         variant="ghost"

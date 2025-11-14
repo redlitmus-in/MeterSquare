@@ -25,7 +25,9 @@ import {
   Eye,
   GripVertical,
   Edit2,
-  FileCheck
+  FileCheck,
+  Cloud,
+  CloudOff
 } from 'lucide-react';
 import {
   DndContext,
@@ -48,6 +50,11 @@ import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { ProjectOption, BOQMaterial, BOQLabour, BOQCreatePayload, WorkType, TermsConditionsItem } from '@/roles/estimator/types';
 import { ModernSelect } from '@/components/ui/modern-select';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { useAutoSave } from '@/hooks/useAutoSave';
+import { useInactivityDetection } from '@/hooks/useInactivityDetection';
+import InactivityModal from '@/components/modals/InactivityModal';
+import DataRecoveryModal from '@/components/modals/DataRecoveryModal';
+import SaveDraftModal from '@/components/modals/SaveDraftModal';
 
 // Backend-aligned interfaces
 interface SubItemForm {
@@ -313,6 +320,256 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [termsExpanded, setTermsExpanded] = useState(false);
   const [termsListExpanded, setTermsListExpanded] = useState(false);
   const [editingTermId, setEditingTermId] = useState<string | null>(null);
+
+  // Auto-save and inactivity states
+  const [showInactivityModal, setShowInactivityModal] = useState(false);
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [showSaveDraftModal, setShowSaveDraftModal] = useState(false);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+
+  // Auto-save function - ONLY saves to localStorage (no database save)
+  const handleAutoSave = async (formData: any, isAutoSave: boolean) => {
+    // Don't auto-save in revision mode or edit mode
+    if (isRevision || editMode) return;
+
+    // Don't auto-save if there's no meaningful data
+    if (!selectedProjectId || !boqName.trim() || items.length === 0) {
+      console.log('⚠️ Auto-save skipped - insufficient data');
+      return;
+    }
+
+    // Auto-save only saves to localStorage, not to database
+    // The useAutoSave hook handles localStorage automatically
+    // This function is just a placeholder for validation
+
+    if (isAutoSave) {
+      // Show a visible confirmation that data is backed up locally
+      console.log('✅ BOQ data backed up locally');
+      toast.success('💾 Draft backed up locally', {
+        duration: 2000,
+        description: `BOQ: ${boqName} - ${items.length} items`
+      });
+    }
+  };
+
+  // Auto-save hook - save every 3 minutes (localStorage only)
+  const { isSaving, lastSaved, saveNow, clearLocalStorage, getLocalStorageData } = useAutoSave({
+    data: {
+      boqName,
+      selectedProjectId,
+      items,
+      overallOverhead,
+      overallProfit,
+      overallDiscount,
+      preliminaries,
+      costQuantity,
+      costUnit,
+      costRate,
+      costAmount,
+      preliminaryInternalCost,
+      preliminaryMiscPercentage,
+      preliminaryOverheadProfitPercentage,
+      preliminaryTransportPercentage,
+      preliminaryNotes,
+      termsConditions
+    },
+    onSave: handleAutoSave,
+    interval: 180000, // 3 minutes
+    localStorageKey: 'boq_draft_autosave',
+    enabled: autoSaveEnabled && isOpen && !isRevision && !editMode
+  });
+
+  // TEST MODE: Set to true to test inactivity in 10 seconds instead of 2 hours
+  const INACTIVITY_TEST_MODE = false; // ⚠️ TESTING MODE ENABLED - 10 second timeout
+
+  // Inactivity detection hook - 2 hour timeout (or 10 seconds in test mode)
+  const { isInactive, resetTimer } = useInactivityDetection({
+    timeout: INACTIVITY_TEST_MODE ? 10000 : 7200000, // 10 seconds (test) or 2 hours (production)
+    onInactive: () => {
+      setShowInactivityModal(true);
+    },
+    enabled: isOpen && !isRevision && !editMode
+  });
+
+  // Handle inactivity modal actions
+  const handleContinueWorking = () => {
+    setShowInactivityModal(false);
+    resetTimer();
+  };
+
+  const handleSaveAndClose = async () => {
+    setShowInactivityModal(false);
+    await saveNow(); // Save to localStorage one more time
+    toast.success('Draft saved locally - you can continue later', { duration: 3000 });
+    onClose();
+  };
+
+  // Handle close button with save draft confirmation
+  const handleCloseWithConfirmation = () => {
+    const hasData = (boqName && boqName.trim().length > 0) || selectedProjectId !== null || items.length > 0;
+
+    if (hasData && !editMode && !isRevision) {
+      setShowSaveDraftModal(true);
+    } else {
+      onClose();
+    }
+  };
+
+  const handleSaveDraftAndClose = async () => {
+    setShowSaveDraftModal(false);
+
+    // Explicitly save to localStorage now (don't rely on auto-save timer)
+    await saveNow();
+
+    toast.success('Draft saved - you can continue later', {
+      duration: 3000,
+      description: `BOQ: ${boqName}`
+    });
+
+    onClose();
+  };
+
+  const handleDiscardAndClose = () => {
+    setShowSaveDraftModal(false);
+    clearLocalStorage();
+    toast.info('Draft discarded');
+    onClose();
+  };
+
+  // Auto-restore draft data on mount (no modal, just restore directly)
+  useEffect(() => {
+    if (isOpen && !editMode && !isRevision) {
+      const savedData = getLocalStorageData();
+      const actualData = savedData?.data || savedData;
+
+      if (actualData && actualData.boqName) {
+        // Auto-restore data directly (no popup modal)
+        setBoqName(actualData.boqName || '');
+        setSelectedProjectId(actualData.selectedProjectId || null);
+        setItems(actualData.items || []);
+        setOverallOverhead(actualData.overallOverhead || 10);
+        setOverallProfit(actualData.overallProfit || 15);
+        setOverallDiscount(actualData.overallDiscount || 0);
+        setPreliminaries(actualData.preliminaries || []);
+        setCostQuantity(actualData.costQuantity || 1);
+        setCostUnit(actualData.costUnit || 'nos');
+        setCostRate(actualData.costRate || 0);
+        setCostAmount(actualData.costAmount || 0);
+        setPreliminaryInternalCost(actualData.preliminaryInternalCost || 0);
+        setPreliminaryMiscPercentage(actualData.preliminaryMiscPercentage || 10);
+        setPreliminaryOverheadProfitPercentage(actualData.preliminaryOverheadProfitPercentage || 25);
+        setPreliminaryTransportPercentage(actualData.preliminaryTransportPercentage || 5);
+        setPreliminaryNotes(actualData.preliminaryNotes || '');
+        setTermsConditions(actualData.termsConditions || []);
+
+        toast.success(`Resuming: ${actualData.boqName}`, {
+          description: `Draft with ${actualData.items?.length || 0} items restored`
+        });
+      }
+    }
+  }, [isOpen, editMode, isRevision, getLocalStorageData]);
+
+  // Warn user before page refresh/close if there's unsaved data
+  useEffect(() => {
+    if (!isOpen || editMode || isRevision) return;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      const hasData = boqName.trim() || selectedProjectId || items.length > 0;
+
+      if (hasData) {
+        console.log('⚠️ User trying to leave page with unsaved data');
+        e.preventDefault();
+        e.returnValue = ''; // Chrome requires returnValue to be set
+        return ''; // Some browsers show this message
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isOpen, editMode, isRevision, boqName, selectedProjectId, items]);
+
+  // Handle browser back button - intercept and show save draft modal
+  useEffect(() => {
+    if (!isOpen || editMode || isRevision) return;
+
+    // Add a dummy history entry when form opens
+    window.history.pushState({ boqFormOpen: true }, '');
+
+    const handlePopState = (e: PopStateEvent) => {
+      const hasData = (boqName && boqName.trim().length > 0) || selectedProjectId !== null || items.length > 0;
+
+      console.log('⬅️ BROWSER BACK BUTTON CLICKED');
+      console.log('  - Has data:', hasData);
+      console.log('  - Edit mode:', editMode);
+      console.log('  - Revision mode:', isRevision);
+
+      if (hasData && !editMode && !isRevision) {
+        // Prevent going back
+        e.preventDefault();
+        window.history.pushState({ boqFormOpen: true }, '');
+
+        console.log('✅ Showing save draft modal instead of going back');
+        toast.info('Please save or discard your changes first');
+        setShowSaveDraftModal(true);
+      } else {
+        console.log('❌ No data, allowing navigation back');
+        onClose();
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      // Clean up history when component unmounts
+      if (window.history.state?.boqFormOpen) {
+        window.history.back();
+      }
+    };
+  }, [isOpen, editMode, isRevision, boqName, selectedProjectId, items, onClose]);
+
+  // Handle data recovery
+  const handleRestoreData = () => {
+    const savedData = getLocalStorageData();
+    console.log('🔄 Restoring data...', savedData);
+
+    if (savedData) {
+      // Handle nested structure: {data: {...}, timestamp: ...}
+      const actualData = savedData.data || savedData;
+      console.log('📦 Restoring from data:', actualData);
+
+      setBoqName(actualData.boqName || '');
+      setSelectedProjectId(actualData.selectedProjectId || null);
+      setItems(actualData.items || []);
+      setOverallOverhead(actualData.overallOverhead || 10);
+      setOverallProfit(actualData.overallProfit || 15);
+      setOverallDiscount(actualData.overallDiscount || 0);
+      setPreliminaries(actualData.preliminaries || []);
+      setCostQuantity(actualData.costQuantity || 1);
+      setCostUnit(actualData.costUnit || 'nos');
+      setCostRate(actualData.costRate || 0);
+      setCostAmount(actualData.costAmount || 0);
+      setPreliminaryInternalCost(actualData.preliminaryInternalCost || 0);
+      setPreliminaryMiscPercentage(actualData.preliminaryMiscPercentage || 10);
+      setPreliminaryOverheadProfitPercentage(actualData.preliminaryOverheadProfitPercentage || 25);
+      setPreliminaryTransportPercentage(actualData.preliminaryTransportPercentage || 5);
+      setPreliminaryNotes(actualData.preliminaryNotes || '');
+      setTermsConditions(actualData.termsConditions || []);
+
+      console.log('✅ Data restored successfully!');
+      toast.success('Previous work restored - continue where you left off!');
+    }
+    setShowRecoveryModal(false);
+  };
+
+  const handleDiscardData = () => {
+    clearLocalStorage();
+    setShowRecoveryModal(false);
+    toast.info('Starting fresh');
+  };
 
   // Load projects and master items on mount
   useEffect(() => {
@@ -2077,6 +2334,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         if (result.success) {
           toast.success(result.message || 'BOQ revision created successfully');
 
+          // Clear auto-save data on successful revision creation
+          clearLocalStorage();
+
           // FIX: Upload new images if any exist in sub-items (for revision mode)
           const hasNewImages = items.some(item =>
             item.sub_items && item.sub_items.some(si => si.images && si.images.length > 0)
@@ -2343,6 +2603,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         if (response.ok && result.success) {
           toast.success(result.message || 'BOQ updated successfully');
 
+          // Clear auto-save data on successful update
+          clearLocalStorage();
+
           // FIX: Upload new images if any exist in sub-items
           const hasNewImages = items.some(item =>
             item.sub_items && item.sub_items.some(si => si.images && si.images.length > 0)
@@ -2457,6 +2720,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
         if (response.ok && result.success) {
           toast.success(result.message || 'Extra items added successfully');
+
+          // Clear auto-save data on successful addition
+          clearLocalStorage();
+
           if (onSubmit) {
             onSubmit(existingBoqId);
           }
@@ -2613,6 +2880,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         if (result.success && result.boq_id) {
           toast.success(result.message);
 
+          // Clear auto-save data on successful creation
+          clearLocalStorage();
+
           // Check if any sub-items have images to upload
           const hasImages = items.some(item =>
             item.sub_items && item.sub_items.some(si => si.images && si.images.length > 0)
@@ -2689,9 +2959,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
+        {/* Backdrop */}
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={handleCloseWithConfirmation} />
 
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
@@ -2704,18 +2975,41 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               <div className="p-3 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-md">
                 <FileText className="w-8 h-8 text-blue-600" />
               </div>
-              <div>
+              <div className="flex-1">
                 <h2 className="text-2xl font-bold text-[#243d8a]">
                   {editMode ? 'Edit BOQ' : isRevision ? 'Create BOQ Revision' : 'Create New BOQ'}
                 </h2>
                 <p className="text-sm text-gray-600 mt-1">
                   {editMode ? 'Update the Bill of Quantities details' : isRevision ? 'Create a new revision of the BOQ' : 'Build a detailed Bill of Quantities for your project'}
                 </p>
+                {/* Auto-save status indicator */}
+                {!isRevision && !editMode && autoSaveEnabled && (
+                  <div className="flex items-center gap-2 mt-2 text-xs">
+                    {isSaving ? (
+                      <>
+                        <CloudOff className="w-3.5 h-3.5 text-gray-400 animate-pulse" />
+                        <span className="text-gray-500 font-medium">Backing up locally...</span>
+                      </>
+                    ) : lastSaved ? (
+                      <>
+                        <Cloud className="w-3.5 h-3.5 text-green-500" />
+                        <span className="text-gray-500">
+                          Backed up at {new Date(lastSaved).toLocaleTimeString()} (Local only)
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Cloud className="w-3.5 h-3.5 text-blue-400" />
+                        <span className="text-gray-500">Auto-backup enabled (Local only, every 3 min)</span>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleCloseWithConfirmation}
               className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
               disabled={isSubmitting}
               aria-label="Close dialog"
@@ -5156,7 +5450,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleCloseWithConfirmation}
               className="px-6 py-2.5 text-gray-700 bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition-all font-semibold shadow-sm"
               disabled={isSubmitting || isUploadingBulk}
             >
@@ -5218,7 +5512,35 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             </div>
           </div>
         </motion.div>
+
     </div>
+
+      {/* Modals - Rendered OUTSIDE the form container for proper z-index */}
+      {/* Inactivity Modal */}
+      <InactivityModal
+        open={showInactivityModal}
+        onContinue={handleContinueWorking}
+        onSaveAndClose={handleSaveAndClose}
+        lastSaved={lastSaved}
+      />
+
+      {/* Data Recovery Modal */}
+      <DataRecoveryModal
+        open={showRecoveryModal}
+        onRestore={handleRestoreData}
+        onDiscard={handleDiscardData}
+        timestamp={getLocalStorageData()?.timestamp}
+        boqName={(getLocalStorageData()?.data || getLocalStorageData())?.boqName}
+      />
+
+      {/* Save Draft Confirmation Modal */}
+      <SaveDraftModal
+        open={showSaveDraftModal}
+        onSaveAndClose={handleSaveDraftAndClose}
+        onDiscardAndClose={handleDiscardAndClose}
+        boqName={boqName}
+      />
+    </>
   );
 };
 
