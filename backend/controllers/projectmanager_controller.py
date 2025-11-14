@@ -329,6 +329,25 @@ def get_all_pm_boqs():
                             elif action_type == 'day_extension_approved' and action_status == 'approved':
                                 has_approved_extension = True
 
+            # Get item assignment counts
+            total_items = 0
+            items_assigned_by_me = 0
+            items_pending_assignment = 0
+
+            boq_details_record = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+            if boq_details_record and boq_details_record.boq_details:
+                items = boq_details_record.boq_details.get('items', [])
+                total_items = len(items)
+
+                for item in items:
+                    assigned_by_pm = item.get('assigned_by_pm_user_id')
+                    assigned_to_se = item.get('assigned_to_se_user_id')
+
+                    if assigned_to_se and assigned_by_pm == user_id:
+                        items_assigned_by_me += 1
+                    elif not assigned_to_se:
+                        items_pending_assignment += 1
+
             boq_data = {
                 "boq_id": boq.boq_id,
                 "boq_name": boq.boq_name,
@@ -343,7 +362,11 @@ def get_all_pm_boqs():
                 # Day extension status
                 "has_pending_day_extension": has_pending_day_extension,
                 "pending_day_extension_count": pending_day_extension_count,
-                "has_approved_extension": has_approved_extension
+                "has_approved_extension": has_approved_extension,
+                # Item assignment counts
+                "total_items": total_items,
+                "items_assigned_by_me": items_assigned_by_me,
+                "items_pending_assignment": items_pending_assignment
             }
             boqs_list.append(boq_data)
 
@@ -792,6 +815,564 @@ def assign_projects():
         log.error(f"Error assigning projects: {str(e)}\n{traceback.format_exc()}")
         return jsonify({
             "error": f"Failed to assign projects: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500
+
+def assign_items_to_se():
+    """PM assigns specific BOQ items to a Site Engineer"""
+    try:
+        data = request.get_json()
+
+        boq_id = data.get('boq_id')
+        item_indices = data.get('item_indices', [])  # List of item indices to assign
+        se_user_id = data.get('se_user_id')
+
+        # Validate input
+        if not boq_id:
+            return jsonify({"error": "boq_id is required"}), 400
+        if not item_indices or not isinstance(item_indices, list):
+            return jsonify({"error": "item_indices must be a non-empty list"}), 400
+        if not se_user_id:
+            return jsonify({"error": "se_user_id is required"}), 400
+
+        # Get current user (PM or MEP)
+        pm_user_id = g.user_id
+        pm_user = User.query.get(pm_user_id)
+        if not pm_user:
+            return jsonify({"error": "User not found"}), 404
+
+        pm_name = pm_user.full_name
+        role_name = pm_user.role.role if pm_user.role else 'unknown'
+
+        # Get BOQ and validate
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Get project
+        project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Validate PM/MEP is assigned to project
+        is_pm = role_name == 'projectManager' and pm_user_id in (project.user_id or [])
+        is_mep = role_name == 'mep' and pm_user_id in (project.mep_supervisor_id or [])
+        is_admin = role_name == 'admin'
+
+        if not (is_pm or is_mep or is_admin):
+            return jsonify({"error": "You are not assigned to this project"}), 403
+
+        # Validate SE exists
+        se_user = User.query.get(se_user_id)
+        if not se_user or not se_user.role or se_user.role.role != 'siteEngineer':
+            return jsonify({"error": "Invalid Site Engineer"}), 400
+
+        se_name = se_user.full_name
+
+        # Get BOQ details
+        boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq_details:
+            return jsonify({"error": "BOQ details not found"}), 404
+
+        # Get items from JSONB
+        boq_data = boq_details.boq_details or {}
+        items = boq_data.get('items', [])
+
+        if not items:
+            return jsonify({"error": "No items found in BOQ"}), 404
+
+        # Validate and assign items
+        assigned_items = []
+        skipped_items = []
+
+        for item_index in item_indices:
+            if item_index < 0 or item_index >= len(items):
+                skipped_items.append({
+                    "index": item_index,
+                    "reason": "Invalid item index"
+                })
+                continue
+
+            item = items[item_index]
+
+            # Check if item is already assigned by another PM/MEP
+            existing_pm_id = item.get('assigned_by_pm_user_id')
+            if existing_pm_id and existing_pm_id != pm_user_id:
+                skipped_items.append({
+                    "index": item_index,
+                    "item_code": item.get('item_code', 'N/A'),
+                    "reason": f"Already assigned by another {role_name}",
+                    "assigned_by": item.get('assigned_by_pm_name')
+                })
+                continue
+
+            # Assign the item
+            item['assigned_by_pm_user_id'] = pm_user_id
+            item['assigned_by_pm_name'] = pm_name
+            item['assigned_to_se_user_id'] = se_user_id
+            item['assigned_to_se_name'] = se_name
+            item['assignment_date'] = datetime.utcnow().isoformat()
+            item['assignment_status'] = 'assigned'
+
+            assigned_items.append({
+                "index": item_index,
+                "item_code": item.get('item_code') or item.get('item_number') or item.get('sr_no') or f"Item-{item_index+1}",
+                "description": item.get('description') or item.get('item_name') or item.get('name') or 'N/A'
+            })
+
+        if not assigned_items:
+            return jsonify({
+                "error": "No items were assigned",
+                "skipped_items": skipped_items
+            }), 400
+
+        # Update BOQ details
+        boq_data['items'] = items
+        boq_details.boq_details = boq_data
+
+        # Mark JSONB field as modified for SQLAlchemy
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(boq_details, "boq_details")
+
+        # Save to pm_assign_ss table
+        from models.pm_assign_ss import PMAssignSS
+
+        # Prepare item details for storage
+        item_details_for_db = []
+        for assigned_item in assigned_items:
+            item_index = assigned_item['index']
+            item = items[item_index]
+            item_details_for_db.append({
+                'index': item_index,
+                'item_code': assigned_item['item_code'],
+                'item_name': assigned_item['description'],
+                'quantity': item.get('quantity') or item.get('qty'),
+                'unit': item.get('unit') or item.get('uom'),
+                'rate': item.get('rate') or item.get('unitRate'),
+                'amount': item.get('amount') or item.get('totalAmount')
+            })
+
+        # Check if assignment already exists for this BOQ + SE combination
+        existing_assignment = PMAssignSS.query.filter_by(
+            boq_id=boq_id,
+            assigned_to_se_id=se_user_id,
+            assigned_by_pm_id=pm_user_id,
+            is_deleted=False
+        ).first()
+
+        if existing_assignment:
+            # Update existing assignment - add new item indices
+            existing_indices = existing_assignment.item_indices or []
+            new_indices = [item['index'] for item in assigned_items]
+            combined_indices = list(set(existing_indices + new_indices))
+
+            existing_assignment.item_indices = combined_indices
+            existing_assignment.item_details = item_details_for_db
+            existing_assignment.assignment_status = 'assigned'
+            existing_assignment.last_modified_at = datetime.utcnow()
+            existing_assignment.last_modified_by = pm_name
+            log.info(f"Updated existing assignment {existing_assignment.pm_assign_id} with new items")
+        else:
+            # Create new assignment record
+            new_assignment = PMAssignSS(
+                project_id=project.project_id,
+                boq_id=boq_id,
+                item_indices=[item['index'] for item in assigned_items],
+                item_details=item_details_for_db,
+                assignment_status='assigned',
+                assigned_by_pm_id=pm_user_id,
+                assigned_to_se_id=se_user_id,
+                assignment_date=datetime.utcnow(),
+                created_by=pm_name,
+                created_at=datetime.utcnow(),
+                is_deleted=False
+            )
+            db.session.add(new_assignment)
+            log.info(f"Created new assignment record in pm_assign_ss for BOQ {boq_id}, SE {se_user_id}")
+
+        # Update BOQ history
+        existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        current_actions = []
+        if existing_history and existing_history.action:
+            current_actions = existing_history.action if isinstance(existing_history.action, list) else []
+
+        new_action = {
+            "role": role_name,
+            "type": "items_assigned_to_se",
+            "sender": role_name,
+            "receiver": "site_engineer",
+            "status": "Items_Assigned",
+            "pm_user_id": pm_user_id,
+            "pm_name": pm_name,
+            "se_user_id": se_user_id,
+            "se_name": se_name,
+            "items_count": len(assigned_items),
+            "item_codes": [item['item_code'] for item in assigned_items],
+            "timestamp": datetime.utcnow().isoformat(),
+            "project_id": project.project_id,
+            "project_name": project.project_name
+        }
+
+        current_actions.append(new_action)
+
+        if existing_history:
+            existing_history.action = current_actions
+            flag_modified(existing_history, "action")
+        else:
+            new_history = BOQHistory(
+                boq_id=boq_id,
+                action=current_actions,
+                action_by=pm_name,
+                is_deleted=False
+            )
+            db.session.add(new_history)
+
+        db.session.commit()
+
+        log.info(f"{role_name} {pm_name} assigned {len(assigned_items)} items to SE {se_name} for BOQ {boq_id}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Successfully assigned {len(assigned_items)} item(s) to {se_name}",
+            "assigned_items": assigned_items,
+            "skipped_items": skipped_items,
+            "se_name": se_name,
+            "assigned_by": pm_name
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        log.error(f"Error assigning items to SE: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to assign items: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500
+
+def get_item_assignments(boq_id):
+    """Get all item assignments for a specific BOQ"""
+    try:
+        # Get current user
+        user_id = g.user_id
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        role_name = user.role.role if user.role else 'unknown'
+
+        # Get BOQ and validate
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Get project
+        project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Validate access
+        is_pm = role_name == 'projectManager' and user_id in (project.user_id or [])
+        is_mep = role_name == 'mep' and user_id in (project.mep_supervisor_id or [])
+        is_se = role_name == 'siteEngineer' and project.site_supervisor_id == user_id
+        is_admin = role_name == 'admin'
+
+        if not (is_pm or is_mep or is_se or is_admin):
+            return jsonify({"error": "You do not have access to this BOQ"}), 403
+
+        # Get BOQ details
+        boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq_details:
+            return jsonify({"error": "BOQ details not found"}), 404
+
+        # Get items from JSONB
+        boq_data = boq_details.boq_details or {}
+        items = boq_data.get('items', [])
+
+        # Build assignment data
+        assignment_data = []
+        total_items = len(items)
+        assigned_items = 0
+        unassigned_items = 0
+        my_assignments = 0
+
+        for idx, item in enumerate(items):
+            assignment_status = item.get('assignment_status', 'unassigned')
+            assigned_by_pm = item.get('assigned_by_pm_user_id')
+            assigned_to_se = item.get('assigned_to_se_user_id')
+
+            if assignment_status == 'assigned' and assigned_to_se:
+                assigned_items += 1
+                if assigned_by_pm == user_id:
+                    my_assignments += 1
+            else:
+                unassigned_items += 1
+
+            assignment_data.append({
+                "index": idx,
+                "item_code": item.get('item_code') or item.get('item_number') or item.get('sr_no') or f"Item-{idx+1}",
+                "description": item.get('description') or item.get('item_name') or item.get('name') or 'N/A',
+                "quantity": item.get('quantity') or item.get('qty'),
+                "unit": item.get('unit') or item.get('uom') or '',
+                "assigned_by_pm_user_id": assigned_by_pm,
+                "assigned_by_pm_name": item.get('assigned_by_pm_name'),
+                "assigned_to_se_user_id": assigned_to_se,
+                "assigned_to_se_name": item.get('assigned_to_se_name'),
+                "assignment_date": item.get('assignment_date'),
+                "assignment_status": assignment_status,
+                "can_modify": not assigned_by_pm or assigned_by_pm == user_id
+            })
+
+        return jsonify({
+            "success": True,
+            "boq_id": boq_id,
+            "boq_name": boq.boq_name,
+            "project_id": project.project_id,
+            "project_name": project.project_name,
+            "items": assignment_data,
+            "summary": {
+                "total_items": total_items,
+                "assigned_items": assigned_items,
+                "unassigned_items": unassigned_items,
+                "my_assignments": my_assignments
+            }
+        }), 200
+
+    except Exception as e:
+        import traceback
+        log.error(f"Error getting item assignments: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to get item assignments: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500
+
+def unassign_items_from_se():
+    """PM unassigns items from Site Engineer (only their own assignments)"""
+    try:
+        data = request.get_json()
+
+        boq_id = data.get('boq_id')
+        item_indices = data.get('item_indices', [])
+
+        # Validate input
+        if not boq_id:
+            return jsonify({"error": "boq_id is required"}), 400
+        if not item_indices or not isinstance(item_indices, list):
+            return jsonify({"error": "item_indices must be a non-empty list"}), 400
+
+        # Get current user
+        pm_user_id = g.user_id
+        pm_user = User.query.get(pm_user_id)
+        if not pm_user:
+            return jsonify({"error": "User not found"}), 404
+
+        pm_name = pm_user.full_name
+        role_name = pm_user.role.role if pm_user.role else 'unknown'
+
+        # Get BOQ and validate
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Get project
+        project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Validate PM/MEP is assigned to project
+        is_pm = role_name == 'projectManager' and pm_user_id in (project.user_id or [])
+        is_mep = role_name == 'mep' and pm_user_id in (project.mep_supervisor_id or [])
+        is_admin = role_name == 'admin'
+
+        if not (is_pm or is_mep or is_admin):
+            return jsonify({"error": "You are not assigned to this project"}), 403
+
+        # Get BOQ details
+        boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq_details:
+            return jsonify({"error": "BOQ details not found"}), 404
+
+        # Get items from JSONB
+        boq_data = boq_details.boq_details or {}
+        items = boq_data.get('items', [])
+
+        if not items:
+            return jsonify({"error": "No items found in BOQ"}), 404
+
+        # Unassign items
+        unassigned_items = []
+        skipped_items = []
+
+        for item_index in item_indices:
+            if item_index < 0 or item_index >= len(items):
+                skipped_items.append({
+                    "index": item_index,
+                    "reason": "Invalid item index"
+                })
+                continue
+
+            item = items[item_index]
+
+            # Check if item was assigned by current PM
+            existing_pm_id = item.get('assigned_by_pm_user_id')
+            if not existing_pm_id:
+                skipped_items.append({
+                    "index": item_index,
+                    "item_code": item.get('item_code', 'N/A'),
+                    "reason": "Item is not assigned"
+                })
+                continue
+
+            if existing_pm_id != pm_user_id and not is_admin:
+                skipped_items.append({
+                    "index": item_index,
+                    "item_code": item.get('item_code', 'N/A'),
+                    "reason": "Can only unassign your own assignments"
+                })
+                continue
+
+            # Unassign the item
+            item.pop('assigned_by_pm_user_id', None)
+            item.pop('assigned_by_pm_name', None)
+            item.pop('assigned_to_se_user_id', None)
+            item.pop('assigned_to_se_name', None)
+            item.pop('assignment_date', None)
+            item['assignment_status'] = 'unassigned'
+
+            unassigned_items.append({
+                "index": item_index,
+                "item_code": item.get('item_code') or item.get('item_number') or item.get('sr_no') or f"Item-{item_index+1}",
+                "description": item.get('description') or item.get('item_name') or item.get('name') or 'N/A'
+            })
+
+        if not unassigned_items:
+            return jsonify({
+                "error": "No items were unassigned",
+                "skipped_items": skipped_items
+            }), 400
+
+        # Update BOQ details
+        boq_data['items'] = items
+        boq_details.boq_details = boq_data
+
+        # Mark JSONB field as modified for SQLAlchemy
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(boq_details, "boq_details")
+
+        # Update BOQ history
+        existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+        current_actions = []
+        if existing_history and existing_history.action:
+            current_actions = existing_history.action if isinstance(existing_history.action, list) else []
+
+        new_action = {
+            "role": role_name,
+            "type": "items_unassigned_from_se",
+            "sender": role_name,
+            "receiver": "site_engineer",
+            "status": "Items_Unassigned",
+            "pm_user_id": pm_user_id,
+            "pm_name": pm_name,
+            "items_count": len(unassigned_items),
+            "item_codes": [item['item_code'] for item in unassigned_items],
+            "timestamp": datetime.utcnow().isoformat(),
+            "project_id": project.project_id,
+            "project_name": project.project_name
+        }
+
+        current_actions.append(new_action)
+
+        if existing_history:
+            existing_history.action = current_actions
+            flag_modified(existing_history, "action")
+        else:
+            new_history = BOQHistory(
+                boq_id=boq_id,
+                action=current_actions,
+                action_by=pm_name,
+                is_deleted=False
+            )
+            db.session.add(new_history)
+
+        db.session.commit()
+
+        log.info(f"{role_name} {pm_name} unassigned {len(unassigned_items)} items from SE for BOQ {boq_id}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Successfully unassigned {len(unassigned_items)} item(s)",
+            "unassigned_items": unassigned_items,
+            "skipped_items": skipped_items
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        log.error(f"Error unassigning items: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to unassign items: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500
+
+def get_available_site_engineers():
+    """Get list of available Site Engineers for assignment"""
+    try:
+        # Get all users with siteEngineer role
+        from models.roles import Role
+
+        se_role = Role.query.filter_by(role_name='siteEngineer').first()
+        if not se_role:
+            return jsonify({"error": "Site Engineer role not found"}), 404
+
+        site_engineers = User.query.filter_by(
+            role_id=se_role.role_id,
+            is_deleted=False
+        ).all()
+
+        se_list = []
+        for se in site_engineers:
+            # Count projects assigned to this SE
+            projects_count = Project.query.filter_by(
+                site_supervisor_id=se.user_id,
+                is_deleted=False
+            ).count()
+
+            # Count items assigned to this SE across all BOQs
+            boqs = BOQ.query.filter(BOQ.is_deleted == False).all()
+            items_count = 0
+            for boq in boqs:
+                boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+                if boq_details and boq_details.boq_details:
+                    items = boq_details.boq_details.get('items', [])
+                    items_count += sum(1 for item in items
+                                     if item.get('assigned_to_se_user_id') == se.user_id)
+
+            se_list.append({
+                "user_id": se.user_id,
+                "full_name": se.full_name,
+                "email": se.email,
+                "phone_number": se.phone_number,
+                "is_active": se.user_status == 'online',
+                "projects_count": projects_count,
+                "items_assigned_count": items_count,
+                "profile_image": se.profile_image
+            })
+
+        # Sort by online status first, then by name
+        se_list.sort(key=lambda x: (not x['is_active'], x['full_name']))
+
+        return jsonify({
+            "success": True,
+            "site_engineers": se_list,
+            "total_count": len(se_list)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        log.error(f"Error getting site engineers: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to get site engineers: {str(e)}",
             "error_type": type(e).__name__
         }), 500
 

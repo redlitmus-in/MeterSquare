@@ -55,6 +55,7 @@ import { useInactivityDetection } from '@/hooks/useInactivityDetection';
 import InactivityModal from '@/components/modals/InactivityModal';
 import DataRecoveryModal from '@/components/modals/DataRecoveryModal';
 import SaveDraftModal from '@/components/modals/SaveDraftModal';
+import { BOQ_CONFIG } from '@/config/boqConfig';
 
 // Backend-aligned interfaces
 interface SubItemForm {
@@ -1218,9 +1219,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           quantity: subItem.quantity || 1,
           unit: subItem.unit || 'nos',
           rate: subItem.per_unit_cost || 0,
-          misc_percentage: 10,
-          overhead_profit_percentage: 25,
-          transport_percentage: 5,
+          misc_percentage: BOQ_CONFIG.DEFAULT_MISC_PERCENTAGE,
+          overhead_profit_percentage: BOQ_CONFIG.DEFAULT_OVERHEAD_PROFIT_PERCENTAGE,
+          transport_percentage: BOQ_CONFIG.DEFAULT_TRANSPORT_PERCENTAGE,
           master_sub_item_id: subItem.sub_item_id, // Store master sub-item ID
           imageUrls: (subItem as any).imageUrls || [], // Add fetched images
           imageData: (subItem as any).imageData || [], // Add image metadata
@@ -1372,9 +1373,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       quantity: 1,
       unit: 'nos',
       rate: 0,
-      misc_percentage: 10, // Default 10%
-      overhead_profit_percentage: 25, // Default 25%
-      transport_percentage: 5, // Default 5%
+      misc_percentage: BOQ_CONFIG.DEFAULT_MISC_PERCENTAGE,
+      overhead_profit_percentage: BOQ_CONFIG.DEFAULT_OVERHEAD_PROFIT_PERCENTAGE,
+      transport_percentage: BOQ_CONFIG.DEFAULT_TRANSPORT_PERCENTAGE,
       materials: [],
       labour: [
         {
@@ -1717,9 +1718,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     const clientAmount = subItem.quantity * subItem.rate;
 
     // 2. Calculate percentages FROM the client rate (subtract approach)
-    const transportAmount = clientAmount * (subItem.transport_percentage / 100);
-    const overheadProfitAmount = clientAmount * (subItem.overhead_profit_percentage / 100);
-    const miscAmount = clientAmount * (subItem.misc_percentage / 100);
+    // Use default values if percentages are not set (for backward compatibility with old data)
+    const transportAmount = clientAmount * ((subItem.transport_percentage || 0) / 100);
+    const overheadProfitAmount = clientAmount * ((subItem.overhead_profit_percentage || 0) / 100);
+    const miscAmount = clientAmount * ((subItem.misc_percentage || 0) / 100);
 
     // 3. Calculate Internal Cost (Materials + Labour + Misc + Overhead & Profit + Transport)
     const materialCost = subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0);
@@ -2427,9 +2429,15 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         let totalLabourCost = 0;
         let totalMaterialsCount = 0;
         let totalLabourCount = 0;
+        let totalActualProfit = 0;
+        let totalInternalCost = 0;
 
         const mappedItems = items.map(item => {
           const costs = calculateItemCost(item);
+
+          // Aggregate actual profit and internal cost
+          totalActualProfit += costs.totalActualProfit || 0;
+          totalInternalCost += costs.totalInternalCost || 0;
 
           // Aggregate materials and labour from sub_items
           if (item.sub_items && item.sub_items.length > 0) {
@@ -2529,6 +2537,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           return sum + costs.sellingPrice;
         }, 0);
 
+        // Calculate total negotiable profit (actual_profit) after discount
+        // Negotiable Profit = Client Cost (after discount) - Total Internal Cost
+        const totalNegotiableProfit = totalCostAfterDiscount - totalInternalCost;
+
         const updatePayload = {
           boq_id: existingBoqData.boq_id,
           boq_name: boqName,
@@ -2577,6 +2589,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
             total_labour: totalLabourCount,
             total_material_cost: totalMaterialCost,
             total_labour_cost: totalLabourCost,
+            total_internal_cost: totalInternalCost,
+            actual_profit: totalNegotiableProfit,
+            negotiable_margin: totalNegotiableProfit,
             balance_amount: totalCostAfterDiscount,
             existing_purchase_amount: 0,
             new_purchase_amount: 0,
@@ -5370,14 +5385,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             <span className="text-sm text-gray-700 flex-1 leading-relaxed">
                               {term.terms_text}
                             </span>
-                            <div className="flex items-center gap-1 flex-shrink-0">
+                            <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setEditingTermId(term.id);
                                 }}
-                                className="p-1.5 bg-white border border-blue-300 text-blue-600 hover:text-white hover:bg-blue-600 rounded-md transition-all active:scale-95 shadow-sm"
+                                className="p-2 bg-blue-500 text-white hover:bg-blue-600 rounded-lg transition-all active:scale-95 shadow-md hover:shadow-lg"
                                 disabled={isSubmitting}
                                 title="Edit term"
                               >
@@ -5391,7 +5406,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     await removeTerm(term.id);
                                   }
                                 }}
-                                className="p-1.5 bg-white border border-red-300 text-red-600 hover:text-white hover:bg-red-600 rounded-md transition-all active:scale-95 shadow-sm"
+                                className="p-2 bg-red-500 text-white hover:bg-red-600 rounded-lg transition-all active:scale-95 shadow-md hover:shadow-lg"
                                 disabled={isSubmitting}
                                 title="Delete term"
                               >

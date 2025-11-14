@@ -9,9 +9,41 @@ from models.user import User
 from models.role import Role
 from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
 from sqlalchemy import func, and_, or_
+from config.change_request_config import CR_CONFIG
 
 
 log = get_logger()
+
+
+def validate_negotiable_margin_formula(client_amount, materials, labour, misc, overhead_profit, transport, calculated_margin):
+    """
+    Validate that negotiable margin follows the correct formula:
+    Negotiable Margin = Client Amount - (Materials + Labour + Misc + O&P + Transport)
+
+    Raises ValueError if formula is incorrect
+    """
+    expected_internal_cost = materials + labour + misc + overhead_profit + transport
+    expected_margin = client_amount - expected_internal_cost
+
+    # Allow small floating point differences (0.01)
+    tolerance = 0.01
+    difference = abs(expected_margin - calculated_margin)
+
+    if difference > tolerance:
+        error_msg = (
+            f"Negotiable margin calculation error!\n"
+            f"Expected: {expected_margin:.2f} "
+            f"(Client: {client_amount:.2f} - Internal: {expected_internal_cost:.2f})\n"
+            f"Got: {calculated_margin:.2f}\n"
+            f"Difference: {difference:.2f}\n"
+            f"Formula: Client Amount - (Materials + Labour + Misc + O&P + Transport)\n"
+            f"Breakdown: {client_amount:.2f} - ({materials:.2f} + {labour:.2f} + {misc:.2f} + {overhead_profit:.2f} + {transport:.2f})"
+        )
+        log.error(error_msg)
+        raise ValueError(error_msg)
+
+    return True
+
 
 def add_to_master_tables(item_name, description, work_type, materials_data, labour_data, created_by, miscellaneous_percentage=None, miscellaneous_amount=None, overhead_percentage=None, overhead_amount=None, profit_margin_percentage=None, profit_margin_amount=None, discount_percentage=None, discount_amount=None, vat_percentage=None, vat_amount=None, unit=None, quantity=None, per_unit_cost=None, total_amount=None, item_total_cost=None):
     """Add items, materials, and labour to master tables if they don't exist"""
@@ -507,10 +539,10 @@ def create_boq():
                         "total_cost": total_cost_labour
                     })
 
-                # Get per-sub-item percentages from payload
-                misc_percentage = sub_item.get("misc_percentage", 10.0)
-                overhead_profit_percentage = sub_item.get("overhead_profit_percentage", 25.0)
-                transport_percentage = sub_item.get("transport_percentage", 5.0)
+                # Get per-sub-item percentages from payload or use config defaults
+                misc_percentage = sub_item.get("misc_percentage", CR_CONFIG.DEFAULT_MISC_PERCENTAGE)
+                overhead_profit_percentage = sub_item.get("overhead_profit_percentage", CR_CONFIG.DEFAULT_OVERHEAD_PROFIT_PERCENTAGE)
+                transport_percentage = sub_item.get("transport_percentage", CR_CONFIG.DEFAULT_TRANSPORT_PERCENTAGE)
 
                 # Calculate sub-item client amount
                 sub_item_quantity = sub_item.get("quantity", 0)
@@ -527,7 +559,22 @@ def create_boq():
 
                 # Calculate profits
                 planned_profit = overhead_profit_amount
-                negotiable_margin = sub_item_client_amount - sub_item_internal_cost - misc_amount - transport_amount
+                # Negotiable Margin = Client Amount - (Materials + Labour + Misc + O&P + Transport)
+                negotiable_margin = sub_item_client_amount - sub_item_internal_cost - misc_amount - overhead_profit_amount - transport_amount
+
+                # Validate the calculation
+                try:
+                    validate_negotiable_margin_formula(
+                        client_amount=sub_item_client_amount,
+                        materials=sub_item_materials_cost,
+                        labour=sub_item_labour_cost,
+                        misc=misc_amount,
+                        overhead_profit=overhead_profit_amount,
+                        transport=transport_amount,
+                        calculated_margin=negotiable_margin
+                    )
+                except ValueError as e:
+                    log.warning(f"Negotiable margin validation failed for sub-item: {e}")
 
                 # Store processed sub-item
                 processed_sub_items.append({
@@ -1024,6 +1071,24 @@ def create_boq():
 
         log.info(f"BOQ {boq.boq_id} create totals - Items: {total_boq_cost}, Preliminaries: {preliminary_amount}, Combined: {combined_subtotal}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), Final: {final_boq_cost}")
 
+        # Calculate total negotiable margin from all sub-items
+        total_negotiable_margin = 0.0
+        total_planned_profit = 0.0
+        total_misc_amount = 0.0
+        total_overhead_profit_amount = 0.0
+        total_transport_amount = 0.0
+
+        for item in boq_items:
+            if item.get("has_sub_items") and item.get("sub_items"):
+                for sub_item in item["sub_items"]:
+                    total_negotiable_margin += sub_item.get("negotiable_margin", 0.0)
+                    total_planned_profit += sub_item.get("planned_profit", 0.0)
+                    total_misc_amount += sub_item.get("misc_amount", 0.0)
+                    total_overhead_profit_amount += sub_item.get("overhead_profit_amount", 0.0)
+                    total_transport_amount += sub_item.get("transport_amount", 0.0)
+
+        log.info(f"BOQ {boq.boq_id} profit breakdown - Negotiable Margin: {total_negotiable_margin}, Planned Profit (O&P): {total_planned_profit}, Misc: {total_misc_amount}, Transport: {total_transport_amount}")
+
         # Create BOQ details JSON (without terms - stored in junction table)
         boq_details_json = {
             "boq_id": boq.boq_id,
@@ -1040,7 +1105,13 @@ def create_boq():
                 "total_labour_cost": sum(item["totalLabourCost"] for item in boq_items),
                 "total_cost": final_boq_cost,
                 "selling_price": final_boq_cost,
-                "estimatedSellingPrice": final_boq_cost
+                "estimatedSellingPrice": final_boq_cost,
+                "actual_profit": round(total_negotiable_margin, 2),
+                "negotiable_margin": round(total_negotiable_margin, 2),
+                "planned_profit": round(total_planned_profit, 2),
+                "total_misc": round(total_misc_amount, 2),
+                "total_overhead_profit": round(total_overhead_profit_amount, 2),
+                "total_transport": round(total_transport_amount, 2)
             }
         }
 

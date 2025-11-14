@@ -47,9 +47,11 @@ class ChangeRequestWorkflow:
     def determine_initial_approver(requester_role: str, change_request) -> Tuple[str, str]:
         """
         Determine initial approver when request is sent for review
-        Simplified linear workflow:
+
+        Workflow:
         - SE → PM (always)
-        - PM → Estimator (always)
+        - PM → Estimator (for NEW materials with master_material_id = None)
+        - PM → Buyer (for existing materials - NOT IMPLEMENTED YET, defaults to Estimator)
 
         Args:
             requester_role: Role of the person creating the request
@@ -66,11 +68,22 @@ class ChangeRequestWorkflow:
             log.info(f"Site Engineer/Supervisor request - routing to Project Manager")
             return CR_CONFIG.ROLE_PROJECT_MANAGER, "Project Manager"
 
-        # Project Manager → Estimator (simplified linear workflow)
+        # Project Manager routing logic
         # Handle both database formats: camelCase (projectManager) and snake_case (project_manager)
         elif normalized_role in ['projectmanager', 'project_manager']:
-            log.info(f"PM request - routing to Estimator (simplified linear workflow)")
-            return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
+            # Check if request has NEW materials (master_material_id is None)
+            has_new_materials = any(
+                mat.get('master_material_id') is None
+                for mat in (change_request.materials_data or [])
+            )
+
+            if has_new_materials:
+                log.info(f"PM request with NEW materials - routing to Estimator for pricing")
+                return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
+            else:
+                # All existing materials - should go to Buyer, but for now route to Estimator
+                log.info(f"PM request with existing materials only - routing to Estimator")
+                return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
 
         else:
             log.error(f"Invalid role '{requester_role}' (normalized: '{normalized_role}') attempting to send change request")
@@ -95,7 +108,10 @@ class ChangeRequestWorkflow:
     def determine_next_approver_after_pm(change_request) -> Tuple[str, str]:
         """
         Determine next approver after PM approval
-        Routes based on BOQ's dynamic overhead threshold
+
+        NEW FLOW:
+        - NEW materials (master_material_id = None) → Estimator (for pricing)
+        - Existing materials only → Buyer (NOT IMPLEMENTED YET, defaults to Estimator)
 
         Args:
             change_request: ChangeRequest model instance
@@ -103,8 +119,19 @@ class ChangeRequestWorkflow:
         Returns:
             tuple: (approval_required_from, next_approver_display_name)
         """
-        # Route based on dynamic percentage threshold from BOQ
-        return ChangeRequestWorkflow.determine_approval_route_by_percentage(change_request)
+        # Check if request has NEW materials (master_material_id is None)
+        has_new_materials = any(
+            mat.get('master_material_id') is None
+            for mat in (change_request.materials_data or [])
+        )
+
+        if has_new_materials:
+            log.info(f"CR {change_request.cr_id}: Has NEW materials - routing to Estimator for pricing")
+            return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
+        else:
+            # All existing materials - should go to Buyer, but for now route to Estimator
+            log.info(f"CR {change_request.cr_id}: Existing materials only - routing to Estimator")
+            return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
 
     @staticmethod
     def determine_next_approver_after_td() -> Tuple[str, str]:

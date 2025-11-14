@@ -9,24 +9,14 @@ from models.project import Project
 from models.user import User
 from config.logging import get_logger
 from config.change_request_config import CR_CONFIG
-from services.overhead_calculator import overhead_calculator
 from services.change_request_workflow import workflow_service
+from services.negotiable_profit_calculator import negotiable_profit_calculator
 from datetime import datetime
 from sqlalchemy.orm.attributes import flag_modified
 from utils.boq_email_service import BOQEmailService
 from utils.admin_viewing_context import get_effective_user_context
 
 log = get_logger()
-
-
-# DEPRECATED: Use overhead_calculator.calculate_overhead_impact() instead
-# Kept for backward compatibility
-def calculate_overhead_impact(boq_details, new_materials_cost):
-    """
-    DEPRECATED: Use overhead_calculator.calculate_overhead_impact() instead
-    Wrapper function for backward compatibility
-    """
-    return overhead_calculator.calculate_overhead_impact(boq_details, new_materials_cost)
 
 
 def create_change_request():
@@ -117,11 +107,20 @@ def create_change_request():
                 'reason': mat.get('reason', '')  # Reason for new material (used in routing logic)
             })
 
-        # Calculate overhead impact
-        overhead_impact = calculate_overhead_impact(boq_details, materials_total_cost)
+        # Calculate already consumed from previous approved change requests (NEW materials only)
+        # Sum materials_total_cost from all approved/purchase_completed CRs for this BOQ
+        already_consumed = db.session.query(
+            db.func.coalesce(db.func.sum(ChangeRequest.materials_total_cost), 0)
+        ).filter(
+            ChangeRequest.boq_id == boq_id,
+            ChangeRequest.is_deleted == False,
+            ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
+        ).scalar() or 0.0
 
-        if not overhead_impact:
-            return jsonify({"error": "Failed to calculate overhead impact"}), 500
+        # Calculate negotiable margin analysis
+        margin_analysis = negotiable_profit_calculator.calculate_change_request_margin(
+            boq_details, materials_total_cost, boq_id, already_consumed
+        )
 
         # Prepare sub_items_data from materials or extra material data
         sub_items_data = []
@@ -171,59 +170,6 @@ def create_change_request():
                     item_name = itm.get('item_name', '')
                     break
 
-        # Calculate percentage of item overhead - ONLY for NEW materials
-        # Separate NEW materials from EXISTING materials for threshold calculation
-        new_materials_cost = 0.0
-        has_new_materials = False
-        for mat in materials_data:
-            # New material if master_material_id is None
-            if mat.get('master_material_id') is None:
-                new_materials_cost += mat.get('total_price', 0)
-                has_new_materials = True
-
-        percentage_of_item_overhead = 0.0
-
-        # For NEW materials, calculate percentage against item's overhead (miscellaneous) amount
-        # For EXISTING materials, calculate against total overhead_allocated
-        if has_new_materials and item_id:
-            # Get item overhead amount from BOQ item
-            item_overhead_amount = 0.0
-            boq_json = boq_details.boq_details or {}
-            items = boq_json.get('items', [])
-
-            for itm in items:
-                itm_id = itm.get('master_item_id') or f"item_{boq_id}_{items.index(itm) + 1}"
-                if str(itm_id) == str(item_id):
-                    # Try different field names for overhead amount
-                    item_overhead_amount = itm.get('overhead', 0) or itm.get('overhead_amount', 0) or itm.get('miscellaneous_amount', 0)
-
-                    # If overhead is 0, calculate from percentage
-                    if item_overhead_amount == 0:
-                        overhead_percentage = itm.get('overhead_percentage', 10)
-                        total_cost = itm.get('total_cost', 0)
-                        item_overhead_amount = (total_cost * overhead_percentage) / 100
-
-                    break
-
-            if item_overhead_amount > 0:
-                # Calculate percentage based on NEW materials cost vs item overhead amount
-                percentage_of_item_overhead = (new_materials_cost / item_overhead_amount) * 100
-                log.info(f"NEW materials: Cost={new_materials_cost}, Item Overhead={item_overhead_amount}, Percentage={percentage_of_item_overhead:.2f}%")
-            else:
-                # Fallback: If no item overhead, try using total overhead allocated
-                # This ensures we don't default to 100% unnecessarily
-                if overhead_impact['original_overhead_allocated'] > 0:
-                    percentage_of_item_overhead = (new_materials_cost / overhead_impact['original_overhead_allocated']) * 100
-                    log.warning(f"No item overhead found for item {item_id}, using total overhead allocated instead: Cost={new_materials_cost}, Overhead={overhead_impact['original_overhead_allocated']}, Percentage={percentage_of_item_overhead:.2f}%")
-                else:
-                    # Last resort fallback
-                    percentage_of_item_overhead = 100.0
-                    log.error(f"No item overhead or total overhead allocated found for item {item_id}, defaulting to 100%")
-        elif overhead_impact['original_overhead_allocated'] > 0:
-            # Existing materials - use total overhead allocated
-            percentage_of_item_overhead = (materials_total_cost / overhead_impact['original_overhead_allocated']) * 100
-            log.info(f"EXISTING materials: Cost={materials_total_cost}, Overhead={overhead_impact['original_overhead_allocated']}, Percentage={percentage_of_item_overhead:.2f}%")
-
         # DUPLICATE DETECTION: Check for similar requests within last 30 seconds
         # This prevents accidental double-clicks and form re-submissions
         from datetime import timedelta
@@ -247,15 +193,6 @@ def create_change_request():
                     "cr_id": similar_request.cr_id,
                     "is_duplicate": True,
                     "materials_total_cost": round(materials_total_cost, 2),
-                    "overhead_status": {
-                        "original_allocated": round(overhead_impact['original_overhead_allocated'], 2),
-                        "previously_used": round(overhead_impact['original_overhead_used'], 2),
-                        "available_before": round(overhead_impact['original_overhead_remaining'], 2),
-                        "consumed_by_request": round(overhead_impact['overhead_consumed'], 2),
-                        "available_after": round(overhead_impact['new_overhead_remaining'], 2),
-                        "is_over_budget": overhead_impact['is_over_budget'],
-                        "balance": "negative" if overhead_impact['is_over_budget'] else "positive"
-                    },
                     "note": "Duplicate request prevented. Using existing request."
                 }), 200
 
@@ -276,22 +213,7 @@ def create_change_request():
             item_name=item_name,
             materials_data=materials_data,
             materials_total_cost=materials_total_cost,
-            sub_items_data=sub_items_data,  # Add this required field
-            percentage_of_item_overhead=percentage_of_item_overhead,
-            overhead_consumed=overhead_impact['overhead_consumed'],
-            overhead_balance_impact=overhead_impact['overhead_balance_impact'],
-            profit_impact=overhead_impact['profit_impact'],
-            original_overhead_allocated=overhead_impact['original_overhead_allocated'],
-            original_overhead_used=overhead_impact['original_overhead_used'],
-            original_overhead_remaining=overhead_impact['original_overhead_remaining'],
-            original_overhead_percentage=overhead_impact['original_overhead_percentage'],
-            original_profit_percentage=overhead_impact['original_profit_percentage'],
-            new_overhead_remaining=overhead_impact['new_overhead_remaining'],
-            new_base_cost=overhead_impact['new_base_cost'],
-            new_total_cost=overhead_impact['new_total_cost'],
-            is_over_budget=overhead_impact['is_over_budget'],
-            cost_increase_amount=overhead_impact['cost_increase_amount'],
-            cost_increase_percentage=overhead_impact['cost_increase_percentage']
+            sub_items_data=sub_items_data  # Add this required field
         )
 
         # All users create requests in pending status - no auto-send
@@ -382,19 +304,10 @@ def create_change_request():
             "cr_id": change_request.cr_id,
             "status": response_status,
             "materials_total_cost": round(materials_total_cost, 2),
-            "overhead_consumed": round(overhead_impact['overhead_consumed'], 2),
-            "overhead_status": {
-                "original_allocated": round(overhead_impact['original_overhead_allocated'], 2),
-                "previously_used": round(overhead_impact['original_overhead_used'], 2),
-                "available_before": round(overhead_impact['original_overhead_remaining'], 2),
-                "consumed_by_request": round(overhead_impact['overhead_consumed'], 2),
-                "available_after": round(overhead_impact['new_overhead_remaining'], 2),
-                "is_over_budget": overhead_impact['is_over_budget'],
-                "balance": "negative" if overhead_impact['is_over_budget'] else "positive"
-            },
             "approval_required_from": approval_from,
             "project_name": project.project_name,
             "boq_name": boq.boq_name,
+            "negotiable_margin_analysis": margin_analysis,  # Add negotiable margin analysis
             "note": "Request sent for review." if approval_from else "Request created. Click 'Send for Review' to submit to approver."
         }
 
@@ -981,33 +894,35 @@ def get_change_request_by_id(cr_id):
             result['boq_name'] = change_request.boq.boq_name
             result['boq_status'] = change_request.boq.status
 
-        # RECALCULATE consumed amount dynamically for accurate display
-        current_consumed = db.session.query(
-            db.func.coalesce(db.func.sum(ChangeRequest.overhead_consumed), 0)
-        ).filter(
-            ChangeRequest.boq_id == change_request.boq_id,
-            ChangeRequest.is_deleted == False,
-            ChangeRequest.created_at < change_request.created_at,
-            ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
-        ).scalar() or 0
+        # Calculate negotiable margin analysis
+        if change_request.boq:
+            boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
+            if boq_details:
+                # Calculate already consumed from OTHER approved CRs (exclude current CR)
+                already_consumed = db.session.query(
+                    db.func.coalesce(db.func.sum(ChangeRequest.materials_total_cost), 0)
+                ).filter(
+                    ChangeRequest.boq_id == change_request.boq_id,
+                    ChangeRequest.cr_id != cr_id,  # Exclude current CR
+                    ChangeRequest.is_deleted == False,
+                    ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
+                ).scalar() or 0.0
 
-        # Recalculate values based on current consumption
-        original_allocated = change_request.original_overhead_allocated or 0
-        current_available = original_allocated - current_consumed
-        remaining_after = current_available - (change_request.overhead_consumed or 0)
+                # Calculate negotiable margin analysis
+                margin_analysis = negotiable_profit_calculator.calculate_change_request_margin(
+                    boq_details, change_request.materials_total_cost or 0, change_request.boq_id, already_consumed
+                )
 
-        # Add/update overhead analysis with CURRENT values
-        result['overhead_analysis'] = {
-            'original_allocated': original_allocated,
-            'overhead_percentage': change_request.original_overhead_percentage,
-            'consumed_before_request': current_consumed,
-            'available_before_request': current_available,
-            'consumed_by_this_request': change_request.overhead_consumed,
-            'remaining_after_approval': remaining_after,
-            'is_within_budget': remaining_after >= 0,
-            'balance_type': 'negative' if remaining_after < 0 else 'positive',
-            'balance_amount': remaining_after
-        }
+                if margin_analysis:
+                    result['negotiable_margin_analysis'] = margin_analysis
+
+                # Add actual_profit and negotiable_margin from BOQ summary
+                if boq_details.boq_details and isinstance(boq_details.boq_details, dict):
+                    summary = boq_details.boq_details.get('summary', {})
+                    result['actual_profit'] = summary.get('actual_profit', 0)
+                    result['negotiable_margin'] = summary.get('negotiable_margin', 0)
+                    result['planned_profit'] = summary.get('planned_profit', 0)
+                    result['total_cost'] = boq_details.total_cost
 
         # Skip material lookup - master_material_id values like 'mat_198_1_2'
         # are not database IDs but sub_item identifiers
@@ -1027,7 +942,7 @@ def approve_change_request(cr_id):
     Approve change request (Estimator/TD)
     POST /api/change-request/{cr_id}/approve
     {
-        "comments": "Approved. Within overhead budget."
+        "comments": "Approved."
     }
     """
     try:
@@ -1544,9 +1459,7 @@ def complete_purchase_and_merge_to_boq(cr_id):
                 'totalMaterialCost': 0,
                 'totalLabourCost': 0,
                 'base_cost': 0,
-                'overhead_percentage': change_request.original_overhead_percentage or 10,
-                'overhead_amount': 0,
-                'profit_margin_percentage': change_request.original_profit_percentage or 15,
+                'profit_margin_percentage': change_request.original_profit_percentage or CR_CONFIG.DEFAULT_PROFIT_PERCENTAGE,
                 'profit_margin_amount': 0,
                 'total_cost': 0,
                 'selling_price': 0
@@ -1907,35 +1820,6 @@ def get_boq_change_requests(boq_id):
         for cr in change_requests:
             request_data = cr.to_dict()
 
-            # RECALCULATE consumed amount dynamically (not using stored historical value)
-            # Sum overhead consumed by all approved/completed CRs created before this one
-            current_consumed = db.session.query(
-                db.func.coalesce(db.func.sum(ChangeRequest.overhead_consumed), 0)
-            ).filter(
-                ChangeRequest.boq_id == cr.boq_id,
-                ChangeRequest.is_deleted == False,
-                ChangeRequest.created_at < cr.created_at,
-                ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
-            ).scalar() or 0
-
-            # Recalculate available and remaining based on current consumption
-            original_allocated = cr.original_overhead_allocated or 0
-            current_available = original_allocated - current_consumed
-            remaining_after = current_available - (cr.overhead_consumed or 0)
-
-            # Add overhead analysis with CURRENT values
-            request_data['overhead_analysis'] = {
-                'original_allocated': original_allocated,
-                'overhead_percentage': cr.original_overhead_percentage,
-                'consumed_before_request': current_consumed,  # CURRENT consumed, not historical
-                'available_before_request': current_available,  # CURRENT available
-                'consumed_by_this_request': cr.overhead_consumed,
-                'remaining_after_approval': remaining_after,  # RECALCULATED
-                'is_within_budget': remaining_after >= 0,  # RECALCULATED
-                'balance_type': 'negative' if remaining_after < 0 else 'positive',
-                'balance_amount': remaining_after
-            }
-
             # Add budget impact
             request_data['budget_impact'] = {
                 'original_total': cr.new_base_cost if cr.new_base_cost else 0,
@@ -2057,25 +1941,11 @@ def update_change_request(cr_id):
                 'specification': mat.get('specification')  # Specification for new materials
             })
 
-        # Get BOQ details for recalculation
-        boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
-        if not boq_details:
-            return jsonify({"error": "BOQ details not found"}), 404
-
-        # Recalculate overhead impact
-        overhead_impact = calculate_overhead_impact(boq_details, materials_total_cost)
-
         # Update change request
         change_request.justification = justification
         change_request.materials_data = materials_data
         change_request.sub_items_data = sub_items_data
         change_request.materials_total_cost = materials_total_cost
-        change_request.overhead_consumed = overhead_impact['overhead_consumed']
-        change_request.overhead_balance_impact = overhead_impact['overhead_balance_impact']
-        change_request.new_overhead_remaining = overhead_impact['new_overhead_remaining']
-        change_request.is_over_budget = overhead_impact['is_over_budget']
-        change_request.cost_increase_amount = overhead_impact['cost_increase_amount']
-        change_request.cost_increase_percentage = overhead_impact['cost_increase_percentage']
         change_request.updated_at = datetime.utcnow()
 
         db.session.commit()
@@ -2263,73 +2133,6 @@ def reject_change_request(cr_id):
 # Use send_for_review() instead
 # This function has been removed as the endpoint is no longer available
 # The send_for_review() function provides better workflow control
-
-
-def get_item_overhead(boq_id, item_id):
-    """
-    Get overhead snapshot for a specific BOQ item
-    Used for live calculations before creating change request
-    GET /api/boq/{boq_id}/item-overhead/{item_id}
-    """
-    try:
-        # Get BOQ details
-        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
-        if not boq:
-            return jsonify({"error": "BOQ not found"}), 404
-
-        # Get BOQ details
-        boq_details = BOQDetails.query.filter_by(boq_id=boq_id).first()
-        if not boq_details:
-            return jsonify({"error": "BOQ details not found"}), 404
-
-        # Find the specific item
-        boq_json = boq_details.boq_details or {}
-        items = boq_json.get('items', [])
-
-        item = None
-        for itm in items:
-            if itm.get('id') == item_id:
-                item = itm
-                break
-
-        if not item:
-            return jsonify({"error": f"Item {item_id} not found in BOQ"}), 404
-
-        # Calculate item overhead
-        item_overhead = item.get('overhead', 0)
-        if item_overhead == 0:
-            # Calculate from percentage if not stored
-            overhead_percentage = item.get('overhead_percentage', 10)
-            total_cost = item.get('total_cost', 0)
-            item_overhead = (total_cost * overhead_percentage) / 100
-
-        # Calculate consumed overhead from approved change requests
-        approved_crs = ChangeRequest.query.filter_by(
-            boq_id=boq_id,
-            item_id=item_id,
-            status='approved',
-            is_deleted=False
-        ).all()
-
-        consumed = 0.0
-        for cr in approved_crs:
-            consumed += cr.overhead_consumed or 0
-
-        available = item_overhead - consumed
-
-        return jsonify({
-            "item_id": item_id,
-            "item_name": item.get('name', ''),
-            "overhead_allocated": round(item_overhead, 2),
-            "overhead_consumed": round(consumed, 2),
-            "overhead_available": round(available, 2)
-        }), 200
-
-    except Exception as e:
-        log.error(f"Error getting item overhead: {str(e)}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
 
 
 # REMOVED: get_extra_materials, create_extra_material, approve_extra_material functions

@@ -97,11 +97,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const userIsTechnicalDirector = isTechnicalDirector(user);
   const userIsSiteEngineer = isSiteEngineer(user);
 
-  // Check if request has ANY new materials
-  const hasNewMaterials = materialsData.some((mat: any) =>
-    mat.master_material_id === null || mat.master_material_id === undefined
-  );
-
   // Final statuses where no actions should be allowed
   const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'approved', 'rejected'].includes(changeRequest.status);
 
@@ -402,63 +397,60 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                 </div>
               </div>
 
-              {/* Negotiable Price Summary - Show if has new materials */}
-              {hasNewMaterials && changeRequest.overhead_analysis && (
+              {/* Negotiable Margin Summary */}
+              {changeRequest.negotiable_margin_analysis && (
                 <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200">
-                  <h3 className="text-xs sm:text-sm font-semibold text-purple-900 mb-2 sm:mb-3">Negotiable Price Summary</h3>
+                  <h3 className="text-xs sm:text-sm font-semibold text-purple-900 mb-2 sm:mb-3">Negotiable Margin Summary</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-xs sm:text-sm">
                     <div>
                       <span className="text-purple-700 text-[10px] sm:text-xs">Original Allocated:</span>
                       <p className="font-bold text-purple-900 text-xs sm:text-sm">
-                        {formatCurrency(changeRequest.overhead_analysis.original_allocated || 0)}
+                        {formatCurrency(changeRequest.negotiable_margin_analysis.original_allocated || 0)}
                       </p>
+                      {changeRequest.negotiable_margin_analysis.discount_applied > 0 && (
+                        <p className="text-[9px] sm:text-xs text-purple-600">
+                          (Discount: {formatCurrency(changeRequest.negotiable_margin_analysis.discount_applied)})
+                        </p>
+                      )}
                     </div>
                     <div>
                       <span className="text-purple-700 text-[10px] sm:text-xs">Already Consumed:</span>
                       <p className="font-bold text-orange-600 text-xs sm:text-sm">
-                        {formatCurrency(changeRequest.overhead_analysis.consumed_before_request || 0)}
+                        {formatCurrency(changeRequest.negotiable_margin_analysis.already_consumed || 0)}
                       </p>
                     </div>
                     <div>
                       <span className="text-purple-700 text-[10px] sm:text-xs">This Request:</span>
                       <p className="font-bold text-blue-600 text-xs sm:text-sm">
-                        {formatCurrency(totalMaterialsCost)}
+                        {formatCurrency(changeRequest.negotiable_margin_analysis.this_request || 0)}
                       </p>
                     </div>
                     <div>
                       <span className="text-purple-700 text-[10px] sm:text-xs">Remaining After:</span>
                       <p className={`font-bold text-xs sm:text-sm ${
-                        (changeRequest.overhead_analysis.original_allocated - changeRequest.overhead_analysis.consumed_before_request - totalMaterialsCost) < 0
+                        changeRequest.negotiable_margin_analysis.remaining_after < 0
                           ? 'text-red-600'
                           : 'text-green-600'
                       }`}>
-                        {formatCurrency(
-                          changeRequest.overhead_analysis.original_allocated -
-                          changeRequest.overhead_analysis.consumed_before_request -
-                          totalMaterialsCost
-                        )}
+                        {formatCurrency(changeRequest.negotiable_margin_analysis.remaining_after)}
                       </p>
                     </div>
                   </div>
                   <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-purple-300">
                     <div className="flex justify-between items-center">
-                      <span className="text-xs sm:text-sm text-purple-700">Total Negotiable Price Consumption:</span>
+                      <span className="text-xs sm:text-sm text-purple-700">Total Consumption:</span>
                       <span className={`text-base sm:text-lg font-bold ${
-                        ((changeRequest.overhead_analysis.consumed_before_request + totalMaterialsCost) / changeRequest.overhead_analysis.original_allocated * 100) > 40
+                        changeRequest.negotiable_margin_analysis.exceeds_60_percent
                           ? 'text-red-600'
                           : 'text-green-600'
                       }`}>
-                        {changeRequest.overhead_analysis.original_allocated > 0
-                          ? (((changeRequest.overhead_analysis.consumed_before_request + totalMaterialsCost) / changeRequest.overhead_analysis.original_allocated) * 100).toFixed(1)
-                          : '0.0'
-                        }%
+                        {changeRequest.negotiable_margin_analysis.consumption_percentage.toFixed(1)}%
                       </span>
                     </div>
-                    {changeRequest.overhead_analysis.original_allocated > 0 &&
-                     ((changeRequest.overhead_analysis.consumed_before_request + totalMaterialsCost) / changeRequest.overhead_analysis.original_allocated * 100) > 40 && (
+                    {changeRequest.negotiable_margin_analysis.exceeds_60_percent && (
                       <p className="text-[10px] sm:text-xs text-red-600 mt-1 flex items-center gap-1">
                         <AlertCircle className="w-3 h-3" />
-                        <span>Exceeds 40% threshold - TD approval required</span>
+                        <span>Warning: Consumption exceeds 60% threshold</span>
                       </p>
                     )}
                   </div>

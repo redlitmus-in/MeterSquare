@@ -27,7 +27,18 @@ export interface ChangeRequestItem {
     master_material_id?: number;
   }>;
   materials_total_cost: number;
-  overhead_analysis: {
+  negotiable_margin_analysis?: {
+    original_allocated: number;
+    discount_applied: number;
+    already_consumed: number;
+    this_request: number;
+    remaining_after: number;
+    consumption_percentage: number;
+    exceeds_60_percent: boolean;
+    is_over_budget: boolean;
+  };
+  // Deprecated - kept for backward compatibility
+  overhead_analysis?: {
     original_allocated: number;
     overhead_percentage: number;
     consumed_before_request: number;
@@ -38,7 +49,7 @@ export interface ChangeRequestItem {
     balance_type: 'positive' | 'negative';
     balance_amount: number;
   };
-  budget_impact: {
+  budget_impact?: {
     original_total: number;
     new_total_if_approved: number;
     increase_amount: number;

@@ -204,4 +204,49 @@ def delete_buyer_route(user_id):
     access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
-    return delete_buyer(user_id) 
+    return delete_buyer(user_id)
+
+
+# ============================================================================
+# ITEM-LEVEL ASSIGNMENT ROUTES - PM assigns items to Site Engineers
+# ============================================================================
+
+# Assign BOQ items to Site Engineer
+@pm_routes.route('/boq/assign-items-to-se', methods=['POST'])
+@jwt_required
+def assign_items_to_se_route():
+    """SHARED: PM, MEP, or Admin assigns specific BOQ items to a Site Engineer"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return assign_items_to_se()
+
+# Get item assignments for a BOQ
+@pm_routes.route('/boq/<int:boq_id>/item-assignments', methods=['GET'])
+@jwt_required
+def get_item_assignments_route(boq_id):
+    """SHARED: PM, MEP, SE, or Admin views item assignments for a BOQ"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return get_item_assignments(boq_id)
+
+# Unassign items from Site Engineer
+@pm_routes.route('/boq/unassign-items', methods=['POST'])
+@jwt_required
+def unassign_items_from_se_route():
+    """SHARED: PM, MEP, or Admin unassigns items from Site Engineer"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return unassign_items_from_se()
+
+# Get available Site Engineers for assignment
+@pm_routes.route('/available-site-engineers', methods=['GET'])
+@jwt_required
+def get_available_site_engineers_route():
+    """SHARED: PM, MEP, or Admin gets list of available Site Engineers"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return get_available_site_engineers() 

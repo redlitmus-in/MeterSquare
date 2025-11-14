@@ -24,13 +24,14 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
 import BOQDetailsModal from '@/roles/estimator/components/BOQDetailsModal';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, UserCheck } from 'lucide-react';
 import PendingRequestsSection from '@/components/boq/PendingRequestsSection';
 import ApprovedExtraMaterialsSection from '@/components/boq/ApprovedExtraMaterialsSection';
 import RejectedRequestsSection from '@/components/boq/RejectedRequestsSection';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
 import DayExtensionRequestModal from '../components/DayExtensionRequestModal';
+import AssignItemToSEModal from '@/components/modals/AssignItemToSEModal';
 
 interface BOQDetails {
   boq_detail_id?: number;
@@ -146,9 +147,13 @@ const MyProjects: React.FC = () => {
   const [fullScreenBoqMode, setFullScreenBoqMode] = useState<'view' | 'edit'>('view');
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showCreateBOQModal, setShowCreateBOQModal] = useState(false);
+  const [showItemAssignmentModal, setShowItemAssignmentModal] = useState(false);
+  const [selectedItemIndices, setSelectedItemIndices] = useState<number[]>([]);
+  const [selectedItemsInfo, setSelectedItemsInfo] = useState<Array<{ item_code: string; description: string }>>([]);
+  const [itemAssignmentRefreshTrigger, setItemAssignmentRefreshTrigger] = useState(0);
 
   // Pause auto-refresh when any modal is open to prevent flickering during editing
-  const isAnyModalOpen = showEditBOQModal || showAssignModal || showCreateBOQModal;
+  const isAnyModalOpen = showEditBOQModal || showAssignModal || showCreateBOQModal || showItemAssignmentModal;
 
   // Real-time auto-sync for projects - disabled when editing
   const { data: projectsData, isLoading: loading, refetch } = useProjectsAutoSync(
@@ -543,6 +548,20 @@ const MyProjects: React.FC = () => {
     // BOQCreationForm will fetch full BOQ details using the boq_id from existingBoqData
   };
 
+  // Item Assignment Handlers
+  const handleAssignItems = (itemIndices: number[], itemsInfo: Array<{ item_code: string; description: string }>) => {
+    setSelectedItemIndices(itemIndices);
+    setSelectedItemsInfo(itemsInfo);
+    setShowItemAssignmentModal(true);
+  };
+
+  const handleItemAssignmentSuccess = () => {
+    setShowItemAssignmentModal(false);
+    setItemAssignmentRefreshTrigger(prev => prev + 1);
+    refetch();
+    toast.success('Items assigned successfully');
+  };
+
   const filteredProjects = projects.filter(project => {
     const hasSiteSupervisor = project.site_supervisor_id !== null &&
                               project.site_supervisor_id !== undefined &&
@@ -923,6 +942,7 @@ const MyProjects: React.FC = () => {
                       >
                         <EyeIcon className="w-5 h-5" />
                       </button>
+
                       {!project.site_supervisor_id &&
                        project.user_id !== null &&
                        (project.boq_status?.toLowerCase() === 'client_confirmed' ||
@@ -930,10 +950,12 @@ const MyProjects: React.FC = () => {
                         <button
                           onClick={() => {
                             setSelectedProject(project);
-                            setShowAssignModal(true);
+                            // Open modal with empty items array - modal will fetch items itself
+                            setSelectedItemIndices([]);
+                            setShowItemAssignmentModal(true);
                           }}
                           className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-all"
-                          title="Assign Site Engineer"
+                          title="Assign Items to Site Engineer"
                         >
                           <UserPlusIcon className="w-5 h-5" />
                         </button>
@@ -1290,7 +1312,7 @@ const MyProjects: React.FC = () => {
                             {filteredSEs.filter(se => se.user_status === 'online').map((se) => {
                               const isSelected = selectedSE?.user_id === se.user_id;
                               const projectCount = se.project_count || 0;
-                              const isMaxCapacity = projectCount >= 2;
+                              const isMaxCapacity = projectCount >= 3;
 
                               return (
                                 <div
@@ -1336,7 +1358,7 @@ const MyProjects: React.FC = () => {
                                         </div>
                                         <div className="flex items-center gap-2 text-[10px] text-gray-500 mt-0.5">
                                           <BuildingOfficeIcon className="w-3 h-3 flex-shrink-0" />
-                                          <span>{projectCount}/2 projects</span>
+                                          <span>{projectCount}/3 projects</span>
                                           {se.projects && se.projects.length > 0 && (
                                             <button
                                               onClick={(e) => {
@@ -1409,7 +1431,7 @@ const MyProjects: React.FC = () => {
                           <div className="space-y-2">
                             {filteredSEs.filter(se => se.user_status !== 'online').map((se) => {
                               const projectCount = se.project_count || 0;
-                              const isMaxCapacity = projectCount >= 2;
+                              const isMaxCapacity = projectCount >= 3;
 
                               return (
                                 <div
@@ -1448,7 +1470,7 @@ const MyProjects: React.FC = () => {
                                         </div>
                                         <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-0.5">
                                           <BuildingOfficeIcon className="w-3 h-3 flex-shrink-0" />
-                                          <span>{projectCount}/2 projects</span>
+                                          <span>{projectCount}/3 projects</span>
                                           {se.projects && se.projects.length > 0 && (
                                             <button
                                               onClick={(e) => {
@@ -1516,7 +1538,7 @@ const MyProjects: React.FC = () => {
                     <div className="text-[11px] text-blue-900">
                       <p className="font-medium">Project Assignment Limit</p>
                       <p className="text-blue-700 mt-0.5">
-                        Each Site Engineer can be assigned to a maximum of 2 projects. The assigned SE will gain full access to manage this project.
+                        Each Site Engineer can be assigned to a maximum of 3 projects. The assigned SE will gain full access to manage this project.
                       </p>
                     </div>
                   </div>
@@ -2694,6 +2716,19 @@ const MyProjects: React.FC = () => {
           currentDuration={selectedProject.duration_days}
           startDate={selectedProject.start_date}
           endDate={selectedProject.end_date}
+        />
+      )}
+
+      {/* Item Assignment Modal */}
+      {showItemAssignmentModal && selectedProject && (
+        <AssignItemToSEModal
+          isOpen={showItemAssignmentModal}
+          onClose={() => setShowItemAssignmentModal(false)}
+          boqId={selectedProject.boq_id || 0}
+          boqName={selectedProject.boq_name || `BOQ-${selectedProject.boq_id}`}
+          projectName={selectedProject.project_name || selectedProject.project_name || 'Project'}
+          selectedItemIndices={selectedItemIndices}
+          onSuccess={handleItemAssignmentSuccess}
         />
       )}
     </div>

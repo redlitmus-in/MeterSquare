@@ -2,7 +2,7 @@ from flask import request, jsonify, g
 from sqlalchemy.orm import selectinload
 from config.db import db
 from models.project import Project
-from models.boq import BOQ, BOQDetails, MasterItem, MasterSubItem
+from models.boq import BOQ, BOQDetails, MasterItem, MasterSubItem, MasterMaterial
 from models.change_request import ChangeRequest
 from models.user import User
 from models.role import Role
@@ -740,20 +740,78 @@ def complete_purchase():
         cr.purchase_notes = notes
         cr.updated_at = datetime.utcnow()
 
+        # Save newly purchased materials to MasterMaterial table
+        new_materials_added = []
+        sub_items_data = cr.sub_items_data or cr.materials_data or []
+
+        for sub_item in sub_items_data:
+            if isinstance(sub_item, dict):
+                # Check if this sub-item has materials
+                materials_list = sub_item.get('materials', [])
+
+                # If no materials array, treat the sub_item itself as a material
+                if not materials_list:
+                    materials_list = [sub_item]
+
+                for material in materials_list:
+                    material_name = material.get('material_name', '').strip()
+
+                    # Skip if no material name
+                    if not material_name:
+                        continue
+
+                    # Check if material already exists in MasterMaterial
+                    existing_material = MasterMaterial.query.filter_by(
+                        material_name=material_name,
+                        is_active=True
+                    ).first()
+
+                    # Only add if it's a NEW material
+                    if not existing_material:
+                        new_material = MasterMaterial(
+                            material_name=material_name,
+                            item_id=cr.item_id,
+                            sub_item_id=material.get('sub_item_id') or sub_item.get('sub_item_id'),
+                            description=material.get('description', ''),
+                            brand=material.get('brand', ''),
+                            size=material.get('size', ''),
+                            specification=material.get('specification', ''),
+                            quantity=material.get('quantity', 0),
+                            default_unit=material.get('unit', 'unit'),
+                            current_market_price=material.get('unit_price', 0),
+                            total_price=material.get('total_price', 0),
+                            is_active=True,
+                            created_at=datetime.utcnow(),
+                            created_by=buyer_name,
+                            last_modified_at=datetime.utcnow(),
+                            last_modified_by=buyer_name
+                        )
+                        db.session.add(new_material)
+                        new_materials_added.append(material_name)
+                        log.info(f"New material '{material_name}' added to MasterMaterial by buyer {buyer_id}")
+
         db.session.commit()
 
-        log.info(f"Purchase CR-{cr_id} marked as complete by buyer {buyer_id}")
+        if new_materials_added:
+            log.info(f"Purchase CR-{cr_id} completed. Added {len(new_materials_added)} new materials: {', '.join(new_materials_added)}")
+        else:
+            log.info(f"Purchase CR-{cr_id} marked as complete by buyer {buyer_id}. No new materials added.")
+
+        success_message = "Purchase marked as complete successfully"
+        if new_materials_added:
+            success_message += f". {len(new_materials_added)} new material(s) added to system"
 
         return jsonify({
             "success": True,
-            "message": "Purchase marked as complete successfully",
+            "message": success_message,
             "purchase": {
                 "cr_id": cr.cr_id,
                 "status": cr.status,
                 "purchase_completed_by_user_id": cr.purchase_completed_by_user_id,
                 "purchase_completed_by_name": cr.purchase_completed_by_name,
                 "purchase_completion_date": cr.purchase_completion_date.isoformat(),
-                "purchase_notes": cr.purchase_notes
+                "purchase_notes": cr.purchase_notes,
+                "new_materials_added": new_materials_added
             }
         }), 200
 

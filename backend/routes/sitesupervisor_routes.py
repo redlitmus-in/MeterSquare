@@ -62,3 +62,13 @@ def assign_boq_to_buyer_route(boq_id):
     if access_check:
         return access_check
     return assign_boq_to_buyer(boq_id)
+
+# Site Engineer gets items assigned to them
+@sitesupervisor_routes.route('/my-assigned-items', methods=['GET'])
+@jwt_required
+def get_my_assigned_items_route():
+    """Site Supervisor or Admin gets all BOQ items assigned to them"""
+    access_check = check_ss_or_admin_access()
+    if access_check:
+        return access_check
+    return get_my_assigned_items()

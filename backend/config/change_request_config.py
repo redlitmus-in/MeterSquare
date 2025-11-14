@@ -13,9 +13,17 @@ class ChangeRequestConfig:
     # Budget Thresholds
     BUDGET_THRESHOLD_TD = float(os.getenv('CR_BUDGET_THRESHOLD_TD', '50000'))  # AED 50,000
 
-    # Default Financial Percentages
-    DEFAULT_OVERHEAD_PERCENTAGE = float(os.getenv('CR_DEFAULT_OVERHEAD', '10.0'))
+    # Default Financial Percentages for BOQ Calculations
+    DEFAULT_MISC_PERCENTAGE = float(os.getenv('BOQ_DEFAULT_MISC', '10.0'))  # Miscellaneous
+    DEFAULT_OVERHEAD_PROFIT_PERCENTAGE = float(os.getenv('BOQ_DEFAULT_OVERHEAD_PROFIT', '25.0'))  # O&P
+    DEFAULT_TRANSPORT_PERCENTAGE = float(os.getenv('BOQ_DEFAULT_TRANSPORT', '5.0'))  # Transport
+
+    # Legacy fields (for backward compatibility with change requests)
+    DEFAULT_OVERHEAD_PERCENTAGE = DEFAULT_MISC_PERCENTAGE  # Alias
     DEFAULT_PROFIT_PERCENTAGE = float(os.getenv('CR_DEFAULT_PROFIT', '15.0'))
+
+    # Negotiable Margin Thresholds
+    NEGOTIABLE_MARGIN_WARNING_THRESHOLD = float(os.getenv('CR_NEGOTIABLE_MARGIN_WARNING', '60.0'))  # Warning at 60%
 
     # Approval Roles
     ROLE_SITE_ENGINEER = 'site_supervisor'
@@ -68,7 +76,9 @@ class ChangeRequestConfig:
         """Validate configuration on startup"""
         try:
             assert cls.BUDGET_THRESHOLD_TD > 0, "Budget threshold must be positive"
-            assert 0 <= cls.DEFAULT_OVERHEAD_PERCENTAGE <= 100, "Overhead percentage must be 0-100"
+            assert 0 <= cls.DEFAULT_MISC_PERCENTAGE <= 100, "Misc percentage must be 0-100"
+            assert 0 <= cls.DEFAULT_OVERHEAD_PROFIT_PERCENTAGE <= 100, "O&P percentage must be 0-100"
+            assert 0 <= cls.DEFAULT_TRANSPORT_PERCENTAGE <= 100, "Transport percentage must be 0-100"
             assert 0 <= cls.DEFAULT_PROFIT_PERCENTAGE <= 100, "Profit percentage must be 0-100"
             return True
         except AssertionError as e:

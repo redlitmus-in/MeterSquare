@@ -28,6 +28,7 @@ import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
 import { estimatorService } from '../services/estimatorService';
 import { BOQGetResponse, BOQItemDetailed } from '../types';
 import { toast } from 'sonner';
+import { BOQ_CONFIG } from '@/config/boqConfig';
 import BOQHistoryTimeline from './BOQHistoryTimeline';
 import BOQRevisionHistory from './BOQRevisionHistory';
 import BOQComparisonView from './BOQComparisonView';
@@ -852,9 +853,9 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                   const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
                                                   const materialCost = subItem.material_cost || (subItem.materials?.reduce((sum: number, m: any) => sum + (m.total_price || m.quantity * m.unit_price), 0) || 0);
                                                   const labourCost = subItem.labour_cost || (subItem.labour?.reduce((sum: number, l: any) => sum + (l.total_cost || l.hours * l.rate_per_hour), 0) || 0);
-                                                  const miscAmount = subItem.misc_amount || (clientAmount * ((subItem.misc_percentage || 10) / 100));
-                                                  const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || 5) / 100));
-                                                  const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || 25) / 100));
+                                                  const miscAmount = subItem.misc_amount || (clientAmount * ((subItem.misc_percentage || BOQ_CONFIG.DEFAULT_MISC_PERCENTAGE) / 100));
+                                                  const transportAmount = subItem.transport_amount || (clientAmount * ((subItem.transport_percentage || BOQ_CONFIG.DEFAULT_TRANSPORT_PERCENTAGE) / 100));
+                                                  const plannedProfit = subItem.planned_profit || (clientAmount * ((subItem.overhead_profit_percentage || BOQ_CONFIG.DEFAULT_OVERHEAD_PROFIT_PERCENTAGE) / 100));
                                                   const internalCost = subItem.internal_cost || (materialCost + labourCost + miscAmount + plannedProfit + transportAmount);
                                                   const negotiableMargin = subItem.actual_profit || (clientAmount - internalCost);
 

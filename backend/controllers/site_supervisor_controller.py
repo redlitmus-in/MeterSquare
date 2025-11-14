@@ -136,6 +136,35 @@ def get_all_sitesupervisor_boqs():
                     boq_assigned_to_buyer = True
                     assigned_buyer_name = assignment.assigned_to_buyer_name
 
+            # Calculate item assignment counts for this project
+            items_assigned_to_me = 0
+            total_items = 0
+            items_by_pm = {}
+
+            if boq_ids:
+                for boq_id in boq_ids:
+                    boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+                    if boq_details and boq_details.boq_details:
+                        items = boq_details.boq_details.get('items', [])
+                        total_items += len(items)
+
+                        for item in items:
+                            if item.get('assigned_to_se_user_id') == user_id:
+                                items_assigned_to_me += 1
+
+                                # Group by PM
+                                pm_name = item.get('assigned_by_pm_name', 'Unknown')
+                                if pm_name not in items_by_pm:
+                                    items_by_pm[pm_name] = {
+                                        "pm_name": pm_name,
+                                        "pm_user_id": item.get('assigned_by_pm_user_id'),
+                                        "items_count": 0
+                                    }
+                                items_by_pm[pm_name]["items_count"] += 1
+
+            # Convert items_by_pm dict to list
+            items_by_pm_list = list(items_by_pm.values())
+
             projects_list.append({
                 "project_id": project.project_id,
                 "project_name": project.project_name,
@@ -152,7 +181,11 @@ def get_all_sitesupervisor_boqs():
                 "boq_ids": boq_ids,  # List of BOQ IDs for reference
                 "completion_requested": project.completion_requested if project.completion_requested is not None else False,
                 "boq_assigned_to_buyer": boq_assigned_to_buyer,
-                "assigned_buyer_name": assigned_buyer_name
+                "assigned_buyer_name": assigned_buyer_name,
+                # Item assignment counts
+                "items_assigned_to_me": items_assigned_to_me,
+                "total_items": total_items,
+                "items_by_pm": items_by_pm_list
             })
 
         return jsonify({
@@ -899,6 +932,174 @@ def get_available_buyers():
             "error": f"Failed to fetch buyers: {str(e)}"
         }), 500
 
+def get_my_assigned_items():
+    """SE gets all BOQ items assigned to them across all projects"""
+    try:
+        from models.pm_assign_ss import PMAssignSS
+
+        # Get current user
+        user_id = g.user_id
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        role_name = user.role.role if user.role else 'unknown'
+
+        if role_name != 'siteEngineer' and role_name != 'admin':
+            return jsonify({"error": "Only Site Engineers can access this endpoint"}), 403
+
+        # Get all assignments from pm_assign_ss table for this SE
+        assignments = PMAssignSS.query.filter_by(
+            assigned_to_se_id=user_id,
+            is_deleted=False
+        ).all()
+
+        my_items = []
+        grouped_by_pm = {}
+        grouped_by_project = {}
+        total_items_count = 0
+
+        for assignment in assignments:
+            # Get BOQ
+            boq = BOQ.query.filter_by(boq_id=assignment.boq_id, is_deleted=False).first()
+            if not boq:
+                continue
+
+            # Get project
+            project = Project.query.filter_by(project_id=assignment.project_id, is_deleted=False).first()
+            if not project:
+                continue
+
+            # Get PM details
+            pm_user = User.query.get(assignment.assigned_by_pm_id)
+            pm_name = pm_user.full_name if pm_user else 'Unknown'
+
+            # Get BOQ details to fetch full item information
+            boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+            items = boq_details.boq_details.get('items', []) if boq_details and boq_details.boq_details else []
+
+            # Process each assigned item index
+            for item_index in (assignment.item_indices or []):
+                if item_index >= len(items):
+                    continue
+
+                item = items[item_index]
+                total_items_count += 1
+
+                item_data = {
+                    "boq_id": boq.boq_id,
+                    "boq_name": boq.boq_name,
+                    "project_id": project.project_id,
+                    "project_name": project.project_name,
+                    "project_code": project.project_code if hasattr(project, 'project_code') else None,
+                    "item_index": item_index,
+                    "item_code": item.get('item_code') or item.get('item_number') or item.get('item_name') or item.get('sr_no') or f"Item-{item_index+1}",
+                    "description": item.get('description') or item.get('item_name') or item.get('name') or 'N/A',
+                    "quantity": item.get('quantity') or item.get('qty'),
+                    "unit": item.get('unit') or item.get('uom') or '',
+                    "rate": item.get('rate') or item.get('unitRate'),
+                    "amount": item.get('amount') or item.get('totalAmount'),
+                    "assigned_by_pm_user_id": assignment.assigned_by_pm_id,
+                    "assigned_by_pm_name": pm_name,
+                    "assignment_date": assignment.assignment_date.isoformat() if assignment.assignment_date else None,
+                    "assignment_status": assignment.assignment_status or 'assigned',
+                    "notes": assignment.notes
+                }
+
+                my_items.append(item_data)
+
+                # Group by PM
+                if pm_name not in grouped_by_pm:
+                    grouped_by_pm[pm_name] = {
+                        "pm_user_id": assignment.assigned_by_pm_id,
+                        "pm_name": pm_name,
+                        "items_count": 0,
+                        "projects": {}
+                    }
+
+                pm_group = grouped_by_pm[pm_name]
+                pm_group["items_count"] += 1
+
+                # Group by project within PM
+                if project.project_name not in pm_group["projects"]:
+                    pm_group["projects"][project.project_name] = {
+                        "project_id": project.project_id,
+                        "project_name": project.project_name,
+                        "project_code": project.project_code if hasattr(project, 'project_code') else None,
+                        "items_count": 0,
+                        "boqs": {}
+                    }
+
+                pm_group["projects"][project.project_name]["items_count"] += 1
+
+                # Group by BOQ within project
+                if boq.boq_name not in pm_group["projects"][project.project_name]["boqs"]:
+                    pm_group["projects"][project.project_name]["boqs"][boq.boq_name] = {
+                        "boq_id": boq.boq_id,
+                        "boq_name": boq.boq_name,
+                        "items_count": 0
+                    }
+
+                pm_group["projects"][project.project_name]["boqs"][boq.boq_name]["items_count"] += 1
+
+                # Group by project (for top-level summary)
+                if project.project_id not in grouped_by_project:
+                    grouped_by_project[project.project_id] = {
+                        "project_id": project.project_id,
+                        "project_name": project.project_name,
+                        "project_code": project.project_code if hasattr(project, 'project_code') else None,
+                        "items_count": 0,
+                        "boqs": {}
+                    }
+
+                grouped_by_project[project.project_id]["items_count"] += 1
+
+                if boq.boq_id not in grouped_by_project[project.project_id]["boqs"]:
+                    grouped_by_project[project.project_id]["boqs"][boq.boq_id] = {
+                        "boq_id": boq.boq_id,
+                        "boq_name": boq.boq_name,
+                        "items_count": 0
+                    }
+
+                grouped_by_project[project.project_id]["boqs"][boq.boq_id]["items_count"] += 1
+
+        # Convert grouped_by_pm dict to list
+        pm_list = []
+        for pm_name, pm_data in grouped_by_pm.items():
+            # Convert projects dict to list and convert BOQs dict to list within each project
+            for proj_name, proj_data in pm_data["projects"].items():
+                proj_data["boqs"] = list(proj_data["boqs"].values())
+            pm_data["projects"] = list(pm_data["projects"].values())
+            pm_list.append(pm_data)
+
+        # Convert grouped_by_project dict to list
+        project_list = []
+        for proj_id, proj_data in grouped_by_project.items():
+            proj_data["boqs"] = list(proj_data["boqs"].values())
+            project_list.append(proj_data)
+
+        # Sort by PM name
+        pm_list.sort(key=lambda x: x['pm_name'])
+        project_list.sort(key=lambda x: x['project_name'])
+
+        return jsonify({
+            "success": True,
+            "my_items": my_items,
+            "grouped_by_pm": pm_list,
+            "grouped_by_project": project_list,
+            "total_items_assigned": total_items_count,
+            "unique_pms_count": len(pm_list),
+            "unique_projects_count": len(grouped_by_project),
+            "total_assignments": len(assignments)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        log.error(f"Error getting assigned items: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to get assigned items: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500
 
 def assign_boq_to_buyer(boq_id):
     """Site Engineer assigns BOQ materials to a buyer"""

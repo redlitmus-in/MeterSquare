@@ -97,6 +97,84 @@ export const assignBoqToBuyer = async (boqId: number, buyerId: number): Promise<
   }
 };
 
+// ============================================================================
+// ITEM-LEVEL ASSIGNMENT FUNCTIONS - PM assigns items to Site Engineers
+// ============================================================================
+
+// Get available Site Engineers for item assignment
+export const getAvailableSiteEngineers = async (): Promise<any[]> => {
+  try {
+    const response = await apiClient.get('/all_sitesupervisor');
+    // Combine both assigned and unassigned site supervisors
+    const allSEs = [
+      ...(response.data.assigned_project_managers || []),
+      ...(response.data.unassigned_project_managers || [])
+    ];
+    return allSEs;
+  } catch (error) {
+    console.error('Error fetching available site engineers:', error);
+    throw error;
+  }
+};
+
+// Assign specific BOQ items to a Site Engineer
+export const assignItemsToSE = async (
+  boqId: number,
+  itemIndices: number[],
+  seUserId: number
+): Promise<any> => {
+  try {
+    const response = await apiClient.post('/boq/assign-items-to-se', {
+      boq_id: boqId,
+      item_indices: itemIndices,
+      se_user_id: seUserId
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error assigning items to SE:', error);
+    throw error;
+  }
+};
+
+// Get item assignments for a specific BOQ
+export const getItemAssignments = async (boqId: number): Promise<any> => {
+  try {
+    const response = await apiClient.get(`/boq/${boqId}/item-assignments`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching item assignments:', error);
+    throw error;
+  }
+};
+
+// Unassign items from Site Engineer
+export const unassignItems = async (
+  boqId: number,
+  itemIndices: number[]
+): Promise<any> => {
+  try {
+    const response = await apiClient.post('/boq/unassign-items', {
+      boq_id: boqId,
+      item_indices: itemIndices
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error unassigning items:', error);
+    throw error;
+  }
+};
+
+// Get items assigned to current Site Engineer
+export const getMyAssignedItems = async (): Promise<any> => {
+  try {
+    const response = await apiClient.get('/my-assigned-items');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching my assigned items:', error);
+    throw error;
+  }
+};
+
 // Buyer Functions
 export const getSEBoqAssignments = async (): Promise<BOQAssignment[]> => {
   try {

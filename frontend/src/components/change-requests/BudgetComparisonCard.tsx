@@ -99,9 +99,9 @@ const BudgetComparisonCard: React.FC<BudgetComparisonCardProps> = ({ budgetImpac
               </td>
             </tr>
 
-            {/* Overhead */}
+            {/* Negotiable Profit (formerly Overhead) */}
             <tr className="border-b border-gray-200 hover:bg-blue-50/30">
-              <td className="py-3 px-4 text-gray-700">Overhead</td>
+              <td className="py-3 px-4 text-gray-700">Negotiable Profit</td>
               <td className="py-3 px-4 text-right font-medium text-gray-900">
                 {formatCurrency(budgetImpact.original_overhead)}
               </td>
