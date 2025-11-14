@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ApprovalWorkflow from '@/components/workflow/ApprovalWorkflow';
-import MaterialDeliveryNote from '@/components/forms/MaterialDeliveryNote';
+// import MaterialDeliveryNote from '@/components/forms/MaterialDeliveryNote'; // File doesn't exist - commented out
 
 interface SiteDispatch {
   id: string;
@@ -584,7 +584,8 @@ const MaterialDispatchSitePage: React.FC = () => {
               </Button>
             </div>
             <div className="p-4">
-              <MaterialDeliveryNote />
+              {/* <MaterialDeliveryNote /> */}
+              <p className="text-gray-500 text-center py-8">Material delivery note form will be implemented soon.</p>
             </div>
           </div>
         </div>

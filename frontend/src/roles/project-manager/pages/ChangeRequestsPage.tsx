@@ -1746,4 +1746,5 @@ const ChangeRequestsPage: React.FC = () => {
   );
 };
 
-export default ChangeRequestsPage;
+// ✅ PERFORMANCE FIX: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(ChangeRequestsPage);

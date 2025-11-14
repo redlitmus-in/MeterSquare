@@ -4,38 +4,36 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { motion } from 'framer-motion';
-import { 
-  Eye, 
-  EyeOff, 
+import {
   ArrowRight,
   Lock,
   Mail,
   CheckCircle,
   Activity,
   ShieldCheck,
-  Building2,
   Users,
   FileText,
-  Package,
-  TrendingUp,
-  Clock,
-  CheckSquare,
-  BarChart3,
-  Truck,
-  ClipboardList,
-  Settings,
-  Layers,
-  Shield,
-  TrendingUp as LineChart,
-  PieChart,
-  Target,
-  User,
   ChevronDown,
   CheckCircle2,
   KeyRound,
   RefreshCw,
+  Shield,
+  Briefcase,
   HardHat,
-  Briefcase
+  Package,
+  User,
+  TrendingUp as LineChart,
+  CheckSquare,
+  ClipboardList,
+  Clock,
+  Layers,
+  PieChart,
+  Settings,
+  Target,
+  Truck,
+  TrendingUp,
+  BarChart3,
+  Building2
 } from 'lucide-react';
 import { toast } from 'sonner';
 

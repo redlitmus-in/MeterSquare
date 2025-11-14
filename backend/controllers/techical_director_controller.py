@@ -5,6 +5,8 @@ from models.boq import *
 from models.preliminary_master import BOQInternalRevision
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import selectinload  # ✅ PERFORMANCE: Eager loading for N+1 fix
+from datetime import datetime  # For datetime.min in sorting
 from utils.boq_email_service import BOQEmailService
 from models.user import User
 from models.role import Role
@@ -22,16 +24,23 @@ def get_all_td_boqs():
         per_page = min(request.args.get('per_page', 10, type=int), 100)
 
         # Build query - Admin sees ALL BOQs, TD sees specific statuses
+        # ✅ PERFORMANCE FIX: Eager load history and details to prevent N+1 queries
         if user_role == 'admin':
             # Admin sees all BOQs
-            query = db.session.query(BOQ).filter(
+            query = db.session.query(BOQ).options(
+                selectinload(BOQ.history),
+                selectinload(BOQ.details)
+            ).filter(
                 BOQ.is_deleted == False,
                 BOQ.email_sent == True
             ).order_by(BOQ.created_at.desc())
         else:
             # TD should see: Pending_TD_Approval, approved, rejected, sent_for_review, new_purchase_create
             # TD should NOT see: Pending_PM_Approval (those are for PM only)
-            query = db.session.query(BOQ).filter(
+            query = db.session.query(BOQ).options(
+                selectinload(BOQ.history),
+                selectinload(BOQ.details)
+            ).filter(
                 BOQ.is_deleted == False,
                 BOQ.email_sent == True,
                 BOQ.status != 'Pending_PM_Approval'  # Exclude BOQs pending PM approval
@@ -41,10 +50,14 @@ def get_all_td_boqs():
         # Build response with BOQ details and history
         boqs_list = []
         for boq in paginated.items:
-            # Get BOQ history (will be empty array if no history)
-            history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).all()
-            # Get BOQ details
-            boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+            # ✅ PERFORMANCE: Use pre-loaded history and details (no queries!)
+            history = sorted(
+                [h for h in boq.history if h],
+                key=lambda h: h.action_date if h.action_date else datetime.min,
+                reverse=True
+            )
+            # Get BOQ details from pre-loaded relationship
+            boq_details = next((bd for bd in boq.details if not bd.is_deleted), None)
             display_status = boq.status
             if boq.status in ['new_purchase_create', 'sent_for_review']:
                 display_status = 'approved'

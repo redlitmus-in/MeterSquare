@@ -1608,4 +1608,5 @@ const ExtraMaterialPage: React.FC = () => {
   );
 };
 
-export default ExtraMaterialPage;
+// ✅ PERFORMANCE FIX: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(ExtraMaterialPage);

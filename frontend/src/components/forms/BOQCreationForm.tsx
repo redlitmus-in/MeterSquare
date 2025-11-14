@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   X,
@@ -327,6 +327,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [showSaveDraftModal, setShowSaveDraftModal] = useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+  const isClosingAfterSubmitRef = useRef(false);
+  const isFormInitializedRef = useRef(false);
 
   // Auto-save function - ONLY saves to localStorage (no database save)
   const handleAutoSave = async (formData: any, isAutoSave: boolean) => {
@@ -335,7 +337,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
     // Don't auto-save if there's no meaningful data
     if (!selectedProjectId || !boqName.trim() || items.length === 0) {
-      console.log('⚠️ Auto-save skipped - insufficient data');
       return;
     }
 
@@ -345,7 +346,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
     if (isAutoSave) {
       // Show a visible confirmation that data is backed up locally
-      console.log('✅ BOQ data backed up locally');
       toast.success('💾 Draft backed up locally', {
         duration: 2000,
         description: `BOQ: ${boqName} - ${items.length} items`
@@ -381,7 +381,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   });
 
   // TEST MODE: Set to true to test inactivity in 10 seconds instead of 2 hours
-  const INACTIVITY_TEST_MODE = false; // ⚠️ TESTING MODE ENABLED - 10 second timeout
+  const INACTIVITY_TEST_MODE = false; // ✅ PRODUCTION MODE - 2 hour timeout
 
   // Inactivity detection hook - 2 hour timeout (or 10 seconds in test mode)
   const { isInactive, resetTimer } = useInactivityDetection({
@@ -440,13 +440,24 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   // Auto-restore draft data on mount (only if draft is for THIS project)
   useEffect(() => {
     if (isOpen && !editMode && !isRevision) {
+      console.log('🔵 FORM OPENED');
+      // Reset flags when form opens
+      isClosingAfterSubmitRef.current = false;
+      isFormInitializedRef.current = false;
+
       const savedData = getLocalStorageData();
       const actualData = savedData?.data || savedData;
+
+      console.log('📦 Draft data found:', actualData);
+      console.log('📌 Current project ID:', selectedProject?.project_id);
+      console.log('📌 Draft project ID:', actualData?.selectedProjectId);
 
       // Only restore if draft exists AND it's for the SAME project
       const isDraftForThisProject = actualData &&
                                     actualData.boqName &&
                                     actualData.selectedProjectId === selectedProject?.project_id;
+
+      console.log('✅ Is draft for this project?', isDraftForThisProject);
 
       if (isDraftForThisProject) {
         // Auto-restore data directly (no popup modal)
@@ -468,13 +479,46 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         setPreliminaryNotes(actualData.preliminaryNotes || '');
         setTermsConditions(actualData.termsConditions || []);
 
+        console.log('✅ Draft restored');
         toast.success(`Resuming: ${actualData.boqName}`, {
           description: `Draft with ${actualData.items?.length || 0} items restored`
         });
+      } else {
+        console.log('❌ Draft NOT for this project - clearing and resetting');
+        // Draft is for different project or doesn't exist - clear it and start fresh
+        if (actualData && actualData.boqName) {
+          // There's a draft but it's for a different project - clear it
+          console.log('🗑️ Clearing old draft from localStorage');
+          clearLocalStorage();
+        }
+
+        // Reset form to empty state
+        console.log('🔄 Resetting form to empty state');
+        setBoqName('');
+        setItems([]);
+        setOverallOverhead(10);
+        setOverallProfit(15);
+        setOverallDiscount(0);
+        setPreliminaries([]);
+        setCostQuantity(1);
+        setCostUnit('nos');
+        setCostRate(0);
+        setCostAmount(0);
+        setPreliminaryInternalCost(0);
+        setPreliminaryMiscPercentage(10);
+        setPreliminaryOverheadProfitPercentage(25);
+        setPreliminaryTransportPercentage(5);
+        setPreliminaryNotes('');
+        setTermsConditions([]);
       }
-      // If draft is for a different project, start fresh (don't restore)
+
+      // Mark form as initialized after restoring/clearing
+      setTimeout(() => {
+        isFormInitializedRef.current = true;
+        console.log('✅ Form initialized - back button handler now active');
+      }, 100);
     }
-  }, [isOpen, editMode, isRevision, getLocalStorageData, selectedProject]);
+  }, [isOpen, editMode, isRevision, getLocalStorageData, selectedProject, clearLocalStorage]);
 
   // Warn user before page refresh/close if there's unsaved data
   useEffect(() => {
@@ -502,27 +546,45 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   useEffect(() => {
     if (!isOpen || editMode || isRevision) return;
 
+    console.log('🔧 Setting up browser back button handler');
     // Add a dummy history entry when form opens
     window.history.pushState({ boqFormOpen: true }, '');
+    console.log('📌 Added history state');
 
     const handlePopState = (e: PopStateEvent) => {
-      const hasData = (boqName && boqName.trim().length > 0) || selectedProjectId !== null || items.length > 0;
-
       console.log('⬅️ BROWSER BACK BUTTON CLICKED');
-      console.log('  - Has data:', hasData);
-      console.log('  - Edit mode:', editMode);
-      console.log('  - Revision mode:', isRevision);
+
+      // Skip modal if closing after successful submit
+      if (isClosingAfterSubmitRef.current) {
+        console.log('  ✅ Closing after submit - skipping modal');
+        onClose();
+        return;
+      }
+
+      // Don't show modal if form hasn't been initialized yet (prevents triggering on mount)
+      if (!isFormInitializedRef.current) {
+        console.log('  ⏸️ Form not initialized yet - skipping modal');
+        onClose();
+        return;
+      }
+
+      // Only consider it as having data if user entered BOQ name or added items
+      // Don't count selectedProjectId alone since that's set automatically from props
+      const hasData = (boqName && boqName.trim().length > 0) || items.length > 0;
+      console.log('  📊 Has data?', hasData);
+      console.log('  📝 BOQ Name:', boqName);
+      console.log('  📋 Items count:', items.length);
 
       if (hasData && !editMode && !isRevision) {
         // Prevent going back
         e.preventDefault();
         window.history.pushState({ boqFormOpen: true }, '');
 
-        console.log('✅ Showing save draft modal instead of going back');
+        console.log('  🚫 Showing save draft modal');
         toast.info('Please save or discard your changes first');
         setShowSaveDraftModal(true);
       } else {
-        console.log('❌ No data, allowing navigation back');
+        console.log('  ✅ No data - closing form');
         onClose();
       }
     };
@@ -530,23 +592,23 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     window.addEventListener('popstate', handlePopState);
 
     return () => {
+      console.log('🧹 Cleanup: Removing back button handler');
       window.removeEventListener('popstate', handlePopState);
-      // Clean up history when component unmounts
+      // Clean up history when component unmounts (form closes)
       if (window.history.state?.boqFormOpen) {
+        console.log('🧹 Cleanup: Going back in history');
         window.history.back();
       }
     };
-  }, [isOpen, editMode, isRevision, boqName, selectedProjectId, items, onClose]);
+  }, [isOpen, editMode, isRevision, onClose]);
 
   // Handle data recovery
   const handleRestoreData = () => {
     const savedData = getLocalStorageData();
-    console.log('🔄 Restoring data...', savedData);
 
     if (savedData) {
       // Handle nested structure: {data: {...}, timestamp: ...}
       const actualData = savedData.data || savedData;
-      console.log('📦 Restoring from data:', actualData);
 
       setBoqName(actualData.boqName || '');
       setSelectedProjectId(actualData.selectedProjectId || null);
@@ -566,7 +628,6 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       setPreliminaryNotes(actualData.preliminaryNotes || '');
       setTermsConditions(actualData.termsConditions || []);
 
-      console.log('✅ Data restored successfully!');
       toast.success('Previous work restored - continue where you left off!');
     }
     setShowRecoveryModal(false);
@@ -2098,9 +2159,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           }, 500);
         }
 
+        // Clear draft on successful submission
+        clearLocalStorage();
+
         if (onSubmit) {
           onSubmit(result.boq_id);
         }
+        isClosingAfterSubmitRef.current = true;
         onClose();
       } else {
         // Display error with proper formatting
@@ -2406,6 +2471,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           if (onSubmit) {
             onSubmit(result.boq_id || existingBoqData.boq_id);
           }
+          isClosingAfterSubmitRef.current = true;
           onClose();
         } else {
           toast.error(result.message || 'Failed to create BOQ revision');
@@ -2688,6 +2754,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           if (onSubmit) {
             onSubmit(existingBoqData.boq_id);
           }
+          isClosingAfterSubmitRef.current = true;
           onClose();
         } else {
           toast.error(result.error || 'Failed to update BOQ');
@@ -2748,6 +2815,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           if (onSubmit) {
             onSubmit(existingBoqId);
           }
+          isClosingAfterSubmitRef.current = true;
           onClose();
         } else {
           toast.error(result.error || 'Failed to add extra items');
@@ -2965,6 +3033,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           if (onSubmit) {
             onSubmit(result.boq_id);
           }
+          isClosingAfterSubmitRef.current = true;
           onClose();
         } else {
           toast.error(result.message);

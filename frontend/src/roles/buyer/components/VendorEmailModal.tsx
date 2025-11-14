@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import DOMPurify from 'dompurify'; // ✅ SECURITY: XSS protection for email HTML rendering
 import {
   X,
   Mail,
@@ -829,7 +830,9 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                       ) : (
                         <div
                           className="bg-white p-6 max-h-[500px] overflow-y-auto"
-                          dangerouslySetInnerHTML={{ __html: editedEmailContent || emailPreview }}
+                          dangerouslySetInnerHTML={{
+                            __html: DOMPurify.sanitize(editedEmailContent || emailPreview)
+                          }}
                         />
                       )}
                     </div>

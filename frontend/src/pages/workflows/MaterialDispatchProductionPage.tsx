@@ -24,7 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ApprovalWorkflow from '@/components/workflow/ApprovalWorkflow';
-import MaterialRequisitionForm from '@/components/forms/MaterialRequisitionForm';
+// import MaterialRequisitionForm from '@/components/forms/MaterialRequisitionForm'; // File doesn't exist - commented out
 
 interface MaterialDispatch {
   id: string;
@@ -512,7 +512,8 @@ const MaterialDispatchProductionPage: React.FC = () => {
               </Button>
             </div>
             <div className="p-4">
-              <MaterialRequisitionForm />
+              {/* <MaterialRequisitionForm /> */}
+              <p className="text-gray-500 text-center py-8">Material requisition form will be implemented soon.</p>
             </div>
           </div>
         </div>

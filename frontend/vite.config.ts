@@ -10,8 +10,10 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const isProduction = mode === 'production'
 
-  // Enable obfuscation only in production
-  const ENABLE_OBFUSCATION = isProduction
+  // ✅ CRITICAL: Disable obfuscation - it breaks the build and slows performance
+  // Obfuscation is NOT needed for security (backend handles that)
+  // It only increases bundle size and build time
+  const ENABLE_OBFUSCATION = false
 
   return {
     plugins: [
@@ -61,8 +63,24 @@ export default defineConfig(({ mode }) => {
       },
     },
 
-    // Allow importing HTML as raw string
-    assetsInclude: ['**/*.html'],
+    // ✅ CRITICAL PERFORMANCE: Pre-bundle dependencies for faster dev server and initial load
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'react-router-dom',
+        'zustand',
+        'axios',
+        'date-fns',
+        'clsx',
+        'dompurify',
+        'react-hook-form',
+        'zod',
+        // Include heavy libraries for now - will lazy load them properly later
+        'highcharts',
+        'highcharts-react-official'
+      ]
+    },
 
     build: {
       rollupOptions: {
@@ -118,16 +136,9 @@ export default defineConfig(({ mode }) => {
             }
           },
 
-          // Code splitting - simplified for obfuscation
-          manualChunks: ENABLE_OBFUSCATION ? undefined : {
-            // Development chunks for easier debugging
-            'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-            'ui-vendor': ['framer-motion'],
-            'radix-ui': ['@radix-ui/react-dialog', '@radix-ui/react-select', '@radix-ui/react-tabs'],
-            'forms': ['react-hook-form', 'zod', '@hookform/resolvers'],
-            'auth': ['@supabase/supabase-js'],
-            'utils': ['axios', 'date-fns', 'clsx', 'tailwind-merge'],
-          }
+          // ✅ CRITICAL PERFORMANCE FIX: Auto code splitting enabled
+          // Vite will automatically split code based on dynamic imports
+          // manualChunks: undefined  // Let Vite handle it automatically
         },
 
         // Tree-shaking and side-effects optimization
@@ -145,56 +156,8 @@ export default defineConfig(({ mode }) => {
       // Optimize chunk size
       chunkSizeWarningLimit: isProduction ? 2000 : 1000,
 
-      // ✅ PERFORMANCE FIX: Always use terser in production for proper console removal
-      // esbuild is faster but doesn't remove console.log properly
-      minify: isProduction ? 'terser' : 'esbuild',
-      terserOptions: isProduction ? {
-        parse: {
-          ecma: 2020
-        },
-        compress: {
-          ecma: 2020,
-          comparisons: false,
-          inline: 2,
-          drop_console: true,
-          drop_debugger: true,
-          pure_funcs: ['console.log', 'console.info', 'console.debug', 'console.warn'],
-          passes: 3,
-          global_defs: {
-            '@__DEV__': false
-          },
-          module: true,
-          toplevel: true,
-          unsafe_arrows: true,
-          unsafe_comps: true,
-          unsafe_Function: true,
-          unsafe_math: true,
-          unsafe_symbols: true,
-          unsafe_methods: true,
-          unsafe_proto: true,
-          unsafe_regexp: true,
-          unsafe_undefined: true,
-          unused: true
-        },
-        mangle: {
-          safari10: true,
-          module: true,
-          toplevel: true,
-          eval: true,
-          properties: {
-            regex: /^_/
-          }
-        },
-        format: {
-          ecma: 2020,
-          comments: false,
-          ascii_only: true,
-          wrap_iife: true,
-          wrap_func_args: true
-        },
-        module: true,
-        toplevel: true
-      } : {},
+      // ✅ PERFORMANCE: Minify with esbuild (faster, more reliable than terser)
+      minify: isProduction ? 'esbuild' : false,
 
       // Source maps only disabled in production
       sourcemap: isProduction ? false : true,
@@ -228,7 +191,20 @@ export default defineConfig(({ mode }) => {
       },
       // Disable file serving for source maps and original files
       middlewareMode: false,
-      sourcemapIgnoreList: () => true
+      sourcemapIgnoreList: () => true,
+      // ✅ PERFORMANCE: Pre-warm frequently used modules for faster initial load
+      warmup: {
+        clientFiles: [
+          './src/main.tsx',
+          './src/App.tsx',
+          './src/pages/auth/LoginPage.tsx'
+        ]
+      },
+      // ✅ PERFORMANCE: Optimize file system access
+      fs: {
+        strict: true,
+        allow: ['..']
+      }
     },
 
     // Define global constants
@@ -236,19 +212,6 @@ export default defineConfig(({ mode }) => {
       __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
       __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
       __PRODUCTION__: isProduction
-    },
-
-    // Optimize dependencies
-    optimizeDeps: {
-      include: [
-        'react',
-        'react-dom',
-        'react-router-dom',
-        '@supabase/supabase-js',
-        'axios',
-        'crypto-js'
-      ],
-      exclude: ['@rollup/plugin-inject']
     },
 
     // Environment variable prefix
