@@ -825,4 +825,5 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataCh
   );
 };
 
-export default BOQHistoryTimeline;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (828 lines - CRITICAL)
+export default React.memo(BOQHistoryTimeline);

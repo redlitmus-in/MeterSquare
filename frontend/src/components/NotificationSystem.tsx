@@ -690,4 +690,5 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   );
 };
 
-export default NotificationSystem;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (692 lines - CRITICAL)
+export default React.memo(NotificationSystem);

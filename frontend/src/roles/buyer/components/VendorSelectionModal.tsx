@@ -766,4 +766,5 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
   );
 };
 
-export default VendorSelectionModal;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (769 lines - CRITICAL)
+export default React.memo(VendorSelectionModal);

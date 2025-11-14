@@ -4,17 +4,18 @@
  */
 
 export const REFRESH_INTERVALS = {
-  // Purchases - Most critical, fastest updates (2 seconds)
-  PURCHASES: 2000,
+  // ✅ PERFORMANCE: Reduced from 2s to 30s (93% reduction) - Real-time handles live updates
+  // Polling is now a fallback mechanism only
+  PURCHASES: 30000,
 
-  // BOQs - Moderate priority (3 seconds)
-  BOQS: 3000,
+  // ✅ PERFORMANCE: Reduced from 3s to 30s (90% reduction) - Real-time handles live updates
+  BOQS: 30000,
 
-  // Projects - Slower changing data (5 seconds)
-  PROJECTS: 5000,
+  // ✅ PERFORMANCE: Reduced from 5s to 30s (83% reduction) - Real-time handles live updates
+  PROJECTS: 30000,
 
-  // Dashboard Metrics - Least frequent (10 seconds)
-  METRICS: 10000,
+  // ✅ PERFORMANCE: Reduced from 10s to 30s (67% reduction) - Real-time handles live updates
+  METRICS: 30000,
 } as const;
 
 /**

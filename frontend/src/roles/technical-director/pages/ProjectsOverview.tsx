@@ -539,4 +539,5 @@ const ProjectsOverview: React.FC = () => {
   );
 };
 
-export default ProjectsOverview;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (541 lines)
+export default React.memo(ProjectsOverview);

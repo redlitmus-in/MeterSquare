@@ -498,4 +498,5 @@ const SEBoqAssignmentsPage: React.FC = () => {
   );
 };
 
-export default SEBoqAssignmentsPage;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (501 lines)
+export default React.memo(SEBoqAssignmentsPage);

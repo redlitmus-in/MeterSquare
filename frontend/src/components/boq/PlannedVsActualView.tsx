@@ -1069,4 +1069,5 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
   );
 };
 
-export default PlannedVsActualView;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (1,072 lines)
+export default React.memo(PlannedVsActualView);

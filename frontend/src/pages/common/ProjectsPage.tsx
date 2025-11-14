@@ -647,4 +647,5 @@ const ProjectsPage: React.FC = () => {
   );
 };
 
-export default ProjectsPage;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (649 lines)
+export default React.memo(ProjectsPage);

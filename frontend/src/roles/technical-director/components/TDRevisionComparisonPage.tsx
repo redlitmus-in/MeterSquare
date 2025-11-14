@@ -2139,4 +2139,5 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
   );
 };
 
-export default TDRevisionComparisonPage;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (2,142 lines)
+export default React.memo(TDRevisionComparisonPage);

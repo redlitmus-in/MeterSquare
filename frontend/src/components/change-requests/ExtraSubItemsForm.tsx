@@ -666,4 +666,5 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
   );
 };
 
-export default ExtraSubItemsForm;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (668 lines - CRITICAL)
+export default React.memo(ExtraSubItemsForm);

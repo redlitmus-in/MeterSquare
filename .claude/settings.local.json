@@ -23,7 +23,8 @@
       "Bash(psql:*)",
       "Bash(for file in boq_upload_controller.py upload_image_controller.py send_boq_client.py vendor_controller.py settings_controller.py)",
       "Bash(do echo \"=== Checking $file ===\")",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

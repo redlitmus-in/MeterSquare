@@ -649,4 +649,5 @@ const ProcessFlowPage: React.FC = () => {
   );
 };
 
-export default ProcessFlowPage;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (651 lines)
+export default React.memo(ProcessFlowPage);

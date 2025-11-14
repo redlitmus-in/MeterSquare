@@ -553,4 +553,5 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
   );
 };
 
-export default PurchaseDetailsModal;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (556 lines)
+export default React.memo(PurchaseDetailsModal);

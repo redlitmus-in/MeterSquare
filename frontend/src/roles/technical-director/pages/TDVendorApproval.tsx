@@ -706,4 +706,5 @@ const TDVendorApproval: React.FC = () => {
   );
 };
 
-export default TDVendorApproval;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (709 lines)
+export default React.memo(TDVendorApproval);

@@ -579,4 +579,5 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   );
 };
 
-export default ChangeRequestDetailsModal;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (582 lines)
+export default React.memo(ChangeRequestDetailsModal);

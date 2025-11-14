@@ -1988,4 +1988,5 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
   );
 };
 
-export default BOQDetailsModal;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (1,922 lines)
+export default React.memo(BOQDetailsModal);

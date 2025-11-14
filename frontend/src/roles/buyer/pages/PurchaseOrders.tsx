@@ -724,4 +724,5 @@ const PurchaseOrders: React.FC = () => {
   );
 };
 
-export default PurchaseOrders;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (727 lines - CRITICAL)
+export default React.memo(PurchaseOrders);

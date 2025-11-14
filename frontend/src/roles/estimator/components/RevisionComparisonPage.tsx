@@ -2241,4 +2241,5 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
   );
 };
 
-export default RevisionComparisonPage;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (2,244 lines)
+export default React.memo(RevisionComparisonPage);

@@ -1215,4 +1215,5 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   );
 };
 
-export default ExtraMaterialForm;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (1,217 lines)
+export default React.memo(ExtraMaterialForm);

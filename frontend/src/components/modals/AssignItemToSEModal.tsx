@@ -1095,4 +1095,5 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
   );
 };
 
-export default AssignItemToSEModal;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (1,098 lines)
+export default React.memo(AssignItemToSEModal);

@@ -532,4 +532,5 @@ const LoginPageOTP: React.FC = () => {
   );
 };
 
-export default LoginPageOTP;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (534 lines)
+export default React.memo(LoginPageOTP);

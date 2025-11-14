@@ -542,4 +542,5 @@ const UserFormModal: React.FC<UserFormModalProps> = ({
   );
 };
 
-export default UserManagement;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (545 lines)
+export default React.memo(UserManagement);

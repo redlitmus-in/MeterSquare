@@ -621,4 +621,5 @@ const ModernDashboard: React.FC = () => {
   );
 };
 
-export default ModernDashboard;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (623 lines)
+export default React.memo(ModernDashboard);

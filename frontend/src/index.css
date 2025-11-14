@@ -2,6 +2,8 @@
 @import './styles/corporate-theme.css';
 /* Import Mobile Responsive Styles */
 @import './styles/mobile-responsive.css';
+/* ✅ PERFORMANCE: Import lightweight CSS animations (alternative to framer-motion) */
+@import './styles/animations.css';
 
 @tailwind base;
 @tailwind components;

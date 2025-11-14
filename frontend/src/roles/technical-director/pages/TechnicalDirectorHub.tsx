@@ -525,4 +525,5 @@ const TechnicalDirectorDashboard: React.FC = () => {
   );
 };
 
-export default TechnicalDirectorDashboard;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (527 lines)
+export default React.memo(TechnicalDirectorDashboard);

@@ -594,4 +594,5 @@ const MaterialDispatchSitePage: React.FC = () => {
   );
 };
 
-export default MaterialDispatchSitePage;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (596 lines)
+export default React.memo(MaterialDispatchSitePage);

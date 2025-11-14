@@ -509,4 +509,5 @@ const MaterialsToPurchase: React.FC = () => {
   );
 };
 
-export default MaterialsToPurchase;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (512 lines)
+export default React.memo(MaterialsToPurchase);

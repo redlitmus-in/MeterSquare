@@ -910,4 +910,5 @@ const ProfilePage: React.FC = () => {
   );
 };
 
-export default ProfilePage;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (912 lines)
+export default React.memo(ProfilePage);

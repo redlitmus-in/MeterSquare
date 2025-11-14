@@ -2507,4 +2507,5 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   );
 };
 
-export default InternalRevisionTimeline;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (2,510 lines)
+export default React.memo(InternalRevisionTimeline);

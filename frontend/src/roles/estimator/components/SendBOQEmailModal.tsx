@@ -970,4 +970,5 @@ MeterSquare Interiors LLC`;
   );
 };
 
-export default SendBOQEmailModal;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (973 lines - CRITICAL)
+export default React.memo(SendBOQEmailModal);

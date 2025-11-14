@@ -623,4 +623,5 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({
   );
 };
 
-export default BOQRevisionHistory;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (626 lines - CRITICAL)
+export default React.memo(BOQRevisionHistory);

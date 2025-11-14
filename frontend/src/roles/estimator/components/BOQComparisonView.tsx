@@ -581,4 +581,5 @@ const BOQComparisonView: React.FC<BOQComparisonViewProps> = ({ boqId, currentRev
   );
 };
 
-export default BOQComparisonView;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (584 lines)
+export default React.memo(BOQComparisonView);

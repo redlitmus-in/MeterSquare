@@ -585,4 +585,5 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
   );
 };
 
-export default EditChangeRequestModal;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (588 lines - CRITICAL)
+export default React.memo(EditChangeRequestModal);

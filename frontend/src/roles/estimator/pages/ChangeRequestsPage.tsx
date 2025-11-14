@@ -715,4 +715,5 @@ const ChangeRequestsPage: React.FC = () => {
   );
 };
 
-export default ChangeRequestsPage;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (718 lines)
+export default React.memo(ChangeRequestsPage);

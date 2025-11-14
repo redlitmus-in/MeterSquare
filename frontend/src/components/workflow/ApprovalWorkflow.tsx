@@ -609,4 +609,5 @@ const ApprovalWorkflow: React.FC<ApprovalWorkflowProps> = ({
   );
 };
 
-export default ApprovalWorkflow;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (611 lines - CRITICAL)
+export default React.memo(ApprovalWorkflow);

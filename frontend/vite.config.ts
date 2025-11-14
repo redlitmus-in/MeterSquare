@@ -10,6 +10,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const isProduction = mode === 'production'
 
+  // ✅ PRODUCTION: Enable compression for 70% file size reduction
+  const ENABLE_COMPRESSION = isProduction  // Auto-enable in production
+
   // ✅ CRITICAL: Disable obfuscation - it breaks the build and slows performance
   // Obfuscation is NOT needed for security (backend handles that)
   // It only increases bundle size and build time
@@ -24,8 +27,8 @@ export default defineConfig(({ mode }) => {
         '__ANTI_DEBUG__': resolve(__dirname, './src/utils/security/anti-debug.ts'),
       }),
 
-      // Add gzip compression for production builds
-      ENABLE_OBFUSCATION && viteCompression({
+      // Add gzip compression for production builds (70% size reduction)
+      ENABLE_COMPRESSION && viteCompression({
         verbose: false,
         disable: false,
         threshold: 10240,
@@ -33,8 +36,8 @@ export default defineConfig(({ mode }) => {
         ext: '.gz',
       }),
 
-      // Add brotli compression for better compression ratio
-      ENABLE_OBFUSCATION && viteCompression({
+      // Add brotli compression for better compression ratio (75% size reduction)
+      ENABLE_COMPRESSION && viteCompression({
         verbose: false,
         disable: false,
         threshold: 10240,
@@ -158,6 +161,11 @@ export default defineConfig(({ mode }) => {
 
       // ✅ PERFORMANCE: Minify with esbuild (faster, more reliable than terser)
       minify: isProduction ? 'esbuild' : false,
+
+      // ✅ PRODUCTION: Remove console.logs and debugger statements
+      esbuildOptions: {
+        drop: isProduction ? ['console', 'debugger'] : [],
+      },
 
       // Source maps only disabled in production
       sourcemap: isProduction ? false : true,

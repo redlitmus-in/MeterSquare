@@ -944,4 +944,5 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   );
 };
 
-export default VendorEmailModal;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (947 lines - CRITICAL)
+export default React.memo(VendorEmailModal);

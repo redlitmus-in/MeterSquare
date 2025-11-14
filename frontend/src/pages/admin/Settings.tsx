@@ -678,4 +678,5 @@ const AdminSettings: React.FC = () => {
   );
 };
 
-export default AdminSettings;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (681 lines)
+export default React.memo(AdminSettings);

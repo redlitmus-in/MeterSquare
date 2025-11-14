@@ -575,4 +575,5 @@ const EstimatorDashboard: React.FC = () => {
   );
 };
 
-export default EstimatorDashboard;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (577 lines)
+export default React.memo(EstimatorDashboard);

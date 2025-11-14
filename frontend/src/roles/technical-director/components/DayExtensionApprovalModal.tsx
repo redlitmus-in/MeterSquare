@@ -733,4 +733,5 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
   );
 };
 
-export default DayExtensionApprovalModal;
+// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders (736 lines)
+export default React.memo(DayExtensionApprovalModal);
