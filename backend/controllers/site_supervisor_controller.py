@@ -11,6 +11,7 @@ from models.user import User
 from models.role import Role
 from datetime import datetime
 from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
+import copy
 
 log = get_logger()
 
@@ -68,26 +69,68 @@ def create_sitesupervisor():
         }), 500
 
 def get_all_sitesupervisor_boqs():
-    """Get all projects with their BOQ IDs for the Site Engineer"""
+    """
+    Get all projects and assigned items for the Site Engineer.
+    NEW FLOW: Uses pm_assign_ss as the single source of truth for item assignments.
+    """
     try:
         current_user = g.user
         user_id = current_user['user_id']
         user_role = current_user.get('role', '').lower()
 
+        log.info(f"=== SE BOQ API called by user_id={user_id}, role={user_role} ===")
+
+        # Import PMAssignSS model for item-level assignments
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy.orm import joinedload
+
         # Get effective user context (handles admin viewing as other roles)
         context = get_effective_user_context()
 
-        # Get all projects assigned to this site engineer (admin sees all projects with site supervisor assigned)
+        # NEW FLOW: Query pm_assign_ss first to get all item assignments
         if user_role == 'admin' or not should_apply_role_filter(context):
-            projects = Project.query.filter(
-                Project.site_supervisor_id.isnot(None),  # Only projects with site supervisor assigned
-                Project.is_deleted == False
+            # Admin sees all assignments
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.is_deleted == False
             ).all()
         else:
-            projects = Project.query.filter(
+            # SE sees only their assignments
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.assigned_to_se_id == user_id,
+                PMAssignSS.is_deleted == False
+            ).all()
+
+        log.info(f"=== Found {len(item_assignments)} item assignments for SE {user_id} ===")
+
+        # Get unique project IDs from assignments
+        project_ids_from_assignments = list(set([a.project_id for a in item_assignments if a.project_id]))
+
+        # Also include projects where SE is assigned at project level
+        if user_role != 'admin' and should_apply_role_filter(context):
+            projects_from_project_table = Project.query.filter(
                 Project.site_supervisor_id == user_id,
                 Project.is_deleted == False
             ).all()
+            project_ids_from_project_level = [p.project_id for p in projects_from_project_table]
+
+            # Combine project IDs
+            all_project_ids = list(set(project_ids_from_assignments + project_ids_from_project_level))
+        else:
+            all_project_ids = project_ids_from_assignments
+
+        log.info(f"=== Total unique project IDs: {len(all_project_ids)} - {all_project_ids} ===")
+
+        # Fetch all projects in one query
+        if not all_project_ids:
+            return jsonify({
+                "message": "No projects assigned to this Site Engineer",
+                "projects": []
+            }), 200
+
+        projects = Project.query.filter(
+            Project.project_id.in_(all_project_ids),
+            Project.is_deleted == False
+        ).all()
 
         projects_list = []
         for project in projects:
@@ -136,20 +179,56 @@ def get_all_sitesupervisor_boqs():
                     boq_assigned_to_buyer = True
                     assigned_buyer_name = assignment.assigned_to_buyer_name
 
-            # Calculate item assignment counts for this project
+            # Calculate item assignment counts and collect assigned items details
             items_assigned_to_me = 0
             total_items = 0
             items_by_pm = {}
+            assigned_items_details = []
+            boqs_with_items = []
 
             if boq_ids:
+                # DEBUG: Check what's in pm_assign_ss for these BOQs
+                log.info(f"=== DEBUG: SE user_id = {user_id}, type = {type(user_id)} ===")
+                log.info(f"=== DEBUG: BOQ IDs to check = {boq_ids} ===")
+
+                # Check ALL assignments for these BOQs (regardless of SE)
+                all_assignments = PMAssignSS.query.filter(
+                    PMAssignSS.boq_id.in_(boq_ids),
+                    PMAssignSS.is_deleted == False
+                ).all()
+                log.info(f"=== DEBUG: Found {len(all_assignments)} total assignments in pm_assign_ss for these BOQs ===")
+                for a in all_assignments:
+                    log.info(f"  - Assignment ID: {a.pm_assign_id}, BOQ: {a.boq_id}, assigned_to_se_id: {a.assigned_to_se_id} (type: {type(a.assigned_to_se_id)}), item_indices: {a.item_indices}")
+
                 for boq_id in boq_ids:
+                    boq = next((b for b in boqs if b.boq_id == boq_id), None)
                     boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
                     if boq_details and boq_details.boq_details:
                         items = boq_details.boq_details.get('items', [])
                         total_items += len(items)
 
-                        for item in items:
-                            if item.get('assigned_to_se_user_id') == user_id:
+                        # Get assignments from pm_assign_ss table for this BOQ and SE
+                        assignments = PMAssignSS.query.filter_by(
+                            boq_id=boq_id,
+                            assigned_to_se_id=user_id,
+                            is_deleted=False
+                        ).all()
+
+                        log.info(f"=== DEBUG: For BOQ {boq_id}, found {len(assignments)} assignments for SE {user_id} ===")
+
+                        # Collect items assigned to this SE for this BOQ
+                        boq_assigned_items = []
+
+                        # Get all assigned item indices for this SE from pm_assign_ss
+                        assigned_indices = set()
+                        for assignment in assignments:
+                            if assignment.item_indices:
+                                assigned_indices.update(assignment.item_indices)
+
+                        # Process assigned items
+                        for idx in assigned_indices:
+                            if idx < len(items):
+                                item = items[idx]
                                 items_assigned_to_me += 1
 
                                 # Group by PM
@@ -161,6 +240,56 @@ def get_all_sitesupervisor_boqs():
                                         "items_count": 0
                                     }
                                 items_by_pm[pm_name]["items_count"] += 1
+
+                                # Add item details with full structure (excluding prices)
+                                # Deep copy the item to avoid modifying the original
+                                item_detail = copy.deepcopy(item)
+
+                                # Remove price-related fields from main item
+                                price_fields = ['rate', 'amount', 'unitRate', 'totalAmount', 'selling_price',
+                                              'base_price', 'profit', 'overhead', 'gst', 'total_cost']
+                                for field in price_fields:
+                                    item_detail.pop(field, None)
+
+                                # Remove price fields from sub_items if they exist
+                                if 'sub_items' in item_detail and isinstance(item_detail['sub_items'], list):
+                                    for sub_item in item_detail['sub_items']:
+                                        if isinstance(sub_item, dict):
+                                            for field in price_fields:
+                                                sub_item.pop(field, None)
+
+                                            # Remove price fields from materials in sub_items
+                                            if 'materials' in sub_item and isinstance(sub_item['materials'], list):
+                                                for material in sub_item['materials']:
+                                                    if isinstance(material, dict):
+                                                        for field in price_fields + ['unit_price', 'total_price']:
+                                                            material.pop(field, None)
+
+                                            # Remove price fields from labour in sub_items
+                                            if 'labour' in sub_item and isinstance(sub_item['labour'], list):
+                                                for labour in sub_item['labour']:
+                                                    if isinstance(labour, dict):
+                                                        for field in price_fields + ['wage_per_day', 'total_wage']:
+                                                            labour.pop(field, None)
+
+                                # Add assignment metadata
+                                item_detail["item_index"] = idx
+                                item_detail["assigned_by_pm_name"] = pm_name
+                                item_detail["assigned_by_pm_user_id"] = item.get('assigned_by_pm_user_id')
+                                item_detail["assignment_date"] = item.get('assignment_date')
+                                item_detail["assignment_status"] = item.get('assignment_status', 'assigned')
+
+                                assigned_items_details.append(item_detail)
+                                boq_assigned_items.append(item_detail)
+
+                        # Add BOQ with its assigned items if any items are assigned
+                        if boq_assigned_items:
+                            boqs_with_items.append({
+                                "boq_id": boq_id,
+                                "boq_name": boq.boq_name if boq else f"BOQ-{boq_id}",
+                                "items_count": len(boq_assigned_items),
+                                "assigned_items": boq_assigned_items
+                            })
 
             # Convert items_by_pm dict to list
             items_by_pm_list = list(items_by_pm.values())
@@ -185,7 +314,10 @@ def get_all_sitesupervisor_boqs():
                 # Item assignment counts
                 "items_assigned_to_me": items_assigned_to_me,
                 "total_items": total_items,
-                "items_by_pm": items_by_pm_list
+                "items_by_pm": items_by_pm_list,
+                # Detailed item information
+                "assigned_items_details": assigned_items_details,  # All assigned items with full details
+                "boqs_with_items": boqs_with_items  # BOQs grouped with their assigned items
             })
 
         return jsonify({

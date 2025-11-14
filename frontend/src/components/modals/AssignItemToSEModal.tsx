@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -106,6 +106,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
   const [selectedItemIndices, setSelectedItemIndices] = useState<number[]>(initialSelectedItems);
   const [selectAll, setSelectAll] = useState(false);
   const [boqItems, setBoqItems] = useState<BOQItem[]>([]);
+  const [existingAssignments, setExistingAssignments] = useState<Record<number, { se_name: string; se_id: number }>>({});
 
   // Create new SE form state
   const [newSEForm, setNewSEForm] = useState({
@@ -123,6 +124,20 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
     phone: ''
   });
   const [updating, setUpdating] = useState(false);
+
+  // Lock body scroll when modal is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+
+    // Cleanup on unmount
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [isOpen]);
 
   // Fetch available site engineers
   useEffect(() => {
@@ -181,6 +196,18 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
         [];
 
       setBoqItems(items);
+
+      // Extract existing assignments from items
+      const assignments: Record<number, { se_name: string; se_id: number }> = {};
+      items.forEach((item: any, index: number) => {
+        if (item.assigned_to_se_user_id && item.assigned_to_se_name) {
+          assignments[index] = {
+            se_name: item.assigned_to_se_name,
+            se_id: item.assigned_to_se_user_id
+          };
+        }
+      });
+      setExistingAssignments(assignments);
     } catch (error: any) {
       toast.error('Failed to load BOQ items');
     } finally {
@@ -414,12 +441,18 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm overflow-hidden"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.95 }}
           className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
+          onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-5 flex items-center justify-between">
@@ -483,8 +516,8 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
           </div>
 
           {/* Content */}
-          <div className="flex-1 overflow-hidden">
-            <div className={`h-full grid gap-6 p-6 ${activeTab === 'select' ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+          <div className="flex-1 overflow-y-auto scrollbar-thin" style={{ overscrollBehavior: 'contain' }}>
+            <div className={`grid gap-6 p-6 ${activeTab === 'select' ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
               {/* Left Side - SE Selection */}
               <div className="flex flex-col">
                 <div className="mb-4">
@@ -507,7 +540,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                       </div>
 
                       {/* SE List */}
-                      <div className="space-y-3 overflow-y-auto max-h-[500px] pr-2">
+                      <div className="space-y-3">
                         {loading ? (
                           <div className="flex items-center justify-center py-12">
                             <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
@@ -743,34 +776,38 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
               {activeTab === 'select' && (
                 <div className="flex flex-col border-l border-gray-200 pl-6">
                   <div className="mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-3">
-                      Items to Assign ({selectedItemIndices.length}/{initialSelectedItems.length > 0 ? initialSelectedItems.length : boqItems.length})
-                    </h3>
+                    <div className="flex items-center gap-2 mb-3">
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        Items to Assign ({selectedItemIndices.length}/{initialSelectedItems.length > 0 ? initialSelectedItems.length : boqItems.length})
+                      </h3>
 
-                  {/* Info message when no SE selected */}
-                  {!selectedSE && (
-                    <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-2">
-                      <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-                      <div className="text-sm text-yellow-900">
-                        <p className="font-medium">Select a Site Engineer</p>
-                        <p className="text-yellow-700 mt-1">
-                          Please select a Site Engineer from the left panel. All BOQ items will be automatically selected for assignment.
-                        </p>
+                      {/* Info Icons with Tooltips */}
+                      <div className="flex items-center gap-1">
+                        {/* Select SE Info */}
+                        {!selectedSE && (
+                          <div className="group relative">
+                            <AlertCircle className="w-5 h-5 text-yellow-600 cursor-help" />
+                            <div className="absolute left-0 top-7 w-72 p-3 bg-yellow-50 border border-yellow-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                              <p className="font-medium text-sm text-yellow-900">Select a Site Engineer</p>
+                              <p className="text-xs text-yellow-700 mt-1">
+                                Please select a Site Engineer from the left panel. All BOQ items will be automatically selected for assignment.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Project Assignment Limit Info */}
+                        <div className="group relative">
+                          <AlertCircle className="w-5 h-5 text-blue-600 cursor-help" />
+                          <div className="absolute left-0 top-7 w-80 p-3 bg-blue-50 border border-blue-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                            <p className="font-medium text-sm text-blue-900">Project Assignment Limit</p>
+                            <p className="text-xs text-blue-700 mt-1">
+                              Each Site Engineer can be assigned to a maximum of {MAX_PROJECTS_PER_SE} projects. The assigned SE will gain full access to manage this project.
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  )}
-
-                  {/* Project Assignment Limit Info */}
-                  <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
-                    <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                    <div className="text-sm text-blue-900">
-                      <p className="font-medium">Project Assignment Limit</p>
-                      <p className="text-blue-700 mt-1">
-                        Each Site Engineer can be assigned to a maximum of {MAX_PROJECTS_PER_SE} projects. The assigned SE
-                        will gain full access to manage this project.
-                      </p>
-                    </div>
-                  </div>
 
                   {/* Select All Checkbox */}
                   {(initialSelectedItems.length > 1 || boqItems.length > 1) && (
@@ -788,7 +825,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                   )}
 
                   {/* Items List */}
-                  <div className="space-y-2 overflow-y-auto max-h-[400px] pr-2">
+                  <div className="space-y-2">
                     {loadingItems ? (
                       <div className="flex items-center justify-center py-12">
                         <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
@@ -809,32 +846,44 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                       (initialSelectedItems.length > 0 ? initialSelectedItems : Array.from({ length: boqItems.length }, (_, i) => i)).map((index) => {
                         const item = boqItems[index];
                         const isSelected = selectedItemIndices.includes(index);
+                        const existingAssignment = existingAssignments[index];
+                        const isAssignedToOther = existingAssignment && existingAssignment.se_id !== selectedSE?.user_id;
+                        const isAssignedToCurrentSE = existingAssignment && existingAssignment.se_id === selectedSE?.user_id;
+
                         return (
                           <motion.div
                             key={index}
                             initial={{ opacity: 0, x: 20 }}
                             animate={{ opacity: 1, x: 0 }}
                             exit={{ opacity: 0, x: -20 }}
-                            onClick={() => toggleItemSelection(index)}
-                            className={`cursor-pointer p-4 rounded-lg border-2 transition-all ${
-                              isSelected
-                                ? 'border-blue-500 bg-blue-50'
-                                : 'border-gray-200 bg-white hover:border-gray-300'
+                            onClick={() => !isAssignedToOther && toggleItemSelection(index)}
+                            className={`p-4 rounded-lg border-2 transition-all ${
+                              isAssignedToOther
+                                ? 'border-gray-300 bg-gray-50 opacity-60 cursor-not-allowed'
+                                : isSelected
+                                ? 'border-blue-500 bg-blue-50 cursor-pointer'
+                                : 'border-gray-200 bg-white hover:border-gray-300 cursor-pointer'
                             }`}
                           >
                             {/* Item Info */}
                             <div className="w-full">
                               <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <Package className="w-5 h-5 text-gray-400" />
                                   <span className="font-semibold text-gray-900 text-base">
                                     {getItemCode(item, index)}
                                   </span>
-                                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded">
-                                    Index: {index}
-                                  </span>
+                                  {existingAssignment && (
+                                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${
+                                      isAssignedToCurrentSE
+                                        ? 'bg-green-100 text-green-700'
+                                        : 'bg-orange-100 text-orange-700'
+                                    }`}>
+                                      {isAssignedToCurrentSE ? '✓ Already Assigned' : `Assigned to: ${existingAssignment.se_name}`}
+                                    </span>
+                                  )}
                                 </div>
-                                {isSelected && (
+                                {isSelected && !isAssignedToOther && (
                                   <CheckCircle className="w-5 h-5 text-blue-600 fill-blue-600 flex-shrink-0" />
                                 )}
                               </div>

@@ -92,6 +92,12 @@ interface Project {
   newPurchaseItems?: BOQItem[];
   boq_assigned_to_buyer?: boolean;
   assigned_buyer_name?: string;
+  boqs_with_items?: Array<{
+    boq_id: number;
+    boq_name: string;
+    items_count: number;
+    assigned_items: any[];
+  }>;
 }
 
 const MyProjects: React.FC = () => {
@@ -575,6 +581,7 @@ const MyProjects: React.FC = () => {
           boq_name: selectedProject.boq_name,
           project_name: selectedProject.project_name
         } : null}
+        assignedItems={selectedProject?.boqs_with_items?.find(b => b.boq_id === selectedProject.boq_id)?.assigned_items || []}
       />
 
       {/* OLD Details Modal - REMOVED - Replaced with BOQDetailsModal */}

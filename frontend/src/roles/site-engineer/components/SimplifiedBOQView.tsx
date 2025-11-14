@@ -19,22 +19,41 @@ interface SimplifiedBOQViewProps {
   isOpen: boolean;
   onClose: () => void;
   boq: any; // BOQ data with at least boq_id
+  assignedItems?: any[]; // SE's assigned items from pm_assign_ss
 }
 
 const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
   isOpen,
   onClose,
   boq,
+  assignedItems = [],
 }) => {
   const [boqData, setBoqData] = useState<BOQGetResponse | null>(null);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (isOpen && boq?.boq_id) {
-      fetchBOQDetails();
+    if (isOpen) {
+      // If assignedItems are provided, use them directly (SE view)
+      if (assignedItems && assignedItems.length > 0) {
+        // Create a minimal BOQ data structure with only assigned items
+        setBoqData({
+          boq_id: boq?.boq_id,
+          boq_name: boq?.boq_name,
+          status: 'approved',
+          project: boq?.project || { project_name: boq?.project_name },
+          items: assignedItems,
+        } as any);
+
+        // Auto-expand first 2 items
+        const expandedIds = assignedItems.slice(0, 2).map((_, index) => `item-${index}`);
+        setExpandedItems(expandedIds);
+      } else if (boq?.boq_id) {
+        // Fallback: Fetch full BOQ (for admin or other roles)
+        fetchBOQDetails();
+      }
     }
-  }, [isOpen, boq?.boq_id]);
+  }, [isOpen, boq?.boq_id, assignedItems]);
 
   const fetchBOQDetails = async () => {
     if (!boq?.boq_id) return;
@@ -235,8 +254,37 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                   className="overflow-hidden"
                                 >
                                   <div className="p-4 space-y-4 bg-gray-50">
-                                    {/* Sub Items */}
-                                    {item.sub_items?.length > 0 ? (
+                                    {/* Show basic item info if no sub-items (for assigned items from pm_assign_ss) */}
+                                    {!item.sub_items || item.sub_items.length === 0 ? (
+                                      <div className="bg-white rounded-lg p-4 border border-gray-200">
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                          <div>
+                                            <p className="text-xs text-gray-600 mb-1">Item Code</p>
+                                            <p className="font-semibold text-gray-900">{item.item_code || 'N/A'}</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-gray-600 mb-1">Quantity</p>
+                                            <p className="font-semibold text-gray-900">{item.quantity || 0}</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-gray-600 mb-1">Unit</p>
+                                            <p className="font-semibold text-gray-900">{item.unit || 'N/A'}</p>
+                                          </div>
+                                        </div>
+                                        {item.description && (
+                                          <div className="mt-3 pt-3 border-t border-gray-200">
+                                            <p className="text-xs text-gray-600 mb-1">Description</p>
+                                            <p className="text-sm text-gray-900">{item.description}</p>
+                                          </div>
+                                        )}
+                                        {item.assigned_by_pm_name && (
+                                          <div className="mt-3 pt-3 border-t border-gray-200">
+                                            <p className="text-xs text-gray-600 mb-1">Assigned By</p>
+                                            <p className="text-sm font-medium text-[#243d8a]">{item.assigned_by_pm_name}</p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
                                       <div className="space-y-3">
                                         {item.sub_items.map((subItem: any, subIndex: number) => (
                                           <div
@@ -371,11 +419,6 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                             )}
                                           </div>
                                         ))}
-                                      </div>
-                                    ) : (
-                                      <div className="text-center py-8 bg-white rounded-lg border border-gray-200">
-                                        <Info className="w-10 h-10 text-gray-400 mx-auto mb-2" />
-                                        <p className="text-sm text-gray-600">No sub-items defined for this item</p>
                                       </div>
                                     )}
                                   </div>
