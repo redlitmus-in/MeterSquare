@@ -33,27 +33,11 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (isOpen) {
-      // If assignedItems are provided, use them directly (SE view)
-      if (assignedItems && assignedItems.length > 0) {
-        // Create a minimal BOQ data structure with only assigned items
-        setBoqData({
-          boq_id: boq?.boq_id,
-          boq_name: boq?.boq_name,
-          status: 'approved',
-          project: boq?.project || { project_name: boq?.project_name },
-          items: assignedItems,
-        } as any);
-
-        // Auto-expand first 2 items
-        const expandedIds = assignedItems.slice(0, 2).map((_, index) => `item-${index}`);
-        setExpandedItems(expandedIds);
-      } else if (boq?.boq_id) {
-        // Fallback: Fetch full BOQ (for admin or other roles)
-        fetchBOQDetails();
-      }
+    if (isOpen && boq?.boq_id) {
+      // Always fetch full BOQ to get change request materials and complete data
+      fetchBOQDetails();
     }
-  }, [isOpen, boq?.boq_id, assignedItems]);
+  }, [isOpen, boq?.boq_id]);
 
   const fetchBOQDetails = async () => {
     if (!boq?.boq_id) return;
@@ -124,7 +108,7 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                 <div>
                   <h2 className="text-xl font-bold text-white">BOQ Details</h2>
                   <p className="text-blue-100 text-sm">
-                    {boqData?.project?.project_name || 'Loading...'}
+                    {boqData?.project_details?.project_name || 'Loading...'}
                   </p>
                 </div>
               </div>
@@ -140,7 +124,7 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
             <div className="overflow-y-auto max-h-[calc(90vh-80px)] p-6">
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
-                  <ModernLoadingSpinners variant="pulse" color="blue" />
+                  <ModernLoadingSpinners variant="pulse-wave" />
                 </div>
               ) : !boqData ? (
                 <div className="text-center py-12">
@@ -156,7 +140,7 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                         <p className="text-sm text-gray-600 mb-1">Project Name</p>
                         <p className="font-semibold text-gray-900 flex items-center gap-2">
                           <Building2 className="w-4 h-4 text-[#243d8a]" />
-                          {boqData.project?.project_name || boqData.project_name || boq?.project_name || 'N/A'}
+                          {boqData.project_details?.project_name || boq?.project_name || 'N/A'}
                         </p>
                       </div>
                       <div>
@@ -220,6 +204,11 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                   <div className="flex-1">
                                     <h3 className="text-lg font-bold text-gray-900">
                                       {item.item_name || `Item ${index + 1}`}
+                                      {item.has_change_request_materials && (
+                                        <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                                          CR Materials
+                                        </span>
+                                      )}
                                     </h3>
                                     {item.description && (
                                       <p className="text-sm text-gray-600 mt-1">{item.description}</p>
@@ -227,6 +216,11 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-3">
+                                  {item.materials && item.materials.length > 0 && (
+                                    <span className="text-sm font-medium text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">
+                                      {item.materials.length} CR material{item.materials.length > 1 ? 's' : ''}
+                                    </span>
+                                  )}
                                   {item.sub_items?.length > 0 && (
                                     <span className="text-sm font-medium text-[#243d8a] bg-white px-3 py-1 rounded-full border border-[#243d8a]/20">
                                       {item.sub_items.length} sub-item{item.sub_items.length > 1 ? 's' : ''}
@@ -254,6 +248,86 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
                                   className="overflow-hidden"
                                 >
                                   <div className="p-4 space-y-4 bg-gray-50">
+                                    {/* Show item-level materials from change requests if present */}
+                                    {item.materials && item.materials.length > 0 && (
+                                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                                        <h5 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                                          <Package className="w-4 h-4" />
+                                          New Material Purchase
+                                          {item.has_change_request_materials && (
+                                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                                              CR Materials
+                                            </span>
+                                          )}
+                                        </h5>
+                                        <div className="bg-white rounded-lg overflow-hidden border border-blue-200">
+                                          <table className="min-w-full">
+                                            <thead className="bg-blue-100">
+                                              <tr>
+                                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                                                  Material
+                                                </th>
+                                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                                                  Sub-Item
+                                                </th>
+                                                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-700">
+                                                  Quantity
+                                                </th>
+                                                <th className="px-3 py-2 text-center text-xs font-semibold text-gray-700">
+                                                  Unit
+                                                </th>
+                                                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-700">
+                                                  Unit Price
+                                                </th>
+                                                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-700">
+                                                  Total
+                                                </th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-200">
+                                              {item.materials.map((material: any, matIndex: number) => (
+                                                <tr key={matIndex} className="hover:bg-blue-50 transition-colors">
+                                                  <td className="px-3 py-2 text-sm text-gray-900">
+                                                    <div className="flex items-center gap-2">
+                                                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                                                      {material.material_name || 'N/A'}
+                                                      {material.is_from_change_request && (
+                                                        <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                                                          New
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  </td>
+                                                  <td className="px-3 py-2 text-xs text-gray-600">
+                                                    {material.sub_item_name || '-'}
+                                                  </td>
+                                                  <td className="px-3 py-2 text-sm text-gray-900 text-right font-medium">
+                                                    {material.quantity || 0}
+                                                  </td>
+                                                  <td className="px-3 py-2 text-sm text-gray-700 text-center">
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                                      {material.unit || 'N/A'}
+                                                    </span>
+                                                  </td>
+                                                  <td className="px-3 py-2 text-sm text-gray-900 text-right">
+                                                    AED {material.unit_price?.toFixed(2) || '0.00'}
+                                                  </td>
+                                                  <td className="px-3 py-2 text-sm font-semibold text-gray-900 text-right">
+                                                    AED {material.total_price?.toFixed(2) || '0.00'}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                        {item.materials.some((m: any) => m.change_request_id) && (
+                                          <p className="text-xs text-blue-700 mt-2 italic">
+                                            * These materials were added through Change Request #{item.materials.find((m: any) => m.change_request_id)?.change_request_id}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+
                                     {/* Show basic item info if no sub-items (for assigned items from pm_assign_ss) */}
                                     {!item.sub_items || item.sub_items.length === 0 ? (
                                       <div className="bg-white rounded-lg p-4 border border-gray-200">

@@ -608,6 +608,74 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                 {/* Item Details (Expandable) */}
                                 {expandedItems.includes(`existing-${index}`) && (
                                   <div className="p-4 space-y-4">
+                                    {/* Change Request Materials - Show First */}
+                                    {item.materials && item.materials.length > 0 && (
+                                      <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4 mb-4">
+                                        <h5 className="text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
+                                          <Package className="w-4 h-4" />
+                                          New Material Purchase
+                                          {item.has_change_request_materials && (
+                                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                                              CR Materials
+                                            </span>
+                                          )}
+                                        </h5>
+                                        <div className="bg-white rounded border border-blue-200 overflow-hidden">
+                                          <table className="w-full text-xs">
+                                            <thead className="bg-blue-100 border-b border-blue-200">
+                                              <tr>
+                                                <th className="text-left py-2 px-3 font-semibold text-blue-900">Material</th>
+                                                <th className="text-left py-2 px-3 font-semibold text-blue-900">Sub-Item</th>
+                                                <th className="text-center py-2 px-3 font-semibold text-blue-900">Qty</th>
+                                                <th className="text-center py-2 px-3 font-semibold text-blue-900">Unit</th>
+                                                <th className="text-right py-2 px-3 font-semibold text-blue-900">Rate</th>
+                                                <th className="text-right py-2 px-3 font-semibold text-blue-900">Total</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {item.materials.map((material: any, mIndex: number) => (
+                                                <tr key={mIndex} className={`border-b border-blue-100 ${mIndex % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
+                                                  <td className="py-2 px-3 text-gray-900">
+                                                    <div className="flex items-center gap-2">
+                                                      <div className="font-medium">{material.material_name || 'N/A'}</div>
+                                                      {material.is_from_change_request && (
+                                                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                                                          New
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  </td>
+                                                  <td className="py-2 px-3 text-gray-600 text-xs">
+                                                    {material.sub_item_name || '-'}
+                                                  </td>
+                                                  <td className="py-2 px-3 text-center font-medium text-gray-900">
+                                                    {material.quantity || 0}
+                                                  </td>
+                                                  <td className="py-2 px-3 text-center">
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                                      {material.unit || 'N/A'}
+                                                    </span>
+                                                  </td>
+                                                  <td className="py-2 px-3 text-right font-medium text-gray-900">
+                                                    AED {material.unit_price?.toFixed(2) || '0.00'}
+                                                  </td>
+                                                  <td className="py-2 px-3 text-right font-bold text-gray-900">
+                                                    AED {material.total_price?.toFixed(2) || '0.00'}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                        {item.materials.some((m: any) => m.change_request_id) && (
+                                          <p className="text-xs text-blue-700 mt-2 italic flex items-center gap-1">
+                                            <Info className="w-3 h-3" />
+                                            These materials were added through Change Request #{item.materials.find((m: any) => m.change_request_id)?.change_request_id}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+
                                     {/* Sub Items */}
                                     {item.sub_items?.length > 0 && (
                                       <div className="space-y-4">

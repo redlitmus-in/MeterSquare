@@ -1744,11 +1744,11 @@ def get_boq(boq_id):
         try:
             from models.change_request import ChangeRequest
 
-            # Get approved change requests for this BOQ
-            approved_change_requests = ChangeRequest.query.filter_by(
-                boq_id=boq_id,
-                status='approved',
-                is_deleted=False
+            # Get approved and completed change requests for this BOQ
+            approved_change_requests = ChangeRequest.query.filter(
+                ChangeRequest.boq_id == boq_id,
+                ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer']),
+                ChangeRequest.is_deleted == False
             ).order_by(ChangeRequest.approval_date.desc()).all()
 
             if approved_change_requests:

@@ -377,8 +377,8 @@ class BuyerVendorService {
       errors.push('Invalid phone number format');
     }
 
-    if (vendor.gst_number && vendor.gst_number.trim() && !this.isValidGST(vendor.gst_number)) {
-      errors.push('Invalid GST number format');
+    if (vendor.gst_number && vendor.gst_number.trim() && !this.isValidTaxNumber(vendor.gst_number, vendor.country)) {
+      errors.push('Invalid tax number format');
     }
 
     return errors;
@@ -390,16 +390,131 @@ class BuyerVendorService {
     return emailRegex.test(email);
   }
 
-  // Phone validation helper
+  // Phone validation helper - More flexible for international numbers
   private isValidPhone(phone: string): boolean {
+    // Allow digits, spaces, hyphens, parentheses, and plus sign
     const phoneRegex = /^[\d\s\-+()]+$/;
-    return phoneRegex.test(phone) && phone.replace(/\D/g, '').length >= 10;
+
+    // Remove all non-digit characters to check minimum length
+    const digitsOnly = phone.replace(/\D/g, '');
+
+    // Minimum 7 digits (for some countries), maximum 15 (international standard)
+    return phoneRegex.test(phone) && digitsOnly.length >= 7 && digitsOnly.length <= 15;
   }
 
-  // GST validation helper (Indian GST format)
-  private isValidGST(gst: string): boolean {
-    const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-    return gstRegex.test(gst);
+  // Tax/VAT number validation helper - Flexible for different countries
+  private isValidTaxNumber(taxNumber: string, country?: string): boolean {
+    const trimmed = taxNumber.trim();
+
+    // If no country specified or not a recognized format, just check basic format
+    if (!country) {
+      // Generic validation: alphanumeric, hyphens, spaces allowed, 5-20 characters
+      return /^[A-Z0-9\s\-]{5,20}$/i.test(trimmed);
+    }
+
+    // Country-specific validation
+    switch (country.toUpperCase()) {
+      case 'INDIA':
+        // Indian GST format: 15 characters (e.g., 22AAAAA0000A1Z5)
+        return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(trimmed);
+
+      case 'UAE':
+      case 'SAUDI ARABIA':
+      case 'BAHRAIN':
+      case 'KUWAIT':
+      case 'OMAN':
+      case 'QATAR':
+        // GCC VAT/TRN: typically 15 digits
+        return /^[0-9]{15}$/.test(trimmed);
+
+      case 'UK':
+        // UK VAT: 9 or 12 digits, or GB prefix with 9 or 12 digits
+        return /^(GB)?[0-9]{9}([0-9]{3})?$/.test(trimmed.replace(/\s/g, ''));
+
+      case 'USA':
+        // US EIN: XX-XXXXXXX format
+        return /^[0-9]{2}-?[0-9]{7}$/.test(trimmed);
+
+      case 'CANADA':
+        // Canadian Business Number: 9 digits + 2 letter program identifier + 4 digit reference
+        return /^[0-9]{9}(RC|RM|RP|RT)?[0-9]{4}?$/.test(trimmed);
+
+      case 'AUSTRALIA':
+        // Australian Business Number (ABN): 11 digits
+        // Australian Company Number (ACN): 9 digits
+        return /^[0-9]{9}$/.test(trimmed) || /^[0-9]{11}$/.test(trimmed);
+
+      case 'GERMANY':
+        // German VAT (USt-IdNr.): DE followed by 9 digits
+        return /^DE[0-9]{9}$/.test(trimmed.replace(/\s/g, ''));
+
+      case 'FRANCE':
+        // French VAT: FR followed by 2 characters (letters or digits) and 9 digits
+        return /^FR[A-Z0-9]{2}[0-9]{9}$/.test(trimmed.replace(/\s/g, ''));
+
+      case 'SPAIN':
+        // Spanish VAT (NIF/CIF): ES followed by alphanumeric 8-9 characters
+        return /^ES[A-Z0-9]{8,9}$/.test(trimmed.replace(/\s/g, ''));
+
+      case 'ITALY':
+        // Italian VAT: IT followed by 11 digits
+        return /^IT[0-9]{11}$/.test(trimmed.replace(/\s/g, ''));
+
+      case 'NETHERLANDS':
+        // Dutch VAT: NL followed by 9 digits, letter B, and 2 digits
+        return /^NL[0-9]{9}B[0-9]{2}$/.test(trimmed.replace(/\s/g, ''));
+
+      case 'SINGAPORE':
+        // Singapore GST Registration Number: 8 or 9 digits followed by a letter, or starts with M/S
+        return /^[0-9]{8,9}[A-Z]$/.test(trimmed) || /^[MS][0-9]{7}[A-Z]$/.test(trimmed);
+
+      case 'MALAYSIA':
+        // Malaysian SST/GST: Various formats, generally alphanumeric 12-17 characters
+        return /^[A-Z0-9\-]{10,17}$/.test(trimmed);
+
+      case 'CHINA':
+        // Chinese Taxpayer Identification Number: 15, 17, 18, or 20 digits
+        return /^[0-9]{15}$/.test(trimmed) || /^[0-9]{17,20}$/.test(trimmed);
+
+      case 'JAPAN':
+        // Japanese Corporate Number: 13 digits
+        return /^[0-9]{13}$/.test(trimmed);
+
+      case 'SOUTH KOREA':
+        // Korean Business Registration Number: 10 digits (XXX-XX-XXXXX)
+        return /^[0-9]{3}-?[0-9]{2}-?[0-9]{5}$/.test(trimmed);
+
+      case 'BRAZIL':
+        // Brazilian CNPJ: 14 digits (XX.XXX.XXX/XXXX-XX)
+        return /^[0-9]{2}\.?[0-9]{3}\.?[0-9]{3}\/?[0-9]{4}-?[0-9]{2}$/.test(trimmed);
+
+      case 'MEXICO':
+        // Mexican RFC: 12-13 alphanumeric characters
+        return /^[A-Z&Ñ]{3,4}[0-9]{6}[A-Z0-9]{3}$/.test(trimmed);
+
+      case 'SOUTH AFRICA':
+        // South African VAT Number: 10 digits
+        return /^[0-9]{10}$/.test(trimmed);
+
+      case 'NEW ZEALAND':
+        // New Zealand GST Number: 8 or 9 digits
+        return /^[0-9]{8,9}$/.test(trimmed);
+
+      case 'SWITZERLAND':
+        // Swiss VAT/UID: CHE followed by 9 digits and optional MVA/TVA/IVA
+        return /^CHE[0-9]{9}(MWST|TVA|IVA)?$/.test(trimmed.replace(/[\s.-]/g, ''));
+
+      case 'NORWAY':
+      case 'SWEDEN':
+      case 'DENMARK':
+      case 'FINLAND':
+        // Nordic countries: Generally 9-12 digits with optional country prefix
+        return /^(NO|SE|DK|FI)?[0-9]{9,12}$/.test(trimmed.replace(/\s/g, ''));
+
+      default:
+        // Generic validation for other countries: alphanumeric, 5-20 characters
+        return /^[A-Z0-9\s\-]{5,20}$/i.test(trimmed);
+    }
   }
 }
 

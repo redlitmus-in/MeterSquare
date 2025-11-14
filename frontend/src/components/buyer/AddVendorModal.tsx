@@ -11,18 +11,121 @@ interface AddVendorModalProps {
   editVendor?: Vendor | null;
 }
 
-// Country and phone code mapping
+// Comprehensive country and phone code mapping
 const COUNTRY_PHONE_CODES = [
-  { country: 'UAE', code: '+971', flag: '🇦🇪' },
-  { country: 'Saudi Arabia', code: '+966', flag: '🇸🇦' },
-  { country: 'Qatar', code: '+974', flag: '🇶🇦' },
-  { country: 'Kuwait', code: '+965', flag: '🇰🇼' },
-  { country: 'Bahrain', code: '+973', flag: '🇧🇭' },
-  { country: 'Oman', code: '+968', flag: '🇴🇲' },
-  { country: 'India', code: '+91', flag: '🇮🇳' },
-  { country: 'Pakistan', code: '+92', flag: '🇵🇰' },
-  { country: 'USA', code: '+1', flag: '🇺🇸' },
-  { country: 'UK', code: '+44', flag: '🇬🇧' },
+  // Middle East & GCC
+  { country: 'UAE', code: '+971', flag: '🇦🇪', region: 'Middle East' },
+  { country: 'Saudi Arabia', code: '+966', flag: '🇸🇦', region: 'Middle East' },
+  { country: 'Qatar', code: '+974', flag: '🇶🇦', region: 'Middle East' },
+  { country: 'Kuwait', code: '+965', flag: '🇰🇼', region: 'Middle East' },
+  { country: 'Bahrain', code: '+973', flag: '🇧🇭', region: 'Middle East' },
+  { country: 'Oman', code: '+968', flag: '🇴🇲', region: 'Middle East' },
+  { country: 'Jordan', code: '+962', flag: '🇯🇴', region: 'Middle East' },
+  { country: 'Lebanon', code: '+961', flag: '🇱🇧', region: 'Middle East' },
+  { country: 'Iraq', code: '+964', flag: '🇮🇶', region: 'Middle East' },
+  { country: 'Yemen', code: '+967', flag: '🇾🇪', region: 'Middle East' },
+  { country: 'Syria', code: '+963', flag: '🇸🇾', region: 'Middle East' },
+  { country: 'Turkey', code: '+90', flag: '🇹🇷', region: 'Middle East' },
+  { country: 'Egypt', code: '+20', flag: '🇪🇬', region: 'Middle East' },
+
+  // South Asia
+  { country: 'India', code: '+91', flag: '🇮🇳', region: 'South Asia' },
+  { country: 'Pakistan', code: '+92', flag: '🇵🇰', region: 'South Asia' },
+  { country: 'Bangladesh', code: '+880', flag: '🇧🇩', region: 'South Asia' },
+  { country: 'Sri Lanka', code: '+94', flag: '🇱🇰', region: 'South Asia' },
+  { country: 'Nepal', code: '+977', flag: '🇳🇵', region: 'South Asia' },
+  { country: 'Afghanistan', code: '+93', flag: '🇦🇫', region: 'South Asia' },
+  { country: 'Maldives', code: '+960', flag: '🇲🇻', region: 'South Asia' },
+
+  // Southeast Asia
+  { country: 'Singapore', code: '+65', flag: '🇸🇬', region: 'Southeast Asia' },
+  { country: 'Malaysia', code: '+60', flag: '🇲🇾', region: 'Southeast Asia' },
+  { country: 'Indonesia', code: '+62', flag: '🇮🇩', region: 'Southeast Asia' },
+  { country: 'Thailand', code: '+66', flag: '🇹🇭', region: 'Southeast Asia' },
+  { country: 'Philippines', code: '+63', flag: '🇵🇭', region: 'Southeast Asia' },
+  { country: 'Vietnam', code: '+84', flag: '🇻🇳', region: 'Southeast Asia' },
+  { country: 'Myanmar', code: '+95', flag: '🇲🇲', region: 'Southeast Asia' },
+  { country: 'Cambodia', code: '+855', flag: '🇰🇭', region: 'Southeast Asia' },
+  { country: 'Laos', code: '+856', flag: '🇱🇦', region: 'Southeast Asia' },
+  { country: 'Brunei', code: '+673', flag: '🇧🇳', region: 'Southeast Asia' },
+
+  // East Asia
+  { country: 'China', code: '+86', flag: '🇨🇳', region: 'East Asia' },
+  { country: 'Japan', code: '+81', flag: '🇯🇵', region: 'East Asia' },
+  { country: 'South Korea', code: '+82', flag: '🇰🇷', region: 'East Asia' },
+  { country: 'Hong Kong', code: '+852', flag: '🇭🇰', region: 'East Asia' },
+  { country: 'Taiwan', code: '+886', flag: '🇹🇼', region: 'East Asia' },
+  { country: 'Macau', code: '+853', flag: '🇲🇴', region: 'East Asia' },
+
+  // North America
+  { country: 'USA', code: '+1', flag: '🇺🇸', region: 'North America' },
+  { country: 'Canada', code: '+1', flag: '🇨🇦', region: 'North America' },
+  { country: 'Mexico', code: '+52', flag: '🇲🇽', region: 'North America' },
+
+  // Europe - Western
+  { country: 'UK', code: '+44', flag: '🇬🇧', region: 'Europe' },
+  { country: 'Germany', code: '+49', flag: '🇩🇪', region: 'Europe' },
+  { country: 'France', code: '+33', flag: '🇫🇷', region: 'Europe' },
+  { country: 'Italy', code: '+39', flag: '🇮🇹', region: 'Europe' },
+  { country: 'Spain', code: '+34', flag: '🇪🇸', region: 'Europe' },
+  { country: 'Netherlands', code: '+31', flag: '🇳🇱', region: 'Europe' },
+  { country: 'Belgium', code: '+32', flag: '🇧🇪', region: 'Europe' },
+  { country: 'Switzerland', code: '+41', flag: '🇨🇭', region: 'Europe' },
+  { country: 'Austria', code: '+43', flag: '🇦🇹', region: 'Europe' },
+  { country: 'Portugal', code: '+351', flag: '🇵🇹', region: 'Europe' },
+  { country: 'Ireland', code: '+353', flag: '🇮🇪', region: 'Europe' },
+  { country: 'Luxembourg', code: '+352', flag: '🇱🇺', region: 'Europe' },
+
+  // Europe - Northern
+  { country: 'Sweden', code: '+46', flag: '🇸🇪', region: 'Europe' },
+  { country: 'Norway', code: '+47', flag: '🇳🇴', region: 'Europe' },
+  { country: 'Denmark', code: '+45', flag: '🇩🇰', region: 'Europe' },
+  { country: 'Finland', code: '+358', flag: '🇫🇮', region: 'Europe' },
+  { country: 'Iceland', code: '+354', flag: '🇮🇸', region: 'Europe' },
+
+  // Europe - Eastern
+  { country: 'Poland', code: '+48', flag: '🇵🇱', region: 'Europe' },
+  { country: 'Czech Republic', code: '+420', flag: '🇨🇿', region: 'Europe' },
+  { country: 'Hungary', code: '+36', flag: '🇭🇺', region: 'Europe' },
+  { country: 'Romania', code: '+40', flag: '🇷🇴', region: 'Europe' },
+  { country: 'Bulgaria', code: '+359', flag: '🇧🇬', region: 'Europe' },
+  { country: 'Slovakia', code: '+421', flag: '🇸🇰', region: 'Europe' },
+  { country: 'Ukraine', code: '+380', flag: '🇺🇦', region: 'Europe' },
+  { country: 'Russia', code: '+7', flag: '🇷🇺', region: 'Europe' },
+
+  // Europe - Southern
+  { country: 'Greece', code: '+30', flag: '🇬🇷', region: 'Europe' },
+  { country: 'Croatia', code: '+385', flag: '🇭🇷', region: 'Europe' },
+  { country: 'Serbia', code: '+381', flag: '🇷🇸', region: 'Europe' },
+  { country: 'Slovenia', code: '+386', flag: '🇸🇮', region: 'Europe' },
+
+  // Oceania
+  { country: 'Australia', code: '+61', flag: '🇦🇺', region: 'Oceania' },
+  { country: 'New Zealand', code: '+64', flag: '🇳🇿', region: 'Oceania' },
+
+  // Africa - Northern
+  { country: 'Morocco', code: '+212', flag: '🇲🇦', region: 'Africa' },
+  { country: 'Algeria', code: '+213', flag: '🇩🇿', region: 'Africa' },
+  { country: 'Tunisia', code: '+216', flag: '🇹🇳', region: 'Africa' },
+  { country: 'Libya', code: '+218', flag: '🇱🇾', region: 'Africa' },
+
+  // Africa - Sub-Saharan
+  { country: 'South Africa', code: '+27', flag: '🇿🇦', region: 'Africa' },
+  { country: 'Nigeria', code: '+234', flag: '🇳🇬', region: 'Africa' },
+  { country: 'Kenya', code: '+254', flag: '🇰🇪', region: 'Africa' },
+  { country: 'Ghana', code: '+233', flag: '🇬🇭', region: 'Africa' },
+  { country: 'Ethiopia', code: '+251', flag: '🇪🇹', region: 'Africa' },
+  { country: 'Tanzania', code: '+255', flag: '🇹🇿', region: 'Africa' },
+  { country: 'Uganda', code: '+256', flag: '🇺🇬', region: 'Africa' },
+
+  // South America
+  { country: 'Brazil', code: '+55', flag: '🇧🇷', region: 'South America' },
+  { country: 'Argentina', code: '+54', flag: '🇦🇷', region: 'South America' },
+  { country: 'Chile', code: '+56', flag: '🇨🇱', region: 'South America' },
+  { country: 'Colombia', code: '+57', flag: '🇨🇴', region: 'South America' },
+  { country: 'Peru', code: '+51', flag: '🇵🇪', region: 'South America' },
+  { country: 'Venezuela', code: '+58', flag: '🇻🇪', region: 'South America' },
+  { country: 'Ecuador', code: '+593', flag: '🇪🇨', region: 'South America' },
 ];
 
 const AddVendorModal: React.FC<AddVendorModalProps> = ({
@@ -50,6 +153,44 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+
+  // Get tax number label and placeholder based on country
+  const getTaxNumberInfo = (country: string) => {
+    const taxInfo: Record<string, { label: string; placeholder: string; example: string }> = {
+      'India': { label: 'GST Number', placeholder: '22AAAAA0000A1Z5', example: '15 characters' },
+      'UAE': { label: 'VAT/TRN Number', placeholder: '100000000000000', example: '15 digits' },
+      'Saudi Arabia': { label: 'VAT Number', placeholder: '300000000000003', example: '15 digits' },
+      'Qatar': { label: 'Tax Number', placeholder: '100000000000000', example: '15 digits' },
+      'Kuwait': { label: 'Tax Number', placeholder: '100000000000000', example: '15 digits' },
+      'Bahrain': { label: 'Tax Number', placeholder: '100000000000000', example: '15 digits' },
+      'Oman': { label: 'Tax Number', placeholder: '100000000000000', example: '15 digits' },
+      'UK': { label: 'VAT Number', placeholder: 'GB123456789 or 123456789', example: '9 or 12 digits' },
+      'USA': { label: 'EIN (Employer ID)', placeholder: '12-3456789', example: 'XX-XXXXXXX' },
+      'Canada': { label: 'Business Number', placeholder: '123456789RC0001', example: '9 digits + program ID' },
+      'Australia': { label: 'ABN/ACN', placeholder: '12345678901', example: '9 or 11 digits' },
+      'Germany': { label: 'VAT-ID (USt-IdNr)', placeholder: 'DE123456789', example: 'DE + 9 digits' },
+      'France': { label: 'VAT Number', placeholder: 'FRXX123456789', example: 'FR + 11 chars' },
+      'Spain': { label: 'NIF/CIF', placeholder: 'ESA12345678', example: 'ES + 8-9 chars' },
+      'Italy': { label: 'VAT Number', placeholder: 'IT12345678901', example: 'IT + 11 digits' },
+      'Netherlands': { label: 'VAT Number', placeholder: 'NL123456789B01', example: 'NL + 9 digits + B + 2 digits' },
+      'Singapore': { label: 'GST Registration Number', placeholder: '12345678X or M12345678X', example: '8-9 digits + letter' },
+      'Malaysia': { label: 'SST/GST Number', placeholder: 'A01-2345-67890123', example: 'Alphanumeric' },
+      'China': { label: 'Taxpayer ID', placeholder: '123456789012345', example: '15-20 digits' },
+      'Japan': { label: 'Corporate Number', placeholder: '1234567890123', example: '13 digits' },
+      'South Korea': { label: 'Business Registration Number', placeholder: '123-45-67890', example: 'XXX-XX-XXXXX' },
+      'Brazil': { label: 'CNPJ', placeholder: '12.345.678/0001-90', example: 'XX.XXX.XXX/XXXX-XX' },
+      'Mexico': { label: 'RFC', placeholder: 'ABC123456XYZ', example: '12-13 alphanumeric' },
+      'South Africa': { label: 'VAT Number', placeholder: '1234567890', example: '10 digits' },
+      'New Zealand': { label: 'GST Number', placeholder: '12345678 or 123456789', example: '8-9 digits' },
+      'Switzerland': { label: 'UID/VAT', placeholder: 'CHE123456789', example: 'CHE + 9 digits' },
+      'Norway': { label: 'Organization Number', placeholder: '123456789', example: '9 digits' },
+      'Sweden': { label: 'Organization Number', placeholder: '123456789012', example: '12 digits' },
+      'Denmark': { label: 'CVR Number', placeholder: '12345678', example: '8 digits' },
+      'Finland': { label: 'Business ID', placeholder: '1234567-8', example: '7 digits + check digit' },
+    };
+
+    return taxInfo[country] || { label: 'Tax/VAT Number', placeholder: 'Enter tax number', example: 'Country-specific format' };
+  };
 
   useEffect(() => {
     loadCategories();
@@ -337,9 +478,9 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
                     </div>
                   </div>
 
-                  <div>
+                  <div className="col-span-2">
                     <label htmlFor="gst_number" className="block text-sm font-medium text-gray-700 mb-1">
-                      GST/Tax Number
+                      {getTaxNumberInfo(formData.country || 'UAE').label} (Optional)
                     </label>
                     <input
                       id="gst_number"
@@ -348,7 +489,8 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
                       value={formData.gst_number}
                       onChange={handleInputChange}
                       className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                      placeholder="22XXXXX5678X1Z5"
+                      placeholder={getTaxNumberInfo(formData.country || 'UAE').placeholder}
+                      title={`Format: ${getTaxNumberInfo(formData.country || 'UAE').example}`}
                     />
                   </div>
                 </div>
