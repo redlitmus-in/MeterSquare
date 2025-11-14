@@ -110,8 +110,10 @@ interface PurchaseStore {
   getPurchasesForRole: (role: string) => Purchase[];
 }
 
-// Polling interval (2 seconds for real-time feel)
-const DEFAULT_POLLING_INTERVAL = 2000; // Reduced to 2 seconds for even faster updates
+// ✅ PERFORMANCE: Optimized polling interval (30 seconds)
+// Real-time updates handled by WebSocket (socket.io) for instant updates
+// Polling is now a fallback to ensure data consistency
+const DEFAULT_POLLING_INTERVAL = 30000; // 30s (was 2s - 93% less network traffic!)
 
 // Debounce timer for fetch requests
 let fetchDebounceTimer: NodeJS.Timeout | null = null;

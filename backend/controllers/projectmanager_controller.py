@@ -21,6 +21,7 @@ SHARED FUNCTIONALITY:
 """
 
 from flask import request, jsonify, g
+from sqlalchemy.orm import selectinload, joinedload
 from config.db import db
 from models.project import Project
 from models.boq import *
@@ -585,19 +586,29 @@ def assign_projects():
         if not project_ids:
             return jsonify({"error": "project_ids are required"}), 400
 
-        # Validate all users
-        pm_users = []
-        for uid in pm_ids:
-            user = User.query.filter_by(user_id=uid).first()
-            if not user:
-                return jsonify({"error": f"Project Manager with ID {uid} not found"}), 404
-            pm_users.append(user)
+        # ✅ PERFORMANCE FIX: Query all PM users at once (N queries → 1)
+        pm_users = User.query.filter(User.user_id.in_(pm_ids)).all()
+        if len(pm_users) != len(pm_ids):
+            found_ids = [u.user_id for u in pm_users]
+            missing = set(pm_ids) - set(found_ids)
+            return jsonify({"error": f"Project Manager(s) not found: {list(missing)}"}), 404
 
-        # Validate that all projects have Client_Confirmed BOQs
+        # ✅ PERFORMANCE FIX: Query all projects with eager-loaded BOQs at once (100+ queries → 2)
+        projects = Project.query.options(
+            selectinload(Project.boqs)
+        ).filter(
+            Project.project_id.in_(project_ids)
+        ).all()
+
+        # Create project lookup dictionary
+        projects_map = {p.project_id: p for p in projects}
+
+        # Validate that all projects have Client_Confirmed BOQs (no additional queries)
         for pid in project_ids:
-            project = Project.query.filter_by(project_id=pid).first()
+            project = projects_map.get(pid)
             if project:
-                boqs = BOQ.query.filter_by(project_id=pid, is_deleted=False).all()
+                # BOQs already loaded - no query needed
+                boqs = [b for b in project.boqs if not b.is_deleted]
                 for boq in boqs:
                     if boq.status not in ['Client_Confirmed', 'approved']:
                         return jsonify({
@@ -613,9 +624,9 @@ def assign_projects():
         projects_data_for_email = []
         boq_histories_updated = 0
 
-        # Process each project
+        # Process each project (using already-loaded data - no queries)
         for pid in project_ids:
-            project = Project.query.filter_by(project_id=pid).first()
+            project = projects_map.get(pid)
             if project:
                 # Store ALL PM IDs as JSON array in user_id field
                 project.user_id = pm_ids  # This will be stored as JSON array
@@ -635,8 +646,8 @@ def assign_projects():
                     "status": getattr(project, "status", "Active")
                 })
 
-                # Find BOQs associated with this project
-                boqs = BOQ.query.filter_by(project_id=pid, is_deleted=False).all()
+                # Get BOQs from already-loaded data (no query - data already in memory)
+                boqs = [b for b in project.boqs if not b.is_deleted]
 
                 # Create PM names list for comments
                 pm_names_list = ", ".join([pm.full_name for pm in pm_users])

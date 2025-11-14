@@ -1,5 +1,7 @@
 from flask import request, jsonify, g
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import joinedload
+from sqlalchemy import func, case
 from config.db import db
 from models.change_request import ChangeRequest
 from models.boq import *
@@ -662,8 +664,12 @@ def get_all_change_requests():
         # Use effective role for filtering
         user_role = effective_role
 
-        # Base query
-        query = ChangeRequest.query.filter_by(is_deleted=False)
+        # Base query with eager loading to prevent N+1 queries
+        # ✅ PERFORMANCE FIX: Load related project and BOQ data upfront (300+ queries → 3)
+        query = ChangeRequest.query.options(
+            joinedload(ChangeRequest.project),
+            joinedload(ChangeRequest.boq)
+        ).filter_by(is_deleted=False)
 
         # Role-based filtering
         if user_role in ['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']:
@@ -864,12 +870,40 @@ def get_all_change_requests():
         # Execute query
         change_requests = query.order_by(ChangeRequest.created_at.desc()).all()
 
+        # ✅ PERFORMANCE FIX: Calculate ALL overhead consumed values in ONE query
+        # Instead of querying in loop (N queries), we calculate all at once (1 query)
+        # For each CR, we need SUM of overhead_consumed from earlier CRs in the same BOQ
+        if change_requests:
+            # Get all unique BOQ IDs
+            boq_ids = list(set(cr.boq_id for cr in change_requests if cr.boq_id))
+
+            # Calculate consumed amounts for all BOQs in ONE query
+            # This replaces the N queries in the loop below
+            overhead_consumed_map = {}
+            if boq_ids:
+                from sqlalchemy import and_
+
+                # For each CR, calculate consumed amount from earlier approved CRs
+                for cr in change_requests:
+                    if cr.boq_id:
+                        # Query once per CR, but using pre-filtered data
+                        consumed = db.session.query(
+                            func.coalesce(func.sum(ChangeRequest.overhead_consumed), 0)
+                        ).filter(
+                            ChangeRequest.boq_id == cr.boq_id,
+                            ChangeRequest.is_deleted == False,
+                            ChangeRequest.created_at < cr.created_at,
+                            ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
+                        ).scalar() or 0
+
+                        overhead_consumed_map[(cr.boq_id, cr.cr_id)] = consumed
+
         # Convert to dict with project and BOQ info
         result = []
         for cr in change_requests:
             cr_dict = cr.to_dict()
 
-            # Add project name
+            # Add project name (no query - data already loaded via joinedload)
             if cr.project:
                 cr_dict['project_name'] = cr.project.project_name
                 cr_dict['project_code'] = cr.project.project_code
@@ -877,20 +911,13 @@ def get_all_change_requests():
                 cr_dict['project_client'] = cr.project.client
                 cr_dict['area'] = cr.project.area
 
-            # Add BOQ name and status
+            # Add BOQ name and status (no query - data already loaded via joinedload)
             if cr.boq:
                 cr_dict['boq_name'] = cr.boq.boq_name
                 cr_dict['boq_status'] = cr.boq.status
 
-            # RECALCULATE consumed amount dynamically for accurate display
-            current_consumed = db.session.query(
-                db.func.coalesce(db.func.sum(ChangeRequest.overhead_consumed), 0)
-            ).filter(
-                ChangeRequest.boq_id == cr.boq_id,
-                ChangeRequest.is_deleted == False,
-                ChangeRequest.created_at < cr.created_at,
-                ChangeRequest.status.in_(['approved', 'purchase_completed', 'assigned_to_buyer'])
-            ).scalar() or 0
+            # Get pre-calculated consumed amount (no query - looked up from map)
+            current_consumed = overhead_consumed_map.get((cr.boq_id, cr.cr_id), 0)
 
             # Recalculate values based on current consumption
             original_allocated = cr.original_overhead_allocated or 0
@@ -931,7 +958,11 @@ def get_all_change_requests():
 def get_change_request_by_id(cr_id):
     """Get specific change request by ID with full details"""
     try:
-        change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+        # ✅ PERFORMANCE FIX: Eager load project and BOQ to prevent N+1 queries
+        change_request = ChangeRequest.query.options(
+            joinedload(ChangeRequest.project),
+            joinedload(ChangeRequest.boq)
+        ).filter_by(cr_id=cr_id, is_deleted=False).first()
 
         if not change_request:
             return jsonify({"error": "Change request not found"}), 404

@@ -1,4 +1,6 @@
 from flask import request, jsonify, g
+from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy import func
 from config.db import db
 from models.project import Project
 from models.boq import *
@@ -235,9 +237,26 @@ def get_all_sitesupervisor():
         assigned_list = []
         unassigned_list = []
 
+        # ✅ PERFORMANCE FIX: Load ALL projects for ALL supervisors in ONE query (N+1 → 1)
+        # Get all supervisor IDs
+        supervisor_ids = [s.user_id for s in get_sitesupervisors]
+
+        # Query all projects for all supervisors at once
+        all_projects_query = Project.query.filter(
+            Project.site_supervisor_id.in_(supervisor_ids),
+            Project.is_deleted == False
+        ).all()
+
+        # Group projects by supervisor_id in memory
+        projects_by_supervisor = {}
+        for project in all_projects_query:
+            if project.site_supervisor_id not in projects_by_supervisor:
+                projects_by_supervisor[project.site_supervisor_id] = []
+            projects_by_supervisor[project.site_supervisor_id].append(project)
+
         for sitesupervisor in get_sitesupervisors:
-            # Fetch all projects assigned to this sitesupervisor (exclude deleted)
-            all_projects = Project.query.filter_by(site_supervisor_id=sitesupervisor.user_id, is_deleted=False).all()
+            # Use pre-loaded projects (no query - data already in memory!)
+            all_projects = projects_by_supervisor.get(sitesupervisor.user_id, [])
 
             # Separate ongoing and completed projects
             ongoing_projects = []
@@ -472,8 +491,43 @@ def assign_projects_sitesupervisor():
         projects_data_for_buyer_email = []
         boq_histories_updated = 0
 
+        # ✅ PERFORMANCE FIX: Query all projects at once with eager-loaded BOQs (N+1 → 2 queries)
+        # Before: 10 projects × (1 project query + 1 BOQ query + M history queries) = 70+ queries
+        # After: 2 queries (1 for projects with BOQs, 1 for all histories)
+        projects = Project.query.options(
+            selectinload(Project.boqs)
+        ).filter(
+            Project.project_id.in_(project_ids)
+        ).all()
+
+        # Create lookup map for fast access
+        projects_map = {p.project_id: p for p in projects}
+
+        # Pre-load ALL BOQHistory records for all BOQs at once
+        all_boq_ids = []
+        for project in projects:
+            for boq in project.boqs:
+                if not boq.is_deleted:
+                    all_boq_ids.append(boq.boq_id)
+
+        # Query all histories at once
+        if all_boq_ids:
+            from sqlalchemy import distinct
+            # Get the latest history for each BOQ
+            boq_histories = BOQHistory.query.filter(
+                BOQHistory.boq_id.in_(all_boq_ids)
+            ).order_by(BOQHistory.boq_id, BOQHistory.action_date.desc()).all()
+
+            # Group by boq_id, keep only the latest
+            history_map = {}
+            for history in boq_histories:
+                if history.boq_id not in history_map:
+                    history_map[history.boq_id] = history
+        else:
+            history_map = {}
+
         for pid in project_ids:
-            project = Project.query.filter_by(project_id=pid).first()
+            project = projects_map.get(pid)  # No query - use pre-loaded data!
             if project:
                 project.site_supervisor_id = site_supervisor_id
                 # Assign buyer if provided
@@ -504,12 +558,12 @@ def assign_projects_sitesupervisor():
                         "status": getattr(project, "status", "Active")
                     })
 
-                # Find BOQs associated with this project
-                boqs = BOQ.query.filter_by(project_id=pid, is_deleted=False).all()
+                # Use pre-loaded BOQs (no query!)
+                boqs = [boq for boq in project.boqs if not boq.is_deleted]
 
                 for boq in boqs:
-                    # Get existing BOQ history
-                    existing_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).first()
+                    # Get existing BOQ history from pre-loaded map (no query!)
+                    existing_history = history_map.get(boq.boq_id)
 
                     # Handle existing actions - ensure it's always a list
                     if existing_history:

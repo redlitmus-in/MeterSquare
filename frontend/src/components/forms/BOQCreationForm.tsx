@@ -436,13 +436,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     onClose();
   };
 
-  // Auto-restore draft data on mount (no modal, just restore directly)
+  // Auto-restore draft data on mount (only if draft is for THIS project)
   useEffect(() => {
     if (isOpen && !editMode && !isRevision) {
       const savedData = getLocalStorageData();
       const actualData = savedData?.data || savedData;
 
-      if (actualData && actualData.boqName) {
+      // Only restore if draft exists AND it's for the SAME project
+      const isDraftForThisProject = actualData &&
+                                    actualData.boqName &&
+                                    actualData.selectedProjectId === selectedProject?.project_id;
+
+      if (isDraftForThisProject) {
         // Auto-restore data directly (no popup modal)
         setBoqName(actualData.boqName || '');
         setSelectedProjectId(actualData.selectedProjectId || null);
@@ -466,8 +471,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           description: `Draft with ${actualData.items?.length || 0} items restored`
         });
       }
+      // If draft is for a different project, start fresh (don't restore)
     }
-  }, [isOpen, editMode, isRevision, getLocalStorageData]);
+  }, [isOpen, editMode, isRevision, getLocalStorageData, selectedProject]);
 
   // Warn user before page refresh/close if there's unsaved data
   useEffect(() => {

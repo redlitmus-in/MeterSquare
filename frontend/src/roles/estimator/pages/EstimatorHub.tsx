@@ -4168,4 +4168,5 @@ const EstimatorHub: React.FC = () => {
   );
 };
 
-export default EstimatorHub;
+// ✅ PERFORMANCE FIX: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(EstimatorHub);

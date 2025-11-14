@@ -1,5 +1,9 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_compress import Compress
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_caching import Cache
 from dotenv import load_dotenv
 from config.routes import initialize_routes
 from config.db import initialize_db as initialize_sqlalchemy, db
@@ -36,13 +40,14 @@ def create_app():
              supports_credentials=True,
              max_age=3600)  # ✅ NEW: Cache preflight requests for 1 hour
     else:
-        # Development: Allow all origins
+        # Development: Allow specific local origins only (SECURITY FIX)
+        # ⚠️ IMPORTANT: Never use origins="*" with supports_credentials=True in production!
         CORS(app,
-             origins="*",
+             origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"],
              allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-Viewing-As-Role", "X-Viewing-As-Role-Id"],
              methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
              supports_credentials=True,
-             max_age=3600)  # ✅ NEW: Cache preflight requests for 1 hour
+             max_age=3600)  # ✅ Cache preflight requests for 1 hour
 
     # ❌ REMOVED: Redundant after_request handler
     # Flask-CORS extension already handles ALL CORS headers automatically
@@ -50,15 +55,97 @@ def create_app():
     # With 1,500 requests/minute, this was 2.5 minutes of wasted CPU time per minute!
 
     logger = get_logger()  # Setup logging (make sure this returns something usable)
+
     # Production configuration
     if environment == "production":
         app.config['SESSION_COOKIE_SECURE'] = True
         app.config['SESSION_COOKIE_HTTPONLY'] = True
-        app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+        app.config['SESSION_COOKIE_SAMESITE'] = 'Strict'  # Changed from Lax to Strict for better security
         app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour
 
+    # ✅ PERFORMANCE: Response Compression (70-90% bandwidth reduction)
+    app.config['COMPRESS_MIMETYPES'] = [
+        'text/html', 'text/css', 'text/xml', 'text/plain',
+        'application/json', 'application/javascript', 'application/xml'
+    ]
+    app.config['COMPRESS_LEVEL'] = 6  # Balance between speed and compression
+    app.config['COMPRESS_MIN_SIZE'] = 500  # Only compress responses > 500 bytes
+    Compress(app)
+
+    # ✅ PERFORMANCE: Caching Layer (Redis or in-memory)
+    redis_url = os.getenv('REDIS_URL', None)
+    if redis_url:
+        # Production: Use Redis for distributed caching
+        app.config['CACHE_TYPE'] = 'redis'
+        app.config['CACHE_REDIS_URL'] = redis_url
+        app.config['CACHE_DEFAULT_TIMEOUT'] = 300  # 5 minutes
+    else:
+        # Development: Use simple in-memory cache
+        app.config['CACHE_TYPE'] = 'simple'
+        app.config['CACHE_DEFAULT_TIMEOUT'] = 300
+
+    cache = Cache(app)
+    app.cache = cache  # Make cache accessible to routes
+
+    # ✅ SECURITY: Rate Limiting (prevents brute force, DoS)
+    limiter = Limiter(
+        app=app,
+        key_func=get_remote_address,
+        default_limits=["1000 per day", "200 per hour"] if environment == "production" else ["10000 per hour"],
+        storage_uri=redis_url if redis_url else "memory://",
+        strategy="fixed-window"
+    )
+    app.limiter = limiter  # Make limiter accessible to routes
+
+    # ✅ SECURITY: Security Headers (prevents XSS, clickjacking, etc.)
+    @app.after_request
+    def set_security_headers(response):
+        """Add security headers to all responses"""
+        # Prevent MIME-type sniffing
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+
+        # Prevent clickjacking
+        response.headers['X-Frame-Options'] = 'DENY'
+
+        # XSS Protection (legacy but still useful for old browsers)
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+
+        # HSTS: Force HTTPS (only in production)
+        if environment == "production":
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
+
+        # Content Security Policy
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "font-src 'self' data:; "
+            "connect-src 'self' https://msq.kol.tel wss://msq.kol.tel"
+        )
+
+        # Referrer Policy
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+
+        # Permissions Policy (disable unnecessary browser features)
+        response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+
+        return response
+
+    # ✅ SECURITY: Log security events
+    @app.before_request
+    def log_security_events():
+        """Log authentication and security-related events"""
+        # Log failed authentication attempts
+        if request.endpoint and 'login' in request.endpoint:
+            logger.info(f"Login attempt from IP: {request.remote_addr}")
+
+        # Log admin endpoint access attempts
+        if request.endpoint and 'admin' in request.endpoint:
+            logger.info(f"Admin endpoint access: {request.endpoint} from IP: {request.remote_addr}")
+
     initialize_sqlalchemy(app)  # Init SQLAlchemy ORM
-    
+
     # Create all tables
     # with app.app_context():
     #     db.create_all()

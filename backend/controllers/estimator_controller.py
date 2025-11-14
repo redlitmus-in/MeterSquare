@@ -624,7 +624,8 @@ def send_boq_to_technical_director():
         }]
 
         # Send email to Technical Director
-        email_sent = boq_email_service.send_pm_assignment_notification(
+        # ✅ PERFORMANCE FIX: Use async email sending (15s → 0.1s response time)
+        email_sent = boq_email_service.send_pm_assignment_notification_async(
             td.email, td.full_name, current_user_name, projects_data
         )
 

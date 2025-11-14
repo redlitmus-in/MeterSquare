@@ -2700,4 +2700,5 @@ const MyProjects: React.FC = () => {
   );
 };
 
-export default MyProjects;
+// ✅ PERFORMANCE FIX: Wrap with React.memo to prevent unnecessary re-renders
+export default React.memo(MyProjects);

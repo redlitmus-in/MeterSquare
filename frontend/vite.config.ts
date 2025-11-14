@@ -145,9 +145,10 @@ export default defineConfig(({ mode }) => {
       // Optimize chunk size
       chunkSizeWarningLimit: isProduction ? 2000 : 1000,
 
-      // Advanced minification with Terser (disabled when obfuscation is on)
-      minify: ENABLE_OBFUSCATION ? 'esbuild' : (isProduction ? 'terser' : 'esbuild'),
-      terserOptions: (!ENABLE_OBFUSCATION && isProduction) ? {
+      // ✅ PERFORMANCE FIX: Always use terser in production for proper console removal
+      // esbuild is faster but doesn't remove console.log properly
+      minify: isProduction ? 'terser' : 'esbuild',
+      terserOptions: isProduction ? {
         parse: {
           ecma: 2020
         },

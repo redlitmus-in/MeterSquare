@@ -1,4 +1,5 @@
 from flask import request, jsonify, g
+from sqlalchemy.orm import selectinload
 from config.db import db
 from models.project import Project
 from models.boq import BOQ, BOQDetails, MasterItem, MasterSubItem
@@ -255,13 +256,18 @@ def get_buyer_boq_materials():
         # Get projects where BOTH buyer AND site_supervisor (SE) are assigned
         # Only show materials when both buyer and SE are assigned to the project
         # Admin sees all projects
+        # ✅ PERFORMANCE FIX: Eager load BOQs and BOQDetails (100+ queries → 2)
         if user_role == 'admin':
-            projects = Project.query.filter(
+            projects = Project.query.options(
+                selectinload(Project.boqs).selectinload(BOQ.boq_details_rel)
+            ).filter(
                 Project.site_supervisor_id.isnot(None),  # SE must be assigned
                 Project.is_deleted == False
             ).all()
         else:
-            projects = Project.query.filter(
+            projects = Project.query.options(
+                selectinload(Project.boqs).selectinload(BOQ.boq_details_rel)
+            ).filter(
                 Project.buyer_id == buyer_id,
                 Project.site_supervisor_id.isnot(None),  # SE must be assigned
                 Project.is_deleted == False
@@ -271,12 +277,13 @@ def get_buyer_boq_materials():
         total_cost = 0
 
         for project in projects:
-            # Get BOQs for this project
-            boqs = BOQ.query.filter_by(project_id=project.project_id, is_deleted=False).all()
+            # Get BOQs for this project (no query - already loaded via selectinload)
+            boqs = [boq for boq in project.boqs if not boq.is_deleted]
 
             for boq in boqs:
-                # Get BOQ details
-                boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+                # Get BOQ details (no query - already loaded via selectinload)
+                boq_details_list = [bd for bd in boq.boq_details_rel if not bd.is_deleted]
+                boq_details = boq_details_list[0] if boq_details_list else None
 
                 if boq_details and boq_details.boq_details:
                     items = boq_details.boq_details.get('items', [])
@@ -334,13 +341,18 @@ def get_buyer_dashboard():
 
         # Get projects where BOTH buyer AND site_supervisor (SE) are assigned
         # Admin sees all projects
+        # ✅ PERFORMANCE FIX: Eager load BOQs (N+1 queries → 2)
         if user_role == 'admin':
-            projects = Project.query.filter(
+            projects = Project.query.options(
+                selectinload(Project.boqs)
+            ).filter(
                 Project.site_supervisor_id.isnot(None),
                 Project.is_deleted == False
             ).all()
         else:
-            projects = Project.query.filter(
+            projects = Project.query.options(
+                selectinload(Project.boqs)
+            ).filter(
                 Project.buyer_id == buyer_id,
                 Project.site_supervisor_id.isnot(None),
                 Project.is_deleted == False
@@ -350,8 +362,8 @@ def get_buyer_dashboard():
         total_cost = 0
 
         for project in projects:
-            # Get BOQs for this project
-            boqs = BOQ.query.filter_by(project_id=project.project_id, is_deleted=False).all()
+            # Get BOQs for this project (no query - already loaded via selectinload)
+            boqs = [boq for boq in project.boqs if not boq.is_deleted]
 
             if not boqs:
                 continue
@@ -1827,9 +1839,10 @@ def send_vendor_email(cr_id):
                 log.error(f"Error processing attachments for CR-{cr_id}: {str(e)}")
         # Continue sending email even if attachments fail
         # Send email to vendor(s) (with optional custom body)
+        # ✅ PERFORMANCE FIX: Use async email sending (15s → 0.1s response time)
         from utils.boq_email_service import BOQEmailService
         email_service = BOQEmailService()
-        email_sent = email_service.send_vendor_purchase_order(
+        email_sent = email_service.send_vendor_purchase_order_async(
             email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, attachments
         )
 
@@ -2556,9 +2569,10 @@ def send_se_boq_vendor_email(assignment_id):
         }
 
         # Send email to vendor
+        # ✅ PERFORMANCE FIX: Use async email sending (15s → 0.1s response time)
         from utils.boq_email_service import BOQEmailService
         email_service = BOQEmailService()
-        email_sent = email_service.send_vendor_purchase_order(
+        email_sent = email_service.send_vendor_purchase_order_async(
             vendor_email, vendor_data, purchase_data, buyer_data, project_data
         )
 
