@@ -923,12 +923,30 @@ def request_project_completion(project_id):
         user_id = current_user['user_id']
         se_name = current_user.get('full_name', 'Site Engineer')
 
-        # Get the project
+        # Get the project - check both traditional and item-level assignments
         project = Project.query.filter_by(
             project_id=project_id,
             site_supervisor_id=user_id,
             is_deleted=False
         ).first()
+
+        # If not found via traditional assignment, check for item-level assignment
+        if not project:
+            from models.pm_assign_ss import PMAssignSS
+
+            # Check if user has any items assigned in this project
+            item_assignment = PMAssignSS.query.filter_by(
+                project_id=project_id,
+                assigned_to_se_id=user_id,
+                is_deleted=False
+            ).first()
+
+            if item_assignment:
+                # Get the project without site_supervisor_id check
+                project = Project.query.filter_by(
+                    project_id=project_id,
+                    is_deleted=False
+                ).first()
 
         if not project:
             return jsonify({
@@ -1024,12 +1042,50 @@ def request_project_completion(project_id):
             )
             db.session.add(boq_history)
 
+        # Update SE completion request in pm_assign_ss table
+        from models.pm_assign_ss import PMAssignSS
+
+        # Find all assignments for this SE in this project
+        se_assignments = PMAssignSS.query.filter_by(
+            project_id=project_id,
+            assigned_to_se_id=user_id,
+            is_deleted=False
+        ).all()
+
+        # Mark all SE assignments as completion requested
+        for assignment in se_assignments:
+            assignment.se_completion_requested = True
+            assignment.se_completion_request_date = datetime.utcnow()
+            assignment.last_modified_by = se_name
+            assignment.last_modified_at = datetime.utcnow()
+
+        # Always recalculate project total_se_assignments to ensure accuracy
+        # Count unique PM-SE pairs for this project
+        from sqlalchemy import func
+        unique_pairs_query = db.session.query(
+            func.count(func.distinct(func.concat(
+                PMAssignSS.assigned_by_pm_id, '-', PMAssignSS.assigned_to_se_id
+            )))
+        ).filter(
+            PMAssignSS.project_id == project_id,
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.assigned_by_pm_id.isnot(None),
+            PMAssignSS.assigned_to_se_id.isnot(None)
+        ).scalar()
+
+        project.total_se_assignments = unique_pairs_query or 0
+
+        # Log for debugging
+        log.info(f"Project {project_id}: total_se_assignments = {project.total_se_assignments}, SE assignments found: {len(se_assignments)}")
+
         # Set completion_requested flag
         project.completion_requested = True
         project.last_modified_at = datetime.utcnow()
         project.last_modified_by = se_name
-        boq.status = "completed"
-        boq_history.boq_status = "completed"
+        # DO NOT set status to completed here - wait for PM approval
+        # The project should remain in 'items_assigned' status until PM approves
+        # boq.status = "completed"  # REMOVED - premature completion
+        # boq_history.boq_status = "completed"  # REMOVED - premature completion
 
         db.session.commit()
 
@@ -1039,7 +1095,8 @@ def request_project_completion(project_id):
             "success": True,
             "message": "Completion request sent to Project Manager",
             "project_id": project_id,
-            "completion_requested": True
+            "completion_requested": True,
+            "confirmation_status": f"{project.confirmed_completions}/{project.total_se_assignments} confirmations"
         }), 200
 
     except Exception as e:

@@ -97,6 +97,9 @@ interface Project {
   boq_ids?: number[];
   completion_requested?: boolean;
   duration_days?: number;
+  // Completion confirmation tracking
+  total_se_assignments?: number;
+  confirmed_completions?: number;
   // Day extension status
   hasPendingDayExtension?: boolean;
   pendingDayExtensionCount?: number;
@@ -183,6 +186,8 @@ const MyProjects: React.FC = () => {
           site_supervisor_id: siteSupervisorId,
           site_supervisor_name: boq.project_details?.site_supervisor_name || null,
           completion_requested: boq.project_details?.completion_requested === true,
+          total_se_assignments: boq.project_details?.total_se_assignments || 0,
+          confirmed_completions: boq.project_details?.confirmed_completions || 0,
           user_id: boq.project_details?.user_id || null,
           boq_id: boq.boq_id,
           boq_name: boq.boq_name,
@@ -190,6 +195,10 @@ const MyProjects: React.FC = () => {
           boq_details: undefined,
           created_at: boq.created_at,
           priority: boq.priority || 'medium',
+          // Item assignment tracking
+          items_assigned_by_me: boq.items_assigned_by_me || 0,
+          items_pending_assignment: boq.items_pending_assignment || 0,
+          total_items: boq.total_items || 0,
           // Day extension status
           hasPendingDayExtension: boq.has_pending_day_extension || false,
           pendingDayExtensionCount: boq.pending_day_extension_count || 0,
@@ -251,6 +260,11 @@ const MyProjects: React.FC = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [seToDelete, setSeToDelete] = useState<{ id: number; name: string } | null>(null);
 
+  // Completion confirmation tracking states
+  const [showCompletionDetails, setShowCompletionDetails] = useState<number | null>(null);
+  const [completionDetails, setCompletionDetails] = useState<any>(null);
+  const [loadingCompletionDetails, setLoadingCompletionDetails] = useState(false);
+
   useEffect(() => {
     if (showAssignModal) {
       loadAvailableSEs();
@@ -274,6 +288,45 @@ const MyProjects: React.FC = () => {
       toast.error('Failed to load site engineers');
     } finally {
       setLoadingSEs(false);
+    }
+  };
+
+  const loadCompletionDetails = async (projectId: number) => {
+    try {
+      setLoadingCompletionDetails(true);
+      const response = await projectManagerService.getProjectCompletionDetails(projectId);
+      setCompletionDetails(response);
+      setShowCompletionDetails(projectId);
+    } catch (error) {
+      console.error('Error loading completion details:', error);
+      toast.error('Failed to load completion details');
+    } finally {
+      setLoadingCompletionDetails(false);
+    }
+  };
+
+  const confirmSECompletion = async (projectId: number, seUserId: number) => {
+    try {
+      setCompleting(true);
+      const response = await projectManagerService.confirmSECompletion(projectId, seUserId);
+      if (response.success) {
+        toast.success(response.message || 'Completion confirmed successfully');
+        if (response.project_completed) {
+          toast.success('Project automatically marked as complete!', {
+            duration: 5000,
+            icon: '🎉'
+          });
+        }
+        // Reload completion details and project list
+        await loadCompletionDetails(projectId);
+        refetch();
+      }
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || 'Failed to confirm completion';
+      toast.error(errorMessage);
+      console.error('Error confirming completion:', error);
+    } finally {
+      setCompleting(false);
     }
   };
 
@@ -581,13 +634,21 @@ const MyProjects: React.FC = () => {
 
     if (filterStatus === 'pending') {
       const status = project.boq_status?.toLowerCase() || '';
+      const hasItemsAssigned = (project.items_assigned_by_me || 0) > 0;
       // Pending tab: Projects assigned by TD, waiting for SE assignment
-      return (!hasSiteSupervisor && project.status?.toLowerCase() !== 'completed') &&
+      // Don't show if items are already assigned
+      return (!hasSiteSupervisor && !hasItemsAssigned && project.status?.toLowerCase() !== 'completed') &&
              (status === 'approved' || status === 'pm_approved' || status === 'client_confirmed') &&
+             status !== 'items_assigned' &&
              project.user_id !== null;
     }
     if (filterStatus === 'assigned') {
-      return hasSiteSupervisor && project.status?.toLowerCase() !== 'completed';
+      const boqStatus = project.boq_status?.toLowerCase() || '';
+      const hasItemsAssigned = (project.items_assigned_by_me || 0) > 0;
+      // Show in Assigned tab if:
+      // 1. Traditional: Project has site supervisor assigned, OR
+      // 2. Item-level: Any items have been assigned to SEs
+      return (hasSiteSupervisor || hasItemsAssigned || boqStatus === 'items_assigned') && project.status?.toLowerCase() !== 'completed';
     }
     if (filterStatus === 'completed') {
       return project.status?.toLowerCase() === 'completed';
@@ -611,14 +672,18 @@ const MyProjects: React.FC = () => {
   const getTabCounts = () => ({
     pending: projects.filter(p => {
       const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
+      const hasItemsAssigned = (p.items_assigned_by_me || 0) > 0;
       const status = p.boq_status?.toLowerCase() || '';
-      return (!hasSS && p.status?.toLowerCase() !== 'completed') &&
+      return (!hasSS && !hasItemsAssigned && p.status?.toLowerCase() !== 'completed') &&
              (status === 'approved' || status === 'pm_approved' || status === 'client_confirmed') &&
+             status !== 'items_assigned' &&
              p.user_id !== null;
     }).length,
     assigned: projects.filter(p => {
       const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
-      return hasSS && p.status?.toLowerCase() !== 'completed';
+      const hasItemsAssigned = (p.items_assigned_by_me || 0) > 0;
+      const boqStatus = p.boq_status?.toLowerCase() || '';
+      return (hasSS || hasItemsAssigned || boqStatus === 'items_assigned') && p.status?.toLowerCase() !== 'completed';
     }).length,
     completed: projects.filter(p => p.status?.toLowerCase() === 'completed').length,
     approved: projects.filter(p => {
@@ -800,7 +865,9 @@ const MyProjects: React.FC = () => {
                 className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200 relative"
               >
                 {/* Floating Day Extension Request Indicator - Show only in 'assigned' tab */}
-                {filterStatus === 'assigned' && project.site_supervisor_id && (() => {
+                {filterStatus === 'assigned' &&
+                 (project.site_supervisor_id ||
+                  (project.items_assigned_by_me && project.items_assigned_by_me > 0)) && (() => {
                   const hasRequests = project.hasPendingDayExtension;
                   const requestCount = project.pendingDayExtensionCount || 0;
 
@@ -943,7 +1010,10 @@ const MyProjects: React.FC = () => {
                         <EyeIcon className="w-5 h-5" />
                       </button>
 
-                      {!project.site_supervisor_id &&
+                      {/* Only show assign button in Pending tab, not in Assigned tab */}
+                      {filterStatus !== 'assigned' &&
+                       !project.site_supervisor_id &&
+                       !(project.items_assigned_by_me && project.items_assigned_by_me > 0) &&
                        project.user_id !== null &&
                        (project.boq_status?.toLowerCase() === 'client_confirmed' ||
                         project.boq_status?.toLowerCase() === 'approved') && (
@@ -960,24 +1030,42 @@ const MyProjects: React.FC = () => {
                           <UserPlusIcon className="w-5 h-5" />
                         </button>
                       )}
-                      {project.site_supervisor_id && project.status?.toLowerCase() !== 'completed' && (
+                      {/* Show completion confirmation tracking */}
+                      {(project.site_supervisor_id ||
+                        (project.items_assigned_by_me && project.items_assigned_by_me > 0)) &&
+                       project.status?.toLowerCase() !== 'completed' && (
                         <>
                           {project.completion_requested ? (
-                            <button
-                              onClick={() => {
-                                setProjectToComplete(project);
-                                setShowCompleteModal(true);
-                              }}
-                              className="px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg transition-colors flex items-center gap-2 text-sm font-medium shadow-sm relative animate-pulse"
-                              title="SE Requested Completion - Click to Approve"
-                            >
-                              <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-3 w-3 bg-orange-500"></span>
-                              </span>
-                              <CheckCircleIcon className="w-5 h-5" />
-                              Confirm Complete
-                            </button>
+                            <div className="flex items-center gap-2">
+                              {/* Confirmation counter badge */}
+                              <button
+                                onClick={() => loadCompletionDetails(project.project_id)}
+                                className={`
+                                  px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-sm font-medium shadow-sm
+                                  ${project.total_se_assignments && project.confirmed_completions === project.total_se_assignments
+                                    ? 'bg-green-100 text-green-700 border border-green-300'
+                                    : 'bg-orange-100 text-orange-700 border border-orange-300 animate-pulse'
+                                  }
+                                `}
+                                title="Click to view completion details"
+                              >
+                                {project.total_se_assignments && project.total_se_assignments > 0 ? (
+                                  <>
+                                    <span className="font-bold">
+                                      {project.confirmed_completions || 0}/{project.total_se_assignments}
+                                    </span>
+                                    <span>confirmations</span>
+                                    {project.confirmed_completions === project.total_se_assignments && (
+                                      <CheckCircleIcon className="w-5 h-5 text-green-600" />
+                                    )}
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>View Details</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           ) : (
                             <button
                               disabled
@@ -2730,6 +2818,156 @@ const MyProjects: React.FC = () => {
           selectedItemIndices={selectedItemIndices}
           onSuccess={handleItemAssignmentSuccess}
         />
+      )}
+
+      {/* Completion Details Modal */}
+      {showCompletionDetails && completionDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            <div className="p-6 border-b">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-800">Completion Confirmation Details</h2>
+                  <p className="text-gray-600 mt-1">{completionDetails.project_name}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowCompletionDetails(null);
+                    setCompletionDetails(null);
+                  }}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6 text-gray-500" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
+              {/* Summary Section */}
+              <div className="bg-gray-50 rounded-lg p-4 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-700">Confirmation Status</h3>
+                  <span className={`px-4 py-2 rounded-lg font-bold ${
+                    completionDetails.summary?.all_confirmed
+                      ? 'bg-green-100 text-green-700'
+                      : 'bg-orange-100 text-orange-700'
+                  }`}>
+                    {completionDetails.confirmation_status}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-white rounded-lg p-3">
+                    <p className="text-sm text-gray-500">Total Assignments</p>
+                    <p className="text-xl font-bold text-gray-800">
+                      {completionDetails.summary?.total_assignments || 0}
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-lg p-3">
+                    <p className="text-sm text-gray-500">Confirmed</p>
+                    <p className="text-xl font-bold text-green-600">
+                      {completionDetails.summary?.confirmed_completions || 0}
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-lg p-3">
+                    <p className="text-sm text-gray-500">Pending</p>
+                    <p className="text-xl font-bold text-orange-600">
+                      {completionDetails.summary?.pending_confirmations || 0}
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-lg p-3">
+                    <p className="text-sm text-gray-500">Awaiting SE</p>
+                    <p className="text-xl font-bold text-gray-600">
+                      {completionDetails.summary?.awaiting_se_requests || 0}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Assignment Details */}
+              <div>
+                <h3 className="text-lg font-semibold text-gray-700 mb-4">PM-SE Assignment Details</h3>
+                <div className="space-y-3">
+                  {completionDetails.assignment_pairs?.map((pair: any, index: number) => (
+                    <div key={index} className="bg-white border rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="font-medium text-gray-800">{pair.pm_name}</span>
+                            <ArrowRight className="w-4 h-4 text-gray-400" />
+                            <span className="font-medium text-gray-800">{pair.se_name}</span>
+                            <span className="text-sm text-gray-500">({pair.items_count} items)</span>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm">
+                            {pair.completion_requested ? (
+                              <span className="text-green-600 flex items-center gap-1">
+                                <CheckIcon className="w-4 h-4" />
+                                SE requested completion
+                                {pair.request_date && (
+                                  <span className="text-gray-500">
+                                    on {new Date(pair.request_date).toLocaleDateString()}
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">
+                                Awaiting SE completion request
+                              </span>
+                            )}
+                            {pair.pm_confirmed && (
+                              <span className="text-green-600 flex items-center gap-1">
+                                <CheckCircleIcon className="w-4 h-4" />
+                                PM confirmed
+                                {pair.confirmation_date && (
+                                  <span className="text-gray-500">
+                                    on {new Date(pair.confirmation_date).toLocaleDateString()}
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          {pair.can_confirm && (
+                            <button
+                              onClick={() => confirmSECompletion(showCompletionDetails, pair.se_id)}
+                              disabled={completing}
+                              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {completing ? 'Confirming...' : 'Confirm Complete'}
+                            </button>
+                          )}
+                          {pair.completion_requested && !pair.pm_confirmed && !pair.can_confirm && (
+                            <span className="px-4 py-2 bg-orange-100 text-orange-700 rounded-lg text-sm">
+                              Awaiting {pair.pm_name}'s confirmation
+                            </span>
+                          )}
+                          {pair.pm_confirmed && (
+                            <span className="px-4 py-2 bg-green-100 text-green-700 rounded-lg flex items-center gap-2">
+                              <CheckCircleIcon className="w-5 h-5" />
+                              Confirmed
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Auto-complete message */}
+              {completionDetails.summary?.all_confirmed && (
+                <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center gap-2 text-green-700">
+                    <CheckCircleIcon className="w-6 h-6" />
+                    <span className="font-semibold">
+                      All confirmations received! Project has been automatically marked as complete.
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

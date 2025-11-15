@@ -29,6 +29,10 @@ class Project(db.Model):
     status = db.Column(db.String(50), nullable=False, default='active')  # Default status
     description = db.Column(db.Text, nullable=True)  # Changed to Text for longer descriptions
     completion_requested = db.Column(db.Boolean, default=False)  # SE completion request flag
+
+    # Completion confirmation tracking
+    total_se_assignments = db.Column(db.Integer, default=0)  # Total unique PM-SE assignment pairs
+    confirmed_completions = db.Column(db.Integer, default=0)  # Number of confirmed PM-SE pairs
     is_deleted = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
@@ -74,6 +78,8 @@ class Project(db.Model):
             'status': self.status,
             'description': self.description,
             'completion_requested': self.completion_requested,
+            'total_se_assignments': self.total_se_assignments,
+            'confirmed_completions': self.confirmed_completions,
             'is_deleted': self.is_deleted,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by,

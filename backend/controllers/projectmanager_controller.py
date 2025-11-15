@@ -243,15 +243,19 @@ def get_all_pm_boqs():
 
             # Determine the correct status to display for Project Manager
             display_status = boq.status
-            for h in history:
-                if h.receiver_role == 'projectManager':
-                    # If PM is receiver, show as pending
-                    display_status = 'pending'
-                    break
-                elif h.sender_role == 'projectManager':
-                    # If PM is sender, show the original status
-                    display_status = h.boq_status
-                    break
+
+            # Preserve 'items_assigned' status when items have been assigned
+            # This ensures projects stay in the Assigned tab after item-level assignment
+            if display_status != 'items_assigned':
+                for h in history:
+                    if h.receiver_role == 'projectManager':
+                        # If PM is receiver, show as pending
+                        display_status = 'pending'
+                        break
+                    elif h.sender_role == 'projectManager':
+                        # If PM is sender, show the original status
+                        display_status = h.boq_status
+                        break
 
             # Get PM status from the project's assigned user
             pm_status = None
@@ -306,7 +310,9 @@ def get_all_pm_boqs():
                     "created_by": boq.project.created_by,
                     "last_modified_at": boq.project.last_modified_at.isoformat() if boq.project.last_modified_at else None,
                     "last_modified_by": boq.project.last_modified_by,
-                    "completion_requested": boq.project.completion_requested if boq.project.completion_requested is not None else False
+                    "completion_requested": boq.project.completion_requested if boq.project.completion_requested is not None else False,
+                    "total_se_assignments": boq.project.total_se_assignments if hasattr(boq.project, 'total_se_assignments') else 0,
+                    "confirmed_completions": boq.project.confirmed_completions if hasattr(boq.project, 'confirmed_completions') else 0
                 }
 
             # Check for pending and approved day extension requests that PM sent to TD
@@ -990,6 +996,38 @@ def assign_items_to_se():
             db.session.add(new_assignment)
             log.info(f"Created new assignment record in pm_assign_ss for BOQ {boq_id}, SE {se_user_id}")
 
+        # Check if all items are now assigned
+        all_items_assigned = True
+        total_items = 0
+        assigned_count = 0
+
+        for item in items:
+            # Skip extra materials and change requests from the check
+            item_name = item.get('item_name', '') or item.get('item_code', '')
+            item_code = item.get('item_code', '') or item.get('code', '')
+            is_extra = ('extra material' in item_name.lower() or
+                       'cr #' in item_code.lower() or
+                       'cr #' in item_name.lower())
+
+            if not is_extra:
+                total_items += 1
+                if item.get('assignment_status') == 'assigned' and item.get('assigned_to_se_user_id'):
+                    assigned_count += 1
+                else:
+                    all_items_assigned = False
+
+        log.info(f"BOQ {boq_id}: {assigned_count}/{total_items} non-extra items assigned. All assigned: {all_items_assigned}")
+
+        # Update BOQ status based on item assignments
+        if assigned_count > 0 and total_items > 0:
+            # Set to 'items_assigned' if any items are assigned (not necessarily all)
+            # This ensures the project shows in the Assigned tab once assignment begins
+            boq.status = 'items_assigned'
+            if all_items_assigned:
+                log.info(f"✅ All items assigned for BOQ {boq_id}, status set to 'items_assigned'")
+            else:
+                log.info(f"📋 {assigned_count}/{total_items} items assigned for BOQ {boq_id}, status set to 'items_assigned'")
+
         # Update BOQ history
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
 
@@ -1002,13 +1040,14 @@ def assign_items_to_se():
             "type": "items_assigned_to_se",
             "sender": role_name,
             "receiver": "site_engineer",
-            "status": "Items_Assigned",
+            "status": "Items_Assigned" if not all_items_assigned else "All_Items_Assigned",
             "pm_user_id": pm_user_id,
             "pm_name": pm_name,
             "se_user_id": se_user_id,
             "se_name": se_name,
             "items_count": len(assigned_items),
             "item_codes": [item['item_code'] for item in assigned_items],
+            "all_items_assigned": all_items_assigned,
             "timestamp": datetime.utcnow().isoformat(),
             "project_id": project.project_id,
             "project_name": project.project_name
@@ -1038,7 +1077,9 @@ def assign_items_to_se():
             "assigned_items": assigned_items,
             "skipped_items": skipped_items,
             "se_name": se_name,
-            "assigned_by": pm_name
+            "assigned_by": pm_name,
+            "all_items_assigned": all_items_assigned,
+            "boq_status": boq.status
         }), 200
 
     except Exception as e:
@@ -1566,4 +1607,308 @@ def send_boq_to_estimator():
             "success": False,
             "message": "Failed to send BOQ to Estimator",
             "error": str(e)
+        }), 500
+
+
+def confirm_se_completion():
+    """
+    PM confirms SE completion request.
+    STRICT: Only the PM who assigned items to the SE can confirm their completion.
+    """
+    try:
+        current_user = g.user
+        pm_user_id = current_user['user_id']
+        pm_name = current_user.get('full_name', 'Project Manager')
+
+        data = request.get_json()
+        project_id = data.get('project_id')
+        se_user_id = data.get('se_user_id')
+
+        if not project_id or not se_user_id:
+            return jsonify({
+                "error": "project_id and se_user_id are required"
+            }), 400
+
+        # Import here to avoid circular import
+        from models.pm_assign_ss import PMAssignSS
+
+        # CRITICAL: Find assignments where THIS PM assigned to THIS SE
+        assignments = PMAssignSS.query.filter_by(
+            project_id=project_id,
+            assigned_to_se_id=se_user_id,
+            assigned_by_pm_id=pm_user_id,  # Must match the PM who assigned
+            is_deleted=False
+        ).all()
+
+        if not assignments:
+            return jsonify({
+                "error": "You cannot confirm this SE's completion as you did not assign items to them"
+            }), 403
+
+        # Check if SE has requested completion
+        if not all(a.se_completion_requested for a in assignments):
+            return jsonify({
+                "error": "SE has not requested completion for all assigned items yet"
+            }), 400
+
+        # Check if already confirmed
+        if all(a.pm_confirmed_completion for a in assignments):
+            return jsonify({
+                "error": "You have already confirmed this SE's completion"
+            }), 400
+
+        # Mark all assignments from this PM to this SE as confirmed
+        for assignment in assignments:
+            if not assignment.pm_confirmed_completion:
+                assignment.pm_confirmed_completion = True
+                assignment.pm_confirmation_date = datetime.utcnow()
+                assignment.last_modified_by = pm_name
+                assignment.last_modified_at = datetime.utcnow()
+
+        # Count unique PM-SE confirmation pairs for the project
+        from sqlalchemy import func
+
+        # Count confirmed pairs - using proper distinct counting
+        confirmed_pairs_query = db.session.query(
+            func.count(func.distinct(func.concat(
+                PMAssignSS.assigned_by_pm_id, '-', PMAssignSS.assigned_to_se_id
+            )))
+        ).filter(
+            PMAssignSS.project_id == project_id,
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.se_completion_requested == True,
+            PMAssignSS.pm_confirmed_completion == True
+        ).scalar()
+
+        confirmed_pairs = confirmed_pairs_query or 0
+
+        # Count total unique PM-SE pairs - using proper distinct counting
+        total_pairs_query = db.session.query(
+            func.count(func.distinct(func.concat(
+                PMAssignSS.assigned_by_pm_id, '-', PMAssignSS.assigned_to_se_id
+            )))
+        ).filter(
+            PMAssignSS.project_id == project_id,
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.assigned_by_pm_id.isnot(None),
+            PMAssignSS.assigned_to_se_id.isnot(None)
+        ).scalar()
+
+        total_pairs = total_pairs_query or 0
+
+        # Update project counters
+        project = Project.query.get(project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        project.confirmed_completions = confirmed_pairs
+        project.total_se_assignments = total_pairs
+        project.last_modified_at = datetime.utcnow()
+        project.last_modified_by = pm_name
+
+        # Auto-complete project if all confirmed
+        project_completed = False
+        if confirmed_pairs == total_pairs and total_pairs > 0:
+            project.status = 'completed'
+            project.completion_requested = False
+            project_completed = True
+
+            # Update BOQ status
+            boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
+            if boq:
+                boq.status = 'completed'
+                boq.last_modified_at = datetime.utcnow()
+                boq.last_modified_by = pm_name
+
+            # Add BOQ history entry for project completion
+            if boq:
+                boq_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+                new_action = {
+                    "type": "project_completed",
+                    "status": "completed",
+                    "completed_by": pm_name,
+                    "completed_by_user_id": pm_user_id,
+                    "completion_method": "auto_complete_all_confirmed",
+                    "confirmed_pairs": f"{confirmed_pairs}/{total_pairs}",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "comments": f"Project auto-completed after all {total_pairs} PM-SE confirmations"
+                }
+
+                if boq_history:
+                    current_actions = []
+                    if isinstance(boq_history.action, list):
+                        current_actions = boq_history.action
+                    elif isinstance(boq_history.action, dict):
+                        current_actions = [boq_history.action]
+
+                    current_actions.append(new_action)
+                    boq_history.action = current_actions
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(boq_history, "action")
+                    boq_history.last_modified_at = datetime.utcnow()
+                    boq_history.last_modified_by = pm_name
+                else:
+                    new_history = BOQHistory(
+                        boq_id=boq.boq_id,
+                        action=[new_action],
+                        action_by=pm_name,
+                        boq_status='completed',
+                        sender=pm_name,
+                        receiver='system',
+                        comments=new_action["comments"],
+                        sender_role='project_manager',
+                        receiver_role='system',
+                        action_date=datetime.utcnow(),
+                        created_by=pm_name
+                    )
+                    db.session.add(new_history)
+
+        db.session.commit()
+
+        # Get SE details for response
+        se_user = User.query.get(se_user_id)
+        se_name = se_user.full_name if se_user else "Site Engineer"
+
+        log.info(f"PM {pm_user_id} confirmed SE {se_user_id} completion for project {project_id}. Status: {confirmed_pairs}/{total_pairs}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Successfully confirmed {se_name}'s completion",
+            "confirmation_status": f"{confirmed_pairs}/{total_pairs} confirmations",
+            "project_completed": project_completed,
+            "project_status": project.status,
+            "details": {
+                "se_name": se_name,
+                "confirmed_by": pm_name,
+                "confirmation_date": datetime.utcnow().isoformat(),
+                "all_confirmations_complete": confirmed_pairs == total_pairs
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error confirming SE completion: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to confirm completion: {str(e)}"
+        }), 500
+
+
+def get_project_completion_details(project_id):
+    """
+    Get detailed completion status showing PM-SE pairs and confirmation status.
+    Shows which PMs need to confirm which SE completions.
+    """
+    try:
+        current_user = g.user
+        current_pm_id = current_user['user_id']
+        current_user_role = current_user.get('role', '').lower()
+
+        # Get project
+        project = Project.query.get(project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Check access - PM/MEP must be assigned to project, Admin can see all
+        if current_user_role not in ['admin']:
+            # Check if user is assigned as PM or MEP
+            pm_ids = project.user_id if isinstance(project.user_id, list) else []
+            mep_ids = project.mep_supervisor_id if isinstance(project.mep_supervisor_id, list) else []
+
+            if current_pm_id not in pm_ids and current_pm_id not in mep_ids:
+                return jsonify({"error": "You don't have access to this project"}), 403
+
+        from models.pm_assign_ss import PMAssignSS
+        from sqlalchemy import func
+
+        # Get all unique PM-SE assignment pairs with aggregated data
+        assignment_pairs = db.session.query(
+            PMAssignSS.assigned_by_pm_id,
+            PMAssignSS.assigned_to_se_id,
+            func.array_agg(PMAssignSS.item_indices).label('all_item_indices'),
+            func.bool_and(PMAssignSS.se_completion_requested).label('completion_requested'),
+            func.bool_and(PMAssignSS.pm_confirmed_completion).label('pm_confirmed'),
+            func.max(PMAssignSS.se_completion_request_date).label('request_date'),
+            func.max(PMAssignSS.pm_confirmation_date).label('confirmation_date')
+        ).filter(
+            PMAssignSS.project_id == project_id,
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.assigned_by_pm_id.isnot(None),
+            PMAssignSS.assigned_to_se_id.isnot(None)
+        ).group_by(
+            PMAssignSS.assigned_by_pm_id,
+            PMAssignSS.assigned_to_se_id
+        ).all()
+
+        # Log for debugging
+        log.info(f"Project {project_id} completion details: Found {len(assignment_pairs)} PM-SE pairs")
+
+        # Build detailed response
+        details = []
+        for pair in assignment_pairs:
+            # Get PM and SE user details
+            pm_user = User.query.get(pair.assigned_by_pm_id)
+            se_user = User.query.get(pair.assigned_to_se_id)
+
+            # Log pair details for debugging
+            log.info(f"PM-SE pair: PM {pair.assigned_by_pm_id} -> SE {pair.assigned_to_se_id}, "
+                    f"completion_requested: {pair.completion_requested}, pm_confirmed: {pair.pm_confirmed}")
+
+            # Flatten and deduplicate item indices
+            all_items = []
+            for item_list in pair.all_item_indices:
+                if item_list:
+                    all_items.extend(item_list)
+            unique_items = list(set(all_items))
+
+            details.append({
+                "pm_id": pair.assigned_by_pm_id,
+                "pm_name": pm_user.full_name if pm_user else "Unknown PM",
+                "se_id": pair.assigned_to_se_id,
+                "se_name": se_user.full_name if se_user else "Unknown SE",
+                "items_count": len(unique_items),
+                "item_indices": sorted(unique_items),
+                "completion_requested": pair.completion_requested or False,
+                "pm_confirmed": pair.pm_confirmed or False,
+                "request_date": pair.request_date.isoformat() if pair.request_date else None,
+                "confirmation_date": pair.confirmation_date.isoformat() if pair.confirmation_date else None,
+                "can_confirm": pair.assigned_by_pm_id == current_pm_id and pair.completion_requested and not pair.pm_confirmed
+            })
+
+        # Calculate summary counts
+        total_pairs = len(details)
+        confirmed_count = sum(1 for d in details if d['pm_confirmed'])
+        pending_confirmation = sum(1 for d in details if d['completion_requested'] and not d['pm_confirmed'])
+        awaiting_se_request = sum(1 for d in details if not d['completion_requested'])
+
+        # Check if project should be marked complete
+        all_confirmed = confirmed_count == total_pairs and total_pairs > 0
+
+        return jsonify({
+            "success": True,
+            "project_id": project_id,
+            "project_name": project.project_name,
+            "project_status": project.status,
+            "completion_requested": project.completion_requested,
+            "confirmation_status": f"{confirmed_count}/{total_pairs} confirmations",
+            "summary": {
+                "total_assignments": total_pairs,
+                "confirmed_completions": confirmed_count,
+                "pending_confirmations": pending_confirmation,
+                "awaiting_se_requests": awaiting_se_request,
+                "all_confirmed": all_confirmed,
+                "ready_for_completion": all_confirmed
+            },
+            "assignment_pairs": details,
+            "current_user_can_confirm": [d for d in details if d['can_confirm']]
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error getting completion details: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to get completion details: {str(e)}"
         }), 500

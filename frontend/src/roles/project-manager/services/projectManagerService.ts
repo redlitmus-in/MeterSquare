@@ -308,5 +308,43 @@ export const projectManagerService = {
     phone?: string;
   }): Promise<any> {
     return this.updateSiteSupervisor(siteSupervisorId, data);
+  },
+
+  // Approve project completion (legacy - for backward compatibility)
+  async approveProjectCompletion(projectId: number): Promise<any> {
+    try {
+      const response = await apiClient.put(`/projects/${projectId}`, {
+        status: 'completed'
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error approving project completion:', error);
+      throw error;
+    }
+  },
+
+  // Get project completion details showing PM-SE pairs and confirmation status
+  async getProjectCompletionDetails(projectId: number): Promise<any> {
+    try {
+      const response = await apiClient.get(`/projects/${projectId}/completion-details`);
+      return response.data;
+    } catch (error) {
+      console.error('Error getting completion details:', error);
+      throw error;
+    }
+  },
+
+  // PM confirms SE completion (only for their assignments)
+  async confirmSECompletion(projectId: number, seUserId: number): Promise<any> {
+    try {
+      const response = await apiClient.post('/confirm-se-completion', {
+        project_id: projectId,
+        se_user_id: seUserId
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error confirming SE completion:', error);
+      throw error;
+    }
   }
 };

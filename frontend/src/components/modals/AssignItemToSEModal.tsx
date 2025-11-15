@@ -97,6 +97,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
   onSuccess,
 }) => {
   const [activeTab, setActiveTab] = useState<'select' | 'create'>('select');
+  const [itemsViewTab, setItemsViewTab] = useState<'unassigned' | 'assigned'>('unassigned');
   const [siteEngineers, setSiteEngineers] = useState<SiteEngineer[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -161,15 +162,46 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
   // Auto-select all items when SE is selected AND items are loaded
   useEffect(() => {
     if (selectedSE && boqItems.length > 0) {
-      // If no initial items specified, select all BOQ items
-      const itemsToSelect = initialSelectedItems.length > 0
+      // If no initial items specified, select all unassigned BOQ items
+      const allIndices = initialSelectedItems.length > 0
         ? initialSelectedItems
         : Array.from({ length: boqItems.length }, (_, i) => i);
 
-      setSelectedItemIndices(itemsToSelect);
-      setSelectAll(itemsToSelect.length === boqItems.length);
+      const unassignedIndices = allIndices.filter(index => !existingAssignments[index]);
+
+      setSelectedItemIndices(unassignedIndices);
+      setSelectAll(unassignedIndices.length > 0 && unassignedIndices.length === allIndices.filter(i => !existingAssignments[i]).length);
     }
-  }, [selectedSE, boqItems, initialSelectedItems]);
+  }, [selectedSE, boqItems, initialSelectedItems, existingAssignments]);
+
+  // Update selectAll state when selectedItemIndices changes
+  useEffect(() => {
+    const allIndices = initialSelectedItems.length > 0
+      ? initialSelectedItems
+      : Array.from({ length: boqItems.length }, (_, i) => i);
+    const unassignedIndices = allIndices.filter(index => !existingAssignments[index]);
+
+    setSelectAll(
+      unassignedIndices.length > 0 &&
+      selectedItemIndices.length === unassignedIndices.length &&
+      unassignedIndices.every(index => selectedItemIndices.includes(index))
+    );
+  }, [selectedItemIndices, boqItems.length, initialSelectedItems, existingAssignments]);
+
+  // Auto-switch to assigned tab when all items are already assigned
+  useEffect(() => {
+    if (boqItems.length > 0) {
+      const allIndices = initialSelectedItems.length > 0
+        ? initialSelectedItems
+        : Array.from({ length: boqItems.length }, (_, i) => i);
+      const unassignedIndices = allIndices.filter(index => !existingAssignments[index]);
+
+      // If all items are assigned and we're on the unassigned tab, switch to assigned
+      if (unassignedIndices.length === 0 && itemsViewTab === 'unassigned') {
+        setItemsViewTab('assigned');
+      }
+    }
+  }, [boqItems.length, existingAssignments, initialSelectedItems, itemsViewTab]);
 
   const fetchSiteEngineers = async () => {
     setLoading(true);
@@ -188,18 +220,40 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
     try {
       const response = await apiClient.get(`/boq/${boqId}`);
 
-      // Handle different BOQ response formats
+      console.log('📋 Fetching BOQ items for BOQ ID:', boqId);
+      console.log('📋 API Response:', response.data);
+
+      // Handle different BOQ response formats - exclude extra_purchase items
       const items =
         response.data?.existing_purchase?.items ||
         response.data?.new_purchase?.items ||
         response.data?.items ||
         [];
 
-      setBoqItems(items);
+      console.log('📋 Extracted items count:', items.length);
+      console.log('📋 Items:', items.map((item: any, i: number) => ({
+        index: i,
+        name: item.item_name || item.item_code,
+        assigned_to: item.assigned_to_se_name || 'Unassigned'
+      })));
 
-      // Extract existing assignments from items
+      // Filter out extra purchase items - don't show in assignment modal
+      const filteredItems = items.filter((item: any) => {
+        const itemName = item.item_name || item.item_code || '';
+        const itemCode = item.item_code || item.code || '';
+        // Exclude items that are "Extra Materials" or change requests (CR)
+        return !itemName.toLowerCase().includes('extra material') &&
+               !itemCode.toLowerCase().includes('cr #') &&
+               !itemName.toLowerCase().includes('cr #');
+      });
+
+      console.log('📋 Filtered items count (excluding extra purchases):', filteredItems.length);
+
+      setBoqItems(filteredItems);
+
+      // Extract existing assignments from filtered items
       const assignments: Record<number, { se_name: string; se_id: number }> = {};
-      items.forEach((item: any, index: number) => {
+      filteredItems.forEach((item: any, index: number) => {
         if (item.assigned_to_se_user_id && item.assigned_to_se_name) {
           assignments[index] = {
             se_name: item.assigned_to_se_name,
@@ -207,8 +261,11 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
           };
         }
       });
+
+      console.log('📋 Assignments found:', assignments);
       setExistingAssignments(assignments);
     } catch (error: any) {
+      console.error('❌ Failed to load BOQ items:', error);
       toast.error('Failed to load BOQ items');
     } finally {
       setLoadingItems(false);
@@ -229,9 +286,37 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
     setAssigning(true);
     try {
       await assignItemsToSE(boqId, selectedItemIndices, selectedSE.user_id);
-      toast.success(`Successfully assigned ${selectedItemIndices.length} item(s) to ${selectedSE.full_name}`);
+
+      // Update existing assignments with the newly assigned items
+      const newAssignments = { ...existingAssignments };
+      selectedItemIndices.forEach(index => {
+        newAssignments[index] = {
+          se_name: selectedSE.full_name || selectedSE.sitesupervisor_name || 'SE',
+          se_id: selectedSE.user_id
+        };
+      });
+      setExistingAssignments(newAssignments);
+
+      toast.success(`Successfully assigned ${selectedItemIndices.length} item(s) to ${selectedSE.full_name || selectedSE.sitesupervisor_name}`);
+
+      // Check if there are any unassigned items remaining
+      const allIndices = initialSelectedItems.length > 0
+        ? initialSelectedItems
+        : Array.from({ length: boqItems.length }, (_, i) => i);
+      const remainingUnassigned = allIndices.filter(index => !newAssignments[index]);
+
+      // If all items are now assigned, switch to the assigned tab
+      if (remainingUnassigned.length === 0) {
+        setItemsViewTab('assigned');
+        toast.info('All items have been assigned. Switched to Assigned tab.');
+      }
+
+      // Clear selection
+      setSelectedItemIndices([]);
+      setSelectAll(false);
+
       onSuccess();
-      onClose();
+      // Don't close the modal - keep it open to show the assigned tab
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Failed to assign items');
     } finally {
@@ -249,10 +334,12 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
     if (selectAll) {
       setSelectedItemIndices([]);
     } else {
+      // Only select unassigned items
       const allIndices = initialSelectedItems.length > 0
         ? initialSelectedItems
         : Array.from({ length: boqItems.length }, (_, i) => i);
-      setSelectedItemIndices(allIndices);
+      const unassignedIndices = allIndices.filter(index => !existingAssignments[index]);
+      setSelectedItemIndices(unassignedIndices);
     }
     setSelectAll(!selectAll);
   };
@@ -436,6 +523,26 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
     if (!item) return 0;
     return item.amount || item.totalAmount || item.item_total || item.actualItemCost || item.base_cost || 0;
   }, []);
+
+  // Helper: Get assigned and unassigned items
+  const getAssignedItems = useCallback(() => {
+    const allIndices = initialSelectedItems.length > 0
+      ? initialSelectedItems
+      : Array.from({ length: boqItems.length }, (_, i) => i);
+
+    return allIndices.filter(index => existingAssignments[index]);
+  }, [initialSelectedItems, boqItems.length, existingAssignments]);
+
+  const getUnassignedItems = useCallback(() => {
+    const allIndices = initialSelectedItems.length > 0
+      ? initialSelectedItems
+      : Array.from({ length: boqItems.length }, (_, i) => i);
+
+    return allIndices.filter(index => !existingAssignments[index]);
+  }, [initialSelectedItems, boqItems.length, existingAssignments]);
+
+  const assignedItems = getAssignedItems();
+  const unassignedItems = getUnassignedItems();
 
   if (!isOpen) return null;
 
@@ -776,9 +883,36 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
               {activeTab === 'select' && (
                 <div className="flex flex-col border-l border-gray-200 pl-6">
                   <div className="mb-4">
+                    {/* Tab Navigation for Assigned/Unassigned Items */}
+                    <div className="flex gap-2 mb-4 bg-gray-100 rounded-lg p-1">
+                      <button
+                        onClick={() => setItemsViewTab('unassigned')}
+                        className={`flex-1 px-4 py-2.5 font-semibold text-sm transition-all rounded-md ${
+                          itemsViewTab === 'unassigned'
+                            ? 'bg-white text-blue-600 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        📋 Items to Assign ({unassignedItems.length})
+                      </button>
+                      <button
+                        onClick={() => setItemsViewTab('assigned')}
+                        className={`flex-1 px-4 py-2.5 font-semibold text-sm transition-all rounded-md ${
+                          itemsViewTab === 'assigned'
+                            ? 'bg-white text-green-600 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        ✓ Assigned Items ({assignedItems.length})
+                      </button>
+                    </div>
+
                     <div className="flex items-center gap-2 mb-3">
                       <h3 className="text-lg font-semibold text-gray-900">
-                        Items to Assign ({selectedItemIndices.length}/{initialSelectedItems.length > 0 ? initialSelectedItems.length : boqItems.length})
+                        {itemsViewTab === 'unassigned'
+                          ? `Items to Assign (${selectedItemIndices.length}/${unassignedItems.length})`
+                          : `Assigned Items (${assignedItems.length})`
+                        }
                       </h3>
 
                       {/* Info Icons with Tooltips */}
@@ -809,8 +943,8 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                       </div>
                     </div>
 
-                  {/* Select All Checkbox */}
-                  {(initialSelectedItems.length > 1 || boqItems.length > 1) && (
+                  {/* Select All Checkbox - Only show on unassigned tab */}
+                  {itemsViewTab === 'unassigned' && unassignedItems.length > 1 && (
                     <div className="mb-3 p-3 bg-gray-50 rounded-lg flex items-center gap-3">
                       <input
                         type="checkbox"
@@ -819,7 +953,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                         className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500"
                       />
                       <label className="text-sm font-medium text-gray-700">
-                        Select all items ({initialSelectedItems.length > 0 ? initialSelectedItems.length : boqItems.length})
+                        Select all items ({unassignedItems.length})
                       </label>
                     </div>
                   )}
@@ -842,13 +976,30 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                             : 'This BOQ has no items to assign'}
                         </p>
                       </div>
+                    ) : (itemsViewTab === 'unassigned' && unassignedItems.length === 0) ? (
+                      <div className="text-center py-12">
+                        <CheckCircle className="w-12 h-12 text-green-300 mx-auto mb-3" />
+                        <p className="text-gray-500">All items have been assigned!</p>
+                        <p className="text-sm text-gray-400 mt-1">
+                          Switch to the "Assigned Items" tab to view assignments
+                        </p>
+                      </div>
+                    ) : (itemsViewTab === 'assigned' && assignedItems.length === 0) ? (
+                      <div className="text-center py-12">
+                        <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                        <p className="text-gray-500">No items assigned yet</p>
+                        <p className="text-sm text-gray-400 mt-1">
+                          Assign items from the "Items to Assign" tab
+                        </p>
+                      </div>
                     ) : (
-                      (initialSelectedItems.length > 0 ? initialSelectedItems : Array.from({ length: boqItems.length }, (_, i) => i)).map((index) => {
+                      (itemsViewTab === 'unassigned' ? unassignedItems : assignedItems).map((index) => {
                         const item = boqItems[index];
                         const isSelected = selectedItemIndices.includes(index);
                         const existingAssignment = existingAssignments[index];
                         const isAssignedToOther = existingAssignment && existingAssignment.se_id !== selectedSE?.user_id;
                         const isAssignedToCurrentSE = existingAssignment && existingAssignment.se_id === selectedSE?.user_id;
+                        const isInAssignedTab = itemsViewTab === 'assigned';
 
                         return (
                           <motion.div
@@ -856,9 +1007,11 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                             initial={{ opacity: 0, x: 20 }}
                             animate={{ opacity: 1, x: 0 }}
                             exit={{ opacity: 0, x: -20 }}
-                            onClick={() => !isAssignedToOther && toggleItemSelection(index)}
+                            onClick={() => !isAssignedToOther && !isInAssignedTab && toggleItemSelection(index)}
                             className={`p-4 rounded-lg border-2 transition-all ${
-                              isAssignedToOther
+                              isInAssignedTab
+                                ? 'border-green-300 bg-green-50'
+                                : isAssignedToOther
                                 ? 'border-gray-300 bg-gray-50 opacity-60 cursor-not-allowed'
                                 : isSelected
                                 ? 'border-blue-500 bg-blue-50 cursor-pointer'
@@ -874,17 +1027,27 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                                     {getItemCode(item, index)}
                                   </span>
                                   {existingAssignment && (
-                                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${
-                                      isAssignedToCurrentSE
+                                    <span className={`px-3 py-1 text-xs font-medium rounded-full ${
+                                      isInAssignedTab
+                                        ? 'bg-green-100 text-green-700 border border-green-300'
+                                        : isAssignedToCurrentSE
                                         ? 'bg-green-100 text-green-700'
                                         : 'bg-orange-100 text-orange-700'
                                     }`}>
-                                      {isAssignedToCurrentSE ? '✓ Already Assigned' : `Assigned to: ${existingAssignment.se_name}`}
+                                      {isInAssignedTab
+                                        ? `✓ Assigned to: ${existingAssignment.se_name}`
+                                        : isAssignedToCurrentSE
+                                        ? '✓ Already Assigned'
+                                        : `Assigned to: ${existingAssignment.se_name}`
+                                      }
                                     </span>
                                   )}
                                 </div>
-                                {isSelected && !isAssignedToOther && (
+                                {isSelected && !isAssignedToOther && !isInAssignedTab && (
                                   <CheckCircle className="w-5 h-5 text-blue-600 fill-blue-600 flex-shrink-0" />
+                                )}
+                                {isInAssignedTab && (
+                                  <CheckCircle className="w-5 h-5 text-green-600 fill-green-600 flex-shrink-0" />
                                 )}
                               </div>
                               <p className="text-sm text-gray-700 mb-3">
@@ -910,13 +1073,6 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                                   </span>
                                 </div>
                               </div>
-                              {item?.materials && item.materials.length > 0 && (
-                                <div className="mt-3 pt-3 border-t border-gray-200">
-                                  <span className="text-xs text-gray-500">
-                                    Materials: <span className="font-medium text-gray-700">{item.materials.length} item(s)</span>
-                                  </span>
-                                </div>
-                              )}
                             </div>
                           </motion.div>
                         );
@@ -933,7 +1089,14 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
           {activeTab === 'select' && (
             <div className="border-t border-gray-200 bg-gray-50 px-6 py-4 flex items-center justify-between">
               <div className="text-sm text-gray-600">
-                {selectedSE ? (
+                {itemsViewTab === 'assigned' ? (
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-green-600" />
+                    <span>
+                      Viewing assigned items ({assignedItems.length} total)
+                    </span>
+                  </div>
+                ) : selectedSE ? (
                   <div className="flex items-center gap-2">
                     <CheckCircle className="w-4 h-4 text-green-600" />
                     <span>
@@ -954,25 +1117,27 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                   disabled={assigning}
                   className="px-6 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-100 transition-colors disabled:opacity-50"
                 >
-                  Cancel
+                  {itemsViewTab === 'assigned' ? 'Close' : 'Cancel'}
                 </button>
-                <button
-                  onClick={handleAssignment}
-                  disabled={!selectedSE || selectedItemIndices.length === 0 || assigning}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium hover:from-blue-700 hover:to-blue-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {assigning ? (
-                    <>
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Assigning...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="w-5 h-5" />
-                      Confirm Assignment
-                    </>
-                  )}
-                </button>
+                {itemsViewTab === 'unassigned' && (
+                  <button
+                    onClick={handleAssignment}
+                    disabled={!selectedSE || selectedItemIndices.length === 0 || assigning}
+                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium hover:from-blue-700 hover:to-blue-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {assigning ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Assigning...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-5 h-5" />
+                        Confirm Assignment
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           )}

@@ -289,6 +289,18 @@ def update_project(project_id):
             if data['status'].lower() == 'completed':
                 project.completion_requested = False
 
+                # Also update BOQ status to completed when PM approves completion
+                from models.boq import BOQ
+                boq = BOQ.query.filter_by(
+                    project_id=project_id,
+                    is_deleted=False
+                ).first()
+
+                if boq:
+                    boq.status = 'completed'
+                    boq.last_modified_at = datetime.utcnow()
+                    boq.last_modified_by = current_user.get('full_name') if current_user else 'System'
+
         # Handle dates
         if 'start_date' in data:
             if data['start_date']:

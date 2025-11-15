@@ -249,4 +249,29 @@ def get_available_site_engineers_route():
     access_check = check_pm_or_mep_or_admin_access()
     if access_check:
         return access_check
-    return get_available_site_engineers() 
+    return get_available_site_engineers()
+
+
+# ============================================================================
+# COMPLETION CONFIRMATION ROUTES - PM confirms SE completion
+# ============================================================================
+
+# PM confirms SE completion request
+@pm_routes.route('/confirm-se-completion', methods=['POST'])
+@jwt_required
+def confirm_se_completion_route():
+    """SHARED: PM or MEP confirms SE completion (only for their assignments)"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return confirm_se_completion()
+
+# Get project completion details
+@pm_routes.route('/projects/<int:project_id>/completion-details', methods=['GET'])
+@jwt_required
+def get_project_completion_details_route(project_id):
+    """SHARED: PM, MEP, or Admin views project completion details"""
+    access_check = check_pm_or_mep_or_admin_access()
+    if access_check:
+        return access_check
+    return get_project_completion_details(project_id) 

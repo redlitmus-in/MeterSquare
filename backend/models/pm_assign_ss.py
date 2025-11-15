@@ -21,6 +21,14 @@ class PMAssignSS(db.Model):
     completion_date = db.Column(db.DateTime, nullable=True)
     notes = db.Column(db.Text, nullable=True)
 
+    # SE completion request tracking
+    se_completion_requested = db.Column(db.Boolean, default=False)
+    se_completion_request_date = db.Column(db.DateTime, nullable=True)
+
+    # PM confirmation tracking
+    pm_confirmed_completion = db.Column(db.Boolean, default=False)
+    pm_confirmation_date = db.Column(db.DateTime, nullable=True)
+
     # Standard tracking fields
     is_deleted = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -43,6 +51,10 @@ class PMAssignSS(db.Model):
             'assignment_date': self.assignment_date.isoformat() if self.assignment_date else None,
             'completion_date': self.completion_date.isoformat() if self.completion_date else None,
             'notes': self.notes,
+            'se_completion_requested': self.se_completion_requested,
+            'se_completion_request_date': self.se_completion_request_date.isoformat() if self.se_completion_request_date else None,
+            'pm_confirmed_completion': self.pm_confirmed_completion,
+            'pm_confirmation_date': self.pm_confirmation_date.isoformat() if self.pm_confirmation_date else None,
             'is_deleted': self.is_deleted,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by,
