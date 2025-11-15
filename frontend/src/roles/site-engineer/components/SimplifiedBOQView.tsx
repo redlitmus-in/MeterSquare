@@ -33,11 +33,25 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (isOpen && boq?.boq_id) {
-      // Always fetch full BOQ to get change request materials and complete data
-      fetchBOQDetails();
+    if (isOpen) {
+      // If assignedItems are provided, use them directly (SE view)
+      if (assignedItems && assignedItems.length > 0) {
+        setBoqData({
+          boq_id: boq?.boq_id,
+          boq_name: boq?.boq_name,
+          status: 'approved',
+          project: boq?.project || { project_name: boq?.project_name },
+          items: assignedItems,
+        } as any);
+
+        const expandedIds = assignedItems.slice(0, 2).map((_, index) => `item-${index}`);
+        setExpandedItems(expandedIds);
+      } else if (boq?.boq_id) {
+        // Fallback: Fetch full BOQ (for admin or other roles)
+        fetchBOQDetails();
+      }
     }
-  }, [isOpen, boq?.boq_id]);
+  }, [isOpen, boq?.boq_id, assignedItems]);
 
   const fetchBOQDetails = async () => {
     if (!boq?.boq_id) return;

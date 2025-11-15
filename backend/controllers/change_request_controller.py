@@ -141,8 +141,9 @@ def create_change_request():
                     'master_material_id': mat.get('master_material_id'),  # Include material ID from BOQ
                     'is_new': mat.get('master_material_id') is None,
                     'reason': mat.get('reason'),
-                    'brand': mat.get('brand'),  # Brand for new materials
-                    'specification': mat.get('specification')  # Specification for new materials
+                    'brand': mat.get('brand'),  # Brand for materials
+                    'specification': mat.get('specification'),  # Specification for materials
+                    'size': mat.get('size')  # Size for materials
                 })
 
         # Get item info from request data or extra_material_data
@@ -169,6 +170,22 @@ def create_change_request():
                 if str(itm_id) == str(item_id):
                     item_name = itm.get('item_name', '')
                     break
+
+        # Extract primary sub_item_id from sub_items_data for easier querying
+        primary_sub_item_id = None
+        if sub_items_data and len(sub_items_data) > 0:
+            # Get the first sub_item_id from the array
+            first_sub_item = sub_items_data[0]
+            raw_sub_item_id = first_sub_item.get('sub_item_id')
+            if raw_sub_item_id:
+                try:
+                    # Convert to integer if it's a number
+                    if isinstance(raw_sub_item_id, int):
+                        primary_sub_item_id = raw_sub_item_id
+                    elif isinstance(raw_sub_item_id, str) and raw_sub_item_id.isdigit():
+                        primary_sub_item_id = int(raw_sub_item_id)
+                except (ValueError, TypeError):
+                    log.warning(f"Could not parse sub_item_id: {raw_sub_item_id}")
 
         # DUPLICATE DETECTION: Check for similar requests within last 30 seconds
         # This prevents accidental double-clicks and form re-submissions
@@ -211,6 +228,7 @@ def create_change_request():
             approval_required_from=None,  # Will be set when sent for review
             item_id=item_id,
             item_name=item_name,
+            sub_item_id=primary_sub_item_id,  # Store primary sub_item_id for easier querying
             materials_data=materials_data,
             materials_total_cost=materials_total_cost,
             sub_items_data=sub_items_data  # Add this required field
@@ -586,8 +604,8 @@ def get_all_change_requests():
 
         # Role-based filtering
         if user_role in ['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']:
-            # SE sees ALL requests from their assigned projects (both PM and other SE requests)
-            # This helps them avoid duplicate requests and coordinate better
+            # NEW FLOW: SE sees requests from projects with item-level assignments via pm_assign_ss
+            # OR their own requests (to see pending drafts before items are assigned)
 
             if is_admin_viewing:
                 # Admin viewing as SE: Show ALL SE-related requests
@@ -596,28 +614,41 @@ def get_all_change_requests():
                     ChangeRequest.requested_by_role.in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])
                 )
             else:
-                # Regular SE: Filter by their assigned projects
-                # Get projects assigned to this SE/SS (site_supervisor_id in Project table)
-                se_project_ids = db.session.query(Project.project_id).filter_by(site_supervisor_id=user_id, is_deleted=False).all()
-                se_project_ids = [p[0] for p in se_project_ids] if se_project_ids else []
+                # NEW FLOW: Get projects where SE has item assignments via pm_assign_ss
+                from models.pm_assign_ss import PMAssignSS
 
-                log.info(f"Regular SE {user_id} - filtering by {len(se_project_ids)} assigned projects")
+                # Get unique project IDs where SE has item assignments
+                se_assigned_project_ids = db.session.query(PMAssignSS.project_id).filter(
+                    PMAssignSS.assigned_to_se_id == user_id,
+                    PMAssignSS.is_deleted == False
+                ).distinct().all()
+                se_assigned_project_ids = [p[0] for p in se_assigned_project_ids] if se_assigned_project_ids else []
 
-                # SE/SS should see ALL requests from their projects (including PM requests)
-                if se_project_ids:
+                log.info(f"Regular SE {user_id} - has item assignments in {len(se_assigned_project_ids)} projects")
+
+                # SE sees:
+                # 1. All requests from projects where they have item assignments
+                # 2. Their own requests (to see pending drafts)
+                from sqlalchemy import or_
+
+                if se_assigned_project_ids:
                     query = query.filter(
-                        ChangeRequest.project_id.in_(se_project_ids)  # All requests from SE's projects
+                        or_(
+                            ChangeRequest.project_id.in_(se_assigned_project_ids),  # Requests from assigned projects
+                            ChangeRequest.requested_by_user_id == user_id  # Own requests
+                        )
                     )
                 else:
-                    # Fallback: show only own requests if no project assignment found
+                    # No item assignments found - show only own requests
+                    log.info(f"SE {user_id} has no item assignments, showing only own requests")
                     query = query.filter_by(requested_by_user_id=user_id)
         elif user_role in ['projectmanager', 'project_manager']:
-            # PM sees ONLY requests from their assigned projects:
+            # PM sees:
             # 1. Their own requests from their projects
-            # 2. SE requests from their projects that need PM approval
-            # 3. All purchase/change requests from their assigned projects
+            # 2. SE requests from SEs they specifically assigned (via PMAssignSS.assigned_by_pm_id)
             from sqlalchemy import or_, and_
             from utils.admin_viewing_context import should_apply_role_filter
+            from models.pm_assign_ss import PMAssignSS
 
             # Check if admin is viewing as PM (should see ALL PM data, not user-specific)
             if is_admin_viewing:
@@ -631,28 +662,53 @@ def get_all_change_requests():
                     )
                 )
             else:
-                # Regular PM: Filter ONLY by their assigned projects
-                # Get projects where this user is the project manager (user_id field in Project table)
-                # Use JSONB contains operator since user_id is now a JSONB array
+                # Regular PM: Filter by SEs they assigned and their own requests
+                # Get all SEs that this PM has assigned (via PMAssignSS.assigned_by_pm_id)
+                pm_assigned_se_ids = db.session.query(PMAssignSS.assigned_to_se_id).filter(
+                    PMAssignSS.assigned_by_pm_id == user_id,
+                    PMAssignSS.is_deleted == False
+                ).distinct().all()
+                pm_assigned_se_ids = [se[0] for se in pm_assigned_se_ids] if pm_assigned_se_ids else []
+
+                # Get projects where this PM is assigned (for their own requests)
                 pm_projects = Project.query.filter(
                     Project.user_id.contains([user_id]),
                     Project.is_deleted == False
                 ).all()
                 pm_project_ids = [p.project_id for p in pm_projects]
 
-                log.info(f"Regular PM {user_id} - has {len(pm_project_ids)} assigned projects")
+                log.info(f"Regular PM {user_id} - assigned {len(pm_assigned_se_ids)} SEs, has {len(pm_project_ids)} projects")
 
-                if pm_project_ids:
-                    # PM sees ALL purchase/change requests from their assigned projects only
-                    query = query.filter(
-                        ChangeRequest.project_id.in_(pm_project_ids)  # Only requests from PM's assigned projects
-                    )
+                if pm_assigned_se_ids or pm_project_ids:
+                    # PM sees:
+                    # 1. Their own requests from their assigned projects
+                    # 2. Requests from SEs they assigned
+                    filters = []
+
+                    # Own requests from assigned projects
+                    if pm_project_ids:
+                        filters.append(
+                            and_(
+                                ChangeRequest.requested_by_user_id == user_id,
+                                ChangeRequest.project_id.in_(pm_project_ids)
+                            )
+                        )
+
+                    # Requests from assigned SEs
+                    if pm_assigned_se_ids:
+                        filters.append(
+                            ChangeRequest.requested_by_user_id.in_(pm_assigned_se_ids)
+                        )
+
+                    if filters:
+                        query = query.filter(or_(*filters))
+                    else:
+                        # No assignments found
+                        query = query.filter_by(requested_by_user_id=user_id)
                 else:
-                    # If PM has no assigned projects, show only their own requests
-                    log.warning(f"PM {user_id} has no assigned projects, showing only their own requests")
-                    query = query.filter(
-                        ChangeRequest.requested_by_user_id == user_id  # PM's own requests only
-                    )
+                    # No assignments or projects, show only own requests
+                    log.warning(f"PM {user_id} has no assigned SEs or projects")
+                    query = query.filter_by(requested_by_user_id=user_id)
 
         elif user_role in ['mep', 'mepsupervisor']:
             # MEP sees ONLY requests from their assigned projects (same logic as PM):
@@ -1573,7 +1629,7 @@ def complete_purchase_and_merge_to_boq(cr_id):
         flag_modified(boq_details, 'boq_details')
 
         # First, update or create materials in boq_material (MasterMaterial) table
-        from models.boq import MasterMaterial
+        from models.boq import MasterMaterial, MasterSubItem
 
         # Extract numeric item_id from change_request.item_id
         # change_request.item_id can be a string like "233" or need extraction from target_item
@@ -1599,6 +1655,25 @@ def complete_purchase_and_merge_to_boq(cr_id):
                         item_id_for_materials = int(parts[0])
                         log.info(f"Extracted item_id {item_id_for_materials} from '{change_request.item_id}'")
 
+        # Look up sub_item_id from the database using sub_item_name and item_id
+        sub_item_id_int = None
+        if materials and len(materials) > 0:
+            # Get sub_item_name from the first material (all materials in CR should belong to same sub-item)
+            sub_item_name = materials[0].get('sub_item_name')
+
+            if sub_item_name and item_id_for_materials:
+                master_sub_item = MasterSubItem.query.filter_by(
+                    sub_item_name=sub_item_name,
+                    item_id=item_id_for_materials,
+                    is_deleted=False
+                ).first()
+
+                if master_sub_item:
+                    sub_item_id_int = master_sub_item.sub_item_id
+                    log.info(f"Found sub_item_id {sub_item_id_int} for sub_item_name '{sub_item_name}' and item_id {item_id_for_materials}")
+                else:
+                    log.warning(f"Could not find sub_item_id for sub_item_name '{sub_item_name}' and item_id {item_id_for_materials}")
+
         for material in materials:
             material_name = material.get('material_name')
             unit_price = material.get('unit_price', 0)
@@ -1610,12 +1685,14 @@ def complete_purchase_and_merge_to_boq(cr_id):
             ).first()
 
             if existing_master_material:
-                # Update existing material's price, unit, and item_id
+                # Update existing material's price, unit, item_id, and sub_item_id
                 existing_master_material.current_market_price = unit_price
                 existing_master_material.default_unit = unit
                 if item_id_for_materials:
                     existing_master_material.item_id = item_id_for_materials
-                log.info(f"Updated MasterMaterial '{material_name}' (ID: {existing_master_material.material_id}) with price AED {unit_price}, item_id: {item_id_for_materials}")
+                if sub_item_id_int:
+                    existing_master_material.sub_item_id = sub_item_id_int
+                log.info(f"Updated MasterMaterial '{material_name}' (ID: {existing_master_material.material_id}) with price AED {unit_price}, item_id: {item_id_for_materials}, sub_item_id: {sub_item_id_int}")
 
                 # Update material dict with the actual integer material_id
                 material['master_material_id'] = existing_master_material.material_id
@@ -1628,6 +1705,7 @@ def complete_purchase_and_merge_to_boq(cr_id):
                 new_master_material = MasterMaterial(
                     material_name=material_name,
                     item_id=item_id_for_materials,  # Store the extracted item_id
+                    sub_item_id=sub_item_id_int,  # Store the sub_item_id
                     default_unit=unit,
                     current_market_price=unit_price,
                     description=description_text,  # Mark as from change request
@@ -1641,7 +1719,7 @@ def complete_purchase_and_merge_to_boq(cr_id):
                 )
                 db.session.add(new_master_material)
                 db.session.flush()  # Get the new material_id
-                log.info(f"Created new MasterMaterial '{material_name}' with ID {new_master_material.material_id}, item_id: {item_id_for_materials}, marked as from CR#{cr_id}")
+                log.info(f"Created new MasterMaterial '{material_name}' with ID {new_master_material.material_id}, item_id: {item_id_for_materials}, sub_item_id: {sub_item_id_int}, marked as from CR#{cr_id}")
 
                 # Update material dict with the new integer master_material_id
                 material['master_material_id'] = new_master_material.material_id
@@ -1685,7 +1763,7 @@ def complete_purchase_and_merge_to_boq(cr_id):
                 tracking_entry = MaterialPurchaseTracking(
                     boq_id=change_request.boq_id,
                     project_id=change_request.project_id,
-                    master_item_id=None,  # item_id in change_request is a string, but master_item_id expects integer
+                    master_item_id=item_id_for_materials,  # Use extracted integer item_id
                     item_name=item_name,
                     master_material_id=master_mat_id,  # Use converted/validated ID
                     material_name=material.get('material_name'),

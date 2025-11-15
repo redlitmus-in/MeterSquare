@@ -15,7 +15,7 @@ export interface ChangeRequestItem {
   requested_by_role: string;
   request_type: string;
   justification: string;
-  status: 'pending' | 'under_review' | 'approved_by_pm' | 'approved_by_td' | 'approved' | 'rejected';
+  status: 'pending' | 'under_review' | 'approved_by_pm' | 'approved_by_td' | 'approved' | 'rejected' | 'assigned_to_buyer' | 'purchase_completed';
   current_approver_role?: string | null;
   materials_data: Array<{
     material_name: string;

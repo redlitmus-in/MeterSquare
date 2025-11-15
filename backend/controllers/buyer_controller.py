@@ -259,14 +259,14 @@ def get_buyer_boq_materials():
         # ✅ PERFORMANCE FIX: Eager load BOQs and BOQDetails (100+ queries → 2)
         if user_role == 'admin':
             projects = Project.query.options(
-                selectinload(Project.boqs).selectinload(BOQ.boq_details_rel)
+                selectinload(Project.boqs).selectinload(BOQ.details)
             ).filter(
                 Project.site_supervisor_id.isnot(None),  # SE must be assigned
                 Project.is_deleted == False
             ).all()
         else:
             projects = Project.query.options(
-                selectinload(Project.boqs).selectinload(BOQ.boq_details_rel)
+                selectinload(Project.boqs).selectinload(BOQ.details)
             ).filter(
                 Project.buyer_id == buyer_id,
                 Project.site_supervisor_id.isnot(None),  # SE must be assigned
@@ -282,7 +282,7 @@ def get_buyer_boq_materials():
 
             for boq in boqs:
                 # Get BOQ details (no query - already loaded via selectinload)
-                boq_details_list = [bd for bd in boq.boq_details_rel if not bd.is_deleted]
+                boq_details_list = [bd for bd in boq.details if not bd.is_deleted]
                 boq_details = boq_details_list[0] if boq_details_list else None
 
                 if boq_details and boq_details.boq_details:
@@ -740,9 +740,40 @@ def complete_purchase():
         cr.purchase_notes = notes
         cr.updated_at = datetime.utcnow()
 
+        # Get the actual database item_id (master_item_id) from item_name
+        # cr.item_id contains BOQ-specific identifier like "item_587_2"
+        # We need to find the master_item_id using the item_name from the change request
+        database_item_id = None
+        if cr.item_name:
+            try:
+                # Look up the master item by name in boq_items table
+                from models.boq import MasterItem
+                master_item = MasterItem.query.filter(
+                    MasterItem.item_name == cr.item_name,
+                    MasterItem.is_deleted == False
+                ).first()
+
+                if master_item:
+                    database_item_id = master_item.item_id
+                    log.info(f"Found database item_id {database_item_id} for item '{cr.item_name}'")
+                else:
+                    log.warning(f"Could not find master_item for item_name '{cr.item_name}'")
+            except Exception as e:
+                log.warning(f"Error looking up master_item: {e}")
+
+        # Fallback: if item_id is already numeric, use it directly
+        if not database_item_id and cr.item_id:
+            try:
+                database_item_id = int(cr.item_id) if isinstance(cr.item_id, str) and cr.item_id.isdigit() else cr.item_id
+            except:
+                pass
+
         # Save newly purchased materials to MasterMaterial table
         new_materials_added = []
         sub_items_data = cr.sub_items_data or cr.materials_data or []
+
+        log.info(f"🔍 DEBUG: Processing {len(sub_items_data)} sub_items for CR-{cr_id}")
+        log.info(f"🔍 DEBUG: cr.item_id = {cr.item_id}, database_item_id = {database_item_id}")
 
         for sub_item in sub_items_data:
             if isinstance(sub_item, dict):
@@ -768,10 +799,39 @@ def complete_purchase():
 
                     # Only add if it's a NEW material
                     if not existing_material:
+                        # Get sub_item_id and ensure it's an integer
+                        # Priority: material data > sub_item data > change request column
+                        raw_sub_item_id = material.get('sub_item_id') or sub_item.get('sub_item_id') or cr.sub_item_id
+                        sub_item_id_int = None
+                        if raw_sub_item_id:
+                            try:
+                                # If it's already an int, use it
+                                if isinstance(raw_sub_item_id, int):
+                                    sub_item_id_int = raw_sub_item_id
+                                # If it's a string like "123", convert it
+                                elif isinstance(raw_sub_item_id, str) and raw_sub_item_id.isdigit():
+                                    sub_item_id_int = int(raw_sub_item_id)
+                                # If it's a string like "subitem_331_1_3", extract the integer part
+                                # (This is a fallback, frontend should send integer IDs)
+                            except Exception as e:
+                                log.warning(f"Could not parse sub_item_id '{raw_sub_item_id}': {e}")
+
+                        # Fallback to change request sub_item_id if still None
+                        if sub_item_id_int is None and cr.sub_item_id:
+                            sub_item_id_int = cr.sub_item_id
+                            log.info(f"   - Using cr.sub_item_id as fallback: {sub_item_id_int}")
+
+                        log.info(f"🟢 Creating new material '{material_name}' with:")
+                        log.info(f"   - item_id (database_item_id): {database_item_id}")
+                        log.info(f"   - sub_item_id (parsed): {sub_item_id_int}")
+                        log.info(f"   - raw_sub_item_id from payload: {raw_sub_item_id}")
+                        log.info(f"   - brand: {material.get('brand', '')}")
+                        log.info(f"   - specification: {material.get('specification', '')}")
+
                         new_material = MasterMaterial(
                             material_name=material_name,
-                            item_id=cr.item_id,
-                            sub_item_id=material.get('sub_item_id') or sub_item.get('sub_item_id'),
+                            item_id=database_item_id,  # Use the actual database item_id, not BOQ identifier
+                            sub_item_id=sub_item_id_int,  # Ensure it's an integer or None
                             description=material.get('description', ''),
                             brand=material.get('brand', ''),
                             size=material.get('size', ''),
@@ -788,7 +848,7 @@ def complete_purchase():
                         )
                         db.session.add(new_material)
                         new_materials_added.append(material_name)
-                        log.info(f"New material '{material_name}' added to MasterMaterial by buyer {buyer_id}")
+                        log.info(f"✅ New material '{material_name}' added to MasterMaterial with item_id={database_item_id}, sub_item_id={sub_item_id_int} by buyer {buyer_id}")
 
         db.session.commit()
 

@@ -4061,6 +4061,51 @@ def get_sub_item(item_id):
                 "created_by": sub_item.created_by
             })
 
+        # Collect all unique materials from sub-items for the dropdown
+        all_materials_dict = {}
+        for sub_item_detail in sub_item_details:
+            for material in sub_item_detail.get('materials', []):
+                mat_id = material['material_id']
+                if mat_id not in all_materials_dict:
+                    all_materials_dict[mat_id] = {
+                        "material_id": mat_id,
+                        "item_id": boq_item.item_id,
+                        "item_name": boq_item.item_name,
+                        "material_name": material['material_name'],
+                        "current_market_price": material['current_market_price'],
+                        "default_unit": material['unit']
+                    }
+
+        # Also fetch materials from purchased change requests for this item
+        # Query material_purchase_tracking for materials added via change requests
+        from models.boq import MaterialPurchaseTracking
+        cr_materials = MaterialPurchaseTracking.query.filter(
+            MaterialPurchaseTracking.master_item_id == item_id,
+            MaterialPurchaseTracking.is_from_change_request == True
+        ).all()
+
+        for cr_mat in cr_materials:
+            mat_id = cr_mat.master_material_id
+            if mat_id and mat_id not in all_materials_dict:
+                # Fetch the full material details from boq_material
+                master_material = MasterMaterial.query.filter_by(
+                    material_id=mat_id,
+                    is_active=True
+                ).first()
+
+                if master_material:
+                    all_materials_dict[mat_id] = {
+                        "material_id": mat_id,
+                        "item_id": boq_item.item_id,
+                        "item_name": boq_item.item_name,
+                        "material_name": master_material.material_name,
+                        "current_market_price": master_material.current_market_price,
+                        "default_unit": master_material.default_unit,
+                        "is_from_change_request": True
+                    }
+
+        materials_for_dropdown = list(all_materials_dict.values())
+
         return jsonify({
             "item_id": boq_item.item_id,
             "item_name": boq_item.item_name,
@@ -4068,7 +4113,8 @@ def get_sub_item(item_id):
             "size" : sub_item.size,
             "item_description": boq_item.description,
             "sub_items_count": len(sub_item_details),
-            "sub_items": sub_item_details
+            "sub_items": sub_item_details,
+            "materials": materials_for_dropdown  # Top-level materials array for dropdown
         }), 200
 
     except Exception as e:

@@ -129,7 +129,8 @@ def get_all_sitesupervisor_boqs():
 
         projects = Project.query.filter(
             Project.project_id.in_(all_project_ids),
-            Project.is_deleted == False
+            Project.is_deleted == False,
+            Project.status != 'completed'  # Exclude completed projects
         ).all()
 
         projects_list = []
@@ -294,6 +295,24 @@ def get_all_sitesupervisor_boqs():
             # Convert items_by_pm dict to list
             items_by_pm_list = list(items_by_pm.values())
 
+            # Build areas structure for ExtraMaterialForm compatibility
+            # Using floor_name as area (same structure as /api/projects/assigned-to-me)
+            area_info = {
+                "area_id": 1,  # Placeholder
+                "area_name": project.floor_name or "Main Area",
+                "boqs": []
+            }
+
+            # Add all BOQs to the area's boqs array
+            for boq_id in boq_ids:
+                boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+                if boq:
+                    area_info["boqs"].append({
+                        "boq_id": boq.boq_id,
+                        "boq_name": boq.boq_name or f"BOQ-{boq.boq_id}",
+                        "items": []  # Items will be populated by ExtraMaterialForm if needed
+                    })
+
             projects_list.append({
                 "project_id": project.project_id,
                 "project_name": project.project_name,
@@ -317,7 +336,9 @@ def get_all_sitesupervisor_boqs():
                 "items_by_pm": items_by_pm_list,
                 # Detailed item information
                 "assigned_items_details": assigned_items_details,  # All assigned items with full details
-                "boqs_with_items": boqs_with_items  # BOQs grouped with their assigned items
+                "boqs_with_items": boqs_with_items,  # BOQs grouped with their assigned items
+                # Areas structure for ExtraMaterialForm compatibility
+                "areas": [area_info]
             })
 
         return jsonify({

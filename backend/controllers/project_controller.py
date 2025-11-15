@@ -425,7 +425,7 @@ def get_assigned_projects():
         from models.change_request import ChangeRequest
 
         eager_load_options = [
-            selectinload(Project.boqs).selectinload(BOQ.boq_details_rel),
+            selectinload(Project.boqs).selectinload(BOQ.details),
             selectinload(Project.boqs).selectinload(BOQ.change_requests)
         ]
 
@@ -502,8 +502,8 @@ def get_assigned_projects():
                 # Before: M queries (one per BOQ)
                 # After: 0 additional queries (data already in memory)
                 boq_detail = None
-                if hasattr(boq, 'boq_details_rel') and boq.boq_details_rel:
-                    boq_detail = next((d for d in boq.boq_details_rel if not d.is_deleted), None)
+                if hasattr(boq, 'details') and boq.details:
+                    boq_detail = next((d for d in boq.details if not d.is_deleted), None)
 
                 # Parse BOQ details to get items and sub-items
                 boq_details = boq_detail.boq_details if boq_detail else {}

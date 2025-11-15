@@ -15,6 +15,8 @@ interface Project {
   project_id: number;
   project_name: string;
   areas: Area[];
+  assigned_items_details?: any[];  // For Site Engineers - contains items assigned to them
+  boqs_with_items?: any[];  // For Site Engineers - BOQs with assigned items
 }
 
 interface Area {
@@ -64,8 +66,9 @@ interface MaterialItem {
   unitRate: number;
   reasonForNew?: string;
   justification: string;  // Per-material justification (required for all materials)
-  brand?: string;  // Brand for new materials
-  specification?: string;  // Specification for new materials
+  brand?: string;  // Brand for materials
+  specification?: string;  // Specification for materials
+  size?: string;  // Size for materials
 }
 
 interface ExtraMaterialFormProps {
@@ -226,9 +229,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     try {
       setLoading(true);
       console.log('Fetching projects with token:', token);
-      console.log('API URL:', `${API_URL}/projects/assigned-to-me`);
 
-      const response = await axios.get(`${API_URL}/projects/assigned-to-me`, {
+      // For Site Engineers, use sitesupervisor_boq endpoint to get projects with item assignments
+      const endpoint = user?.role?.toLowerCase() === 'siteengineer' || user?.role?.toLowerCase() === 'sitesupervisor'
+        ? `${API_URL}/sitesupervisor_boq`
+        : `${API_URL}/projects/assigned-to-me`;
+
+      console.log('API URL:', endpoint);
+
+      const response = await axios.get(endpoint, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -236,10 +245,19 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       });
 
       console.log('Projects response:', response.data);
-      console.log('Projects details:', JSON.stringify(response.data.projects, null, 2));
-      setProjects(response.data.projects || []);
 
-      if (!response.data.projects || response.data.projects.length === 0) {
+      // Transform response for SE endpoint
+      let projectsList = [];
+      if (user?.role?.toLowerCase() === 'siteengineer' || user?.role?.toLowerCase() === 'sitesupervisor') {
+        projectsList = response.data.projects || [];
+      } else {
+        projectsList = response.data.projects || [];
+      }
+
+      console.log('Projects details:', JSON.stringify(projectsList, null, 2));
+      setProjects(projectsList);
+
+      if (!projectsList || projectsList.length === 0) {
         toast.info('No projects assigned to you yet');
       }
     } catch (error: any) {
@@ -347,19 +365,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         // Auto-fill BOQ if area has only one BOQ
         if (singleArea.boqs && singleArea.boqs.length === 1) {
           const singleBoq = singleArea.boqs[0];
-          setSelectedBoq(singleBoq);
-
-          // Auto-select BOQ Item if only one item exists
-          if (singleBoq.items && singleBoq.items.length === 1) {
-            const singleItem = singleBoq.items[0];
-            setSelectedItem(singleItem);
-            setSelectedSubItems([]);
-            setMaterials([]);
-          } else {
-            setSelectedItem(null);
-            setSelectedSubItems([]);
-            setMaterials([]);
-          }
+          // Call handleBoqChange to fetch/populate items
+          handleBoqChange(singleBoq.boq_id);
         } else {
           setSelectedBoq(null);
           setSelectedItem(null);
@@ -387,7 +394,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   };
 
   const handleAreaChange = (areaId: number) => {
-    if (!selectedProject) return;
+    if (!selectedProject || !selectedProject.areas) return;
     const area = selectedProject.areas.find(a => a.area_id === areaId);
     setSelectedArea(area || null);
     // Reset downstream selections
@@ -398,15 +405,183 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     setItemOverhead(null);
   };
 
-  const handleBoqChange = (boqId: number) => {
-    if (!selectedArea) return;
+  const handleBoqChange = async (boqId: number) => {
+    console.log('🔵 handleBoqChange called with boqId:', boqId);
+
+    if (!selectedArea) {
+      console.log('❌ No selectedArea, returning');
+      return;
+    }
+
     const boq = selectedArea.boqs.find(b => b.boq_id === boqId);
-    setSelectedBoq(boq || null);
-    // Reset downstream selections
+    console.log('🔵 Found BOQ:', boq);
+
+    // Reset downstream selections immediately
     setSelectedItem(null);
     setSelectedSubItems([]);
     setMaterials([]);
     setItemOverhead(null);
+
+    if (!boq) {
+      console.log('❌ BOQ not found in area.boqs');
+      setSelectedBoq(null);
+      return;
+    }
+
+    // Fetch BOQ items if the items array is empty
+    console.log('🔵 BOQ items check:', boq.items?.length || 0);
+
+    // For Site Engineers, use assigned items directly from boqs_with_items (don't fetch from API)
+    if (isSiteEngineer && selectedProject?.boqs_with_items) {
+      console.log('🔵 Site Engineer - using assigned items from boqs_with_items');
+
+      // Find the specific BOQ in boqs_with_items
+      const boqWithAssignedItems = selectedProject.boqs_with_items.find(
+        (b: any) => b.boq_id === boqId
+      );
+
+      if (boqWithAssignedItems?.assigned_items) {
+        console.log('🔵 Found assigned items:', boqWithAssignedItems.assigned_items);
+
+        // Use the assigned items directly - they already have the correct structure
+        const mappedItems = boqWithAssignedItems.assigned_items.map((item: any, index: number) => ({
+          // Generate item_id from item_index if not present
+          item_id: item.item_id || item.master_item_id || `item_${boqId}_${item.item_index || index}`,
+          item_name: item.item_name,
+          overhead_allocated: item.overhead_allocated || 0,
+          overhead_consumed: item.overhead_consumed || 0,
+          overhead_available: item.overhead_available || 0,
+          sub_items: item.sub_items || []
+        }));
+
+        console.log('✅ Mapped assigned items:', {
+          total: mappedItems.length,
+          items: mappedItems
+        });
+
+        const updatedBoq = {
+          ...boq,
+          items: mappedItems
+        };
+
+        setSelectedBoq(updatedBoq);
+        console.log('✅ Updated BOQ with assigned items:', updatedBoq);
+        return; // Exit early, don't fetch from API
+      } else {
+        console.log('⚠️ No assigned_items found for this BOQ');
+        toast.warning('No items assigned to you for this BOQ');
+        setSelectedBoq({ ...boq, items: [] });
+        return;
+      }
+    }
+
+    // For non-Site Engineers, fetch all items from API if needed
+    if (!boq.items || boq.items.length === 0) {
+      try {
+        setLoading(true);
+        console.log('🔵 Fetching items for BOQ:', boqId);
+
+        // Fetch the full BOQ details with items
+        const response = await axios.get(`${API_URL}/boq/${boqId}`, { headers });
+        const boqDetails = response.data;
+
+        console.log('BOQ details response:', boqDetails);
+
+        // Extract items from existing_purchase and new_purchase sections
+        const existingItems = boqDetails.existing_purchase?.items || [];
+        const newPurchaseItems = boqDetails.new_purchase?.items || [];
+
+        // Combine both arrays to get all items
+        const allItems = [...existingItems, ...newPurchaseItems];
+
+        console.log('Extracted items:', {
+          existing: existingItems.length,
+          newPurchase: newPurchaseItems.length,
+          total: allItems.length,
+          sampleItem: allItems[0]
+        });
+
+        // Map items to ensure they have the required structure
+        let mappedItems = allItems.map((item: any) => ({
+          item_id: item.item_id || item.master_item_id || item.id,
+          item_name: item.item_name || item.name,
+          overhead_allocated: item.overhead_allocated || 0,
+          overhead_consumed: item.overhead_consumed || 0,
+          overhead_available: item.overhead_available || 0,
+          sub_items: item.sub_items || []
+        }));
+
+        // For Site Engineers, use assigned items from boqs_with_items if available
+        if (isSiteEngineer && selectedProject?.boqs_with_items) {
+          console.log('🔵 Site Engineer - using assigned items from boqs_with_items');
+
+          // Find the specific BOQ in boqs_with_items
+          const boqWithAssignedItems = selectedProject.boqs_with_items.find(
+            (b: any) => b.boq_id === boqId
+          );
+
+          if (boqWithAssignedItems?.assigned_items) {
+            console.log('🔵 Found assigned items for BOQ:', boqWithAssignedItems.assigned_items);
+
+            // Get the assigned item IDs
+            const assignedItemIds = new Set(
+              boqWithAssignedItems.assigned_items.map((item: any) =>
+                item.item_id || item.master_item_id
+              )
+            );
+
+            console.log('🔵 Assigned item IDs:', Array.from(assignedItemIds));
+
+            // Filter to only include assigned items
+            const filteredItems = mappedItems.filter((item: any) =>
+              assignedItemIds.has(item.item_id) || assignedItemIds.has(item.item_id.toString())
+            );
+
+            console.log('🔵 Filtered items count:', filteredItems.length);
+
+            // Use the assigned items directly with their full structure from backend
+            if (filteredItems.length === 0) {
+              // If filtering failed, use the assigned_items from backend directly
+              console.log('⚠️ No matches after filtering, using assigned_items directly');
+              mappedItems = boqWithAssignedItems.assigned_items.map((item: any) => ({
+                item_id: item.item_id || item.master_item_id,
+                item_name: item.item_name,
+                overhead_allocated: item.overhead_allocated || 0,
+                overhead_consumed: item.overhead_consumed || 0,
+                overhead_available: item.overhead_available || 0,
+                sub_items: item.sub_items || []
+              }));
+            } else {
+              mappedItems = filteredItems;
+            }
+          } else {
+            console.log('⚠️ No assigned_items found for this BOQ');
+          }
+        }
+
+        console.log('Mapped items:', {
+          total: mappedItems.length,
+          sampleMappedItem: mappedItems[0]
+        });
+
+        // Update the BOQ object with the fetched items
+        const updatedBoq = {
+          ...boq,
+          items: mappedItems
+        };
+
+        setSelectedBoq(updatedBoq);
+        console.log('Updated BOQ with items:', updatedBoq);
+      } catch (error) {
+        console.error('Error fetching BOQ items:', error);
+        toast.error('Failed to load BOQ items');
+        setSelectedBoq(boq); // Set BOQ anyway, even if items failed to load
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setSelectedBoq(boq);
+    }
   };
 
   const handleItemChange = (itemId: string) => {
@@ -457,6 +632,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       return;
     }
 
+    // Log materials before creating payload
+    console.log('📦 Materials before payload creation:', materials.map(m => ({
+      materialName: m.materialName,
+      subItemId: m.subItemId,
+      subItemName: m.subItemName,
+      isNew: m.isNew,
+      type: typeof m.subItemId
+    })));
+
     const payload = {
       project_id: selectedProject.project_id,
       area_id: selectedArea.area_id,
@@ -465,7 +649,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       boq_item_name: selectedItem.item_name,  // Send item name
       materials: materials.map(mat => ({
         material_name: mat.materialName,  // Actual material name like "Bubble Wrap"
-        sub_item_id: mat.isNew ? null : mat.subItemId,  // Sub-item ID
+        sub_item_id: mat.subItemId || null,  // Always send sub_item_id if available (even for new materials)
         sub_item_name: mat.subItemName,  // Sub-item name like "Protection"
         quantity: mat.quantity,
         unit: mat.unit,
@@ -473,12 +657,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         master_material_id: mat.isNew ? null : mat.materialId,  // Material ID
         reason: mat.isNew ? mat.reasonForNew : null,
         justification: mat.justification,  // Per-material justification
-        brand: mat.isNew ? mat.brand : null,  // Brand for new materials
-        specification: mat.isNew ? mat.specification : null  // Specification for new materials
+        brand: mat.brand || null,  // Brand for all materials
+        specification: mat.specification || null,  // Specification for all materials
+        size: mat.size || null  // Size for all materials
       })),
       justification,
       remarks
     };
+
+    console.log('📦 Final payload:', payload);
 
     // Set submission guards
     setIsSubmitting(true);
@@ -568,7 +755,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         if (response.data.success) {
           // All users must manually send for review - no auto-send
           toast.success('Extra material request created successfully. Click "Send for Review" to submit for approval.');
-          onClose();
+          console.log('✅ Request created successfully, calling onSuccess to refetch');
+          if (onSuccess) onSuccess(); // Trigger refetch
+          if (onClose) onClose();
         }
       }
     } catch (error: any) {
@@ -621,7 +810,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             required
           >
             <option value="">Select Area</option>
-            {selectedProject.areas.map(area => (
+            {selectedProject.areas?.map(area => (
               <option key={area.area_id} value={area.area_id}>
                 {area.area_name}
               </option>
@@ -707,6 +896,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                     checked={isSelected}
                     onChange={(e) => {
                       if (e.target.checked) {
+                        console.log('🟢 Selected sub-item:', {
+                          sub_item_id: subItem.sub_item_id,
+                          sub_item_name: subItem.sub_item_name,
+                          type: typeof subItem.sub_item_id
+                        });
                         setSelectedSubItems([...selectedSubItems, subItem]);
                       } else {
                         // Remove this sub-item and its materials
@@ -916,6 +1110,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         onChange={(e) => {
                           const material = subItem.materials.find(m => m.material_id === e.target.value);
                           if (material) {
+                            console.log('🔵 Selecting existing material for sub-item:', {
+                              sub_item_id: subItem.sub_item_id,
+                              sub_item_name: subItem.sub_item_name,
+                              material_name: material.material_name,
+                              type: typeof subItem.sub_item_id
+                            });
+
                             // Check for duplicates - prevent adding same material twice for this sub-item
                             const isDuplicate = materials.some(
                               m => !m.isNew &&
@@ -942,6 +1143,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                               unitRate: material.unit_price || 0,
                               justification: ''
                             };
+                            console.log('🔵 Existing material object:', newMaterialItem);
                             setMaterials([...materials, newMaterialItem]);
                             // Reset dropdown
                             e.target.value = "";
@@ -977,6 +1179,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                     type="button"
                     onClick={() => {
                       // Add new material for this specific sub-item
+                      console.log('🟡 Creating new material for sub-item:', {
+                        sub_item_id: subItem.sub_item_id,
+                        sub_item_name: subItem.sub_item_name,
+                        type: typeof subItem.sub_item_id
+                      });
                       const newMaterial: MaterialItem = {
                         id: `material-${Date.now()}-${Math.random()}`,
                         isNew: true,
@@ -991,6 +1198,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         brand: '',
                         specification: ''
                       };
+                      console.log('🟡 New material object:', newMaterial);
                       setMaterials([...materials, newMaterial]);
                     }}
                     className="flex items-center gap-1 px-3 py-1.5 text-xs bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] text-white rounded-lg hover:from-[#1e3270] hover:to-[#3d4f8a] shadow-md transition-all"
@@ -1042,7 +1250,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                               placeholder="Enter material name"
                             />
                           </div>
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="grid grid-cols-3 gap-2">
                             <div>
                               <label className="block text-xs font-medium text-gray-700 mb-1">
                                 Brand
@@ -1053,6 +1261,18 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                                 onChange={(e) => updateMaterial(material.id, { brand: e.target.value })}
                                 className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
                                 placeholder="Enter brand"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                Size
+                              </label>
+                              <input
+                                type="text"
+                                value={material.size || ''}
+                                onChange={(e) => updateMaterial(material.id, { size: e.target.value })}
+                                className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                                placeholder="Enter size"
                               />
                             </div>
                             <div>

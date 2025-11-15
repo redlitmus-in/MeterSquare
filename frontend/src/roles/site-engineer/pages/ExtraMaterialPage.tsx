@@ -306,7 +306,10 @@ const ExtraMaterialPage: React.FC = () => {
           unit: mat.unit,
           unit_price: mat.unit_rate || mat.unitRate,
           master_material_id: mat.materialId || mat.master_material_id || null,  // Material ID
-          reason: mat.reason || mat.reasonForNew || null
+          reason: mat.reason || mat.reasonForNew || null,
+          brand: mat.brand || null,  // Brand for all materials
+          specification: mat.specification || null,  // Specification for all materials
+          size: mat.size || null  // Size for all materials
         }))
       };
 

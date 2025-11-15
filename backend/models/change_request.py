@@ -28,6 +28,7 @@ class ChangeRequest(db.Model):
     # BOQ Item Reference (which item these sub-items belong to)
     item_id = db.Column(db.String(255), nullable=True)  # e.g., "item_1"
     item_name = db.Column(db.String(255), nullable=True)  # e.g., "Concrete Work"
+    sub_item_id = db.Column(db.Integer, nullable=True)  # Primary sub-item ID for easier querying
 
     # Item Overhead Tracking (snapshot at request time)
     item_overhead_allocated = db.Column(db.Float, default=0.0)  # Total overhead for this item
@@ -200,6 +201,7 @@ class ChangeRequest(db.Model):
             # BOQ Item Reference
             'item_id': self.item_id,
             'item_name': self.item_name,
+            'sub_item_id': self.sub_item_id,
 
             # Item Overhead
             'item_overhead': {

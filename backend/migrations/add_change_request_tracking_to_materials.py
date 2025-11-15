@@ -40,6 +40,25 @@ def upgrade():
                 END $$;
             """))
 
+            # Fix existing NULL master_item_id values for change request materials
+            # Extract item_id from change_requests table and update material_purchase_tracking
+            conn.execute(text("""
+                UPDATE material_purchase_tracking mpt
+                SET master_item_id = CASE
+                    -- If item_id is already an integer, use it directly
+                    WHEN cr.item_id ~ '^[0-9]+$' THEN cr.item_id::INTEGER
+                    -- If item_id is like 'item_234' or 'item_234_1', extract the first number
+                    WHEN cr.item_id ~ '^item_[0-9]+' THEN
+                        (regexp_match(cr.item_id, 'item_([0-9]+)'))[1]::INTEGER
+                    ELSE NULL
+                END
+                FROM change_requests cr
+                WHERE mpt.change_request_id = cr.cr_id
+                  AND mpt.is_from_change_request = TRUE
+                  AND mpt.master_item_id IS NULL
+                  AND cr.item_id IS NOT NULL;
+            """))
+
             conn.commit()
 
         print("✅ Migration completed: Added change request tracking columns to material_purchase_tracking")
@@ -48,6 +67,8 @@ def upgrade():
         print("  - change_request_id (INTEGER, FK to change_requests.cr_id)")
         print("\nForeign key constraint created:")
         print("  - fk_material_purchase_change_request")
+        print("\nData fix applied:")
+        print("  - Updated master_item_id for existing change request materials")
 
 def downgrade():
     """Remove change request tracking columns"""
