@@ -424,18 +424,17 @@ def send_for_review(cr_id):
 
         elif normalized_role in ['projectmanager', 'project_manager', 'mep', 'mepsupervisor']:
             # PM/MEP routing logic:
-            # - New materials (master_material_id is None) → Send to Estimator
-            # - Existing BOQ materials (all have master_material_id) → Send directly to Buyer
+            # - Can send to Estimator or Buyer based on route_to parameter
+            # - If not specified, defaults based on material type:
+            #   - New materials (master_material_id is None) → Default to Estimator
+            #   - Existing BOQ materials (all have master_material_id) → Default to Buyer
 
             # Check if all materials are existing (from BOQ) or if there are new materials
             has_new_materials = any(mat.get('master_material_id') is None for mat in (change_request.materials_data or []))
 
-            if has_new_materials:
-                # Has new materials - MUST send to Estimator (route_to required)
-                if not route_to or route_to != 'estimator':
-                    return jsonify({"error": "New materials detected. Must send to Estimator. Set route_to='estimator'"}), 400
-
-                # Route to the project's assigned estimator
+            # Determine routing
+            if route_to == 'estimator':
+                # Explicitly sending to Estimator
                 project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
                 if not project or not project.estimator_id:
                     return jsonify({"error": "No Estimator assigned for this project"}), 400
@@ -448,17 +447,36 @@ def send_for_review(cr_id):
                 next_role = CR_CONFIG.ROLE_ESTIMATOR
                 next_approver = assigned_estimator.full_name or assigned_estimator.username
                 next_approver_id = assigned_estimator.user_id
-                log.info(f"Routing CR {cr_id} with NEW materials to Estimator: {next_approver} (user_id={next_approver_id}, project_id={change_request.project_id})")
+                log.info(f"Routing CR {cr_id} to Estimator: {next_approver} (user_id={next_approver_id}, project_id={change_request.project_id})")
 
-            else:
-                # All materials are existing (from BOQ) - Send directly to Buyer
-                if route_to and route_to != 'buyer':
-                    return jsonify({"error": "All materials are from BOQ. Must send to Buyer. Set route_to='buyer'"}), 400
-
+            elif route_to == 'buyer':
+                # Explicitly sending to Buyer
                 next_role = CR_CONFIG.ROLE_BUYER
                 next_approver = "Buyer"
                 next_approver_id = None
-                log.info(f"Routing CR {cr_id} with EXISTING BOQ materials directly to Buyer")
+                log.info(f"Routing CR {cr_id} directly to Buyer")
+
+            elif has_new_materials:
+                # No route_to specified, has new materials - default to Estimator
+                project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
+                if not project or not project.estimator_id:
+                    return jsonify({"error": "No Estimator assigned for this project"}), 400
+
+                assigned_estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
+                if not assigned_estimator:
+                    return jsonify({"error": "Assigned Estimator user record not found"}), 400
+
+                next_role = CR_CONFIG.ROLE_ESTIMATOR
+                next_approver = assigned_estimator.full_name or assigned_estimator.username
+                next_approver_id = assigned_estimator.user_id
+                log.info(f"Routing CR {cr_id} with NEW materials to Estimator (default): {next_approver}")
+
+            else:
+                # No route_to specified, all materials from BOQ - default to Buyer
+                next_role = CR_CONFIG.ROLE_BUYER
+                next_approver = "Buyer"
+                next_approver_id = None
+                log.info(f"Routing CR {cr_id} with EXISTING BOQ materials to Buyer (default)")
 
         elif is_admin:
             # Admin sends to assigned PM
