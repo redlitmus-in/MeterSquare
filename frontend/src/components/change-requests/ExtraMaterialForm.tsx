@@ -79,26 +79,151 @@ interface ExtraMaterialFormProps {
   initialData?: any;  // For editing existing change requests
 }
 
-// Common units for dropdown
+// Universal units for dropdown - Comprehensive list for all construction/engineering needs
 const COMMON_UNITS = [
+  // --- COUNTING UNITS ---
   'nos',
-  'sqm',
-  'sqft',
+  'pcs',
+  'each',
+  'unit',
+  'pair',
+  'set',
+  'lot',
+  'dozen',
+  'gross',
+
+  // --- LENGTH/LINEAR UNITS ---
+  // Metric
+  'm',
+  'cm',
+  'mm',
+  'km',
   'lm',
   'rmt',
+  'running meter',
+  // Imperial
+  'ft',
+  'in',
+  'yd',
+  'mile',
+  'running feet',
+
+  // --- AREA UNITS ---
+  // Metric
+  'sqm',
+  'sqcm',
+  'sqmm',
+  'hectare',
+  'acre',
+  // Imperial
+  'sqft',
+  'sqyd',
+  'sqin',
+
+  // --- VOLUME UNITS ---
+  // Metric
   'cum',
+  'cbm',
+  'liters',
+  'ml',
+  'cc',
+  // Imperial
+  'cft',
   'cuft',
+  'cuyd',
+  'cuin',
+  'gallons',
+  'quarts',
+
+  // --- WEIGHT/MASS UNITS ---
+  // Metric
   'kg',
+  'grams',
+  'mg',
   'ton',
+  'tonnes',
+  'mt',
+  'quintal',
+  // Imperial
+  'lbs',
+  'oz',
+  'cwt',
+
+  // --- PACKAGING UNITS ---
   'bags',
   'boxes',
-  'pcs',
-  'sets',
+  'cartons',
+  'bundles',
   'rolls',
   'sheets',
+  'drums',
+  'cans',
+  'bottles',
+  'packets',
+  'pallets',
+  'crates',
+  'sacks',
+  'bales',
+  'reels',
+  'coils',
+
+  // --- CONSTRUCTION SPECIFIC ---
+  'brass',
+  'bags(50kg)',
+  'bags(25kg)',
+  'bags(40kg)',
   'length',
-  'pair',
-  'lot'
+  'panel',
+  'board',
+  'tile',
+  'block',
+  'brick',
+  'slab',
+  'plate',
+  'beam',
+  'rod',
+  'bar',
+  'pipe',
+  'tube',
+  'pole',
+  'post',
+
+  // --- ELECTRICAL/PLUMBING ---
+  'watt',
+  'kw',
+  'ampere',
+  'volt',
+  'points',
+  'circuits',
+  'fixtures',
+
+  // --- PAINT/COATING ---
+  'liters',
+  'gallons',
+  'coat',
+  'layer',
+
+  // --- TIME ---
+  'hour',
+  'day',
+  'week',
+  'month',
+  'year',
+  'shift',
+
+  // --- SPECIAL UNITS ---
+  'trip',
+  'load',
+  'batch',
+  'run',
+  'cycle',
+  'service',
+  'job',
+  'task',
+  'activity',
+
+  // --- CUSTOM ---
+  'Custom (Type below)'
 ];
 
 const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCancel, onClose, onSuccess, initialData }) => {
@@ -1320,20 +1445,36 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             Unit {material.isNew && <span className="text-red-500">*</span>}
                           </label>
                           {material.isNew ? (
-                            <div className="relative">
-                              <input
-                                type="text"
-                                list={`units-${material.id}`}
-                                value={material.unit}
-                                onChange={(e) => updateMaterial(material.id, { unit: e.target.value })}
+                            <div className="space-y-1">
+                              <select
+                                value={material.unit === 'Custom (Type below)' || !COMMON_UNITS.includes(material.unit) ? 'Custom (Type below)' : material.unit}
+                                onChange={(e) => {
+                                  if (e.target.value === 'Custom (Type below)') {
+                                    updateMaterial(material.id, { unit: '' });
+                                  } else {
+                                    updateMaterial(material.id, { unit: e.target.value });
+                                  }
+                                }}
                                 className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
-                                placeholder="Select or type unit"
-                              />
-                              <datalist id={`units-${material.id}`}>
+                                required
+                              >
+                                <option value="">Select unit</option>
                                 {COMMON_UNITS.map(unit => (
-                                  <option key={unit} value={unit} />
+                                  <option key={unit} value={unit}>
+                                    {unit}
+                                  </option>
                                 ))}
-                              </datalist>
+                              </select>
+                              {(material.unit === 'Custom (Type below)' || (material.unit && !COMMON_UNITS.includes(material.unit))) && (
+                                <input
+                                  type="text"
+                                  value={material.unit === 'Custom (Type below)' ? '' : material.unit}
+                                  onChange={(e) => updateMaterial(material.id, { unit: e.target.value })}
+                                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                                  placeholder="Enter custom unit"
+                                  required
+                                />
+                              )}
                             </div>
                           ) : (
                             <input
