@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-// import * as Highcharts from 'highcharts';
-// import * as HighchartsReact from 'highcharts-react-official';
+import * as Highcharts from 'highcharts';
+import * as HighchartsReact from 'highcharts-react-official';
 import {
   FileText,
   AlertCircle,
@@ -399,8 +399,7 @@ const EstimatorDashboard: React.FC = () => {
             animate={{ opacity: 1, x: 0 }}
             className="bg-white rounded-xl shadow-md border border-gray-100 p-4"
           >
-            {/* <HighchartsReact.default highcharts={Highcharts} options={projectStatusChart} /> */}
-            <div className="text-center text-gray-500 py-8">Chart temporarily disabled</div>
+            <HighchartsReact.default highcharts={Highcharts} options={projectStatusChart} />
           </motion.div>
 
           <motion.div
@@ -408,8 +407,7 @@ const EstimatorDashboard: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             className="bg-white rounded-xl shadow-md border border-gray-100 p-4"
           >
-            {/* <HighchartsReact.default highcharts={Highcharts} options={budgetUtilizationChart} /> */}
-            <div className="text-center text-gray-500 py-8">Chart temporarily disabled</div>
+            <HighchartsReact.default highcharts={Highcharts} options={budgetUtilizationChart} />
           </motion.div>
 
           <motion.div
@@ -417,8 +415,7 @@ const EstimatorDashboard: React.FC = () => {
             animate={{ opacity: 1, x: 0 }}
             className="bg-white rounded-xl shadow-md border border-gray-100 p-4"
           >
-            {/* <HighchartsReact.default highcharts={Highcharts} options={progressTimelineChart} /> */}
-            <div className="text-center text-gray-500 py-8">Chart temporarily disabled</div>
+            <HighchartsReact.default highcharts={Highcharts} options={progressTimelineChart} />
           </motion.div>
         </div>
 

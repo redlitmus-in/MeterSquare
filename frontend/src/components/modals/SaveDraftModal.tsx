@@ -46,29 +46,29 @@ const SaveDraftModal: React.FC<SaveDraftModalProps> = ({
       }}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         style={{
           backgroundColor: 'white',
-          borderRadius: '16px',
+          borderRadius: '12px',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-          maxWidth: '28rem',
+          maxWidth: '24rem',
           width: '100%',
           position: 'relative',
           zIndex: 100000,
         }}
       >
         {/* Header */}
-        <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border-b border-yellow-100 px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-yellow-100 rounded-lg">
-              <AlertCircle className="w-6 h-6 text-yellow-600" />
+        <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border-b border-yellow-100 px-5 py-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-yellow-100 rounded-lg">
+              <AlertCircle className="w-5 h-5 text-yellow-600" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">
+              <h2 className="text-lg font-bold text-gray-900">
                 Save your work?
               </h2>
-              <p className="text-sm text-gray-600 mt-0.5">
+              <p className="text-xs text-gray-600">
                 You have unsaved changes
               </p>
             </div>
@@ -76,68 +76,50 @@ const SaveDraftModal: React.FC<SaveDraftModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-4">
-          <p className="text-gray-700">
-            You're about to close this form. Would you like to save your work so you
-            can continue later?
+        <div className="p-5 space-y-3">
+          <p className="text-sm text-gray-700">
+            You're about to close this form. Would you like to save your work so you can continue later?
           </p>
 
           {boqName && (
-            <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
-              <p className="text-sm text-gray-700">
+            <div className="bg-blue-50 rounded-lg p-2.5 border border-blue-200">
+              <p className="text-xs text-gray-700">
                 <strong>BOQ:</strong> {boqName}
               </p>
             </div>
           )}
 
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <div className="flex items-start gap-3">
-              <Save className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-semibold text-gray-900">
-                  Save as Draft (Recommended)
-                </p>
-                <p className="text-xs text-gray-600 mt-1">
-                  Your work will be saved locally and you can continue anytime
-                </p>
-              </div>
+          <div className="bg-green-50 border border-green-200 rounded-lg p-2.5">
+            <div className="flex items-center gap-2">
+              <Save className="w-4 h-4 text-green-600 flex-shrink-0" />
+              <p className="text-sm font-semibold text-gray-900">
+                Save as Draft (Recommended)
+              </p>
             </div>
           </div>
 
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <div className="flex items-start gap-3">
-              <Trash2 className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-semibold text-gray-900">
-                  Discard Changes
-                </p>
-                <p className="text-xs text-gray-600 mt-1">
-                  All your work will be permanently lost
-                </p>
-              </div>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-2.5">
+            <div className="flex items-center gap-2">
+              <Trash2 className="w-4 h-4 text-red-600 flex-shrink-0" />
+              <p className="text-sm font-semibold text-gray-900">
+                Discard Changes
+              </p>
             </div>
-          </div>
-
-          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-            <p className="text-xs text-gray-600">
-              💡 <strong>Tip:</strong> Your draft is saved locally in your browser.
-              When you return, you can restore your work and continue.
-            </p>
           </div>
         </div>
 
         {/* Actions */}
-        <div className="bg-gray-50 px-6 py-4 flex items-center justify-end gap-3">
+        <div className="bg-gray-50 px-5 py-3 flex items-center justify-end gap-2">
           <button
             onClick={onDiscardAndClose}
-            className="px-4 py-2.5 border-2 border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-all font-semibold flex items-center gap-2"
+            className="px-3 py-2 border-2 border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-all font-medium text-sm flex items-center gap-1.5"
           >
             <Trash2 className="w-4 h-4" />
             Discard Changes
           </button>
           <button
             onClick={onSaveAndClose}
-            className="px-6 py-2.5 bg-[rgb(36,61,138)] text-white rounded-lg hover:opacity-90 transition-all font-semibold flex items-center gap-2"
+            className="px-4 py-2 bg-[rgb(36,61,138)] text-white rounded-lg hover:opacity-90 transition-all font-medium text-sm flex items-center gap-1.5"
           >
             <Save className="w-4 h-4" />
             Save Draft & Close

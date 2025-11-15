@@ -223,12 +223,10 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
 
                     {onEdit && (() => {
                       const status = displayData?.status?.toLowerCase() || '';
-                      // Can edit if: draft, approved, revision_approved, sent_for_confirmation, under_revision, pending_revision, pending_pm_approval, pending
-                      // Cannot edit if: client_confirmed, rejected, completed, client_rejected, client_cancelled
+                      // Can edit if: draft, sent_for_confirmation, under_revision, pending_revision, pending_pm_approval, pending
+                      // Cannot edit if: approved, revision_approved, client_confirmed, rejected, completed, client_rejected, client_cancelled
                       const canEdit = !status ||
                         status === 'draft' ||
-                        status === 'approved' ||
-                        status === 'revision_approved' ||
                         status === 'sent_for_confirmation' ||
                         status === 'under_revision' ||
                         status === 'pending_revision' ||

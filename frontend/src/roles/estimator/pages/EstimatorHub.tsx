@@ -1322,8 +1322,8 @@ const EstimatorHub: React.FC = () => {
     const isClientRejected = status === 'client_rejected';
     // Client cancelled: Permanently cancelled, no actions allowed
     const isClientCancelled = status === 'client_cancelled';
-    // Can Edit: Estimator can edit BOQ if it's draft OR approved OR sent to client OR any revision status
-    const canEdit = isDraft || isApprovedByTD || isRevisionApproved || isSentToClient || isUnderRevision || isPendingRevision;
+    // Can Edit: Estimator can edit BOQ if it's draft OR sent to client OR any revision status (but NOT after TD approval)
+    const canEdit = isDraft || isSentToClient || isUnderRevision || isPendingRevision;
 
     return (
       <div
@@ -1969,29 +1969,18 @@ const EstimatorHub: React.FC = () => {
                             </span>
                           );
                         }
-                        // Client not yet confirmed - show send to client button
+                        // Client not yet confirmed - show send to client button (no edit allowed after approval)
                         return (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setIsRevisionEdit(isRevApproved); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }}
-                              className="h-8 w-8 p-0"
-                              title="Edit BOQ"
-                            >
-                              <Edit className="h-4 w-4 text-green-600" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => { setBoqToEmail(boq); setEmailMode('client'); setShowSendEmailModal(true); }}
-                              className="h-8 px-3 text-green-600 hover:text-green-700"
-                              title={isRevApproved ? "Send Revision to Client" : "Send to Client"}
-                            >
-                              <Send className="h-4 w-4 mr-1" />
-                              <span className="text-xs">{isRevApproved ? 'Send Revision' : 'Send to Client'}</span>
-                            </Button>
-                          </>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => { setBoqToEmail(boq); setEmailMode('client'); setShowSendEmailModal(true); }}
+                            className="h-8 px-3 text-green-600 hover:text-green-700"
+                            title={isRevApproved ? "Send Revision to Client" : "Send to Client"}
+                          >
+                            <Send className="h-4 w-4 mr-1" />
+                            <span className="text-xs">{isRevApproved ? 'Send Revision' : 'Send to Client'}</span>
+                          </Button>
                         );
                       }
                       return null;
@@ -3484,18 +3473,31 @@ const EstimatorHub: React.FC = () => {
                           <FileText className="h-5 w-5 text-blue-600" />
                           Related BOQs
                         </h3>
-                        {projectBoqs.length === 0 && (
-                          <button
-                            className="px-4 py-2 bg-white border-2 border-red-500 text-red-600 text-sm rounded-lg hover:bg-red-50 transition-all font-semibold flex items-center gap-2"
-                            onClick={() => {
-                              handleCreateBOQ(viewingProject);
-                              setViewingProject(null);
-                            }}
-                          >
-                            <Plus className="h-4 w-4" />
-                            Create New BOQ
-                          </button>
-                        )}
+                        {projectBoqs.length === 0 && (() => {
+                          const isDraftForThisProject = hasSavedDraft && draftData?.selectedProjectId === viewingProject.project_id;
+                          return (
+                            <button
+                              className={`px-4 py-2 bg-white border-2 ${isDraftForThisProject ? 'border-orange-500 text-orange-600 hover:bg-orange-50' : 'border-red-500 text-red-600 hover:bg-red-50'} text-sm rounded-lg transition-all font-semibold flex items-center gap-2`}
+                              onClick={() => {
+                                handleCreateBOQ(viewingProject);
+                                setViewingProject(null);
+                              }}
+                              title={isDraftForThisProject ? `Resume draft: ${draftData?.boqName || 'Unsaved BOQ'}` : 'Create a new BOQ for this project'}
+                            >
+                              {isDraftForThisProject ? (
+                                <>
+                                  <Clock className="h-4 w-4" />
+                                  Resume Draft
+                                </>
+                              ) : (
+                                <>
+                                  <Plus className="h-4 w-4" />
+                                  Create New BOQ
+                                </>
+                              )}
+                            </button>
+                          );
+                        })()}
                       </div>
 
                       {projectBoqs.length === 0 ? (
