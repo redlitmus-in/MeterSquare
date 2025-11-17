@@ -62,23 +62,31 @@ const EstimatorDashboard: React.FC = () => {
     try {
       const result = await estimatorService.getAllBOQs();
       if (result.success) {
-        const mapped = result.data.map((boq: any) => ({
-          ...boq,
-          boq_id: boq.boq_id,
-          title: boq.boq_name || boq.title || 'Unnamed BOQ',
-          project: {
-            project_id: boq.project_id,
-            name: boq.project_name || 'Unknown Project',
-            client: boq.client || 'Unknown Client',
-            location: boq.location || 'Unknown Location'
-          },
-          summary: {
-            grandTotal: boq.total_cost || boq.selling_price || 0
-          },
-          total_cost: boq.total_cost || 0,
-          status: boq.status || 'draft',
-          created_at: boq.created_at
-        }));
+        const mapped = result.data.map((boq: any) => {
+          // Calculate correct grand total: items + preliminaries - discount
+          const itemsTotal = boq.total_cost || boq.selling_price || 0;
+          const preliminaryAmount = boq.preliminaries?.cost_details?.amount || 0;
+          const discountAmount = boq.discount_amount || 0;
+          const grandTotal = (itemsTotal + preliminaryAmount) - discountAmount;
+
+          return {
+            ...boq,
+            boq_id: boq.boq_id,
+            title: boq.boq_name || boq.title || 'Unnamed BOQ',
+            project: {
+              project_id: boq.project_id,
+              name: boq.project_name || 'Unknown Project',
+              client: boq.client || 'Unknown Client',
+              location: boq.location || 'Unknown Location'
+            },
+            summary: {
+              grandTotal: grandTotal // Now includes preliminaries and discount
+            },
+            total_cost: grandTotal, // Update total_cost to match grand total
+            status: boq.status || 'draft',
+            created_at: boq.created_at
+          };
+        });
         setRecentBoqs(mapped.slice(0, 6)); // Get latest 6
       }
     } catch (error) {
