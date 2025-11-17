@@ -65,6 +65,14 @@ const PurchaseOrders = lazy(() => import('@/roles/buyer/pages/PurchaseOrders'));
 const VendorManagement = lazy(() => import('@/roles/buyer/pages/VendorManagement'));
 const VendorDetails = lazy(() => import('@/roles/buyer/pages/VendorDetails'));
 
+// Production Manager Pages - M2 Store Management
+const M2StoreDashboard = lazy(() => import('@/roles/production-manager/pages/M2StoreDashboard'));
+const MaterialsManagement = lazy(() => import('@/roles/production-manager/pages/MaterialsManagement'));
+const ReceiveStock = lazy(() => import('@/roles/production-manager/pages/ReceiveStock'));
+const DispatchMaterials = lazy(() => import('@/roles/production-manager/pages/DispatchMaterials'));
+const StockTake = lazy(() => import('@/roles/production-manager/pages/StockTake'));
+const M2StoreReports = lazy(() => import('@/roles/production-manager/pages/M2StoreReports'));
+
 // Admin Pages - Mix of custom admin pages and role pages
 const AdminUserManagement = lazy(() => import('@/pages/admin/UserManagement'));
 const AdminRoleManagement = lazy(() => import('@/pages/admin/RoleManagement'));
@@ -452,6 +460,34 @@ const BuyerRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <>{children}</>;
 };
 
+// Production Manager and Admin Route Component
+const ProductionManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuthStore();
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  const isProductionManager = userRoleLower === 'productionmanager' ||
+                             userRoleLower === 'production manager' ||
+                             userRoleLower === 'production_manager' ||
+                             roleId === 'productionManager' ||
+                             roleIdLower === 'production_manager' ||
+                             roleId === 9; // Database role_id for production manager
+
+  const isAdmin = userRole === 'Admin' ||
+                 userRoleLower === 'admin' ||
+                 roleId === 'admin' ||
+                 roleIdLower === 'admin' ||
+                 roleId === 5;
+
+  if (!isProductionManager && !isAdmin) {
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
 // Admin Only Route Component
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuthStore();
@@ -733,6 +769,38 @@ function App() {
               <BuyerRoute>
                 <VendorDetails />
               </BuyerRoute>
+            } />
+
+            {/* Production Manager Routes - M2 Store Management */}
+            <Route path="m2-store" element={
+              <ProductionManagerRoute>
+                <M2StoreDashboard />
+              </ProductionManagerRoute>
+            } />
+            <Route path="m2-store/materials" element={
+              <ProductionManagerRoute>
+                <MaterialsManagement />
+              </ProductionManagerRoute>
+            } />
+            <Route path="m2-store/receive" element={
+              <ProductionManagerRoute>
+                <ReceiveStock />
+              </ProductionManagerRoute>
+            } />
+            <Route path="m2-store/dispatch" element={
+              <ProductionManagerRoute>
+                <DispatchMaterials />
+              </ProductionManagerRoute>
+            } />
+            <Route path="m2-store/stock-take" element={
+              <ProductionManagerRoute>
+                <StockTake />
+              </ProductionManagerRoute>
+            } />
+            <Route path="m2-store/reports" element={
+              <ProductionManagerRoute>
+                <M2StoreReports />
+              </ProductionManagerRoute>
             } />
 
             {/* Admin Routes - Use original role pages directly */}

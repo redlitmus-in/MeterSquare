@@ -12,6 +12,7 @@ const EstimatorDashboard = lazy(() => import('@/roles/estimator/pages/EstimatorD
 const ProjectManagerDashboard = lazy(() => import('@/roles/project-manager/pages/ProjectManagerHub'));
 const SiteEngineerDashboard = lazy(() => import('@/roles/site-engineer/pages/Dashboard'));
 const BuyerDashboard = lazy(() => import('@/roles/buyer/pages/Dashboard'));
+const ProductionManagerDashboard = lazy(() => import('@/roles/production-manager/pages/M2StoreDashboard'));
 
 /**
  * Component that dynamically loads the appropriate dashboard based on user role
@@ -103,6 +104,14 @@ const RoleDashboard: React.FC = () => {
     case 'buyer':
     case 'Buyer':
       DashboardComponent = BuyerDashboard;
+      break;
+
+    case 'productionmanager':
+    case 'productionManager':
+    case 'production manager':
+    case 'production_manager':
+    case UserRole.PRODUCTION_MANAGER:
+      DashboardComponent = ProductionManagerDashboard;
       break;
 
   }

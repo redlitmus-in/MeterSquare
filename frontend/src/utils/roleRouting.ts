@@ -44,12 +44,14 @@ export const ROLE_URL_SLUGS: Record<string, string> = {
   [UserRole.MEP]: 'mep',  // Management level MEP (shares PM functionality)
   [UserRole.PROCUREMENT]: 'procurement',
   [UserRole.PROJECT_MANAGER]: 'project-manager',
+  [UserRole.PRODUCTION_MANAGER]: 'production-manager',
   [UserRole.DESIGN]: 'design',
   [UserRole.ESTIMATION]: 'estimator', // Map estimation to estimator URL
   [UserRole.ACCOUNTS]: 'accounts',
   [UserRole.TECHNICAL_DIRECTOR]: 'technical-director',
   'technicalDirector': 'technical-director',
   'projectManager': 'project-manager',
+  'productionManager': 'production-manager',
   'mep': 'mep',  // Management level MEP
   'estimator': 'estimator',
   'estimation': 'estimator' // Map estimation to estimator URL
@@ -72,12 +74,14 @@ export const ROLE_DASHBOARD_PATHS: Record<string, string> = {
   [UserRole.MEP]: '/mep/dashboard',  // Management level MEP dashboard
   [UserRole.PROCUREMENT]: '/procurement/dashboard',
   [UserRole.PROJECT_MANAGER]: '/project-manager/dashboard',
+  [UserRole.PRODUCTION_MANAGER]: '/production-manager/dashboard',
   [UserRole.DESIGN]: '/design/dashboard',
   [UserRole.ESTIMATION]: '/estimator/dashboard', // Map estimation to estimator dashboard
   [UserRole.ACCOUNTS]: '/accounts/dashboard',
   [UserRole.TECHNICAL_DIRECTOR]: '/technical-director/dashboard',
   'technicalDirector': '/technical-director/dashboard',
   'projectManager': '/project-manager/dashboard',
+  'productionManager': '/production-manager/dashboard',
   'mep': '/mep/dashboard',  // Management level MEP
   'estimator': '/estimator/dashboard',
   'estimation': '/estimator/dashboard' // Map estimation to estimator dashboard
@@ -150,12 +154,14 @@ export const getRoleDisplayName = (role: string | number | UserRole): string => 
     [UserRole.MEP]: 'MEP Supervisor',  // Display as "MEP Supervisor" in UI
     [UserRole.PROCUREMENT]: 'Procurement',
     [UserRole.PROJECT_MANAGER]: 'Project Manager',
+    [UserRole.PRODUCTION_MANAGER]: 'Production Manager',
     [UserRole.DESIGN]: 'Design',
     [UserRole.ESTIMATION]: 'Estimator', // Map to Estimator display name
     [UserRole.ACCOUNTS]: 'Accounts',
     [UserRole.TECHNICAL_DIRECTOR]: 'Technical Director',
     'technicalDirector': 'Technical Director',
     'projectManager': 'Project Manager',
+    'productionManager': 'Production Manager',
     'mep': 'MEP Supervisor',  // Display as "MEP Supervisor" in UI
     'estimator': 'Estimator',
     'estimation': 'Estimator' // Map to Estimator display name
@@ -179,12 +185,14 @@ export const getRoleThemeColor = (role: string | UserRole): string => {
     [UserRole.MEP]: 'cyan',  // Cyan for MEP (management level) - distinct from PM green
     [UserRole.PROCUREMENT]: 'red',
     [UserRole.PROJECT_MANAGER]: 'green',
+    [UserRole.PRODUCTION_MANAGER]: 'amber',
     [UserRole.DESIGN]: 'purple',
     [UserRole.ESTIMATION]: 'indigo', // Map to indigo (same as estimator)
     [UserRole.ACCOUNTS]: 'emerald',
     [UserRole.TECHNICAL_DIRECTOR]: 'blue',
     'technicalDirector': 'blue',
     'projectManager': 'green',
+    'productionManager': 'amber',
     'mep': 'cyan',  // Cyan for MEP
     'estimator': 'indigo',
     'estimation': 'indigo' // Map to indigo (same as estimator)
@@ -252,7 +260,9 @@ export const hasRouteAccess = (userRole: string | UserRole, routePath: string): 
     [UserRole.MEP]: ['/procurement', '/workflows', '/projects', '/team', '/boq'],  // Same access as PM
     [UserRole.PROCUREMENT]: ['/procurement', '/vendor'],
     [UserRole.PROJECT_MANAGER]: ['/procurement', '/workflows', '/projects', '/team'],
+    [UserRole.PRODUCTION_MANAGER]: ['/production', '/materials', '/projects', '/workflows', '/m2-store'],
     'projectManager': ['/procurement', '/workflows', '/projects', '/team'],
+    'productionManager': ['/production', '/materials', '/projects', '/workflows', '/m2-store'],
     'mep': ['/procurement', '/workflows', '/projects', '/team', '/boq'],  // Same access as PM
     [UserRole.DESIGN]: ['/projects', '/workflows'],
     [UserRole.ESTIMATION]: ['/boq', '/estimation', '/projects', '/cost-analysis'], // Map to estimator access

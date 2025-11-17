@@ -261,7 +261,8 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       'Estimator': { role: 'estimator', roleId: 4, displayName: 'Estimator', slug: 'estimator' },
       'Project Manager': { role: 'projectManager', roleId: 6, displayName: 'Project Manager', slug: 'project-manager' },
       'Site Engineer': { role: 'siteEngineer', roleId: 3, displayName: 'Site Engineer', slug: 'site-engineer' },
-      'Buyer': { role: 'buyer', roleId: 8, displayName: 'Buyer', slug: 'buyer' }
+      'Buyer': { role: 'buyer', roleId: 8, displayName: 'Buyer', slug: 'buyer' },
+      'Production Manager': { role: 'productionManager', roleId: 9, displayName: 'Production Manager', slug: 'production-manager' }
     };
 
     const roleInfo = roleMap[roleName];
@@ -471,6 +472,54 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       }
     ];
 
+    // Production Manager specific navigation items - M2 Store Management
+    const productionManagerItems: NavigationItem[] = [
+      {
+        name: 'M2 Store',
+        href: buildPath('/m2-store'),
+        icon: BuildingOfficeIcon,
+        iconSolid: BuildingOfficeSolid,
+        color: 'text-amber-600',
+        children: [
+          {
+            name: 'Materials Master',
+            href: buildPath('/m2-store/materials'),
+            icon: CubeIcon,
+            iconSolid: CubeSolid,
+            color: 'text-teal-600'
+          },
+          {
+            name: 'Receive Stock (GRN)',
+            href: buildPath('/m2-store/receive'),
+            icon: DocumentPlusIcon,
+            iconSolid: DocumentPlusSolid,
+            color: 'text-green-600'
+          },
+          {
+            name: 'Dispatch Materials',
+            href: buildPath('/m2-store/dispatch'),
+            icon: ShoppingCartIcon,
+            iconSolid: ShoppingSolid,
+            color: 'text-purple-600'
+          },
+          {
+            name: 'Stock Take',
+            href: buildPath('/m2-store/stock-take'),
+            icon: ClipboardDocumentCheckIcon,
+            iconSolid: ClipboardDocumentCheckSolid,
+            color: 'text-orange-600'
+          },
+          {
+            name: 'Reports & Analytics',
+            href: buildPath('/m2-store/reports'),
+            icon: DocumentTextIcon,
+            iconSolid: DocumentTextSolid,
+            color: 'text-indigo-600'
+          }
+        ]
+      }
+    ];
+
     // Admin specific navigation items - Only User Management
     // Admin accesses vendor section through role switching (viewing as Technical Director)
     const adminItems: NavigationItem[] = [
@@ -550,6 +599,16 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         currentRole === 'buyer' ||
         getRoleDisplayName(roleId || '') === 'Buyer';
 
+    // Check for Production Manager with multiple format variations
+    const isProductionManager = roleId === 'productionManager' ||
+        roleIdLower === 'productionmanager' ||
+        roleIdLower === 'production manager' ||
+        roleIdLower === 'production_manager' ||
+        currentRole === 'productionManager' ||
+        currentRole === UserRole.PRODUCTION_MANAGER ||
+        getRoleDisplayName(roleId || '') === 'Production Manager' ||
+        roleId === 9; // Database role_id for production manager
+
     // Check for Admin with multiple format variations (using isAdmin from line 324)
     if (isAdmin) {
       // Check if admin is viewing as another role
@@ -579,6 +638,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             break;
           case 'buyer':
             navigation.push(...buyerItems);
+            break;
+          case 'productionManager':
+            navigation.push(...productionManagerItems);
             break;
           default:
             navigation.push(...adminItems);
@@ -623,6 +685,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
           iconSolid: UserGroupIcon,
           color: 'text-purple-600'
         });
+        navigation.push({
+          name: 'Production Manager',
+          href: '#',
+          icon: UserGroupIcon,
+          iconSolid: UserGroupIcon,
+          color: 'text-amber-600'
+        });
       }
     } else if (isTechnicalDirector) {
       // Technical Director gets specialized menu items
@@ -647,6 +716,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     } else if (isBuyer) {
       // Buyer gets Materials to Purchase, Projects, and Purchase Orders
       navigation.push(...buyerItems);
+    } else if (isProductionManager) {
+      // Production Manager gets M2 Store Management items
+      navigation.push(...productionManagerItems);
     } else {
       // Other roles get procurement
       navigation.push(procurementItem);

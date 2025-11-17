@@ -12,6 +12,7 @@ export enum UserRole {
   MEP = 'mep',  // Management level MEP (same as PM)
   PROCUREMENT = 'procurement',
   PROJECT_MANAGER = 'projectManager',
+  PRODUCTION_MANAGER = 'productionManager',
   DESIGN = 'design',
   ESTIMATION = 'estimation',
   ESTIMATOR = 'estimator',

@@ -333,6 +333,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   // Store original data for discard in EDIT mode
   const originalDataRef = useRef<any>(null);
 
+  // Track if we restored a draft to avoid overwriting with master data
+  const draftRestoredRef = useRef(false);
+
   // Auto-save function - saves to localStorage for both CREATE and EDIT modes
   const handleAutoSave = async (formData: any, isAutoSave: boolean) => {
     // Don't auto-save in revision mode
@@ -495,6 +498,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       // Reset flags when form opens
       isClosingAfterSubmitRef.current = false;
       isFormInitializedRef.current = false;
+      draftRestoredRef.current = false; // Reset draft restored flag
 
       const savedData = getLocalStorageData();
       const actualData = savedData?.data || savedData;
@@ -523,6 +527,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         setPreliminaryTransportPercentage(actualData.preliminaryTransportPercentage || 5);
         setPreliminaryNotes(actualData.preliminaryNotes || '');
         setTermsConditions(actualData.termsConditions || []);
+
+        // Mark that we restored a draft
+        draftRestoredRef.current = true;
 
         toast.success(`Resuming: ${actualData.boqName}`, {
           description: `Draft with ${actualData.items?.length || 0} items restored`
@@ -582,52 +589,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     };
   }, [isOpen, editMode, isRevision, boqName, selectedProjectId, items]);
 
-  // Handle browser back button - intercept and show save draft modal
-  useEffect(() => {
-    if (!isOpen || editMode || isRevision) return;
-
-    // Add a dummy history entry when form opens
-    window.history.pushState({ boqFormOpen: true }, '');
-
-    const handlePopState = (e: PopStateEvent) => {
-      // Skip modal if closing after successful submit
-      if (isClosingAfterSubmitRef.current) {
-        onClose();
-        return;
-      }
-
-      // Don't show modal if form hasn't been initialized yet (prevents triggering on mount)
-      if (!isFormInitializedRef.current) {
-        onClose();
-        return;
-      }
-
-      // Only consider it as having data if user entered BOQ name or added items
-      // Don't count selectedProjectId alone since that's set automatically from props
-      const hasData = (boqName && boqName.trim().length > 0) || items.length > 0;
-
-      if (hasData && !isRevision) {
-        // Prevent going back
-        e.preventDefault();
-        window.history.pushState({ boqFormOpen: true }, '');
-
-        toast.info('Please save or discard your changes first');
-        setShowSaveDraftModal(true);
-      } else {
-        onClose();
-      }
-    };
-
-    window.addEventListener('popstate', handlePopState);
-
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-      // Clean up history when component unmounts (form closes)
-      if (window.history.state?.boqFormOpen) {
-        window.history.back();
-      }
-    };
-  }, [isOpen, editMode, isRevision, onClose]);
+  // REMOVED: Browser back button handler - was causing modal to show on tab changes
+  // The close button already handles showing the save draft modal
+  // Users should explicitly click the close/cancel button to close the form
 
   // Handle data recovery
   const handleRestoreData = () => {
@@ -734,15 +698,24 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           amount: 0
         }));
 
-        setPreliminaries(items);
+        // Only set if we haven't restored a draft (to avoid overwriting restored data)
+        if (!draftRestoredRef.current) {
+          setPreliminaries(items);
+        } else {
+          console.log('⏭️ Skipping preliminaries load - draft was restored');
+        }
       } else {
-        // If no items in database, start with empty
-        setPreliminaries([]);
+        // If no items in database, start with empty (only if no draft restored)
+        if (!draftRestoredRef.current) {
+          setPreliminaries([]);
+        }
       }
     } catch (error) {
       console.error('Failed to load master preliminaries:', error);
       toast.error('Failed to load preliminary items');
-      setPreliminaries([]);
+      if (!draftRestoredRef.current) {
+        setPreliminaries([]);
+      }
     }
   };
 
@@ -830,18 +803,27 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           display_order: item.display_order || 0
         }));
 
-        setTermsConditions(items);
-        console.log('✅ Terms state updated with', items.length, 'items');
+        // Only set if we haven't restored a draft (to avoid overwriting restored data)
+        if (!draftRestoredRef.current) {
+          setTermsConditions(items);
+          console.log('✅ Terms state updated with', items.length, 'items');
+        } else {
+          console.log('⏭️ Skipping terms load - draft was restored');
+        }
       } else {
         console.warn('⚠️ No terms data in response:', response);
-        // If no items in database, start with empty
-        setTermsConditions([]);
+        // If no items in database, start with empty (only if no draft restored)
+        if (!draftRestoredRef.current) {
+          setTermsConditions([]);
+        }
       }
     } catch (error: any) {
       console.error('❌ Failed to load master terms:', error);
       console.error('❌ Error details:', error.response?.data || error.message);
       toast.error('Failed to load terms & conditions');
-      setTermsConditions([]);
+      if (!draftRestoredRef.current) {
+        setTermsConditions([]);
+      }
     }
   };
 
