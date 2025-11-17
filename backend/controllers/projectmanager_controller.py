@@ -101,7 +101,7 @@ def get_all_pm_boqs():
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 10, type=int), 100)
 
-        # STRICT ROLE-BASED FILTERING: PM sees only PM projects, MEP sees only MEP projects
+        # UNIFIED FILTERING: PM and MEP Manager both see projects assigned to either field
         if user_role == 'admin' or not should_apply_role_filter(context):
             # Admin sees all projects with PM or MEP assigned
             assigned_projects = db.session.query(Project.project_id).filter(
@@ -111,16 +111,14 @@ def get_all_pm_boqs():
                 ),
                 Project.is_deleted == False
             ).all()
-        elif user_role == 'projectmanager':
-            # PM sees ONLY projects where user_id JSONB array contains their ID
+        elif user_role in ['projectmanager', 'mep']:
+            # PM and MEP Manager both see projects where EITHER user_id OR mep_supervisor_id contains their ID
+            # This allows both manager roles to function identically
             assigned_projects = db.session.query(Project.project_id).filter(
-                Project.user_id.contains([user_id]),
-                Project.is_deleted == False
-            ).all()
-        elif user_role == 'mep':
-            # MEP sees ONLY projects where mep_supervisor_id JSONB array contains their ID
-            assigned_projects = db.session.query(Project.project_id).filter(
-                Project.mep_supervisor_id.contains([user_id]),
+                db.or_(
+                    Project.user_id.contains([user_id]),
+                    Project.mep_supervisor_id.contains([user_id])
+                ),
                 Project.is_deleted == False
             ).all()
         else:
@@ -134,43 +132,23 @@ def get_all_pm_boqs():
         if user_role == 'admin':
             boq_ids_for_approval = []
         else:
-            # ROLE-AWARE BOQ APPROVAL HISTORY QUERY
-            # PM: Get BOQs sent to project_manager role
-            # MEP: Get BOQs sent to mep role
+            # UNIFIED BOQ APPROVAL HISTORY QUERY
+            # PM and MEP Manager both see BOQs sent to either manager role
             from sqlalchemy import text
 
-            if user_role == 'projectmanager':
-                # PM sees BOQs sent to project_manager role
+            if user_role in ['projectmanager', 'mep']:
+                # PM and MEP Manager see BOQs sent to EITHER manager role
                 boqs_for_approval_query = db.session.execute(
                     text("""
                         SELECT DISTINCT bh.boq_id
                         FROM boq_history bh,
                              jsonb_array_elements(bh.action) AS action_item
                         WHERE (
-                            (action_item->>'receiver_role' = 'project_manager'
+                            (action_item->>'receiver_role' IN ('project_manager', 'mep')
                              AND (action_item->>'recipient_user_id')::INTEGER = :user_id
-                             AND action_item->>'type' = 'sent_to_pm')
+                             AND action_item->>'type' IN ('sent_to_pm', 'sent_to_mep'))
                             OR
-                            (action_item->>'sender_role' = 'project_manager'
-                             AND (action_item->>'decided_by_user_id')::INTEGER = :user_id
-                             AND action_item->>'type' = 'sent_to_estimator')
-                        )
-                    """),
-                    {"user_id": user_id}
-                )
-            elif user_role == 'mep':
-                # MEP sees BOQs sent to mep role (same logic as PM but for mep role)
-                boqs_for_approval_query = db.session.execute(
-                    text("""
-                        SELECT DISTINCT bh.boq_id
-                        FROM boq_history bh,
-                             jsonb_array_elements(bh.action) AS action_item
-                        WHERE (
-                            (action_item->>'receiver_role' = 'mep'
-                             AND (action_item->>'recipient_user_id')::INTEGER = :user_id
-                             AND action_item->>'type' = 'sent_to_mep')
-                            OR
-                            (action_item->>'sender_role' = 'mep'
+                            (action_item->>'sender_role' IN ('project_manager', 'mep')
                              AND (action_item->>'decided_by_user_id')::INTEGER = :user_id
                              AND action_item->>'type' = 'sent_to_estimator')
                         )

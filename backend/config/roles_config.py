@@ -140,7 +140,7 @@ ROLE_HIERARCHY = {
             'request_materials',
             'view_task_status'
         ],
-        'description': 'MEP Supervisor - MEP operations and material requisition',
+        'description': 'MEP Manager - MEP operations and material requisition',
         'color': '#0891b2',
         'icon': 'Activity'
     },
@@ -188,7 +188,7 @@ ROLE_HIERARCHY = {
             'view_boq_analytics',
             'manage_boq_items'
         ],
-        'description': 'MEP Supervisor - MEP project coordination and approvals (same capabilities as PM)',
+        'description': 'MEP Manager - MEP project coordination and approvals (same capabilities as PM)',
         'color': '#0891b2',  # Cyan color to differentiate from PM
         'icon': 'Activity'  # Different icon for visual distinction
     },

@@ -740,11 +740,11 @@ def get_all_change_requests():
                     query = query.filter_by(requested_by_user_id=user_id)
 
         elif user_role in ['mep', 'mepsupervisor']:
-            # MEP sees ONLY requests from their assigned projects (same logic as PM):
+            # MEP sees ONLY requests from Site Engineers assigned to their projects:
             # 1. Their own requests from their projects
-            # 2. SE requests from their projects that need MEP approval
-            # 3. All purchase/change requests from their assigned projects
+            # 2. SE requests from SEs assigned to MEP's projects (via PMAssignSS)
             from sqlalchemy import or_, and_
+            from models.pm_assign_ss import PMAssignSS
 
             # Check if admin is viewing as MEP (should see ALL MEP data, not user-specific)
             if is_admin_viewing:
@@ -758,7 +758,7 @@ def get_all_change_requests():
                     )
                 )
             else:
-                # Regular MEP: Filter ONLY by their assigned projects
+                # Regular MEP: Filter by SEs assigned to MEP's projects
                 # Get projects where this user is the MEP supervisor (mep_supervisor_id field in Project table)
                 # Use JSONB contains operator since mep_supervisor_id is a JSONB array
                 mep_projects = Project.query.filter(
@@ -770,10 +770,35 @@ def get_all_change_requests():
                 log.info(f"Regular MEP {user_id} - has {len(mep_project_ids)} assigned projects")
 
                 if mep_project_ids:
-                    # MEP sees ALL purchase/change requests from their assigned projects only
-                    query = query.filter(
-                        ChangeRequest.project_id.in_(mep_project_ids)  # Only requests from MEP's assigned projects
+                    # Get all SEs assigned to MEP's projects (via PMAssignSS)
+                    mep_assigned_se_ids = db.session.query(PMAssignSS.assigned_to_se_id).filter(
+                        PMAssignSS.project_id.in_(mep_project_ids),
+                        PMAssignSS.is_deleted == False
+                    ).distinct().all()
+                    mep_assigned_se_ids = [se[0] for se in mep_assigned_se_ids] if mep_assigned_se_ids else []
+
+                    log.info(f"Regular MEP {user_id} - found {len(mep_assigned_se_ids)} SEs assigned to their projects")
+
+                    # MEP sees:
+                    # 1. Their own requests from their assigned projects
+                    # 2. Requests from SEs assigned to their projects
+                    filters = []
+
+                    # Own requests from assigned projects
+                    filters.append(
+                        and_(
+                            ChangeRequest.requested_by_user_id == user_id,
+                            ChangeRequest.project_id.in_(mep_project_ids)
+                        )
                     )
+
+                    # Requests from assigned SEs
+                    if mep_assigned_se_ids:
+                        filters.append(
+                            ChangeRequest.requested_by_user_id.in_(mep_assigned_se_ids)
+                        )
+
+                    query = query.filter(or_(*filters))
                 else:
                     # If MEP has no assigned projects, show only their own requests
                     log.warning(f"MEP {user_id} has no assigned projects, showing only their own requests")
@@ -1050,6 +1075,9 @@ def approve_change_request(cr_id):
 
         # Normalize role for consistent comparison
         normalized_role = workflow_service.normalize_role(approver_role)
+
+        # Admin has full approval authority (like TD)
+        is_admin = approver_role in ['admin'] or normalized_role == 'admin'
 
         # PM can approve requests that are under_review from SE
         if normalized_role in ['projectmanager'] and change_request.status == 'under_review':
@@ -1439,8 +1467,95 @@ def approve_change_request(cr_id):
                 "assigned_to_buyer_name": change_request.assigned_to_buyer_name
             }), 200
 
+        elif is_admin:
+            # Admin approves - Final approval with full authority (same as TD)
+            change_request.td_approved_by_user_id = approver_id
+            change_request.td_approved_by_name = approver_name
+            change_request.td_approval_date = datetime.utcnow()
+            change_request.status = CR_CONFIG.STATUS_PURCHASE_COMPLETE  # Mark as complete
+            change_request.approval_required_from = None  # No further approval needed
+            change_request.current_approver_role = None
+            change_request.updated_at = datetime.utcnow()
+
+            log.info(f"Admin {approver_name} gave final approval for CR {cr_id} - Change request complete")
+
+            # Add to BOQ History - Admin Approval (use 'admin' role in history)
+            existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+            if existing_history:
+                if existing_history.action is None:
+                    current_actions = []
+                elif isinstance(existing_history.action, list):
+                    current_actions = existing_history.action
+                elif isinstance(existing_history.action, dict):
+                    current_actions = [existing_history.action]
+                else:
+                    current_actions = []
+            else:
+                current_actions = []
+
+            new_action = {
+                "role": "admin",  # Show as admin in history
+                "type": "change_request_approved_by_admin",
+                "sender": approver_name,
+                "receiver": None,  # No next receiver - final approval
+                "sender_role": "admin",  # Use actual admin role, not viewing-as role
+                "receiver_role": None,
+                "status": CR_CONFIG.STATUS_PURCHASE_COMPLETE,
+                "cr_id": cr_id,
+                "item_name": change_request.item_name or f"CR #{cr_id}",
+                "materials_count": len(change_request.materials_data) if change_request.materials_data else 0,
+                "total_cost": change_request.materials_total_cost,
+                "comments": f"Admin gave final approval. Change request completed.",
+                "timestamp": datetime.utcnow().isoformat(),
+                "sender_name": approver_name,
+                "sender_user_id": approver_id,
+                "project_name": change_request.project.project_name if change_request.project else None,
+                "project_id": change_request.project_id
+            }
+
+            current_actions.append(new_action)
+            log.info(f"Appending change_request_approved_by_admin action to BOQ {change_request.boq_id} history")
+
+            if existing_history:
+                existing_history.action = current_actions
+                flag_modified(existing_history, "action")
+                existing_history.action_by = approver_name
+                existing_history.sender = approver_name
+                existing_history.receiver = None  # Final approval
+                existing_history.comments = f"CR #{cr_id} final approval by Admin"
+                existing_history.action_date = datetime.utcnow()
+                existing_history.last_modified_by = approver_name
+                existing_history.last_modified_at = datetime.utcnow()
+            else:
+                boq_history = BOQHistory(
+                    boq_id=change_request.boq_id,
+                    action=current_actions,
+                    action_by=approver_name,
+                    boq_status=change_request.boq.status if change_request.boq else 'unknown',
+                    sender=approver_name,
+                    receiver=None,  # Final approval
+                    comments=f"CR #{cr_id} final approval by Admin",
+                    sender_role='admin',  # Use admin role in history
+                    receiver_role=None,
+                    action_date=datetime.utcnow(),
+                    created_by=approver_name
+                )
+                db.session.add(boq_history)
+
+            db.session.commit()
+
+            log.info(f"Admin gave final approval for CR {cr_id}")
+
+            return jsonify({
+                "success": True,
+                "message": "Final approval by Admin. Change request completed.",
+                "status": CR_CONFIG.STATUS_PURCHASE_COMPLETE,
+                "cr_id": cr_id
+            }), 200
+
         else:
-            return jsonify({"error": "Invalid approver role. Only PM, TD, and Estimator can approve change requests."}), 403
+            return jsonify({"error": "Invalid approver role. Only Admin, PM, TD, and Estimator can approve change requests."}), 403
 
     except SQLAlchemyError as e:
         db.session.rollback()
@@ -2105,6 +2220,9 @@ def reject_change_request(cr_id):
         # Normalize role for consistent comparison
         normalized_role = workflow_service.normalize_role(approver_role)
 
+        # Admin has full rejection authority
+        is_admin = approver_role in ['admin'] or normalized_role == 'admin'
+
         # PM can reject requests that are under_review from SE
         if normalized_role in ['projectmanager'] and change_request.status == 'under_review':
             # PM can reject requests from Site Engineers
@@ -2121,8 +2239,8 @@ def reject_change_request(cr_id):
             if change_request.status not in ['under_review', 'approved_by_pm', 'approved_by_td']:
                 return jsonify({"error": "Request must be under review to reject"}), 400
 
-        # For other roles, check if user has permission to reject
-        if normalized_role not in ['projectmanager']:
+        # For other roles, check if user has permission to reject (admin bypasses this check)
+        if normalized_role not in ['projectmanager'] and not is_admin:
             required_approver = change_request.approval_required_from
             if not workflow_service.can_approve(approver_role, required_approver):
                 return jsonify({"error": f"You don't have permission to reject this request. Required: {required_approver}, Your role: {approver_role}"}), 403
@@ -2135,10 +2253,13 @@ def reject_change_request(cr_id):
             return jsonify({"error": "Rejection reason is required"}), 400
 
         # Update change request - Record who rejected and at what stage
+        # Use 'admin' role in history when admin rejects
+        history_role = 'admin' if is_admin else approver_role
+
         change_request.status = 'rejected'
         change_request.rejected_by_user_id = approver_id
         change_request.rejected_by_name = approver_name
-        change_request.rejected_at_stage = approver_role
+        change_request.rejected_at_stage = history_role
         change_request.rejection_reason = rejection_reason
         change_request.updated_at = datetime.utcnow()
 
@@ -2158,11 +2279,11 @@ def reject_change_request(cr_id):
             current_actions = []
 
         new_action = {
-            "role": normalized_role,
+            "role": 'admin' if is_admin else normalized_role,
             "type": "change_request_rejected",
             "sender": approver_name,
             "receiver": change_request.requested_by_name,
-            "sender_role": approver_role,
+            "sender_role": history_role,  # Use admin role in history
             "receiver_role": change_request.requested_by_role,
             "status": "rejected",
             "cr_id": cr_id,
@@ -2170,8 +2291,8 @@ def reject_change_request(cr_id):
             "materials_count": len(change_request.materials_data) if change_request.materials_data else 0,
             "total_cost": change_request.materials_total_cost,
             "rejection_reason": rejection_reason,
-            "rejected_at_stage": approver_role,
-            "comments": f"Rejected by {approver_role.replace('_', ' ').title()}: {rejection_reason}",
+            "rejected_at_stage": history_role,  # Use admin role in history
+            "comments": f"Rejected by {history_role.replace('_', ' ').title()}: {rejection_reason}",
             "timestamp": datetime.utcnow().isoformat(),
             "sender_name": approver_name,
             "sender_user_id": approver_id,
@@ -2188,7 +2309,7 @@ def reject_change_request(cr_id):
             existing_history.action_by = approver_name
             existing_history.sender = approver_name
             existing_history.receiver = change_request.requested_by_name
-            existing_history.comments = f"CR #{cr_id} rejected by {approver_role}"
+            existing_history.comments = f"CR #{cr_id} rejected by {history_role}"
             existing_history.action_date = datetime.utcnow()
             existing_history.last_modified_by = approver_name
             existing_history.last_modified_at = datetime.utcnow()
@@ -2200,8 +2321,8 @@ def reject_change_request(cr_id):
                 boq_status=change_request.boq.status if change_request.boq else 'unknown',
                 sender=approver_name,
                 receiver=change_request.requested_by_name,
-                comments=f"CR #{cr_id} rejected by {approver_role}",
-                sender_role=approver_role,
+                comments=f"CR #{cr_id} rejected by {history_role}",
+                sender_role=history_role,  # Use admin role in history
                 receiver_role=change_request.requested_by_role,
                 action_date=datetime.utcnow(),
                 created_by=approver_name

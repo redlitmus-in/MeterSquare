@@ -260,6 +260,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       'Technical Director': { role: 'technicalDirector', roleId: 7, displayName: 'Technical Director', slug: 'technical-director' },
       'Estimator': { role: 'estimator', roleId: 4, displayName: 'Estimator', slug: 'estimator' },
       'Project Manager': { role: 'projectManager', roleId: 6, displayName: 'Project Manager', slug: 'project-manager' },
+      'MEP': { role: 'mep', roleId: 11, displayName: 'MEP Manager', slug: 'mep' },
       'Site Engineer': { role: 'siteEngineer', roleId: 3, displayName: 'Site Engineer', slug: 'site-engineer' },
       'Buyer': { role: 'buyer', roleId: 8, displayName: 'Buyer', slug: 'buyer' }
     };
@@ -574,6 +575,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
           case 'projectManager':
             navigation.push(...projectManagerItems);
             break;
+          case 'mep':
+            navigation.push(...projectManagerItems); // MEP shares PM menu items
+            break;
           case 'siteEngineer':
             navigation.push(...siteEngineerItems);
             break;
@@ -610,6 +614,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
           color: 'text-green-600'
         });
         navigation.push({
+          name: 'MEP',
+          href: '#',
+          icon: UserGroupIcon,
+          iconSolid: UserGroupIcon,
+          color: 'text-cyan-600'
+        });
+        navigation.push({
           name: 'Site Engineer',
           href: '#',
           icon: UserGroupIcon,
@@ -637,9 +648,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       currentRole === UserRole.MEP ||
       currentRole === 'mep' ||
       roleIdLower === 'mep' ||
-      getRoleDisplayName(roleId || '') === 'MEP Supervisor'
+      getRoleDisplayName(roleId || '') === 'MEP Manager'
     ) {
-      // Project Manager AND MEP Supervisor get the same specialized menu items - SHARED CODE
+      // Project Manager AND MEP Manager get the same specialized menu items - SHARED CODE
       navigation.push(...projectManagerItems);
     } else if (isSiteEngineer) {
       // Site Engineer gets Projects menu with submenu (Assigned, Ongoing, Completed)
