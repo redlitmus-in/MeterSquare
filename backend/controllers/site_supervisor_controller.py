@@ -129,8 +129,7 @@ def get_all_sitesupervisor_boqs():
 
         projects = Project.query.filter(
             Project.project_id.in_(all_project_ids),
-            Project.is_deleted == False,
-            Project.status != 'completed'  # Exclude completed projects
+            Project.is_deleted == False
         ).all()
 
         projects_list = []
