@@ -260,27 +260,30 @@ export interface BOQDashboardMetrics {
   rejectedBOQs?: number;
   sentForConfirmation?: number;
   totalProjectValue: number;
+  totalValue?: number; // Alias for totalProjectValue
   averageApprovalTime: number;
   monthlyTrend: {
     month: string;
     count: number;
     value: number;
   }[];
-  topProjects: {
-    id?: number;
-    name: string;
+  topProjects: Array<{
+    project_id: number;
+    project_name: string;
+    boq_count: number;
+    total_value: number;
+    total_items?: number;
+    material_count?: number;
+    labor_count?: number;
+    material_cost?: number;
+    labor_cost?: number;
+  }>;
+  recentActivities?: Array<{
+    project_id: number;
+    project_name: string;
+    boq_count: number;
     value: number;
-    status: BOQStatus;
-    client?: string;
-  }[];
-  recentActivities?: {
-    id: number;
-    type: 'created' | 'updated';
-    description: string;
-    timestamp: string;
-    project: string;
-    status: string;
-  }[];
+  }>;
 }
 
 export interface BOQFilter {

@@ -330,10 +330,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const isClosingAfterSubmitRef = useRef(false);
   const isFormInitializedRef = useRef(false);
 
-  // Auto-save function - ONLY saves to localStorage (no database save)
+  // Store original data for discard in EDIT mode
+  const originalDataRef = useRef<any>(null);
+
+  // Auto-save function - saves to localStorage for both CREATE and EDIT modes
   const handleAutoSave = async (formData: any, isAutoSave: boolean) => {
-    // Don't auto-save in revision mode or edit mode
-    if (isRevision || editMode) return;
+    // Don't auto-save in revision mode
+    if (isRevision) return;
 
     // Don't auto-save if there's no meaningful data
     if (!selectedProjectId || !boqName.trim() || items.length === 0) {
@@ -345,15 +348,23 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     // This function is just a placeholder for validation
 
     if (isAutoSave) {
-      // Show a visible confirmation that data is backed up locally
-      toast.success('💾 Draft backed up locally', {
-        duration: 2000,
-        description: `BOQ: ${boqName} - ${items.length} items`
+      // Show a subtle confirmation that data is backed up locally
+      const mode = editMode ? 'Changes saved' : 'Draft saved';
+      toast.success(mode, {
+        duration: 1500,
+        description: `${boqName} - ${items.length} items`
       });
     }
   };
 
-  // Auto-save hook - save every 3 minutes (localStorage only)
+  // Auto-save hook - saves immediately after changes (localStorage)
+  // - Silent backup to localStorage: 500ms after user stops typing
+  // - Full save with notification: Every 3 seconds if data changed
+  // Use unique localStorage key for edit mode based on BOQ ID
+  const autoSaveKey = editMode && existingBoqData?.boq_id
+    ? `boq_edit_draft_${existingBoqData.boq_id}`
+    : 'boq_draft_autosave';
+
   const { isSaving, lastSaved, saveNow, clearLocalStorage, getLocalStorageData } = useAutoSave({
     data: {
       boqName,
@@ -375,9 +386,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       termsConditions
     },
     onSave: handleAutoSave,
-    interval: 180000, // 3 minutes
-    localStorageKey: 'boq_draft_autosave',
-    enabled: autoSaveEnabled && isOpen && !isRevision && !editMode
+    interval: 3000, // 3 seconds - immediate auto-save after changes
+    localStorageKey: autoSaveKey,
+    enabled: autoSaveEnabled && isOpen && !isRevision // Enable for both CREATE and EDIT modes
   });
 
   // TEST MODE: Set to true to test inactivity in 10 seconds instead of 2 hours
@@ -389,7 +400,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     onInactive: () => {
       setShowInactivityModal(true);
     },
-    enabled: isOpen && !isRevision && !editMode
+    enabled: isOpen && !isRevision // Enable for both CREATE and EDIT modes
   });
 
   // Handle inactivity modal actions
@@ -409,7 +420,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const handleCloseWithConfirmation = () => {
     const hasData = (boqName && boqName.trim().length > 0) || selectedProjectId !== null || items.length > 0;
 
-    if (hasData && !editMode && !isRevision) {
+    // Show save draft modal for both CREATE and EDIT modes (not for REVISION)
+    if (hasData && !isRevision) {
       setShowSaveDraftModal(true);
     } else {
       onClose();
@@ -419,21 +431,61 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const handleSaveDraftAndClose = async () => {
     setShowSaveDraftModal(false);
 
-    // Explicitly save to localStorage now (don't rely on auto-save timer)
-    await saveNow();
-
-    toast.success('Draft saved - you can continue later', {
-      duration: 3000,
-      description: `BOQ: ${boqName}`
-    });
-
-    onClose();
+    // In EDIT mode, save to database using the submit handler; in CREATE mode, save to localStorage
+    if (editMode && existingBoqData?.boq_id) {
+      try {
+        // Save changes to database by calling the main submit handler
+        await handleSubmit();
+        // handleSubmit already shows success toast and closes the form
+      } catch (error) {
+        console.error('Failed to save changes:', error);
+        toast.error('Failed to save changes to database');
+        return; // Don't close if save failed
+      }
+    } else {
+      // CREATE mode: Save to localStorage
+      await saveNow();
+      toast.success('Draft saved locally - you can continue later', {
+        duration: 3000,
+        description: `BOQ: ${boqName}`
+      });
+      onClose();
+    }
   };
 
   const handleDiscardAndClose = () => {
     setShowSaveDraftModal(false);
-    clearLocalStorage();
-    toast.info('Draft discarded');
+
+    // In EDIT mode, restore original values; in CREATE mode, clear localStorage
+    if (editMode && originalDataRef.current) {
+      // Restore original data
+      const original = originalDataRef.current;
+      setBoqName(original.boqName || '');
+      setSelectedProjectId(original.selectedProjectId || null);
+      setItems(original.items || []);
+      setOverallOverhead(original.overallOverhead || 10);
+      setOverallProfit(original.overallProfit || 15);
+      setOverallDiscount(original.overallDiscount || 0);
+      setPreliminaries(original.preliminaries || []);
+      setCostQuantity(original.costQuantity || 1);
+      setCostUnit(original.costUnit || 'nos');
+      setCostRate(original.costRate || 0);
+      setCostAmount(original.costAmount || 0);
+      setPreliminaryInternalCost(original.preliminaryInternalCost || 0);
+      setPreliminaryMiscPercentage(original.preliminaryMiscPercentage || 10);
+      setPreliminaryOverheadProfitPercentage(original.preliminaryOverheadProfitPercentage || 25);
+      setPreliminaryTransportPercentage(original.preliminaryTransportPercentage || 5);
+      setPreliminaryNotes(original.preliminaryNotes || '');
+      setTermsConditions(original.termsConditions || []);
+
+      clearLocalStorage(); // Also clear any draft in localStorage
+      toast.info('Changes discarded - reverted to original');
+    } else {
+      // CREATE mode: Clear draft
+      clearLocalStorage();
+      toast.info('Draft discarded');
+    }
+
     onClose();
   };
 
@@ -554,7 +606,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       // Don't count selectedProjectId alone since that's set automatically from props
       const hasData = (boqName && boqName.trim().length > 0) || items.length > 0;
 
-      if (hasData && !editMode && !isRevision) {
+      if (hasData && !isRevision) {
         // Prevent going back
         e.preventDefault();
         window.history.pushState({ boqFormOpen: true }, '');
@@ -1144,6 +1196,30 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           setItems(formItems);
           // Expand all items by default in edit mode
           setExpandedItems(formItems.map(item => item.id));
+
+          // Store original data for discard functionality in EDIT mode
+          if (editMode) {
+            const prelimsData = boqDetails.preliminaries || {};
+            originalDataRef.current = {
+              boqName: boqDetails.boq_name,
+              selectedProjectId: boqDetails.project_id,
+              items: formItems,
+              overallOverhead: 10, // Default values
+              overallProfit: 15,
+              overallDiscount: boqDetails.discount_percentage || 0,
+              preliminaries,
+              costQuantity: prelimsData.cost_details?.quantity || 1,
+              costUnit: prelimsData.cost_details?.unit || 'nos',
+              costRate: prelimsData.cost_details?.rate || 0,
+              costAmount: prelimsData.cost_details?.amount || 0,
+              preliminaryInternalCost: prelimsData.cost_details?.internal_cost || 0,
+              preliminaryMiscPercentage: prelimsData.cost_details?.misc_percentage || 10,
+              preliminaryOverheadProfitPercentage: prelimsData.cost_details?.overhead_profit_percentage || 25,
+              preliminaryTransportPercentage: prelimsData.cost_details?.transport_percentage || 5,
+              preliminaryNotes: prelimsData.notes || '',
+              termsConditions
+            };
+          }
         }
 
         toast.success(editMode ? 'BOQ loaded for editing' : 'BOQ data loaded');
@@ -3048,24 +3124,24 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   {editMode ? 'Update the Bill of Quantities details' : isRevision ? 'Create a new revision of the BOQ' : 'Build a detailed Bill of Quantities for your project'}
                 </p>
                 {/* Auto-save status indicator */}
-                {!isRevision && !editMode && autoSaveEnabled && (
+                {!isRevision && autoSaveEnabled && (
                   <div className="flex items-center gap-2 mt-2 text-xs">
                     {isSaving ? (
                       <>
                         <CloudOff className="w-3.5 h-3.5 text-gray-400 animate-pulse" />
-                        <span className="text-gray-500 font-medium">Backing up locally...</span>
+                        <span className="text-gray-500 font-medium">Saving changes...</span>
                       </>
                     ) : lastSaved ? (
                       <>
                         <Cloud className="w-3.5 h-3.5 text-green-500" />
                         <span className="text-gray-500">
-                          Backed up at {new Date(lastSaved).toLocaleTimeString()} (Local only)
+                          Last saved: {new Date(lastSaved).toLocaleTimeString()}
                         </span>
                       </>
                     ) : (
                       <>
                         <Cloud className="w-3.5 h-3.5 text-blue-400" />
-                        <span className="text-gray-500">Auto-backup enabled (Local only, every 3 min)</span>
+                        <span className="text-gray-500">Auto-save enabled - changes saved automatically</span>
                       </>
                     )}
                   </div>

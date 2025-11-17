@@ -1,13 +1,5 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import Highcharts from 'highcharts';
-import HighchartsReact from 'highcharts-react-official';
-import HighchartsMore from 'highcharts/highcharts-more';
-import HighchartsTreemap from 'highcharts/modules/treemap';
-
-// Initialize Highcharts modules
-HighchartsMore(Highcharts);
-HighchartsTreemap(Highcharts);
 
 interface PremiumChartsProps {
   data?: any;
@@ -15,7 +7,31 @@ interface PremiumChartsProps {
   height?: number;
 }
 
-const PremiumCharts: React.FC<PremiumChartsProps> = ({ data, type, height = 300 }) => {
+const PremiumCharts: React.FC<PremiumChartsProps> = React.memo(({ data, type, height = 300 }) => {
+  // ✅ PERFORMANCE: Lazy load Highcharts premium modules only when needed
+  const [chartsLoaded, setChartsLoaded] = useState(false);
+  const [Highcharts, setHighcharts] = useState<any>(null);
+  const [HighchartsReact, setHighchartsReact] = useState<any>(null);
+
+  // Load chart libraries with premium modules on mount
+  useEffect(() => {
+    Promise.all([
+      import('highcharts'),
+      import('highcharts-react-official'),
+      import('highcharts/highcharts-more'),
+      import('highcharts/modules/treemap')
+    ]).then(([HC, HCReact, HCMore, HCTreemap]) => {
+      // Initialize modules
+      HCMore.default(HC.default);
+      HCTreemap.default(HC.default);
+
+      setHighcharts(HC.default);
+      setHighchartsReact(() => HCReact.default);
+      setChartsLoaded(true);
+    }).catch(error => {
+      console.error('Failed to load premium chart libraries:', error);
+    });
+  }, []);
   const chartOptions = useMemo(() => {
     const baseOptions: Highcharts.Options = {
       chart: {
@@ -262,6 +278,15 @@ const PremiumCharts: React.FC<PremiumChartsProps> = ({ data, type, height = 300 
     }
   }, [data, type, height]);
 
+  // Show loading state while charts are loading
+  if (!chartsLoaded || !Highcharts || !HighchartsReact) {
+    return (
+      <div className="w-full flex items-center justify-center" style={{ height }}>
+        <div className="text-gray-500 animate-pulse">Loading chart...</div>
+      </div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -275,6 +300,6 @@ const PremiumCharts: React.FC<PremiumChartsProps> = ({ data, type, height = 300 
       />
     </motion.div>
   );
-};
+});
 
 export default PremiumCharts;

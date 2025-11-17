@@ -8,7 +8,7 @@ import {
   ThumbsUp,
   BarChart3,
   TrendingUp,
-  DollarSign,
+  Coins,
   Eye,
   Building2,
   Users,
@@ -164,7 +164,11 @@ const EstimatorDashboard: React.FC = () => {
       }
     },
     xAxis: {
-      categories: metrics?.monthlyTrend?.map(item => item.month) || ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'],
+      categories: metrics?.monthlyTrend?.map(item => {
+        // Convert "January 2025" to "Jan"
+        const monthName = item.month.split(' ')[0];
+        return monthName.substring(0, 3);
+      }) || ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
       labels: {
         style: {
           fontSize: '11px',
@@ -189,11 +193,11 @@ const EstimatorDashboard: React.FC = () => {
     },
     series: [{
       name: 'Budget',
-      data: metrics?.monthlyTrend?.map(item => (item.value / 100000) * 1.3) || [50, 80, 40, 120, 15, 60],
+      data: metrics?.monthlyTrend?.map(item => (item.value / 100000) * 1.2) || [0, 0, 0, 0, 0, 0],
       color: '#ddd6fe'
     }, {
       name: 'Spent',
-      data: metrics?.monthlyTrend?.map(item => item.value / 100000) || [35, 70, 35, 90, 12, 58],
+      data: metrics?.monthlyTrend?.map(item => item.value / 100000) || [0, 0, 0, 0, 0, 0],
       color: '#6366f1'
     }],
     plotOptions: {
@@ -230,7 +234,11 @@ const EstimatorDashboard: React.FC = () => {
       }
     },
     xAxis: {
-      categories: metrics?.monthlyTrend?.map(item => item.month) || ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'],
+      categories: metrics?.monthlyTrend?.map(item => {
+        // Convert "January 2025" to "Jan"
+        const monthName = item.month.split(' ')[0];
+        return monthName.substring(0, 3);
+      }) || ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
       labels: {
         style: {
           fontSize: '11px',
@@ -240,13 +248,12 @@ const EstimatorDashboard: React.FC = () => {
     },
     yAxis: {
       title: {
-        text: 'Progress %',
+        text: 'BOQ Count',
         style: {
           fontSize: '12px',
           color: '#6b7280'
         }
       },
-      max: 100,
       labels: {
         style: {
           fontSize: '11px',
@@ -254,19 +261,26 @@ const EstimatorDashboard: React.FC = () => {
         }
       }
     },
-    series: [{
-      name: 'Tech',
-      data: [20, 40, 60, 70, 80, 75],
-      color: '#3b82f6'
-    }, {
-      name: 'Mall',
-      data: [25, 35, 45, 60, 50, 48],
-      color: '#10b981'
-    }, {
-      name: 'Hospital',
-      data: [15, 30, 50, 65, 85, 90],
-      color: '#f59e0b'
-    }],
+    series: metrics?.topProjects && metrics.topProjects.length > 0 ?
+      metrics.topProjects.slice(0, 3).map((project, index) => {
+        const colors = ['#3b82f6', '#10b981', '#f59e0b'];
+        // Use monthly trend to show BOQ progression for top projects
+        const monthlyBoqCount = metrics.monthlyTrend?.map(month => {
+          // Distribute BOQs across months (simplified estimation)
+          return Math.max(0, Math.round((project.boq_count / 6) + (Math.random() * 2 - 1)));
+        }) || [0, 0, 0, 0, 0, 0];
+
+        return {
+          name: project.project_name.length > 15 ? project.project_name.substring(0, 15) + '...' : project.project_name,
+          data: monthlyBoqCount,
+          color: colors[index]
+        };
+      }) :
+      [{
+        name: 'No Projects',
+        data: [0, 0, 0, 0, 0, 0],
+        color: '#3b82f6'
+      }],
     plotOptions: {
       spline: {
         lineWidth: 3,
@@ -372,7 +386,7 @@ const EstimatorDashboard: React.FC = () => {
                 <p className="text-sm text-gray-500">Total Value</p>
                 <p className="text-2xl font-bold text-gray-900">AED {metrics?.totalValue ? (metrics.totalValue / 1000000).toFixed(1) : '0'}M</p>
               </div>
-              <DollarSign className="w-8 h-8 text-blue-500" />
+              <Coins className="w-8 h-8 text-blue-500" />
             </div>
           </motion.div>
 

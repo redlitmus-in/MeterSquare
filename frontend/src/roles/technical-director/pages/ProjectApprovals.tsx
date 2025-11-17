@@ -571,6 +571,7 @@ const ProjectApprovals: React.FC = () => {
       pmAssigned: !!boq.user_id, // Convert to boolean - user_id indicates PM is assigned to project
       revision_number: boq.revision_number || 0,
       preliminaries: boq.preliminaries || {},
+      terms_conditions: boq.terms_conditions || [],
       totalVatAmount: boq.total_vat_amount || boq.totalVatAmount || 0,
       overallVatPercentage: boq.overall_vat_percentage || boq.overallVatPercentage || 0,
       // Project timeline fields
@@ -3869,6 +3870,49 @@ const ProjectApprovals: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Terms & Conditions - Internal Version */}
+                  {((selectedEstimation as any).terms_conditions || (selectedEstimation as any).preliminaries) && (
+                    (() => {
+                      const rawTermsSource = (selectedEstimation as any).terms_conditions || (selectedEstimation as any).preliminaries;
+                      // Handle both direct array and object with items property
+                      let termsSource = [];
+                      if (Array.isArray(rawTermsSource)) {
+                        termsSource = rawTermsSource;
+                      } else if (rawTermsSource && Array.isArray(rawTermsSource.items)) {
+                        termsSource = rawTermsSource.items;
+                      }
+                      const checkedTerms = termsSource.filter((term: any) => term.checked || term.selected);
+
+                      if (checkedTerms.length === 0) return null;
+
+                      return (
+                        <div className="bg-white rounded-lg shadow-sm border border-orange-200 p-4 mb-4">
+                          <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <FileText className="w-5 h-5 text-blue-600" />
+                            Terms & Conditions
+                          </h3>
+                          <div className="space-y-2">
+                            {checkedTerms.map((term: any, index: number) => (
+                              <div key={index} className="flex items-start gap-3 p-3 bg-orange-50 rounded-lg border border-orange-200">
+                                <div className="mt-0.5 w-4 h-4 rounded border-2 border-orange-500 bg-orange-500 flex items-center justify-center flex-shrink-0">
+                                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </div>
+                                <div className="flex-1 text-sm text-gray-700">
+                                  {term.terms_text || term.description}
+                                  {term.isCustom && (
+                                    <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded font-medium">Custom</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
+
               </div>
 
               {/* Client Version (Right) */}
@@ -4085,6 +4129,49 @@ const ProjectApprovals: React.FC = () => {
                       })()}
                     </div>
                   </div>
+
+                  {/* Terms & Conditions - Client Version */}
+                  {((selectedEstimation as any).terms_conditions || (selectedEstimation as any).preliminaries) && (
+                    (() => {
+                      const rawTermsSource = (selectedEstimation as any).terms_conditions || (selectedEstimation as any).preliminaries;
+                      // Handle both direct array and object with items property
+                      let termsSource = [];
+                      if (Array.isArray(rawTermsSource)) {
+                        termsSource = rawTermsSource;
+                      } else if (rawTermsSource && Array.isArray(rawTermsSource.items)) {
+                        termsSource = rawTermsSource.items;
+                      }
+                      const checkedTerms = termsSource.filter((term: any) => term.checked || term.selected);
+
+                      if (checkedTerms.length === 0) return null;
+
+                      return (
+                        <div className="bg-white rounded-lg shadow-sm border border-blue-200 p-4 mb-4">
+                          <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <FileText className="w-5 h-5 text-blue-600" />
+                            Terms & Conditions
+                          </h3>
+                          <div className="space-y-2">
+                            {checkedTerms.map((term: any, index: number) => (
+                              <div key={index} className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                <div className="mt-0.5 w-4 h-4 rounded border-2 border-blue-500 bg-blue-500 flex items-center justify-center flex-shrink-0">
+                                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </div>
+                                <div className="flex-1 text-sm text-gray-700">
+                                  {term.terms_text || term.description}
+                                  {term.isCustom && (
+                                    <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded font-medium">Custom</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
 
               </div>
             </div>
@@ -5196,6 +5283,49 @@ const ProjectApprovals: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Terms & Conditions - Internal Version */}
+                  {((selectedEstimation as any).terms_conditions || (selectedEstimation as any).preliminaries) && (
+                    (() => {
+                      const rawTermsSource = (selectedEstimation as any).terms_conditions || (selectedEstimation as any).preliminaries;
+                      // Handle both direct array and object with items property
+                      let termsSource = [];
+                      if (Array.isArray(rawTermsSource)) {
+                        termsSource = rawTermsSource;
+                      } else if (rawTermsSource && Array.isArray(rawTermsSource.items)) {
+                        termsSource = rawTermsSource.items;
+                      }
+                      const checkedTerms = termsSource.filter((term: any) => term.checked || term.selected);
+
+                      if (checkedTerms.length === 0) return null;
+
+                      return (
+                        <div className="bg-white rounded-lg shadow-sm border border-orange-200 p-4 mb-4">
+                          <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <FileText className="w-5 h-5 text-blue-600" />
+                            Terms & Conditions
+                          </h3>
+                          <div className="space-y-2">
+                            {checkedTerms.map((term: any, index: number) => (
+                              <div key={index} className="flex items-start gap-3 p-3 bg-orange-50 rounded-lg border border-orange-200">
+                                <div className="mt-0.5 w-4 h-4 rounded border-2 border-orange-500 bg-orange-500 flex items-center justify-center flex-shrink-0">
+                                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </div>
+                                <div className="flex-1 text-sm text-gray-700">
+                                  {term.terms_text || term.description}
+                                  {term.isCustom && (
+                                    <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded font-medium">Custom</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
+
               </div>
 
               {/* Client Version (Right) */}
@@ -5412,6 +5542,49 @@ const ProjectApprovals: React.FC = () => {
                       })()}
                     </div>
                   </div>
+
+                  {/* Terms & Conditions - Client Version */}
+                  {((selectedEstimation as any).terms_conditions || (selectedEstimation as any).preliminaries) && (
+                    (() => {
+                      const rawTermsSource = (selectedEstimation as any).terms_conditions || (selectedEstimation as any).preliminaries;
+                      // Handle both direct array and object with items property
+                      let termsSource = [];
+                      if (Array.isArray(rawTermsSource)) {
+                        termsSource = rawTermsSource;
+                      } else if (rawTermsSource && Array.isArray(rawTermsSource.items)) {
+                        termsSource = rawTermsSource.items;
+                      }
+                      const checkedTerms = termsSource.filter((term: any) => term.checked || term.selected);
+
+                      if (checkedTerms.length === 0) return null;
+
+                      return (
+                        <div className="bg-white rounded-lg shadow-sm border border-blue-200 p-4 mb-4">
+                          <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <FileText className="w-5 h-5 text-blue-600" />
+                            Terms & Conditions
+                          </h3>
+                          <div className="space-y-2">
+                            {checkedTerms.map((term: any, index: number) => (
+                              <div key={index} className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                <div className="mt-0.5 w-4 h-4 rounded border-2 border-blue-500 bg-blue-500 flex items-center justify-center flex-shrink-0">
+                                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </div>
+                                <div className="flex-1 text-sm text-gray-700">
+                                  {term.terms_text || term.description}
+                                  {term.isCustom && (
+                                    <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded font-medium">Custom</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
 
               </div>
             </div>

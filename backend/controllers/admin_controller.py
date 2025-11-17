@@ -953,17 +953,29 @@ def get_all_boqs_admin():
         # Order by most recent first
         query = query.order_by(desc(BOQ.created_at))
 
-        # Paginate
+        # PERFORMANCE FIX: Use JOINs to load related data in one query
+        from sqlalchemy.orm import joinedload
+
+        # Paginate with eager loading
         total = query.count()
-        boqs = query.limit(per_page).offset((page - 1) * per_page).all()
+        boqs = query.options(
+            joinedload(BOQ.project)  # project relationship exists
+            # Note: creator relationship doesn't exist (created_by is a string), will fetch separately
+        ).limit(per_page).offset((page - 1) * per_page).all()
+
+        # Pre-fetch all users in ONE query to avoid N+1
+        creator_ids = [boq.created_by for boq in boqs if boq.created_by]
+        creators_map = {}
+        if creator_ids:
+            creators = User.query.filter(User.user_id.in_(creator_ids)).all()
+            creators_map = {str(u.user_id): u for u in creators}
 
         boq_list = []
         for boq in boqs:
-            # Get project info
-            project = Project.query.filter_by(project_id=boq.project_id).first()
-            
-            # Get creator info
-            creator = User.query.filter_by(user_id=boq.created_by).first()
+            # Use pre-loaded project relationship
+            project = boq.project if hasattr(boq, 'project') else None
+            # Use pre-fetched creator map
+            creator = creators_map.get(str(boq.created_by)) if boq.created_by else None
 
             boq_list.append({
                 "boq_id": boq.boq_id,

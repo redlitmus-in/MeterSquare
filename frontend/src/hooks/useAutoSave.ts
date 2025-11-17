@@ -134,7 +134,7 @@ export const useAutoSave = ({
     await performSave(false);
   }, [performSave]);
 
-  // Set up auto-save interval
+  // Set up auto-save interval - triggers performSave which shows toast notification
   useEffect(() => {
     if (!enabled) return;
 
@@ -143,7 +143,7 @@ export const useAutoSave = ({
       clearTimeout(saveTimerRef.current);
     }
 
-    // Set new timer
+    // Set new timer - this will trigger the full save with toast notification
     saveTimerRef.current = setTimeout(() => {
       performSave(true);
     }, interval);
@@ -156,14 +156,33 @@ export const useAutoSave = ({
     };
   }, [data, enabled, interval, performSave]);
 
-  // Save to localStorage on every data change (immediate backup)
-  // REMOVED: This was causing issues by overwriting saved drafts with empty initial state
-  // Auto-save now only happens via the interval timer and manual saveNow() calls
-  // useEffect(() => {
-  //   if (enabled && data) {
-  //     saveToLocalStorage(data);
-  //   }
-  // }, [data, enabled, saveToLocalStorage]);
+  // Immediate localStorage backup on data change (no toast, just silent backup)
+  // This ensures data is never lost even if browser crashes before the interval timer
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+
+    // Clear existing debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // Save to localStorage after 500ms of no changes (debounced)
+    debounceTimerRef.current = setTimeout(() => {
+      const currentData = JSON.stringify(data);
+      // Only save if data has actually changed
+      if (currentData !== lastDataRef.current) {
+        saveToLocalStorage(data);
+        console.log('💾 Silent localStorage backup completed');
+      }
+    }, 500);
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [data, enabled, saveToLocalStorage]);
 
   // Cleanup on unmount
   useEffect(() => {

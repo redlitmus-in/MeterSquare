@@ -1371,35 +1371,54 @@ def unassign_items_from_se():
 def get_available_site_engineers():
     """Get list of available Site Engineers for assignment"""
     try:
-        # Get all users with siteEngineer role
+        # PERFORMANCE FIX: Pre-calculate counts to prevent N+1 queries
         from models.roles import Role
+        from sqlalchemy import func
 
         se_role = Role.query.filter_by(role_name='siteEngineer').first()
         if not se_role:
             return jsonify({"error": "Site Engineer role not found"}), 404
 
+        # Pre-calculate project counts in ONE query
+        project_counts = db.session.query(
+            Project.site_supervisor_id,
+            func.count(Project.project_id).label('count')
+        ).filter(
+            Project.is_deleted == False,
+            Project.site_supervisor_id.isnot(None)
+        ).group_by(Project.site_supervisor_id).all()
+
+        project_count_map = {row[0]: row[1] for row in project_counts}
+
+        # Get site engineers
         site_engineers = User.query.filter_by(
             role_id=se_role.role_id,
             is_deleted=False
         ).all()
 
+        # Pre-load all BOQ details in ONE query for item counting
+        from sqlalchemy.orm import selectinload
+        boqs_with_details = BOQ.query.options(
+            selectinload(BOQ.details)  # Fixed: use 'details' not 'boq_details'
+        ).filter(BOQ.is_deleted == False).all()
+
+        # Build item count map per SE (done once for all SEs)
+        se_item_counts = {}
+        for boq in boqs_with_details:
+            boq_details_list = boq.details if hasattr(boq, 'details') else []  # Fixed relationship name
+            for boq_details in boq_details_list:
+                if boq_details and not boq_details.is_deleted and boq_details.boq_details:
+                    items = boq_details.boq_details.get('items', [])
+                    for item in items:
+                        se_id = item.get('assigned_to_se_user_id')
+                        if se_id:
+                            se_item_counts[se_id] = se_item_counts.get(se_id, 0) + 1
+
         se_list = []
         for se in site_engineers:
-            # Count projects assigned to this SE
-            projects_count = Project.query.filter_by(
-                site_supervisor_id=se.user_id,
-                is_deleted=False
-            ).count()
-
-            # Count items assigned to this SE across all BOQs
-            boqs = BOQ.query.filter(BOQ.is_deleted == False).all()
-            items_count = 0
-            for boq in boqs:
-                boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
-                if boq_details and boq_details.boq_details:
-                    items = boq_details.boq_details.get('items', [])
-                    items_count += sum(1 for item in items
-                                     if item.get('assigned_to_se_user_id') == se.user_id)
+            # Use pre-calculated counts - NO database queries in loop!
+            projects_count = project_count_map.get(se.user_id, 0)
+            items_count = se_item_counts.get(se.user_id, 0)
 
             se_list.append({
                 "user_id": se.user_id,

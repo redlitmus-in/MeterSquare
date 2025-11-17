@@ -677,10 +677,24 @@ class EstimatorService {
       // Try to fetch from backend API first
       try {
         const response = await apiClient.get('/estimator_dashboard');
-        if (response.data && response.data.data) {
+        if (response.data) {
+          // Map backend response (snake_case) to frontend format (camelCase)
+          const backendData = response.data;
           return {
             success: true,
-            data: response.data.data
+            data: {
+              totalBOQs: backendData.total_boqs || 0,
+              pendingBOQs: backendData.pending_boqs || 0,
+              approvedBOQs: backendData.approved_boqs || 0,
+              rejectedBOQs: backendData.rejected_boqs || 0,
+              sentForConfirmation: backendData.sent_for_confirmation_boqs || 0,
+              totalProjectValue: backendData.total_selling_amount || 0,
+              totalValue: backendData.total_selling_amount || 0,
+              averageApprovalTime: backendData.average_approval_time || 0,
+              monthlyTrend: backendData.monthly_trend || [],
+              topProjects: backendData.top_projects || [],
+              recentActivities: backendData.recent_activities || []
+            }
           };
         }
       } catch (apiError) {

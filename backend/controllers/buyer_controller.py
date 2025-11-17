@@ -80,17 +80,37 @@ def create_buyer():
 def get_all_buyers():
     """Get all buyers (assigned and unassigned)"""
     try:
+        # PERFORMANCE FIX: Use JOIN instead of N+1 queries (no User.buyer_projects relationship exists)
+        from sqlalchemy import and_
+
         role = Role.query.filter_by(role='buyer').first()
         if not role:
             return jsonify({"error": "Buyer role not found"}), 404
 
+        # Get buyers
         buyers = User.query.filter_by(role_id=role.role_id, is_deleted=False).all()
+
+        # Pre-fetch ALL projects for all buyers in ONE query
+        buyer_ids = [b.user_id for b in buyers]
+        projects_by_buyer = {}
+        if buyer_ids:
+            projects = Project.query.filter(
+                Project.buyer_id.in_(buyer_ids),
+                Project.is_deleted == False
+            ).all()
+
+            # Group projects by buyer_id
+            for project in projects:
+                if project.buyer_id not in projects_by_buyer:
+                    projects_by_buyer[project.buyer_id] = []
+                projects_by_buyer[project.buyer_id].append(project)
+
         assigned_list = []
         unassigned_list = []
 
         for buyer in buyers:
-            # Fetch all projects assigned to this buyer
-            projects = Project.query.filter_by(buyer_id=buyer.user_id, is_deleted=False).all()
+            # Use pre-fetched projects instead of querying
+            projects = projects_by_buyer.get(buyer.user_id, [])
 
             if projects and len(projects) > 0:
                 # Add each project under assigned list

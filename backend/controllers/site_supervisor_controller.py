@@ -127,19 +127,21 @@ def get_all_sitesupervisor_boqs():
                 "projects": []
             }), 200
 
-        projects = Project.query.filter(
+        # PERFORMANCE FIX: Use eager loading to prevent N+1 queries
+        from sqlalchemy.orm import selectinload
+
+        projects = Project.query.options(
+            selectinload(Project.boqs).selectinload(BOQ.details),  # Fixed: use 'details' not 'boq_details'
+            selectinload(Project.boqs).selectinload(BOQ.history)
+        ).filter(
             Project.project_id.in_(all_project_ids),
             Project.is_deleted == False
         ).all()
 
         projects_list = []
         for project in projects:
-            # Get all BOQs for this project
-            boqs = BOQ.query.filter(
-                BOQ.project_id == project.project_id,
-                BOQ.is_deleted == False,
-                BOQ.email_sent == True
-            ).all()
+            # Use pre-loaded relationship instead of querying
+            boqs = [boq for boq in project.boqs if not boq.is_deleted and boq.email_sent] if hasattr(project, 'boqs') and project.boqs else []
 
             # Collect BOQ IDs for this project
             boq_ids = [boq.boq_id for boq in boqs]
@@ -202,8 +204,9 @@ def get_all_sitesupervisor_boqs():
 
                 for boq_id in boq_ids:
                     boq = next((b for b in boqs if b.boq_id == boq_id), None)
-                    boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
-                    if boq_details and boq_details.boq_details:
+                    # Use pre-loaded relationship instead of querying (relationship name is 'details')
+                    boq_details = boq.details[0] if boq and hasattr(boq, 'details') and boq.details and len(boq.details) > 0 else None
+                    if boq_details and not boq_details.is_deleted and boq_details.boq_details:
                         items = boq_details.boq_details.get('items', [])
                         total_items += len(items)
 

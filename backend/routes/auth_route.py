@@ -26,8 +26,8 @@ def register_route():
 def login_route():
     """User login - Rate limited to prevent brute force attacks"""
     limiter = get_limiter()
-    # 5 login attempts per 15 minutes per IP
-    @limiter.limit("5 per 15 minutes")
+    # 30 login attempts per 15 minutes per IP
+    @limiter.limit("30 per 15 minutes")
     def _login():
         return user_login()
     return _login()
@@ -36,8 +36,8 @@ def login_route():
 def send_otp_route():
     """Send OTP for password reset - Rate limited to prevent OTP flooding"""
     limiter = get_limiter()
-    # 3 OTP requests per 10 minutes per IP
-    @limiter.limit("3 per 10 minutes")
+    # 30 OTP requests per 15 minutes per IP
+    @limiter.limit("30 per 15 minutes")
     def _send_otp():
         return send_email()
     return _send_otp()
@@ -46,8 +46,8 @@ def send_otp_route():
 def verification_otp_route():
     """Verify OTP - Rate limited to prevent brute force"""
     limiter = get_limiter()
-    # 5 verification attempts per 10 minutes per IP
-    @limiter.limit("5 per 10 minutes")
+    # 30 verification attempts per 15 minutes per IP
+    @limiter.limit("30 per 15 minutes")
     def _verify_otp():
         return verification_otp()
     return _verify_otp()

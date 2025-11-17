@@ -3806,14 +3806,23 @@ def get_estimator_dashboard():
         # Get effective user context (handles admin viewing as other roles)
         context = get_effective_user_context()
 
-        # Get BOQs and Projects based on user role
+        # PERFORMANCE FIX: Use eager loading to prevent N+1 queries
+        from sqlalchemy.orm import selectinload
+
+        # Get BOQs and Projects based on user role with eager loading
         if user_role == 'admin' or not should_apply_role_filter(context):
-            # Admin sees all BOQs and projects
-            all_boqs = BOQ.query.filter_by(is_deleted=False).all()
-            projects = Project.query.filter_by(is_deleted=False).all()
+            # Admin sees all BOQs and projects with eager-loaded relationships
+            all_boqs = BOQ.query.options(
+                selectinload(BOQ.details)  # Fixed: use 'details' not 'boq_details'
+            ).filter_by(is_deleted=False).all()
+            projects = Project.query.options(
+                selectinload(Project.boqs).selectinload(BOQ.details)  # Fixed relationship name
+            ).filter_by(is_deleted=False).all()
         else:
             # Estimators see their assigned projects OR projects with no estimator
-            projects = Project.query.filter(
+            projects = Project.query.options(
+                selectinload(Project.boqs).selectinload(BOQ.details)  # Fixed relationship name
+            ).filter(
                 Project.is_deleted == False
             ).filter(
                 or_(
@@ -3823,7 +3832,9 @@ def get_estimator_dashboard():
             ).all()
             project_ids = [p.project_id for p in projects]
             if project_ids:
-                all_boqs = BOQ.query.filter(BOQ.project_id.in_(project_ids), BOQ.is_deleted == False).all()
+                all_boqs = BOQ.query.options(
+                    selectinload(BOQ.details)  # Fixed relationship name
+                ).filter(BOQ.project_id.in_(project_ids), BOQ.is_deleted == False).all()
             else:
                 all_boqs = []
 
@@ -3848,9 +3859,11 @@ def get_estimator_dashboard():
         # Monthly trend tracking
         monthly_data = defaultdict(lambda: {"count": 0, "value": 0})
 
+        # PERFORMANCE FIX: Use pre-loaded relationships instead of additional queries
         # Calculate metrics for each project
         for project in projects:
-            project_boqs = BOQ.query.filter_by(project_id=project.project_id, is_deleted=False).all()
+            # Use already-loaded BOQs relationship instead of querying
+            project_boqs = [boq for boq in project.boqs if not boq.is_deleted] if hasattr(project, 'boqs') and project.boqs else []
             if not project_boqs:
                 continue
 
@@ -3862,7 +3875,8 @@ def get_estimator_dashboard():
             project_labor_count = 0
 
             for boq in project_boqs:
-                boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+                # Use pre-loaded relationship instead of querying (relationship name is 'details')
+                boq_details = boq.details[0] if hasattr(boq, 'details') and boq.details else None
 
                 if boq_details:
                     selling_price = float(boq_details.total_cost) if boq_details.total_cost else 0.0
