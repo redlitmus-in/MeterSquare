@@ -231,7 +231,7 @@ const RoleSpecificVendorHub: React.FC = () => {
           </div>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Access Restricted</h3>
           <p className="text-gray-600">
-            Vendor management is not available for {userRoleLower === 'site supervisor' || userRoleLower === 'site_supervisor' || userRoleLower === 'sitesupervisor' ? 'Site Supervisor' : 'MEP Supervisor'} role.
+            Vendor management is not available for {userRoleLower === 'site supervisor' || userRoleLower === 'site_supervisor' || userRoleLower === 'sitesupervisor' ? 'Site Supervisor' : 'MEP Manager'} role.
           </p>
           <p className="text-sm text-gray-500 mt-2">
             You can initiate material purchase requests through the Procurement module.
@@ -297,7 +297,7 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <>{children}</>
 };
 
-// Project Manager, MEP Supervisor, Technical Director, and Admin Route Component
+// Project Manager, MEP Manager, Technical Director, and Admin Route Component
 const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuthStore();
 
@@ -318,9 +318,9 @@ const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children
                           roleId === 'projectManager' ||
                           roleIdLower === 'project_manager';
 
-  // MEP Supervisor (management level) - same access as PM
+  // MEP Manager (management level) - same access as PM
   const isMEP = userRole === 'MEP' ||
-                userRole === 'MEP Supervisor' ||
+                userRole === 'MEP Manager' ||
                 userRoleLower === 'mep' ||
                 userRoleLower === 'mep supervisor' ||
                 userRoleLower === 'mep_supervisor' ||

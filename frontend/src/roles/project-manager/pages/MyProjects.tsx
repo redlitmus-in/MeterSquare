@@ -145,7 +145,7 @@ const MyProjects: React.FC = () => {
   const userRole = (user as any)?.role || '';
   const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
   const isMEP = userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
-  const pageTitle = isMEP ? 'My Projects (MEP)' : 'My Projects';
+  const pageTitle = isMEP ? 'My Projects (MEP Manager)' : 'My Projects';
 
   // Modal states - declared first to use in auto-refresh condition
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
