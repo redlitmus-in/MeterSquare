@@ -233,10 +233,10 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const submissionInProgressRef = React.useRef(false);
   const [projects, setProjects] = useState<Project[]>([]);
 
-  // Check if user is Site Engineer
+  // Check if user is Site Engineer or Site Supervisor
   const isSiteEngineer = useMemo(() => {
-    const role = (user as any)?.role?.toLowerCase() || '';
-    return role === 'site engineer' || role === 'site_engineer' || role === 'siteengineer';
+    const role = (user as any)?.role?.toLowerCase().replace(/[_\s]/g, '') || '';
+    return role === 'siteengineer' || role === 'sitesupervisor';
   }, [user]);
 
   // Dynamic field states
@@ -275,7 +275,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   // Handle editing mode - pre-fill form with initialData
   useEffect(() => {
     if (initialData && initialData.editMode && projects.length > 0) {
-      console.log('Edit mode - initialData:', initialData);
+      // Debug log removed
 
       // Find and select the project
       const project = projects.find(p => p.project_id === initialData.project_id);
@@ -353,14 +353,14 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const fetchAssignedProjects = async () => {
     try {
       setLoading(true);
-      console.log('Fetching projects with token:', token);
+      // Debug log removed
 
       // For Site Engineers, use sitesupervisor_boq endpoint to get projects with item assignments
-      const endpoint = user?.role?.toLowerCase() === 'siteengineer' || user?.role?.toLowerCase() === 'sitesupervisor'
+      const endpoint = isSiteEngineer
         ? `${API_URL}/sitesupervisor_boq`
         : `${API_URL}/projects/assigned-to-me`;
 
-      console.log('API URL:', endpoint);
+      // Debug log removed
 
       const response = await axios.get(endpoint, {
         headers: {
@@ -369,21 +369,46 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         }
       });
 
-      console.log('Projects response:', response.data);
+      // Debug log removed
 
-      // Transform response for SE endpoint
-      let projectsList = [];
-      if (user?.role?.toLowerCase() === 'siteengineer' || user?.role?.toLowerCase() === 'sitesupervisor') {
-        projectsList = response.data.projects || [];
-      } else {
-        projectsList = response.data.projects || [];
+      // Extract projects from response
+      const projectsList = response.data.projects || [];
+
+      // For Site Engineers: Filter out projects where work is confirmed/completed
+      let filteredProjects = projectsList;
+      if (isSiteEngineer && projectsList.length > 0) {
+        // Debug: Log project structure to verify completion status fields
+        console.log('🔍 All projects received:', projectsList.map(p => ({
+          name: p.project_name,
+          id: p.project_id,
+          my_work_confirmed: p.my_work_confirmed,
+          completion_requested: p.completion_requested,
+          my_completion_requested: p.my_completion_requested
+        })));
+
+        // Filter out completed/confirmed projects (only show active work)
+        filteredProjects = projectsList.filter(project => {
+          // Only hide projects where THIS SE's work is confirmed or THIS SE requested completion
+          // Don't hide projects just because someone else requested completion
+          const isCompleted =
+            project.my_work_confirmed === true ||
+            project.my_completion_requested === true;
+
+          console.log(`Project "${project.project_name}": isCompleted=${isCompleted}, my_work_confirmed=${project.my_work_confirmed}, my_completion_requested=${project.my_completion_requested}`);
+
+          return !isCompleted; // Only include non-completed projects
+        });
+
+        console.log(`✅ Filtered projects: ${filteredProjects.length} active out of ${projectsList.length} total`);
       }
 
-      console.log('Projects details:', JSON.stringify(projectsList, null, 2));
-      setProjects(projectsList);
+      setProjects(filteredProjects);
 
-      if (!projectsList || projectsList.length === 0) {
-        toast.info('No projects assigned to you yet');
+      if (!filteredProjects || filteredProjects.length === 0) {
+        toast.info(isSiteEngineer
+          ? 'No active projects available for material requests'
+          : 'No projects assigned to you yet'
+        );
       }
     } catch (error: any) {
       console.error('Error fetching projects:', error);
@@ -467,15 +492,224 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     setMaterials(materials.filter(m => m.id !== id));
   };
 
-  // Computed fields - Simplified routing without calculations
+  // Computed fields - Dynamic routing based on material types
   const calculations = useMemo(() => {
-    // Simple linear routing: All requests → Estimator → Buyer → TD
-    return {
-      routingPath: isSiteEngineer
+    // Check if request contains any new (custom) materials
+    const hasNewMaterials = materials.some(m => m.isNew);
+
+    // Routing logic:
+    // - Existing materials only: PM → Buyer → TD (skip Estimator)
+    // - New materials (or mixed): PM → Estimator → Buyer → TD
+    let routingPath: string;
+
+    if (hasNewMaterials) {
+      // Include Estimator for new materials
+      routingPath = isSiteEngineer
         ? 'SE → PM → Estimator → Buyer → TD'
-        : 'PM → Estimator → Buyer → TD'
+        : 'PM → Estimator → Buyer → TD';
+    } else {
+      // Skip Estimator for existing materials only
+      routingPath = isSiteEngineer
+        ? 'SE → PM → Buyer → TD'
+        : 'PM → Buyer → TD';
+    }
+
+    return { routingPath };
+  }, [isSiteEngineer, materials]);
+
+  // Memoized set of already-added materials to avoid closure stale state issues
+  const addedMaterialsSet = useMemo(() => {
+    const set = new Set<string>();
+    materials.forEach(m => {
+      if (!m.isNew) {
+        // Create composite key: use materialId OR materialName as fallback + subItemId
+        // Backend sometimes doesn't return material_id, so use name as fallback
+        const materialKey = m.materialId || m.materialName;
+        const key = `${materialKey}_${m.subItemId}`;
+        console.log('🔑 Adding to set:', {
+          materialName: m.materialName,
+          materialId: m.materialId,
+          materialKey,
+          subItemId: m.subItemId,
+          key: key
+        });
+        set.add(key);
+      }
+    });
+    console.log('📋 Complete addedMaterialsSet:', Array.from(set));
+    return set;
+  }, [materials]);
+
+  // Helper function to reset downstream selections
+  const resetDownstreamSelections = (fromLevel: 'project' | 'area' | 'boq' | 'item') => {
+    if (fromLevel === 'project') setSelectedArea(null);
+    if (['project', 'area'].includes(fromLevel)) setSelectedBoq(null);
+    if (['project', 'area', 'boq'].includes(fromLevel)) setSelectedItem(null);
+    if (['project', 'area', 'boq', 'item'].includes(fromLevel)) {
+      setSelectedSubItems([]);
+      setMaterials([]);
+    }
+    setItemOverhead(null);
+  };
+
+  // Helper function to transform materials for API payload
+  const transformMaterialsForPayload = (materials: MaterialItem[]) => {
+    return materials.map(mat => ({
+      material_name: mat.materialName,
+      sub_item_id: mat.subItemId || null,
+      sub_item_name: mat.subItemName,
+      quantity: mat.quantity,
+      unit: mat.unit,
+      unit_rate: mat.isNew ? 0 : mat.unitRate,
+      unit_price: mat.unitRate,
+      master_material_id: mat.isNew ? null : mat.materialId,
+      reason: mat.isNew ? mat.reasonForNew : null,
+      justification: mat.justification,
+      brand: mat.isNew ? mat.brand : null,
+      specification: mat.isNew ? mat.specification : null,
+      size: mat.size || null
+    }));
+  };
+
+  // Helper function to map items to standardized structure
+  const mapItemsToStructure = (items: any[]) => {
+    return items.map((item: any, index: number) => ({
+      item_id: item.item_id || item.master_item_id || item.id || `item_${index}`,
+      item_name: item.item_name || item.name,
+      overhead_allocated: item.overhead_allocated || 0,
+      overhead_consumed: item.overhead_consumed || 0,
+      overhead_available: item.overhead_available || 0,
+      sub_items: item.sub_items || []
+    }));
+  };
+
+  // Helper function to get assigned items for Site Engineers
+  const getAssignedItemsForBoq = (boqId: number): any[] | null => {
+    if (!isSiteEngineer || !selectedProject?.boqs_with_items) {
+      return null;
+    }
+
+    const boqWithAssignedItems = selectedProject.boqs_with_items.find(
+      (b: any) => b.boq_id === boqId
+    );
+
+    return boqWithAssignedItems?.assigned_items || null;
+  };
+
+  // Helper function to validate form inputs
+  const validateFormInputs = (): boolean => {
+    // Check required selections
+    if (!selectedProject || !selectedArea || !selectedBoq || !selectedItem) {
+      toast.error('Please select project, area, BOQ, and BOQ item');
+      return false;
+    }
+
+    // Check materials exist
+    if (materials.length === 0) {
+      toast.error('Please add at least one sub-item');
+      return false;
+    }
+
+    // Validate each material
+    for (const material of materials) {
+      if (!material.materialName) {
+        toast.error('All materials must have a name');
+        return false;
+      }
+
+      if (material.quantity <= 0) {
+        toast.error(`Material "${material.materialName}" must have positive quantity`);
+        return false;
+      }
+    }
+
+    // Validate justification
+    if (!justification || justification.trim().length < 20) {
+      toast.error('Please provide a justification (minimum 20 characters)');
+      return false;
+    }
+
+    return true;
+  };
+
+  // Helper function to build submission payload
+  const buildSubmissionPayload = () => {
+    console.log('📦 Materials before payload creation:', materials.map(m => ({
+      materialName: m.materialName,
+      subItemId: m.subItemId,
+      subItemName: m.subItemName,
+      isNew: m.isNew,
+      materialId: m.materialId,
+      type: typeof m.subItemId
+    })));
+
+    const transformedMaterials = transformMaterialsForPayload(materials);
+
+    console.log('📤 SUBMISSION PAYLOAD - Materials being sent to backend:', transformedMaterials.map(m => ({
+      material_name: m.material_name,
+      master_material_id: m.master_material_id,
+      is_new: m.master_material_id === null
+    })));
+
+    return {
+      project_id: selectedProject!.project_id,
+      area_id: selectedArea!.area_id,
+      boq_id: selectedBoq!.boq_id,
+      boq_item_id: selectedItem!.item_id,
+      boq_item_name: selectedItem!.item_name,
+      materials: transformedMaterials,
+      justification,
+      remarks
     };
-  }, [isSiteEngineer]);
+  };
+
+  // Helper function to handle update (edit mode)
+  const handleUpdateChangeRequest = async (crId: number) => {
+    const updatePayload = {
+      boq_id: selectedBoq!.boq_id,
+      item_id: selectedItem?.item_id || null,
+      item_name: selectedItem?.item_name || null,
+      justification: justification || remarks,
+      remarks: remarks,
+      materials: transformMaterialsForPayload(materials)
+    };
+
+    const response = await axios.put(
+      `${API_URL}/change-request/${crId}`,
+      updatePayload,
+      { headers }
+    );
+
+    if (response.data.success || response.data.data) {
+      toast.success('Change request updated successfully');
+      if (onSuccess) onSuccess();
+      if (onCancel) onCancel();
+      if (onClose) onClose();
+    }
+  };
+
+  // Helper function to handle new change request creation
+  const handleCreateChangeRequest = async () => {
+    const changeRequestPayload = {
+      boq_id: selectedBoq!.boq_id,
+      item_id: selectedItem?.item_id || null,
+      item_name: selectedItem?.item_name || null,
+      justification: justification || remarks,
+      materials: transformMaterialsForPayload(materials)
+    };
+
+    const response = await axios.post(
+      `${API_URL}/boq/change-request`,
+      changeRequestPayload,
+      { headers }
+    );
+
+    if (response.data.success) {
+      toast.success('Extra material request created successfully. Click "Send for Review" to submit for approval.');
+      if (onSuccess) onSuccess();
+      if (onClose) onClose();
+    }
+  };
 
   const handleProjectChange = (projectId: number) => {
     const project = projects.find(p => p.project_id === projectId);
@@ -493,124 +727,72 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           // Call handleBoqChange to fetch/populate items
           handleBoqChange(singleBoq.boq_id);
         } else {
-          setSelectedBoq(null);
-          setSelectedItem(null);
-          setSelectedSubItems([]);
-          setMaterials([]);
+          resetDownstreamSelections('area');
         }
       } else {
         // Reset downstream selections if multiple areas
-        setSelectedArea(null);
-        setSelectedBoq(null);
-        setSelectedItem(null);
-        setSelectedSubItems([]);
-        setMaterials([]);
+        resetDownstreamSelections('project');
       }
     } else {
       // Reset all if no project
-      setSelectedArea(null);
-      setSelectedBoq(null);
-      setSelectedItem(null);
-      setSelectedSubItems([]);
-      setMaterials([]);
+      resetDownstreamSelections('project');
     }
-
-    setItemOverhead(null);
   };
 
   const handleAreaChange = (areaId: number) => {
     if (!selectedProject || !selectedProject.areas) return;
     const area = selectedProject.areas.find(a => a.area_id === areaId);
     setSelectedArea(area || null);
-    // Reset downstream selections
-    setSelectedBoq(null);
-    setSelectedItem(null);
-    setSelectedSubItems([]);
-    setMaterials([]);
-    setItemOverhead(null);
+    resetDownstreamSelections('area');
   };
 
   const handleBoqChange = async (boqId: number) => {
-    console.log('🔵 handleBoqChange called with boqId:', boqId);
-
     if (!selectedArea) {
-      console.log('❌ No selectedArea, returning');
       return;
     }
 
     const boq = selectedArea.boqs.find(b => b.boq_id === boqId);
-    console.log('🔵 Found BOQ:', boq);
 
     // Reset downstream selections immediately
-    setSelectedItem(null);
-    setSelectedSubItems([]);
-    setMaterials([]);
-    setItemOverhead(null);
+    resetDownstreamSelections('boq');
 
     if (!boq) {
-      console.log('❌ BOQ not found in area.boqs');
       setSelectedBoq(null);
       return;
     }
 
-    // Fetch BOQ items if the items array is empty
-    console.log('🔵 BOQ items check:', boq.items?.length || 0);
+    // For Site Engineers, try to use assigned items directly (skip API fetch)
+    const assignedItems = getAssignedItemsForBoq(boqId);
 
-    // For Site Engineers, use assigned items directly from boqs_with_items (don't fetch from API)
-    if (isSiteEngineer && selectedProject?.boqs_with_items) {
-      console.log('🔵 Site Engineer - using assigned items from boqs_with_items');
+    if (assignedItems) {
+      // Site Engineer has assigned items - use them directly
+      const mappedItems = mapItemsToStructure(assignedItems);
 
-      // Find the specific BOQ in boqs_with_items
-      const boqWithAssignedItems = selectedProject.boqs_with_items.find(
-        (b: any) => b.boq_id === boqId
-      );
+      console.log('✅ Using assigned items for Site Engineer:', {
+        total: mappedItems.length,
+        items: mappedItems
+      });
 
-      if (boqWithAssignedItems?.assigned_items) {
-        console.log('🔵 Found assigned items:', boqWithAssignedItems.assigned_items);
+      setSelectedBoq({ ...boq, items: mappedItems });
+      return; // Exit early, skip API fetch
+    }
 
-        // Use the assigned items directly - they already have the correct structure
-        const mappedItems = boqWithAssignedItems.assigned_items.map((item: any, index: number) => ({
-          // Generate item_id from item_index if not present
-          item_id: item.item_id || item.master_item_id || `item_${boqId}_${item.item_index || index}`,
-          item_name: item.item_name,
-          overhead_allocated: item.overhead_allocated || 0,
-          overhead_consumed: item.overhead_consumed || 0,
-          overhead_available: item.overhead_available || 0,
-          sub_items: item.sub_items || []
-        }));
-
-        console.log('✅ Mapped assigned items:', {
-          total: mappedItems.length,
-          items: mappedItems
-        });
-
-        const updatedBoq = {
-          ...boq,
-          items: mappedItems
-        };
-
-        setSelectedBoq(updatedBoq);
-        console.log('✅ Updated BOQ with assigned items:', updatedBoq);
-        return; // Exit early, don't fetch from API
-      } else {
-        console.log('⚠️ No assigned_items found for this BOQ');
-        toast.warning('No items assigned to you for this BOQ');
-        setSelectedBoq({ ...boq, items: [] });
-        return;
-      }
+    // Site Engineer with no assigned items
+    if (isSiteEngineer) {
+      console.log('⚠️ No assigned items found for this BOQ');
+      toast.warning('No items assigned to you for this BOQ');
+      setSelectedBoq({ ...boq, items: [] });
+      return;
     }
 
     // For non-Site Engineers, fetch all items from API if needed
     if (!boq.items || boq.items.length === 0) {
       try {
         setLoading(true);
-        console.log('🔵 Fetching items for BOQ:', boqId);
 
         // Fetch the full BOQ details with items
         const response = await axios.get(`${API_URL}/boq/${boqId}`, { headers });
         const boqDetails = response.data;
-
-        console.log('BOQ details response:', boqDetails);
 
         // Extract items from existing_purchase and new_purchase sections
         const existingItems = boqDetails.existing_purchase?.items || [];
@@ -626,63 +808,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           sampleItem: allItems[0]
         });
 
-        // Map items to ensure they have the required structure
-        let mappedItems = allItems.map((item: any) => ({
-          item_id: item.item_id || item.master_item_id || item.id,
-          item_name: item.item_name || item.name,
-          overhead_allocated: item.overhead_allocated || 0,
-          overhead_consumed: item.overhead_consumed || 0,
-          overhead_available: item.overhead_available || 0,
-          sub_items: item.sub_items || []
-        }));
-
-        // For Site Engineers, use assigned items from boqs_with_items if available
-        if (isSiteEngineer && selectedProject?.boqs_with_items) {
-          console.log('🔵 Site Engineer - using assigned items from boqs_with_items');
-
-          // Find the specific BOQ in boqs_with_items
-          const boqWithAssignedItems = selectedProject.boqs_with_items.find(
-            (b: any) => b.boq_id === boqId
-          );
-
-          if (boqWithAssignedItems?.assigned_items) {
-            console.log('🔵 Found assigned items for BOQ:', boqWithAssignedItems.assigned_items);
-
-            // Get the assigned item IDs
-            const assignedItemIds = new Set(
-              boqWithAssignedItems.assigned_items.map((item: any) =>
-                item.item_id || item.master_item_id
-              )
-            );
-
-            console.log('🔵 Assigned item IDs:', Array.from(assignedItemIds));
-
-            // Filter to only include assigned items
-            const filteredItems = mappedItems.filter((item: any) =>
-              assignedItemIds.has(item.item_id) || assignedItemIds.has(item.item_id.toString())
-            );
-
-            console.log('🔵 Filtered items count:', filteredItems.length);
-
-            // Use the assigned items directly with their full structure from backend
-            if (filteredItems.length === 0) {
-              // If filtering failed, use the assigned_items from backend directly
-              console.log('⚠️ No matches after filtering, using assigned_items directly');
-              mappedItems = boqWithAssignedItems.assigned_items.map((item: any) => ({
-                item_id: item.item_id || item.master_item_id,
-                item_name: item.item_name,
-                overhead_allocated: item.overhead_allocated || 0,
-                overhead_consumed: item.overhead_consumed || 0,
-                overhead_available: item.overhead_available || 0,
-                sub_items: item.sub_items || []
-              }));
-            } else {
-              mappedItems = filteredItems;
-            }
-          } else {
-            console.log('⚠️ No assigned_items found for this BOQ');
-          }
-        }
+        // Map items to standardized structure
+        const mappedItems = mapItemsToStructure(allItems);
 
         console.log('Mapped items:', {
           total: mappedItems.length,
@@ -690,13 +817,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         });
 
         // Update the BOQ object with the fetched items
-        const updatedBoq = {
-          ...boq,
-          items: mappedItems
-        };
-
-        setSelectedBoq(updatedBoq);
-        console.log('Updated BOQ with items:', updatedBoq);
+        setSelectedBoq({ ...boq, items: mappedItems });
       } catch (error) {
         console.error('Error fetching BOQ items:', error);
         toast.error('Failed to load BOQ items');
@@ -713,84 +834,26 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     if (!selectedBoq) return;
     const item = selectedBoq.items.find(i => i.item_id === itemId);
     setSelectedItem(item || null);
-    setSelectedSubItems([]);  // Reset sub-items selection
-    setMaterials([]);
+    resetDownstreamSelections('item');
   };
 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // CRITICAL: Prevent double submission
+    // Prevent double submission
     if (isSubmitting || submissionInProgressRef.current) {
       console.warn('Submission already in progress, ignoring duplicate submit');
       return;
     }
 
-    // Validation
-    if (!selectedProject || !selectedArea || !selectedBoq || !selectedItem) {
-      toast.error('Please select project, area, BOQ, and BOQ item');
+    // Validate form inputs
+    if (!validateFormInputs()) {
       return;
     }
 
-    if (materials.length === 0) {
-      toast.error('Please add at least one sub-item');
-      return;
-    }
-
-    // Validate each material
-    for (const material of materials) {
-      if (!material.materialName) {
-        toast.error('All materials must have a name');
-        return;
-      }
-
-      if (material.quantity <= 0) {
-        toast.error(`Material "${material.materialName}" must have positive quantity`);
-        return;
-      }
-    }
-
-    // Overall justification is required
-    if (!justification || justification.trim().length < 20) {
-      toast.error('Please provide a justification (minimum 20 characters)');
-      return;
-    }
-
-    // Log materials before creating payload
-    console.log('📦 Materials before payload creation:', materials.map(m => ({
-      materialName: m.materialName,
-      subItemId: m.subItemId,
-      subItemName: m.subItemName,
-      isNew: m.isNew,
-      type: typeof m.subItemId
-    })));
-
-    const payload = {
-      project_id: selectedProject.project_id,
-      area_id: selectedArea.area_id,
-      boq_id: selectedBoq.boq_id,  // Send the actual BOQ ID
-      boq_item_id: selectedItem.item_id,  // Also send item_id for reference
-      boq_item_name: selectedItem.item_name,  // Send item name
-      materials: materials.map(mat => ({
-        material_name: mat.materialName,  // Actual material name like "Bubble Wrap"
-        sub_item_id: mat.subItemId || null,  // Always send sub_item_id if available (even for new materials)
-        sub_item_name: mat.subItemName,  // Sub-item name like "Protection"
-        quantity: mat.quantity,
-        unit: mat.unit,
-        unit_rate: mat.isNew ? 0 : mat.unitRate,  // Set to 0 for new materials (no rate field)
-        master_material_id: mat.isNew ? null : mat.materialId,  // Material ID
-        reason: mat.isNew ? mat.reasonForNew : null,
-        justification: mat.justification,  // Per-material justification
-        brand: mat.brand || null,  // Brand for all materials
-        specification: mat.specification || null,  // Specification for all materials
-        size: mat.size || null  // Size for all materials
-      })),
-      justification,
-      remarks
-    };
-
-    console.log('📦 Final payload:', payload);
+    // Build payload
+    const payload = buildSubmissionPayload();
 
     // Set submission guards
     setIsSubmitting(true);
@@ -799,91 +862,18 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     try {
       setLoading(true);
 
-      // Check if we're in edit mode
+      // Determine submission path
       const isEditMode = initialData && initialData.editMode && initialData.cr_id;
 
-      // SINGLE submission path - use onSubmit if provided, otherwise direct API call
       if (onSubmit) {
+        // Custom submit handler provided
         await onSubmit(payload);
       } else if (isEditMode) {
         // Edit mode - update existing change request
-        const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-        const token = localStorage.getItem('access_token');
-        const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-        const updatePayload = {
-          boq_id: selectedBoq.boq_id,
-          item_id: selectedItem?.item_id || null,
-          item_name: selectedItem?.item_name || null,
-          justification: justification || remarks,
-          remarks: remarks,
-          materials: materials.map(mat => ({
-            material_name: mat.materialName,
-            sub_item_id: mat.subItemId,
-            sub_item_name: mat.subItemName,
-            quantity: mat.quantity,
-            unit: mat.unit,
-            unit_price: mat.unitRate,
-            master_material_id: mat.isNew ? null : mat.materialId,
-            reason: mat.isNew ? mat.reasonForNew : null,
-            justification: mat.justification,
-            brand: mat.isNew ? mat.brand : null,
-            specification: mat.isNew ? mat.specification : null
-          }))
-        };
-
-        const response = await axios.put(
-          `${API_URL}/change-request/${initialData.cr_id}`,
-          updatePayload,
-          { headers }
-        );
-
-        if (response.data.success || response.data.data) {
-          toast.success('Change request updated successfully');
-          if (onSuccess) onSuccess();
-          if (onCancel) onCancel();
-          if (onClose) onClose();
-        }
+        await handleUpdateChangeRequest(initialData.cr_id);
       } else if (onClose) {
-        // For PM's ChangeRequestsPage - submit directly here
-        const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-        const token = localStorage.getItem('access_token');
-        const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-        // Use the main change request API endpoint instead of extra_materials wrapper
-        const changeRequestPayload = {
-          boq_id: selectedBoq.boq_id,
-          item_id: selectedItem?.item_id || null,
-          item_name: selectedItem?.item_name || null,
-          justification: justification || remarks,
-          materials: materials.map(mat => ({
-            material_name: mat.materialName,  // The actual material name like "Bubble Wrap"
-            sub_item_id: mat.subItemId,  // The sub-item (scope) ID like "subitem_331_1_3"
-            sub_item_name: mat.subItemName,  // The sub-item (scope) name like "Protection"
-            quantity: mat.quantity,
-            unit: mat.unit,
-            unit_price: mat.unitRate,
-            master_material_id: mat.isNew ? null : mat.materialId,  // The material ID like "mat_331_1_3_1"
-            reason: mat.isNew ? mat.reasonForNew : null,
-            justification: mat.justification,  // Per-material justification
-            brand: mat.isNew ? mat.brand : null,  // Brand for new materials
-            specification: mat.isNew ? mat.specification : null  // Specification for new materials
-          }))
-        };
-
-        const response = await axios.post(
-          `${API_URL}/boq/change-request`,
-          changeRequestPayload,
-          { headers }
-        );
-
-        if (response.data.success) {
-          // All users must manually send for review - no auto-send
-          toast.success('Extra material request created successfully. Click "Send for Review" to submit for approval.');
-          console.log('✅ Request created successfully, calling onSuccess to refetch');
-          if (onSuccess) onSuccess(); // Trigger refetch
-          if (onClose) onClose();
-        }
+        // Create new change request
+        await handleCreateChangeRequest();
       }
     } catch (error: any) {
       console.error('Error submitting extra material request:', error);
@@ -1233,63 +1223,112 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                     <div className="relative">
                       <select
                         onChange={(e) => {
-                          const material = subItem.materials.find(m => m.material_id === e.target.value);
-                          if (material) {
-                            console.log('🔵 Selecting existing material for sub-item:', {
-                              sub_item_id: subItem.sub_item_id,
-                              sub_item_name: subItem.sub_item_name,
-                              material_name: material.material_name,
-                              type: typeof subItem.sub_item_id
-                            });
+                          const selectedValue = e.target.value;
 
-                            // Check for duplicates - prevent adding same material twice for this sub-item
-                            const isDuplicate = materials.some(
+                          // Guard: Ignore empty selection
+                          if (!selectedValue || selectedValue === "") {
+                            return;
+                          }
+
+                          // Debug: Log what we're searching for and what's available
+                          console.log('🔍 Material Selection Debug:', {
+                            selectedValue,
+                            availableMaterials: subItem.materials.map(m => ({
+                              material_id: m.material_id,
+                              material_name: m.material_name,
+                              id_type: typeof m.material_id
+                            }))
+                          });
+
+                          // Robust find: Try by ID first, fallback to name
+                          let material = subItem.materials.find(m => m.material_id === selectedValue);
+
+                          // Fallback: If not found by ID, try by name (handles backend mismatch)
+                          if (!material) {
+                            material = subItem.materials.find(m => m.material_name === selectedValue);
+                            console.log('⚠️ Material found by name fallback:', material ? 'Success' : 'Failed');
+                          }
+
+                          if (!material) {
+                            console.error('❌ Material not found for value:', selectedValue, {
+                              searchedById: true,
+                              searchedByName: true,
+                              availableIds: subItem.materials.map(m => m.material_id),
+                              availableNames: subItem.materials.map(m => m.material_name)
+                            });
+                            toast.error('Material not found. Please try again.');
+                            return;
+                          }
+
+                          console.log('✅ Material found:', {
+                            sub_item_id: subItem.sub_item_id,
+                            sub_item_name: subItem.sub_item_name,
+                            material_name: material.material_name,
+                            material_id: material.material_id
+                          });
+
+                          // Use functional update to check duplicates and add material with current state
+                          setMaterials(currentMaterials => {
+                            // Check for duplicates using composite key (handles missing material_id)
+                            const materialKey = material.material_id || material.material_name;
+                            const isDuplicate = currentMaterials.some(
                               m => !m.isNew &&
-                                   m.materialId === material.material_id &&
+                                   m.materialId === materialKey &&
                                    m.subItemId === subItem.sub_item_id
                             );
 
                             if (isDuplicate) {
-                              toast.error(`"${material.material_name}" is already added for this sub-item. Please remove it first if you want to modify it.`);
-                              e.target.value = "";
-                              return;
+                              toast.error(`"${material.material_name}" is already added for this sub-item.`);
+                              return currentMaterials; // Return unchanged
                             }
 
-                            // Pass the specific subItem to addExistingMaterial
+                            // Create new material item
                             const newMaterialItem: MaterialItem = {
                               id: `material-${Date.now()}-${Math.random()}`,
                               isNew: false,
                               subItemId: subItem.sub_item_id,
                               subItemName: subItem.sub_item_name,
-                              materialId: material.material_id,
+                              // Use material_id OR material_name as fallback (backend sometimes doesn't return material_id)
+                              materialId: material.material_id || material.material_name,
                               materialName: material.material_name,
                               quantity: material.quantity || 0,
                               unit: material.unit,
                               unitRate: material.unit_price || 0,
                               justification: ''
                             };
-                            console.log('🔵 Existing material object:', newMaterialItem);
-                            setMaterials([...materials, newMaterialItem]);
-                            // Reset dropdown
-                            e.target.value = "";
-                          }
+
+                            // Debug log removed
+                            return [...currentMaterials, newMaterialItem];
+                          });
+
+                          // Reset dropdown to default
+                          e.target.value = "";
                         }}
                         className="pl-3 pr-10 py-2 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
-                        value=""
+                        defaultValue=""
                       >
                         <option value="">Select Material</option>
                         {subItem.materials.map(material => {
-                          // Check if this material is already added for this sub-item
-                          const isAlreadyAdded = materials.some(
-                            m => !m.isNew &&
-                                 m.materialId === material.material_id &&
-                                 m.subItemId === subItem.sub_item_id
-                          );
+                          // Check if this material is already added using memoized set (fixes closure stale state bug)
+                          // Use material_id OR material_name as fallback (backend sometimes doesn't return material_id)
+                          const materialKey = material.material_id || material.material_name;
+                          const compositeKey = `${materialKey}_${subItem.sub_item_id}`;
+                          const isAlreadyAdded = addedMaterialsSet.has(compositeKey);
+
+                          console.log('🔍 Checking material in dropdown:', {
+                            materialName: material.material_name,
+                            materialId: material.material_id,
+                            materialKey,
+                            subItemId: subItem.sub_item_id,
+                            compositeKey,
+                            isAlreadyAdded,
+                            setContents: Array.from(addedMaterialsSet)
+                          });
 
                           return (
                             <option
-                              key={material.material_id}
-                              value={material.material_id}
+                              key={material.material_id || material.material_name}
+                              value={material.material_id || material.material_name}
                               disabled={isAlreadyAdded}
                               className={isAlreadyAdded ? 'text-gray-400 italic' : ''}
                             >
@@ -1323,8 +1362,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         brand: '',
                         specification: ''
                       };
-                      console.log('🟡 New material object:', newMaterial);
-                      setMaterials([...materials, newMaterial]);
+                      // Use functional update to avoid stale state
+                      setMaterials(prevMaterials => [...prevMaterials, newMaterial]);
                     }}
                     className="flex items-center gap-1 px-3 py-1.5 text-xs bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] text-white rounded-lg hover:from-[#1e3270] hover:to-[#3d4f8a] shadow-md transition-all"
                   >
@@ -1416,35 +1455,42 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         </div>
                       ) : (
                         <div className="mb-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
-                          <p className="text-[10px] font-medium text-blue-900 mb-0.5">Selected Material</p>
+                          <p className="text-[10px] font-medium text-blue-900 mb-0.5">Selected Material (View Only)</p>
                           <p className="text-xs font-semibold text-blue-900">{material.materialName}</p>
-                          <div className="mt-1 flex gap-3 text-[10px] text-blue-700">
-                            <span>Unit: {material.unit}</span>
-                            {!isSiteEngineer && <span>Rate: AED{material.unitRate.toLocaleString()}/{material.unit}</span>}
+                          <div className="mt-1 grid grid-cols-2 gap-2 text-[10px] text-blue-700">
+                            <div>
+                              <span className="font-medium">Quantity:</span> {material.quantity} {material.unit}
+                            </div>
+                            {!isSiteEngineer && (
+                              <div>
+                                <span className="font-medium">Rate:</span> AED{material.unitRate.toLocaleString()}/{material.unit}
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
 
-                      <div className="grid grid-cols-2 gap-2 mt-2">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">
-                            Quantity <span className="text-red-500">*</span>
-                          </label>
-                          <input
-                            type="number"
-                            value={material.quantity}
-                            onChange={(e) => updateMaterial(material.id, { quantity: parseFloat(e.target.value) || 0 })}
-                            className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
-                            min="0.01"
-                            step="0.01"
-                            placeholder="Qty"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">
-                            Unit {material.isNew && <span className="text-red-500">*</span>}
-                          </label>
-                          {material.isNew ? (
+                      {/* Quantity and Unit - Editable for new materials, view-only for existing */}
+                      {material.isNew ? (
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Quantity <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              value={material.quantity}
+                              onChange={(e) => updateMaterial(material.id, { quantity: parseFloat(e.target.value) || 0 })}
+                              className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                              min="0.01"
+                              step="0.01"
+                              placeholder="Qty"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Unit <span className="text-red-500">*</span>
+                            </label>
                             <div className="space-y-1">
                               <select
                                 value={material.unit === 'Custom (Type below)' || !COMMON_UNITS.includes(material.unit) ? 'Custom (Type below)' : material.unit}
@@ -1476,17 +1522,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                                 />
                               )}
                             </div>
-                          ) : (
-                            <input
-                              type="text"
-                              value={material.unit}
-                              className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
-                              readOnly
-                              disabled
-                            />
-                          )}
+                          </div>
                         </div>
-                      </div>
+                      ) : null}
                     </div>
                   ))
                 )}

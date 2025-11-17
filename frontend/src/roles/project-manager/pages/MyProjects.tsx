@@ -104,6 +104,10 @@ interface Project {
   hasPendingDayExtension?: boolean;
   pendingDayExtensionCount?: number;
   hasApprovedExtension?: boolean;
+  // Item assignment tracking
+  items_assigned_by_me?: number;
+  items_pending_assignment?: number;
+  total_items?: number;
 }
 
 interface SiteEngineer {
@@ -635,20 +639,18 @@ const MyProjects: React.FC = () => {
     if (filterStatus === 'pending') {
       const status = project.boq_status?.toLowerCase() || '';
       const hasItemsAssigned = (project.items_assigned_by_me || 0) > 0;
-      // Pending tab: Projects assigned by TD, waiting for SE assignment
-      // Don't show if items are already assigned
+      // Pending tab: Projects assigned by TD, waiting for SE assignment by THIS PM
+      // Show if THIS PM hasn't assigned items yet (even if other PMs have)
       return (!hasSiteSupervisor && !hasItemsAssigned && project.status?.toLowerCase() !== 'completed') &&
-             (status === 'approved' || status === 'pm_approved' || status === 'client_confirmed') &&
-             status !== 'items_assigned' &&
+             (status === 'approved' || status === 'pm_approved' || status === 'client_confirmed' || status === 'items_assigned') &&
              project.user_id !== null;
     }
     if (filterStatus === 'assigned') {
-      const boqStatus = project.boq_status?.toLowerCase() || '';
       const hasItemsAssigned = (project.items_assigned_by_me || 0) > 0;
-      // Show in Assigned tab if:
-      // 1. Traditional: Project has site supervisor assigned, OR
-      // 2. Item-level: Any items have been assigned to SEs
-      return (hasSiteSupervisor || hasItemsAssigned || boqStatus === 'items_assigned') && project.status?.toLowerCase() !== 'completed';
+      // Show in Assigned tab if THIS PM has assigned items:
+      // 1. Traditional: Project has site supervisor assigned by THIS PM, OR
+      // 2. Item-level: THIS PM has assigned items to SEs
+      return (hasSiteSupervisor || hasItemsAssigned) && project.status?.toLowerCase() !== 'completed';
     }
     if (filterStatus === 'completed') {
       return project.status?.toLowerCase() === 'completed';
@@ -675,15 +677,13 @@ const MyProjects: React.FC = () => {
       const hasItemsAssigned = (p.items_assigned_by_me || 0) > 0;
       const status = p.boq_status?.toLowerCase() || '';
       return (!hasSS && !hasItemsAssigned && p.status?.toLowerCase() !== 'completed') &&
-             (status === 'approved' || status === 'pm_approved' || status === 'client_confirmed') &&
-             status !== 'items_assigned' &&
+             (status === 'approved' || status === 'pm_approved' || status === 'client_confirmed' || status === 'items_assigned') &&
              p.user_id !== null;
     }).length,
     assigned: projects.filter(p => {
       const hasSS = p.site_supervisor_id !== null && p.site_supervisor_id !== undefined && p.site_supervisor_id !== 0;
       const hasItemsAssigned = (p.items_assigned_by_me || 0) > 0;
-      const boqStatus = p.boq_status?.toLowerCase() || '';
-      return (hasSS || hasItemsAssigned || boqStatus === 'items_assigned') && p.status?.toLowerCase() !== 'completed';
+      return (hasSS || hasItemsAssigned) && p.status?.toLowerCase() !== 'completed';
     }).length,
     completed: projects.filter(p => p.status?.toLowerCase() === 'completed').length,
     approved: projects.filter(p => {
@@ -1010,13 +1010,14 @@ const MyProjects: React.FC = () => {
                         <EyeIcon className="w-5 h-5" />
                       </button>
 
-                      {/* Only show assign button in Pending tab, not in Assigned tab */}
-                      {filterStatus !== 'assigned' &&
-                       !project.site_supervisor_id &&
-                       !(project.items_assigned_by_me && project.items_assigned_by_me > 0) &&
+                      {/* Show assign button when there are items pending assignment (works in both Pending and Assigned tabs) */}
+                      {!project.site_supervisor_id &&
+                       (project.items_pending_assignment || 0) > 0 &&
                        project.user_id !== null &&
-                       (project.boq_status?.toLowerCase() === 'client_confirmed' ||
-                        project.boq_status?.toLowerCase() === 'approved') && (
+                       (project.boq_status?.toLowerCase() === 'approved' ||
+                        project.boq_status?.toLowerCase() === 'pm_approved' ||
+                        project.boq_status?.toLowerCase() === 'client_confirmed' ||
+                        project.boq_status?.toLowerCase() === 'items_assigned') && (
                         <button
                           onClick={() => {
                             setSelectedProject(project);
@@ -1034,49 +1035,30 @@ const MyProjects: React.FC = () => {
                       {(project.site_supervisor_id ||
                         (project.items_assigned_by_me && project.items_assigned_by_me > 0)) &&
                        project.status?.toLowerCase() !== 'completed' && (
-                        <>
-                          {project.completion_requested ? (
-                            <div className="flex items-center gap-2">
-                              {/* Confirmation counter badge */}
-                              <button
-                                onClick={() => loadCompletionDetails(project.project_id)}
-                                className={`
-                                  px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-sm font-medium shadow-sm
-                                  ${project.total_se_assignments && project.confirmed_completions === project.total_se_assignments
-                                    ? 'bg-green-100 text-green-700 border border-green-300'
-                                    : 'bg-orange-100 text-orange-700 border border-orange-300 animate-pulse'
-                                  }
-                                `}
-                                title="Click to view completion details"
-                              >
-                                {project.total_se_assignments && project.total_se_assignments > 0 ? (
-                                  <>
-                                    <span className="font-bold">
-                                      {project.confirmed_completions || 0}/{project.total_se_assignments}
-                                    </span>
-                                    <span>confirmations</span>
-                                    {project.confirmed_completions === project.total_se_assignments && (
-                                      <CheckCircleIcon className="w-5 h-5 text-green-600" />
-                                    )}
-                                  </>
-                                ) : (
-                                  <>
-                                    <span>View Details</span>
-                                  </>
-                                )}
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              disabled
-                              className="px-4 py-2 bg-gray-300 text-gray-500 rounded-lg flex items-center gap-2 text-sm font-medium shadow-sm cursor-not-allowed opacity-60"
-                              title="Waiting for SE completion request"
-                            >
-                              <CheckCircleIcon className="w-5 h-5" />
-                              Complete
-                            </button>
-                          )}
-                        </>
+                        <div className="flex items-center gap-2">
+                          {/* Confirmation counter badge - always show count */}
+                          <button
+                            onClick={() => loadCompletionDetails(project.project_id)}
+                            className={`
+                              px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-sm font-medium shadow-sm
+                              ${project.total_se_assignments && project.confirmed_completions === project.total_se_assignments && project.total_se_assignments > 0
+                                ? 'bg-green-100 text-green-700 border border-green-300'
+                                : project.completion_requested
+                                ? 'bg-orange-100 text-orange-700 border border-orange-300 animate-pulse'
+                                : 'bg-gray-100 text-gray-700 border border-gray-300'
+                              }
+                            `}
+                            title={project.completion_requested ? "Click to view completion details" : "Waiting for SE completion request"}
+                          >
+                            <span className="font-bold">
+                              {project.confirmed_completions || 0}/{project.total_se_assignments || 0}
+                            </span>
+                            <span>confirmations</span>
+                            {project.total_se_assignments && project.confirmed_completions === project.total_se_assignments && project.total_se_assignments > 0 && (
+                              <CheckCircleIcon className="w-5 h-5 text-green-600" />
+                            )}
+                          </button>
+                        </div>
                       )}
                       {project.status?.toLowerCase() === 'completed' && (
                         <div className="px-4 py-2 bg-green-100 border-2 border-green-400 rounded-lg flex items-center gap-2">
@@ -1088,7 +1070,7 @@ const MyProjects: React.FC = () => {
                   </div>
 
                   {/* Project Stats */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-4">
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                       <p className="text-xs text-blue-700 mb-1">Location</p>
                       <p className="text-lg font-bold text-blue-900">{project.location || 'N/A'}</p>
@@ -1114,6 +1096,23 @@ const MyProjects: React.FC = () => {
                         {project.end_date ? new Date(project.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A'}
                       </p>
                     </div>
+                    {/* Item Assignment Count */}
+                    {filterStatus === 'assigned' && (
+                      <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                        <p className="text-xs text-indigo-700 mb-1">Items Assigned</p>
+                        <p className="text-lg font-bold text-indigo-900">
+                          {((project.total_items || 0) - (project.items_pending_assignment || 0))}/{project.total_items || 0}
+                        </p>
+                      </div>
+                    )}
+                    {filterStatus === 'pending' && (project.total_items || 0) > 0 && (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                        <p className="text-xs text-yellow-700 mb-1">Items Pending</p>
+                        <p className="text-lg font-bold text-yellow-900">
+                          {project.total_items || 0}
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                 </div>

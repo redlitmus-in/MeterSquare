@@ -449,7 +449,8 @@ const ChangeRequestsPage: React.FC = () => {
                                   style={{ backgroundColor: 'rgb(22, 163, 74)' }}
                                 >
                                   <Check className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                                  <span>Approve</span>
+                                  <span className="hidden sm:inline">Approve & Send to Buyer</span>
+                                  <span className="sm:hidden">Approve</span>
                                 </button>
                                 <button
                                   onClick={() => handleReject(request.cr_id)}

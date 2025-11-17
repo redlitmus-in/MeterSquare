@@ -343,9 +343,21 @@ def get_all_pm_boqs():
             boq_details_record = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
             if boq_details_record and boq_details_record.boq_details:
                 items = boq_details_record.boq_details.get('items', [])
-                total_items = len(items)
 
                 for item in items:
+                    # Skip extra materials and change requests from counts (same logic as frontend and assign_items_to_se)
+                    item_name = item.get('item_name', '') or item.get('item_code', '')
+                    item_code = item.get('item_code', '') or item.get('code', '')
+                    is_extra = ('extra material' in item_name.lower() or
+                               'cr #' in item_code.lower() or
+                               'cr #' in item_name.lower())
+
+                    if is_extra:
+                        continue  # Skip extra materials from all counts
+
+                    # Count non-extra items only
+                    total_items += 1
+
                     assigned_by_pm = item.get('assigned_by_pm_user_id')
                     assigned_to_se = item.get('assigned_to_se_user_id')
 

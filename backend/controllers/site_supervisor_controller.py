@@ -313,6 +313,26 @@ def get_all_sitesupervisor_boqs():
                         "items": []  # Items will be populated by ExtraMaterialForm if needed
                     })
 
+            # Check if all SE's work has been PM-confirmed
+            from models.pm_assign_ss import PMAssignSS
+            se_assignments = PMAssignSS.query.filter_by(
+                project_id=project.project_id,
+                assigned_to_se_id=user_id,
+                is_deleted=False,
+                se_completion_requested=True  # Only check assignments where SE requested completion
+            ).all()
+
+            # SE's work is confirmed if ALL their requested assignments are PM-confirmed
+            all_my_work_confirmed = all(a.pm_confirmed_completion for a in se_assignments) if se_assignments else False
+
+            # Check if THIS SE has requested completion (SE-specific, not project-level)
+            # If ANY of this SE's assignments has se_completion_requested=True, then this SE requested completion
+            my_completion_requested = any(a.se_completion_requested for a in PMAssignSS.query.filter_by(
+                project_id=project.project_id,
+                assigned_to_se_id=user_id,
+                is_deleted=False
+            ).all())
+
             projects_list.append({
                 "project_id": project.project_id,
                 "project_name": project.project_name,
@@ -328,6 +348,8 @@ def get_all_sitesupervisor_boqs():
                 "priority": getattr(project, 'priority', 'medium'),
                 "boq_ids": boq_ids,  # List of BOQ IDs for reference
                 "completion_requested": project.completion_requested if project.completion_requested is not None else False,
+                "my_completion_requested": my_completion_requested,  # SE-specific: did THIS SE request completion?
+                "my_work_confirmed": all_my_work_confirmed,  # SE-specific confirmation status
                 "boq_assigned_to_buyer": boq_assigned_to_buyer,
                 "assigned_buyer_name": assigned_buyer_name,
                 # Item assignment counts

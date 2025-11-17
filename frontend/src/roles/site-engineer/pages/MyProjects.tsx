@@ -87,7 +87,9 @@ interface Project {
     total_materials_cost: number;
     total_labour_cost: number;
   };
-  completion_requested?: boolean;
+  completion_requested?: boolean;  // PROJECT-LEVEL: true if ANY SE requested
+  my_completion_requested?: boolean;  // SE-SPECIFIC: true if THIS SE requested
+  my_work_confirmed?: boolean;  // SE-specific: true if all SE's work is PM-confirmed
   existingPurchaseItems?: BOQItem[];
   newPurchaseItems?: BOQItem[];
   boq_assigned_to_buyer?: boolean;
@@ -518,7 +520,7 @@ const MyProjects: React.FC = () => {
                       >
                         <PlusIcon className="w-5 h-5" />
                       </button> */}
-                      {!project.completion_requested && project.status?.toLowerCase() !== 'completed' && (
+                      {!project.my_completion_requested && project.status?.toLowerCase() !== 'completed' && (
                         <button
                           onClick={() => {
                             setProjectToRequest(project);
@@ -531,10 +533,16 @@ const MyProjects: React.FC = () => {
                           Request Completion
                         </button>
                       )}
-                      {project.completion_requested && project.status?.toLowerCase() !== 'completed' && (
+                      {project.my_completion_requested && !project.my_work_confirmed && project.status?.toLowerCase() !== 'completed' && (
                         <div className="px-4 py-2 bg-yellow-100 border-2 border-yellow-400 rounded-lg flex items-center gap-2">
                           <ClockIcon className="w-5 h-5 text-yellow-600" />
                           <span className="text-sm font-bold text-yellow-900">Pending PM Approval</span>
+                        </div>
+                      )}
+                      {project.my_work_confirmed && project.status?.toLowerCase() !== 'completed' && (
+                        <div className="px-4 py-2 bg-green-100 border-2 border-green-400 rounded-lg flex items-center gap-2">
+                          <CheckCircleIcon className="w-5 h-5 text-green-600" />
+                          <span className="text-sm font-bold text-green-900">Your Work Confirmed</span>
                         </div>
                       )}
                       {project.status?.toLowerCase() === 'completed' && (

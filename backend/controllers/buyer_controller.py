@@ -805,21 +805,25 @@ def complete_purchase():
                         sub_item_id_int = None
                         if raw_sub_item_id:
                             try:
-                                # If it's already an int, use it
+                                # If it's already an int, use it (sub_item_id is INTEGER in database)
                                 if isinstance(raw_sub_item_id, int):
                                     sub_item_id_int = raw_sub_item_id
                                 # If it's a string like "123", convert it
                                 elif isinstance(raw_sub_item_id, str) and raw_sub_item_id.isdigit():
                                     sub_item_id_int = int(raw_sub_item_id)
-                                # If it's a string like "subitem_331_1_3", extract the integer part
-                                # (This is a fallback, frontend should send integer IDs)
+                                else:
+                                    log.warning(f"⚠️ sub_item_id has unexpected format: {raw_sub_item_id} (type: {type(raw_sub_item_id)})")
                             except Exception as e:
-                                log.warning(f"Could not parse sub_item_id '{raw_sub_item_id}': {e}")
+                                log.warning(f"❌ Could not parse sub_item_id '{raw_sub_item_id}': {e}")
 
                         # Fallback to change request sub_item_id if still None
                         if sub_item_id_int is None and cr.sub_item_id:
                             sub_item_id_int = cr.sub_item_id
                             log.info(f"   - Using cr.sub_item_id as fallback: {sub_item_id_int}")
+
+                        # Log warning if sub_item_id is still None
+                        if sub_item_id_int is None:
+                            log.warning(f"⚠️ No valid sub_item_id found for material '{material_name}' in CR-{cr_id}")
 
                         log.info(f"🟢 Creating new material '{material_name}' with:")
                         log.info(f"   - item_id (database_item_id): {database_item_id}")

@@ -131,7 +131,7 @@ def create_change_request():
             # Direct API call - convert materials to sub_items format
             for mat in materials:
                 sub_items_data.append({
-                    'sub_item_id': mat.get('sub_item_id'),  # Sub-item ID (e.g., "subitem_331_1_3")
+                    'sub_item_id': mat.get('sub_item_id'),  # Sub-item ID (INTEGER from boq_sub_items table)
                     'sub_item_name': mat.get('sub_item_name'),  # Sub-item name (e.g., "Protection")
                     'material_name': mat.get('material_name'),  # Material name (e.g., "Bubble Wrap")
                     'quantity': mat.get('quantity'),
@@ -179,13 +179,17 @@ def create_change_request():
             raw_sub_item_id = first_sub_item.get('sub_item_id')
             if raw_sub_item_id:
                 try:
-                    # Convert to integer if it's a number
+                    # Convert to integer if it's a number (sub_item_id should be INTEGER from database)
                     if isinstance(raw_sub_item_id, int):
                         primary_sub_item_id = raw_sub_item_id
                     elif isinstance(raw_sub_item_id, str) and raw_sub_item_id.isdigit():
                         primary_sub_item_id = int(raw_sub_item_id)
-                except (ValueError, TypeError):
-                    log.warning(f"Could not parse sub_item_id: {raw_sub_item_id}")
+                    else:
+                        log.warning(f"⚠️ sub_item_id has unexpected format: {raw_sub_item_id} (type: {type(raw_sub_item_id)})")
+                except (ValueError, TypeError) as e:
+                    log.warning(f"❌ Could not parse sub_item_id: {raw_sub_item_id}, error: {e}")
+            else:
+                log.info("ℹ️ No sub_item_id provided in change request materials")
 
         # DUPLICATE DETECTION: Check for similar requests within last 30 seconds
         # This prevents accidental double-clicks and form re-submissions
@@ -238,6 +242,13 @@ def create_change_request():
         # User must explicitly click "Send for Review" button
         db.session.add(change_request)
         db.session.flush()  # Get the cr_id before committing
+
+        # Log successful change request creation with sub_item_id
+        log.info(f"✅ Change request CR-{change_request.cr_id} created with sub_item_id={primary_sub_item_id}")
+        if primary_sub_item_id:
+            log.info(f"   - sub_item_id {primary_sub_item_id} will be saved to change_requests table")
+        else:
+            log.info(f"   - No sub_item_id provided (this is OK for some change request types)")
 
         # Add to BOQ History - Track change request creation
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()

@@ -1043,7 +1043,28 @@ const ChangeRequestsPage: React.FC = () => {
                                 className="bg-green-600 hover:bg-green-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold"
                               >
                                 <Check className="h-3.5 w-3.5" />
-                                <span>Approve</span>
+                                <span>
+                                  {/* Dynamic text based on material types */}
+                                  {(() => {
+                                    // Check if ANY material is new (has no master_material_id)
+                                    const hasNewMaterials = request.materials_data?.some(mat =>
+                                      mat.master_material_id === null ||
+                                      mat.master_material_id === undefined ||
+                                      mat.master_material_id === ''
+                                    );
+
+                                    // Debug log for troubleshooting
+                                    if (request.materials_data && request.materials_data.length > 0) {
+                                      console.log(`CR ${request.cr_id} materials:`, request.materials_data.map(m => ({
+                                        name: m.material_name,
+                                        master_id: m.master_material_id,
+                                        is_new: m.master_material_id === null || m.master_material_id === undefined
+                                      })));
+                                    }
+
+                                    return hasNewMaterials ? 'Approve & Send to Estimator' : 'Approve & Send to Buyer';
+                                  })()}
+                                </span>
                               </button>
                               <button
                                 onClick={() => handleReject(request.cr_id)}
