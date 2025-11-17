@@ -351,11 +351,18 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     // This function is just a placeholder for validation
 
     if (isAutoSave) {
+      // Check if user has added any images
+      const hasImages = items.some(item =>
+        item.sub_items.some(subItem => subItem.images && subItem.images.length > 0)
+      );
+
       // Show a subtle confirmation that data is backed up locally
       const mode = editMode ? 'Changes saved' : 'Draft saved';
       toast.success(mode, {
-        duration: 1500,
-        description: `${boqName} - ${items.length} items`
+        duration: hasImages ? 3000 : 1500,
+        description: hasImages
+          ? `${boqName} - Note: Images not saved in draft, please re-add`
+          : `${boqName} - ${items.length} items`
       });
     }
   };
@@ -368,11 +375,23 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     ? `boq_edit_draft_${existingBoqData.boq_id}`
     : 'boq_draft_autosave';
 
+  // Sanitize items before saving - remove File objects as they can't be serialized to localStorage
+  const sanitizeItemsForStorage = (items: BOQItemForm[]) => {
+    return items.map(item => ({
+      ...item,
+      sub_items: item.sub_items.map(subItem => ({
+        ...subItem,
+        images: [], // Remove File objects - they can't be serialized
+        // Keep imageUrls and imageData for reference only
+      }))
+    }));
+  };
+
   const { isSaving, lastSaved, saveNow, clearLocalStorage, getLocalStorageData } = useAutoSave({
     data: {
       boqName,
       selectedProjectId,
-      items,
+      items: sanitizeItemsForStorage(items), // Sanitize items to remove File objects
       overallOverhead,
       overallProfit,
       overallDiscount,
@@ -5662,6 +5681,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         onSaveAndClose={handleSaveDraftAndClose}
         onDiscardAndClose={handleDiscardAndClose}
         boqName={boqName}
+        hasImages={items.some(item =>
+          item.sub_items.some(subItem => subItem.images && subItem.images.length > 0)
+        )}
       />
     </>
   );

@@ -7,6 +7,7 @@ interface SaveDraftModalProps {
   onSaveAndClose: () => void;
   onDiscardAndClose: () => void;
   boqName?: string;
+  hasImages?: boolean; // Whether the BOQ has uploaded images
 }
 
 /**
@@ -23,6 +24,7 @@ const SaveDraftModal: React.FC<SaveDraftModalProps> = ({
   onSaveAndClose,
   onDiscardAndClose,
   boqName,
+  hasImages = false,
 }) => {
   if (!open) {
     return null;
@@ -86,6 +88,20 @@ const SaveDraftModal: React.FC<SaveDraftModalProps> = ({
               <p className="text-xs text-gray-700">
                 <strong>BOQ:</strong> {boqName}
               </p>
+            </div>
+          )}
+
+          {hasImages && (
+            <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-300">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-semibold text-amber-900">Important:</p>
+                  <p className="text-xs text-amber-800">
+                    Uploaded images cannot be saved in draft. You'll need to re-upload them when you resume.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 
