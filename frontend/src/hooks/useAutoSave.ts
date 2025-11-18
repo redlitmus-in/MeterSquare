@@ -43,14 +43,21 @@ export const useAutoSave = ({
 
   // Save to local storage
   const saveToLocalStorage = useCallback(
-    (dataToSave: any) => {
+    async (dataToSave: any) => {
       if (!localStorageKey) return;
 
       try {
+        // If data has items with images, sanitize them first
+        let sanitizedData = dataToSave;
+        if (dataToSave?.items && Array.isArray(dataToSave.items)) {
+          // Convert File objects to base64 for storage
+          sanitizedData = await sanitizeItemsForStorage(dataToSave);
+        }
+
         localStorage.setItem(
           localStorageKey,
           JSON.stringify({
-            data: dataToSave,
+            data: sanitizedData,
             timestamp: new Date().toISOString(),
           })
         );
@@ -60,6 +67,59 @@ export const useAutoSave = ({
     },
     [localStorageKey]
   );
+
+  // Helper to convert items with images to base64
+  const sanitizeItemsForStorage = async (dataToSave: any) => {
+    const items = dataToSave.items;
+    const sanitizedItems = [];
+
+    for (const item of items) {
+      const sanitizedSubItems = [];
+
+      for (const subItem of item.sub_items || []) {
+        const base64Images = [];
+
+        // Convert each File to base64
+        if (subItem.images && subItem.images.length > 0) {
+          for (const file of subItem.images) {
+            try {
+              const base64 = await fileToBase64(file);
+              base64Images.push({
+                data: base64,
+                name: file.name,
+                type: file.type
+              });
+            } catch (error) {
+              console.error('Failed to convert image to base64:', error);
+            }
+          }
+        }
+
+        sanitizedSubItems.push({
+          ...subItem,
+          images: [], // Clear File objects
+          base64Images // Store base64 encoded images
+        });
+      }
+
+      sanitizedItems.push({
+        ...item,
+        sub_items: sanitizedSubItems
+      });
+    }
+
+    return { ...dataToSave, items: sanitizedItems };
+  };
+
+  // Helper: Convert File to base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
 
   // Get data from local storage
   const getLocalStorageData = useCallback(() => {
