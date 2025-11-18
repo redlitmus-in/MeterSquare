@@ -511,6 +511,7 @@ def create_boq():
                     sub_item_materials_cost += total_price
 
                     sub_item_materials.append({
+                        "material_id": mat_data.get("material_id"),
                         "material_name": mat_data.get("material_name"),
                         "location": mat_data.get("location", ""),
                         "brand": mat_data.get("brand", ""),
@@ -763,6 +764,7 @@ def create_boq():
                         materials_cost += total_price
 
                         sub_item_materials.append({
+                            "material_id": mat_data.get("material_id"),
                             "material_name": mat_data.get("material_name"),
                             "location": mat_data.get("location", ""),
                             "brand": mat_data.get("brand", ""),

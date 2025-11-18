@@ -924,11 +924,16 @@ def get_all_change_requests():
             )
         elif user_role == 'buyer':
             # Buyer sees:
-            # 1. Requests assigned to buyer (status='assigned_to_buyer')
-            # 2. Requests buyer has completed (status='purchase_complete')
-            from sqlalchemy import or_
+            # 1. Requests pending buyer review (status='under_review' AND approval_required_from='buyer')
+            # 2. Requests assigned to buyer (status='assigned_to_buyer')
+            # 3. Requests buyer has completed (status='purchase_complete')
+            from sqlalchemy import or_, and_
             query = query.filter(
                 or_(
+                    and_(
+                        ChangeRequest.status == CR_CONFIG.STATUS_UNDER_REVIEW,
+                        ChangeRequest.approval_required_from == 'buyer'
+                    ),
                     ChangeRequest.status == CR_CONFIG.STATUS_ASSIGNED_TO_BUYER,
                     ChangeRequest.status == CR_CONFIG.STATUS_PURCHASE_COMPLETE
                 )

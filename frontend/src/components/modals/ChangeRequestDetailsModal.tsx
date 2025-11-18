@@ -96,6 +96,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const userIsEstimator = isEstimator(user);
   const userIsTechnicalDirector = isTechnicalDirector(user);
   const userIsSiteEngineer = isSiteEngineer(user);
+  const userIsBuyer = user?.role?.toLowerCase() === 'buyer' || user?.role_name?.toLowerCase() === 'buyer';
 
   // Final statuses where no actions should be allowed
   const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'purchase_completed', 'approved', 'rejected'].includes(changeRequest.status);
@@ -114,6 +115,9 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
   // Check if there are any new materials (determines if pricing columns should be shown)
   const hasNewMaterials = materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined);
+
+  // Buyers should always see pricing columns
+  const shouldShowPricing = userIsBuyer || (!userIsSiteEngineer && hasNewMaterials);
 
   // Handler for approval with updated materials
   const handleApproveWithUpdatedPrices = () => {
@@ -297,20 +301,20 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
               {/* Materials Requested - Responsive Table */}
               <div className="mb-4 sm:mb-6">
                 <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3">Materials Requested</h3>
-                <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
-                  <table className={`w-full ${userIsSiteEngineer ? 'min-w-[800px]' : 'min-w-[1100px]'}`}>
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full table-fixed">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">Material</th>
-                        <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">Brand</th>
-                        <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">Size / Spec</th>
-                        <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">Sub-Item</th>
-                        <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">For Item</th>
-                        <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Quantity</th>
-                        {!userIsSiteEngineer && hasNewMaterials && (
+                        <th className="px-1.5 py-1.5 text-left text-[11px] font-semibold text-gray-600 w-[18%]">Material</th>
+                        <th className="px-1.5 py-1.5 text-left text-[11px] font-semibold text-gray-600 w-[12%]">Brand</th>
+                        <th className="px-1.5 py-1.5 text-left text-[11px] font-semibold text-gray-600 w-[14%]">Size/Spec</th>
+                        <th className="px-1.5 py-1.5 text-left text-[11px] font-semibold text-gray-600 w-[16%]">Sub-Item</th>
+                        <th className="px-1.5 py-1.5 text-left text-[11px] font-semibold text-gray-600 w-[14%]">For Item</th>
+                        <th className="px-1.5 py-1.5 text-right text-[11px] font-semibold text-gray-600 w-[12%]">Quantity</th>
+                        {shouldShowPricing && (
                           <>
-                            <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Unit Price</th>
-                            <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Total</th>
+                            <th className="px-1.5 py-1.5 text-right text-[11px] font-semibold text-gray-600 w-[14%]">Unit Price</th>
+                            <th className="px-1.5 py-1.5 text-right text-[11px] font-semibold text-gray-600 w-[14%]">Total</th>
                           </>
                         )}
                       </tr>
@@ -321,84 +325,70 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         const isNewMaterial = material.master_material_id === null || material.master_material_id === undefined;
                         return (
                           <tr key={idx} className="hover:bg-gray-50">
-                            <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-gray-900">
-                              <div className="flex items-center gap-2">
-                                <span>{material.material_name}</span>
+                            <td className="px-1.5 py-1.5 text-[11px] font-medium text-gray-900 truncate">
+                              <div className="flex items-center gap-1">
+                                <span className="truncate">{material.material_name}</span>
                                 {isNewMaterial && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300">
+                                  <span className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-green-100 text-green-800 border border-green-300 flex-shrink-0">
                                     NEW
                                   </span>
                                 )}
                               </div>
                             </td>
-                            <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600">
+                            <td className="px-1.5 py-1.5 text-[11px] text-gray-600 truncate">
                               {material.brand || '-'}
                             </td>
-                            <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600">
-                              <div className="flex flex-col gap-1">
-                                {material.size && <span>{material.size}</span>}
-                                {material.specification && (
-                                  <span className="text-gray-500 text-xs">{material.specification}</span>
-                                )}
-                                {!material.size && !material.specification && '-'}
-                              </div>
+                            <td className="px-1.5 py-1.5 text-[11px] text-gray-600 truncate">
+                              {material.size || material.specification || '-'}
                             </td>
-                          <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600">
-                            {material.sub_item_name && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                          <td className="px-1.5 py-1.5 text-[11px] text-gray-600 truncate">
+                            {material.sub_item_name ? (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-800 truncate">
                                 {material.sub_item_name}
                               </span>
-                            )}
+                            ) : '-'}
                           </td>
-                          <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600">
-                            {changeRequest.item_name && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                          <td className="px-1.5 py-1.5 text-[11px] text-gray-600 truncate">
+                            {changeRequest.item_name ? (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-800 truncate">
                                 {changeRequest.item_name}
                               </span>
-                            )}
+                            ) : '-'}
                           </td>
-                          <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600 text-right whitespace-nowrap">
+                          <td className="px-1.5 py-1.5 text-[11px] text-gray-600 text-right whitespace-nowrap">
                             {material.quantity} {material.unit}
                           </td>
-                          {!userIsSiteEngineer && hasNewMaterials && (
+                          {shouldShowPricing && (
                             <>
-                              <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600 text-right whitespace-nowrap">
-                                {isNewMaterial ? (
-                                  canEditPrices ? (
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      min="0"
-                                      value={material.unit_price || 0}
-                                      onChange={(e) => handlePriceChange(idx, e.target.value)}
-                                      className="w-24 px-2 py-1 text-right border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50 text-gray-900 font-medium"
-                                      placeholder="0.00"
-                                    />
-                                  ) : (
-                                    formatCurrency(material.unit_price || 0)
-                                  )
+                              <td className="px-1.5 py-1.5 text-[11px] text-gray-600 text-right whitespace-nowrap">
+                                {canEditPrices && isNewMaterial ? (
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={material.unit_price || 0}
+                                    onChange={(e) => handlePriceChange(idx, e.target.value)}
+                                    className="w-20 px-1.5 py-1 text-[11px] text-right border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50 text-gray-900 font-medium"
+                                    placeholder="0.00"
+                                  />
                                 ) : (
-                                  <span className="text-gray-400 italic">From BOQ</span>
+                                  formatCurrency(material.unit_price || 0)
                                 )}
                               </td>
-                              <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-semibold text-gray-900 text-right whitespace-nowrap">
-                                {isNewMaterial ? (
-                                  formatCurrency(material.total_price || (material.quantity * material.unit_price) || 0)
-                                ) : (
-                                  <span className="text-gray-400 italic">From BOQ</span>
-                                )}
+                              <td className="px-1.5 py-1.5 text-[11px] font-semibold text-gray-900 text-right whitespace-nowrap">
+                                {formatCurrency(material.total_price || (material.quantity * material.unit_price) || 0)}
                               </td>
                             </>
                           )}
                         </tr>
                         );
                       })}
-                      {!userIsSiteEngineer && hasNewMaterials && (
+                      {shouldShowPricing && (
                         <tr className="bg-purple-50 font-bold">
-                          <td colSpan={7} className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-purple-900 text-right">
+                          <td colSpan={6} className="px-1.5 py-1.5 text-[11px] text-purple-900 text-right">
                             Total Cost:
                           </td>
-                          <td className="px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-purple-900 text-right whitespace-nowrap">
+                          <td className="px-1.5 py-1.5 text-xs font-bold text-purple-900 text-right whitespace-nowrap">
                             {formatCurrency(totalMaterialsCost)}
                           </td>
                         </tr>
