@@ -33,7 +33,8 @@ import {
   MapPin,
   ArrowRight,
   ArrowLeft,
-  Activity
+  Activity,
+  Image as ImageIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
@@ -1477,8 +1478,8 @@ const ProjectApprovals: React.FC = () => {
           {/* Page Content */}
         <div className="max-w-7xl mx-auto px-6 py-6">
           {/* Filter Tabs and View Toggle */}
-          <div className="flex items-center justify-between mb-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 inline-flex gap-1">
+          <div className="flex items-center justify-between mb-6 gap-4">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 flex flex-wrap gap-1">
             {[
               { key: 'pending', label: 'Pending' },
               { key: 'approved', label: 'Approved' },
@@ -1498,14 +1499,14 @@ const ProjectApprovals: React.FC = () => {
                     setRevisionSubTab('pending_approval');
                   }
                 }}
-                className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 ${
+                className={`px-2.5 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 whitespace-nowrap ${
                   filterStatus === tab.key
                     ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 border border-red-200 shadow-md'
                     : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                 }`}
               >
                 <span>{tab.label}</span>
-                <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${
+                <span className={`px-1 py-0.5 text-[10px] font-bold rounded-full min-w-[18px] text-center ${
                   filterStatus === tab.key
                     ? 'bg-red-600 text-white'
                     : 'bg-gray-200 text-gray-700'
@@ -1806,22 +1807,22 @@ const ProjectApprovals: React.FC = () => {
                 );
               })()}
 
-              <div className="p-6">
-                <div className="flex items-start justify-between mb-4">
+              <div className="p-4">
+                <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-lg font-bold text-gray-900">{estimation.projectName}</h3>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <h3 className="text-base font-bold text-gray-900">{estimation.projectName}</h3>
                       {estimation.projectCode && (
-                        <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
+                        <span className="px-2 py-0.5 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
                           {estimation.projectCode}
                         </span>
                       )}
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getPriorityColor(estimation.priority)}`}>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${getPriorityColor(estimation.priority)}`}>
                         {estimation.priority} priority
                       </span>
                       <div className="flex items-center gap-1">
                         {getStatusIcon(estimation.status)}
-                        <span className={`text-sm font-medium ${
+                        <span className={`text-xs font-medium ${
                           estimation.status === 'cancelled' ? 'text-red-600' :
                           estimation.status === 'rejected' ? 'text-red-600' :
                           estimation.status === 'approved' ? 'text-green-600' :
@@ -1840,7 +1841,7 @@ const ProjectApprovals: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-3">
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600 mb-2">
                       <div className="flex items-center gap-1">
                         <BuildingOfficeIcon className="w-4 h-4" />
                         <span>{estimation.clientName}</span>
@@ -1862,37 +1863,37 @@ const ProjectApprovals: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-5 gap-4">
-                      <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3">
-                        <p className="text-xs text-gray-500 mb-1">Total Value</p>
-                        <p className="text-lg font-bold text-gray-900">
+                    <div className="grid grid-cols-5 gap-2">
+                      <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-2">
+                        <p className="text-[10px] text-gray-500 mb-0.5">Total Value</p>
+                        <p className="text-sm font-bold text-gray-900">
                           {(() => {
                             console.log(`🎨 [TD Card Render] BOQ ${estimation.id} (${estimation.projectName}) - Displaying totalValue: ${estimation.totalValue}`);
                             return formatCurrency(estimation.totalValue);
                           })()}
                         </p>
                       </div>
-                      <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3">
-                        <p className="text-xs text-gray-500 mb-1">Items</p>
-                        <p className="text-lg font-bold text-blue-900">{estimation.itemCount}</p>
+                      <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-2">
+                        <p className="text-[10px] text-gray-500 mb-0.5">Items</p>
+                        <p className="text-sm font-bold text-blue-900">{estimation.itemCount}</p>
                       </div>
-                      <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-3">
-                        <p className="text-xs text-gray-500 mb-1">Labor Cost</p>
-                        <p className="text-lg font-bold text-green-900">{formatCurrency(estimation.laborCost)}</p>
+                      <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-2">
+                        <p className="text-[10px] text-gray-500 mb-0.5">Labor Cost</p>
+                        <p className="text-sm font-bold text-green-900">{formatCurrency(estimation.laborCost)}</p>
                       </div>
-                      <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-3">
-                        <p className="text-xs text-gray-500 mb-1">Material Cost</p>
-                        <p className="text-lg font-bold text-red-900">{formatCurrency(estimation.materialCost)}</p>
+                      <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-2">
+                        <p className="text-[10px] text-gray-500 mb-0.5">Material Cost</p>
+                        <p className="text-sm font-bold text-red-900">{formatCurrency(estimation.materialCost)}</p>
                       </div>
-                      <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-3">
-                        <p className="text-xs text-gray-500 mb-1">O&P Margin</p>
-                        <p className="text-lg font-bold text-orange-900">{estimation.overheadPercentage + estimation.profitMargin}%</p>
-                        <p className="text-[10px] text-orange-700">OH: {estimation.overheadPercentage}% | P: {estimation.profitMargin}%</p>
+                      <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-2">
+                        <p className="text-[10px] text-gray-500 mb-0.5">O&P Margin</p>
+                        <p className="text-sm font-bold text-orange-900">{estimation.overheadPercentage + estimation.profitMargin}%</p>
+                        <p className="text-[9px] text-orange-700">OH: {estimation.overheadPercentage}% | P: {estimation.profitMargin}%</p>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 ml-4">
+                  <div className="flex items-center gap-1.5 ml-3">
                     <button
                       onClick={async () => {
                         // Store reference to current estimation BEFORE any state changes
@@ -1902,10 +1903,10 @@ const ProjectApprovals: React.FC = () => {
                         setFullScreenBoqMode('view');
                         setShowFullScreenBOQ(true);
                       }}
-                      className="p-2.5 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors group"
+                      className="p-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors group"
                       title="View BOQ Details"
                     >
-                      <EyeIcon className="w-5 h-5 text-blue-600 group-hover:text-blue-700" />
+                      <EyeIcon className="w-4 h-4 text-blue-600 group-hover:text-blue-700" />
                     </button>
 
                     {/* Show PM Details button - Only show when PM is assigned */}
@@ -2129,7 +2130,12 @@ const ProjectApprovals: React.FC = () => {
           boq={selectedEstimation ? { boq_id: selectedEstimation.id, boq_name: selectedEstimation.projectName } : null}
           onDownload={() => setShowFormatModal(true)}
           onApprove={
-            selectedEstimation && (selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision')
+            // Only show Approve button if: status is pending/pending_revision AND not already approved AND PM not assigned
+            selectedEstimation &&
+            (selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision') &&
+            selectedEstimation.status !== 'approved' &&
+            selectedEstimation.status !== 'revision_approved' &&
+            !selectedEstimation.pmAssigned
               ? () => {
                   // Show approval modal (TD needs to review comparison first for pending, or direct approval for revisions)
                   setShowApprovalModal(true);
@@ -2137,7 +2143,12 @@ const ProjectApprovals: React.FC = () => {
               : undefined
           }
           onReject={
-            selectedEstimation && (selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision')
+            // Only show Reject button if: status is pending/pending_revision AND not already approved AND PM not assigned
+            selectedEstimation &&
+            (selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision') &&
+            selectedEstimation.status !== 'approved' &&
+            selectedEstimation.status !== 'revision_approved' &&
+            !selectedEstimation.pmAssigned
               ? () => {
                   // Show rejection modal
                   setShowRejectionModal(true);
@@ -3618,6 +3629,34 @@ const ProjectApprovals: React.FC = () => {
                                         </div>
                                       </div>
                                     )}
+
+                                    {/* Sub-item Images */}
+                                    {subItem.sub_item_image && Array.isArray(subItem.sub_item_image) && subItem.sub_item_image.length > 0 && (
+                                      <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                        <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                          <ImageIcon className="w-3.5 h-3.5" />
+                                          Attached Images ({subItem.sub_item_image.length})
+                                        </h5>
+                                        <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                          {subItem.sub_item_image.map((image: any, imgIndex: number) => (
+                                            <div
+                                              key={imgIndex}
+                                              className="relative group cursor-pointer"
+                                              onClick={() => window.open(image.url, '_blank')}
+                                            >
+                                              <img
+                                                src={image.url}
+                                                alt={`${subItem.sub_item_name} - ${image.original_name || image.filename}`}
+                                                className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:border-orange-500 transition-all"
+                                              />
+                                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center">
+                                                <Eye className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })}
@@ -4074,6 +4113,34 @@ const ProjectApprovals: React.FC = () => {
                                     <div className="mt-2 text-right">
                                       <span className="text-sm font-semibold text-blue-700">Total: {formatCurrency(subItemAmount)}</span>
                                     </div>
+
+                                    {/* Sub-item Images */}
+                                    {subItem.sub_item_image && Array.isArray(subItem.sub_item_image) && subItem.sub_item_image.length > 0 && (
+                                      <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                        <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                          <ImageIcon className="w-3.5 h-3.5" />
+                                          Attached Images ({subItem.sub_item_image.length})
+                                        </h5>
+                                        <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                          {subItem.sub_item_image.map((image: any, imgIndex: number) => (
+                                            <div
+                                              key={imgIndex}
+                                              className="relative group cursor-pointer"
+                                              onClick={() => window.open(image.url, '_blank')}
+                                            >
+                                              <img
+                                                src={image.url}
+                                                alt={`${subItem.sub_item_name} - ${image.original_name || image.filename}`}
+                                                className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:border-blue-500 transition-all"
+                                              />
+                                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center">
+                                                <Eye className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })}
@@ -4527,7 +4594,11 @@ const ProjectApprovals: React.FC = () => {
           refreshTrigger={boqDetailsRefreshTrigger}
           onDownload={() => setShowFormatModal(true)}
           onApprove={
-            (selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision')
+            // Only show Approve button if: status is pending/pending_revision AND not already approved AND PM not assigned
+            ((selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision') &&
+             selectedEstimation.status !== 'approved' &&
+             selectedEstimation.status !== 'revision_approved' &&
+             !selectedEstimation.pmAssigned)
               ? () => {
                   setShowApprovalModal(true);
                   // Don't close full-screen BOQ yet - keep data for comparison modal
@@ -4535,7 +4606,11 @@ const ProjectApprovals: React.FC = () => {
               : undefined
           }
           onReject={
-            (selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision')
+            // Only show Reject button if: status is pending/pending_revision AND not already approved AND PM not assigned
+            ((selectedEstimation.status === 'pending' || selectedEstimation.status === 'pending_revision') &&
+             selectedEstimation.status !== 'approved' &&
+             selectedEstimation.status !== 'revision_approved' &&
+             !selectedEstimation.pmAssigned)
               ? () => {
                   setShowRejectionModal(true);
                   // Don't close full-screen BOQ yet - keep data for rejection modal
@@ -5027,6 +5102,34 @@ const ProjectApprovals: React.FC = () => {
                                         </div>
                                       </div>
                                     )}
+
+                                    {/* Sub-item Images */}
+                                    {subItem.sub_item_image && Array.isArray(subItem.sub_item_image) && subItem.sub_item_image.length > 0 && (
+                                      <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                        <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                          <ImageIcon className="w-3.5 h-3.5" />
+                                          Attached Images ({subItem.sub_item_image.length})
+                                        </h5>
+                                        <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                          {subItem.sub_item_image.map((image: any, imgIndex: number) => (
+                                            <div
+                                              key={imgIndex}
+                                              className="relative group cursor-pointer"
+                                              onClick={() => window.open(image.url, '_blank')}
+                                            >
+                                              <img
+                                                src={image.url}
+                                                alt={`${subItem.sub_item_name} - ${image.original_name || image.filename}`}
+                                                className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:border-orange-500 transition-all"
+                                              />
+                                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center">
+                                                <Eye className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })}
@@ -5487,6 +5590,34 @@ const ProjectApprovals: React.FC = () => {
                                     <div className="mt-2 text-right">
                                       <span className="text-sm font-semibold text-blue-700">Total: {formatCurrency(subItemAmount)}</span>
                                     </div>
+
+                                    {/* Sub-item Images */}
+                                    {subItem.sub_item_image && Array.isArray(subItem.sub_item_image) && subItem.sub_item_image.length > 0 && (
+                                      <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                        <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                          <ImageIcon className="w-3.5 h-3.5" />
+                                          Attached Images ({subItem.sub_item_image.length})
+                                        </h5>
+                                        <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                          {subItem.sub_item_image.map((image: any, imgIndex: number) => (
+                                            <div
+                                              key={imgIndex}
+                                              className="relative group cursor-pointer"
+                                              onClick={() => window.open(image.url, '_blank')}
+                                            >
+                                              <img
+                                                src={image.url}
+                                                alt={`${subItem.sub_item_name} - ${image.original_name || image.filename}`}
+                                                className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:border-blue-500 transition-all"
+                                              />
+                                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center">
+                                                <Eye className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })}

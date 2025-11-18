@@ -2679,6 +2679,50 @@ def revision_boq(boq_id):
             boq_details.total_labour = total_labour
             boq_details.last_modified_by = user_name
 
+            # Save preliminary selections to boq_preliminaries junction table
+            preliminaries_data = data.get("preliminaries", {})
+            if preliminaries_data and isinstance(preliminaries_data, dict):
+                prelim_items = preliminaries_data.get("items", [])
+                if prelim_items:
+                    # Delete existing preliminary selections for this BOQ
+                    BOQPreliminary.query.filter_by(boq_id=boq_id).delete()
+
+                    # Insert new selections
+                    for prelim in prelim_items:
+                        prelim_id = prelim.get('prelim_id')
+                        is_checked = prelim.get('checked', False) or prelim.get('selected', False)
+
+                        if prelim_id:  # Only save master preliminary items
+                            boq_prelim = BOQPreliminary(
+                                boq_id=boq_id,
+                                prelim_id=prelim_id,
+                                is_checked=is_checked
+                            )
+                            db.session.add(boq_prelim)
+                    log.info(f"✅ Updated preliminary selections in boq_preliminaries for BOQ {boq_id} during revision")
+
+            # Save terms & conditions selections to boq_terms_selections junction table
+            terms_conditions = data.get("terms_conditions", [])
+            if terms_conditions and isinstance(terms_conditions, list):
+                from sqlalchemy import text
+                for term in terms_conditions:
+                    term_id = term.get('term_id')
+                    is_checked = term.get('checked', False)
+
+                    if term_id:  # Only save if it has a term_id (from master table)
+                        # Insert or update term selection
+                        db.session.execute(text("""
+                            INSERT INTO boq_terms_selections (boq_id, term_id, is_checked, created_at, updated_at)
+                            VALUES (:boq_id, :term_id, :is_checked, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (boq_id, term_id)
+                            DO UPDATE SET is_checked = :is_checked, updated_at = CURRENT_TIMESTAMP
+                        """), {
+                            'boq_id': boq_id,
+                            'term_id': term_id,
+                            'is_checked': is_checked
+                        })
+                log.info(f"✅ Updated terms selections in boq_terms_selections for BOQ {boq_id} during revision")
+
         # If items are provided, update the JSON structure (for non-revision updates)
         elif "items" in data:
             # Use the same current user logic for BOQ details

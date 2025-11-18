@@ -338,8 +338,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
   // Auto-save function - saves to localStorage for both CREATE and EDIT modes
   const handleAutoSave = async (formData: any, isAutoSave: boolean) => {
-    // Don't auto-save in revision mode
-    if (isRevision) return;
+    // Enable auto-save for revision mode too - users need draft protection
+    // if (isRevision) return;
 
     // Don't auto-save if there's no meaningful data
     if (!selectedProjectId || !boqName.trim() || items.length === 0) {
@@ -370,7 +370,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   // - Full save with notification: Every 3 seconds if data changed
   // Use unique localStorage key for EACH project to prevent drafts from overwriting each other
   const autoSaveKey = editMode && existingBoqData?.boq_id
-    ? `boq_edit_draft_${existingBoqData.boq_id}`
+    ? `boq_edit_draft_${existingBoqData.boq_id}${isRevision ? '_revision' : ''}`
     : `boq_draft_create_${selectedProjectId || selectedProject?.project_id || 'temp'}`;
 
   // Helper: Convert base64 back to File
@@ -409,7 +409,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     onSave: handleAutoSave,
     interval: 3000, // 3 seconds - immediate auto-save after changes
     localStorageKey: autoSaveKey,
-    enabled: autoSaveEnabled && isOpen && !isRevision // Enable for both CREATE and EDIT modes
+    enabled: autoSaveEnabled && isOpen // Enable for CREATE, EDIT, and REVISION modes
   });
 
   // TEST MODE: Set to true to test inactivity in 10 seconds instead of 2 hours
@@ -421,7 +421,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     onInactive: () => {
       setShowInactivityModal(true);
     },
-    enabled: isOpen && !isRevision // Enable for both CREATE and EDIT modes
+    enabled: isOpen // Enable for CREATE, EDIT, and REVISION modes
   });
 
   // Handle inactivity modal actions
@@ -441,8 +441,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const handleCloseWithConfirmation = () => {
     const hasData = (boqName && boqName.trim().length > 0) || selectedProjectId !== null || items.length > 0;
 
-    // Show save draft modal for both CREATE and EDIT modes (not for REVISION)
-    if (hasData && !isRevision) {
+    // Show save draft modal for CREATE, EDIT, and REVISION modes
+    if (hasData) {
       setShowSaveDraftModal(true);
     } else {
       onClose();
@@ -512,7 +512,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
   // Auto-restore draft data on mount (only if draft is for THIS project)
   useEffect(() => {
-    if (isOpen && !editMode && !isRevision) {
+    // Allow draft recovery for CREATE mode and REVISION edits
+    // Regular EDIT mode loads from database, so skip draft recovery
+    if (isOpen && (!editMode || isRevision)) {
       // Reset flags when form opens
       isClosingAfterSubmitRef.current = false;
       isFormInitializedRef.current = false;
@@ -625,7 +627,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
   // Warn user before page refresh/close if there's unsaved data
   useEffect(() => {
-    if (!isOpen || editMode || isRevision) return;
+    // Enable warning for CREATE and REVISION modes (not regular EDIT since it auto-saves to DB)
+    if (!isOpen || (editMode && !isRevision)) return;
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       const hasData = boqName.trim() || selectedProjectId || items.length > 0;
@@ -3192,7 +3195,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                   {editMode ? 'Update the Bill of Quantities details' : isRevision ? 'Create a new revision of the BOQ' : 'Build a detailed Bill of Quantities for your project'}
                 </p>
                 {/* Auto-save status indicator */}
-                {!isRevision && autoSaveEnabled && (
+                {autoSaveEnabled && (
                   <div className="flex items-center gap-2 mt-2 text-xs">
                     {isSaving ? (
                       <>
