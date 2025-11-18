@@ -156,7 +156,17 @@ def get_all_td_boqs():
                         profit_margin = item.get("profit_margin", 0) or item.get("profit_margin_percentage", 0)
 
             # Use calculated selling price if available, otherwise fall back to database value
-            final_total_cost = total_selling_price if total_selling_price > 0 else (float(boq_details.total_cost) if boq_details and boq_details.total_cost else 0.0)
+            items_subtotal = total_selling_price if total_selling_price > 0 else (float(boq_details.total_cost) if boq_details and boq_details.total_cost else 0.0)
+
+            # Get preliminaries amount from BOQ details JSON
+            preliminaries_amount = 0
+            if boq_details and boq_details.boq_details:
+                preliminaries = boq_details.boq_details.get("preliminaries", {})
+                if preliminaries and "cost_details" in preliminaries:
+                    preliminaries_amount = float(preliminaries.get("cost_details", {}).get("amount", 0) or 0)
+
+            # Calculate subtotal (items + preliminaries) BEFORE discount
+            subtotal_before_discount = items_subtotal + preliminaries_amount
 
             # Apply discount if present in BOQ details
             discount_percentage = 0
@@ -166,13 +176,14 @@ def get_all_td_boqs():
                 discount_amount = boq_details.boq_details.get("discount_amount", 0) or 0
 
                 # Calculate discount amount if only percentage is provided
-                if discount_amount == 0 and discount_percentage > 0 and final_total_cost > 0:
-                    discount_amount = final_total_cost * (discount_percentage / 100)
+                # Discount is applied on subtotal (items + preliminaries)
+                if discount_amount == 0 and discount_percentage > 0 and subtotal_before_discount > 0:
+                    discount_amount = subtotal_before_discount * (discount_percentage / 100)
 
-                # Apply discount to final total
-                if discount_amount > 0:
-                    final_total_cost = final_total_cost - discount_amount
-                    log.info(f"BOQ {boq.boq_id}: Applied discount {discount_percentage}% (AED {discount_amount}) to total. Before: {total_selling_price}, After: {final_total_cost}")
+            # Calculate GRAND TOTAL (Excluding VAT) = Subtotal - Discount
+            final_total_cost = subtotal_before_discount - discount_amount
+
+            log.info(f"BOQ {boq.boq_id}: Items={items_subtotal}, Preliminaries={preliminaries_amount}, Subtotal={subtotal_before_discount}, Discount={discount_amount}, Grand Total={final_total_cost}")
 
             boq_data = {
                 "boq_id": boq.boq_id,
