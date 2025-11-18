@@ -783,14 +783,21 @@ const EstimatorHub: React.FC = () => {
   const handleBOQCreated = (boqId: number) => {
     toast.success('BOQ created successfully!');
     setShowFullScreenBOQ(false);
+
+    // Clear project-specific draft if it exists
+    if (selectedProjectForBOQ) {
+      const draftKey = `boq_draft_create_${selectedProjectForBOQ.project_id}`;
+      localStorage.removeItem(draftKey);
+      console.log(`✅ Draft cleared for project ${selectedProjectForBOQ.project_id} after successful BOQ creation`);
+    }
+
+    // Also clear old draft key for backward compatibility
+    localStorage.removeItem('boq_draft_autosave');
+
     setSelectedProjectForBOQ(null);
     setActiveTab('projects'); // Show pending projects tab
-
-    // Clear draft since BOQ was successfully created
-    localStorage.removeItem('boq_draft_autosave');
     setHasSavedDraft(false);
     setDraftData(null);
-    console.log('✅ Draft cleared after successful BOQ creation');
 
     loadBOQs(); // Refresh the BOQ list
   };
@@ -2500,8 +2507,20 @@ const EstimatorHub: React.FC = () => {
                           <span className="sm:hidden">View</span>
                         </button>
                         {(() => {
-                          // Check if draft is for THIS specific project
-                          const isDraftForThisProject = hasSavedDraft && draftData?.selectedProjectId === project.project_id;
+                          // Check if draft is for THIS specific project using project-specific localStorage key
+                          let isDraftForThisProject = false;
+                          let projectDraftData = null;
+                          try {
+                            const draftKey = `boq_draft_create_${project.project_id}`;
+                            const savedDraft = localStorage.getItem(draftKey);
+                            if (savedDraft) {
+                              const parsedDraft = JSON.parse(savedDraft);
+                              projectDraftData = parsedDraft.data || parsedDraft;
+                              isDraftForThisProject = projectDraftData && projectDraftData.boqName && projectDraftData.selectedProjectId === project.project_id;
+                            }
+                          } catch (error) {
+                            console.error('Error checking project draft:', error);
+                          }
                           return boqCount === 0 ? (
                             isDraftForThisProject ? (
                               <button
@@ -2518,7 +2537,7 @@ const EstimatorHub: React.FC = () => {
                                   e.currentTarget.style.color = '#ea580c';
                                 }}
                                 onClick={() => handleCreateBOQ(project)}
-                                title={`Resume draft: ${draftData?.boqName || 'Unsaved BOQ'}`}
+                                title={`Resume draft: ${projectDraftData?.boqName || 'Unsaved BOQ'}`}
                               >
                                 <Clock className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                                 <span className="hidden sm:inline">Resume Draft</span>
@@ -3475,7 +3494,20 @@ const EstimatorHub: React.FC = () => {
                           Related BOQs
                         </h3>
                         {projectBoqs.length === 0 && (() => {
-                          const isDraftForThisProject = hasSavedDraft && draftData?.selectedProjectId === viewingProject.project_id;
+                          // Check for project-specific draft
+                          let isDraftForThisProject = false;
+                          let projectDraftData = null;
+                          try {
+                            const draftKey = `boq_draft_create_${viewingProject.project_id}`;
+                            const savedDraft = localStorage.getItem(draftKey);
+                            if (savedDraft) {
+                              const parsedDraft = JSON.parse(savedDraft);
+                              projectDraftData = parsedDraft.data || parsedDraft;
+                              isDraftForThisProject = projectDraftData && projectDraftData.boqName && projectDraftData.selectedProjectId === viewingProject.project_id;
+                            }
+                          } catch (error) {
+                            console.error('Error checking project draft:', error);
+                          }
                           return (
                             <button
                               className={`px-4 py-2 bg-white border-2 ${isDraftForThisProject ? 'border-orange-500 text-orange-600 hover:bg-orange-50' : 'border-red-500 text-red-600 hover:bg-red-50'} text-sm rounded-lg transition-all font-semibold flex items-center gap-2`}
@@ -3483,7 +3515,7 @@ const EstimatorHub: React.FC = () => {
                                 handleCreateBOQ(viewingProject);
                                 setViewingProject(null);
                               }}
-                              title={isDraftForThisProject ? `Resume draft: ${draftData?.boqName || 'Unsaved BOQ'}` : 'Create a new BOQ for this project'}
+                              title={isDraftForThisProject ? `Resume draft: ${projectDraftData?.boqName || 'Unsaved BOQ'}` : 'Create a new BOQ for this project'}
                             >
                               {isDraftForThisProject ? (
                                 <>
