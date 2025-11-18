@@ -980,61 +980,7 @@ const ExtraMaterialPage: React.FC = () => {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.3 }}
           >
-            {/* Filters for Approved Tab */}
-            <div className="mb-6 bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <FunnelIcon className="w-5 h-5 text-gray-500" />
-                <h3 className="font-medium text-gray-900">Filters</h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Project</label>
-                  <select
-                    value={filterProject}
-                    onChange={(e) => setFilterProject(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#243d8a]"
-                  >
-                    <option value="">All Projects</option>
-                    {/* Projects will be populated from API */}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Area</label>
-                  <select
-                    value={filterArea}
-                    onChange={(e) => setFilterArea(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#243d8a]"
-                    disabled={!filterProject}
-                  >
-                    <option value="">All Areas</option>
-                    {/* Areas will be populated based on selected project */}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Item</label>
-                  <select
-                    value={filterItem}
-                    onChange={(e) => setFilterItem(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#243d8a]"
-                  >
-                    <option value="">All Items</option>
-                    {/* Items will be populated from API */}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                  <select
-                    value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#243d8a]"
-                  >
-                    <option value="">All Status</option>
-                    <option value="approved">Approved</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Approved Requests</h2>
             {/* Approved List */}
             {loading ? (
               <div className="flex justify-center items-center py-12">
@@ -1068,7 +1014,7 @@ const ExtraMaterialPage: React.FC = () => {
                         {getStatusBadge(request.status)}
                       </div>
 
-                      <div className="space-y-2 text-sm text-gray-600">
+                      <div className="space-y-2 text-sm text-gray-600 mb-4">
                         <div>
                           <p className="font-medium text-gray-900">{request.project_name}</p>
                           <p className="text-xs text-gray-500">{request.area_name}</p>
@@ -1091,6 +1037,14 @@ const ExtraMaterialPage: React.FC = () => {
                           Approved: {new Date(request.created_at).toLocaleDateString()}
                         </div>
                       </div>
+
+                      <button
+                        onClick={() => handleViewDetails(request.id)}
+                        className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                      >
+                        <EyeIcon className="w-4 h-4" />
+                        View Details
+                      </button>
                     </div>
                   </motion.div>
                 ))}
@@ -1122,6 +1076,9 @@ const ExtraMaterialPage: React.FC = () => {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Approved Date
                         </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -1152,6 +1109,15 @@ const ExtraMaterialPage: React.FC = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {new Date(request.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <button
+                              onClick={() => handleViewDetails(request.id)}
+                              className="text-blue-600 hover:text-blue-700 font-medium"
+                            >
+                              <EyeIcon className="w-4 h-4 inline mr-1" />
+                              View
+                            </button>
                           </td>
                         </tr>
                       ))}
