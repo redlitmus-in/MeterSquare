@@ -402,6 +402,7 @@ def send_for_review(cr_id):
 
         data = request.get_json() or {}
         route_to = data.get('route_to')
+        buyer_id = data.get('buyer_id')
         normalized_role = workflow_service.normalize_role(user_role_lower)
 
         # --- Determine next approver ---
@@ -461,11 +462,32 @@ def send_for_review(cr_id):
                 log.info(f"Routing CR {cr_id} to Estimator: {next_approver} (user_id={next_approver_id}, project_id={change_request.project_id})")
 
             elif route_to == 'buyer':
-                # Explicitly sending to Buyer
+                # Explicitly sending to Buyer - require buyer_id selection
+                if not buyer_id:
+                    return jsonify({
+                        "error": "Buyer selection required",
+                        "message": "Please select a buyer to assign this request"
+                    }), 400
+
+                # Validate buyer exists and has buyer role
+                selected_buyer = User.query.filter_by(user_id=buyer_id, is_deleted=False).first()
+                if not selected_buyer:
+                    return jsonify({"error": "Selected buyer not found"}), 404
+
+                buyer_role = selected_buyer.role.role.lower() if selected_buyer.role else ''
+                if buyer_role != 'buyer':
+                    return jsonify({"error": "Selected user is not a buyer"}), 400
+
                 next_role = CR_CONFIG.ROLE_BUYER
-                next_approver = "Buyer"
-                next_approver_id = None
-                log.info(f"Routing CR {cr_id} directly to Buyer")
+                next_approver = selected_buyer.full_name or selected_buyer.username
+                next_approver_id = selected_buyer.user_id
+
+                # Assign to buyer immediately since PM selected them
+                change_request.assigned_to_buyer_user_id = next_approver_id
+                change_request.assigned_to_buyer_name = next_approver
+                change_request.assigned_to_buyer_date = datetime.utcnow()
+
+                log.info(f"Routing CR {cr_id} directly to Buyer: {next_approver} (user_id={next_approver_id})")
 
             elif has_new_materials:
                 # No route_to specified, has new materials - default to Estimator
@@ -483,11 +505,32 @@ def send_for_review(cr_id):
                 log.info(f"Routing CR {cr_id} with NEW materials to Estimator (default): {next_approver}")
 
             else:
-                # No route_to specified, all materials from BOQ - default to Buyer
+                # No route_to specified, all materials from BOQ - default to Buyer (require buyer_id)
+                if not buyer_id:
+                    return jsonify({
+                        "error": "Buyer selection required",
+                        "message": "All materials are from BOQ. Please select a buyer to assign this request"
+                    }), 400
+
+                # Validate buyer exists and has buyer role
+                selected_buyer = User.query.filter_by(user_id=buyer_id, is_deleted=False).first()
+                if not selected_buyer:
+                    return jsonify({"error": "Selected buyer not found"}), 404
+
+                buyer_role = selected_buyer.role.role.lower() if selected_buyer.role else ''
+                if buyer_role != 'buyer':
+                    return jsonify({"error": "Selected user is not a buyer"}), 400
+
                 next_role = CR_CONFIG.ROLE_BUYER
-                next_approver = "Buyer"
-                next_approver_id = None
-                log.info(f"Routing CR {cr_id} with EXISTING BOQ materials to Buyer (default)")
+                next_approver = selected_buyer.full_name or selected_buyer.username
+                next_approver_id = selected_buyer.user_id
+
+                # Assign to buyer immediately since PM selected them
+                change_request.assigned_to_buyer_user_id = next_approver_id
+                change_request.assigned_to_buyer_name = next_approver
+                change_request.assigned_to_buyer_date = datetime.utcnow()
+
+                log.info(f"Routing CR {cr_id} with EXISTING BOQ materials to Buyer (default): {next_approver} (user_id={next_approver_id})")
 
         elif is_admin:
             # Admin sends to assigned PM
@@ -517,7 +560,14 @@ def send_for_review(cr_id):
         # --- Update Change Request ---
         change_request.approval_required_from = next_role
         change_request.current_approver_role = next_role
-        change_request.status = CR_CONFIG.STATUS_UNDER_REVIEW
+
+        # Set appropriate status based on next role
+        if next_role == CR_CONFIG.ROLE_BUYER and next_approver_id:
+            # When routing to specific buyer, set status to assigned_to_buyer
+            change_request.status = CR_CONFIG.STATUS_ASSIGNED_TO_BUYER
+        else:
+            change_request.status = CR_CONFIG.STATUS_UNDER_REVIEW
+
         change_request.updated_at = datetime.utcnow()
 
         # --- Log to BOQ History ---
@@ -538,7 +588,7 @@ def send_for_review(cr_id):
             "receiver_user_id": next_approver_id,
             "sender_role": user_role,
             "receiver_role": next_role,
-            "status": CR_CONFIG.STATUS_UNDER_REVIEW,
+            "status": change_request.status,  # Use the actual status that was set
             "cr_id": cr_id,
             "item_name": change_request.item_name or f"CR #{cr_id}",
             "materials_count": len(change_request.materials_data or []),

@@ -22,6 +22,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
   const [loading, setLoading] = useState(true);
   const [selectedItemForBreakdown, setSelectedItemForBreakdown] = useState<any>(null);
   const [showBreakdownModal, setShowBreakdownModal] = useState(false);
+  const [sendingRequest, setSendingRequest] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -37,6 +38,37 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
       console.error('Error fetching planned vs actual:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSendPurchaseRequest = async () => {
+    try {
+      setSendingRequest(true);
+      const response = await boqTrackingService.sendPurchaseRequest(boqId);
+
+      // Show success message with routing information
+      if (response.route === 'buyer') {
+        toast.success(response.message || 'Purchase request sent to Buyer (existing BOQ materials)', {
+          description: `Assigned to: ${response.buyer?.name}`,
+          duration: 5000,
+        });
+      } else if (response.route === 'estimator') {
+        toast.success(response.message || 'Purchase request sent to Estimator (new materials)', {
+          description: `Sent to: ${response.estimator?.name}`,
+          duration: 5000,
+        });
+      } else {
+        toast.success(response.message || 'Purchase request sent successfully');
+      }
+
+      // Refresh data after sending
+      await fetchData();
+    } catch (error: any) {
+      const errorMsg = error.response?.data?.error || error.response?.data?.details || 'Failed to send purchase request';
+      toast.error(errorMsg);
+      console.error('Error sending purchase request:', error);
+    } finally {
+      setSendingRequest(false);
     }
   };
 
@@ -111,8 +143,29 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
     <div className="space-y-6 p-4">
       {/* Header */}
       <div className="bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] rounded-xl p-6 shadow-lg">
-        <h2 className="text-2xl font-bold text-white mb-2">{data.boq_name}</h2>
-        <p className="text-sm text-blue-100">Real-time Cost Tracking & Variance Analysis</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-white mb-2">{data.boq_name}</h2>
+            <p className="text-sm text-blue-100">Real-time Cost Tracking & Variance Analysis</p>
+          </div>
+          <button
+            onClick={handleSendPurchaseRequest}
+            disabled={sendingRequest}
+            className="px-6 py-3 bg-white text-[#243d8a] rounded-lg font-semibold hover:bg-blue-50 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {sendingRequest ? (
+              <>
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[#243d8a]"></div>
+                <span>Sending...</span>
+              </>
+            ) : (
+              <>
+                <Package className="w-5 h-5" />
+                <span>Submit Purchase Request</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Detailed BOQ View Section */}

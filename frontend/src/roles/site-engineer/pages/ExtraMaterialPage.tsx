@@ -420,16 +420,44 @@ const ExtraMaterialPage: React.FC = () => {
 
   const handleSendToPM = async (requestId: number) => {
     try {
-      await axios.post(
+      const response = await axios.post(
         `${API_URL}/change-request/${requestId}/send-for-review`,
         {},
         { headers }
       );
-      toast.success('Request sent to PM for approval');
+
+      // Show intelligent message based on routing
+      const data = response.data;
+      const recipient = data.recipient || data.next_approver || data.assigned_to;
+      const route = data.route || data.approval_required_from;
+
+      if (route === 'buyer' || recipient?.toLowerCase().includes('buyer')) {
+        toast.success('Material request sent to Buyer (existing BOQ materials)', {
+          description: recipient ? `Assigned to: ${recipient}` : undefined,
+          duration: 5000,
+        });
+      } else if (route === 'estimator' || recipient?.toLowerCase().includes('estimator')) {
+        toast.success('Material request sent to Estimator (new materials for pricing)', {
+          description: recipient ? `Sent to: ${recipient}` : undefined,
+          duration: 5000,
+        });
+      } else if (route === 'project_manager' || route === 'projectmanager' || recipient?.toLowerCase().includes('project')) {
+        toast.success('Material request sent to Project Manager', {
+          description: recipient ? `Sent to: ${recipient}` : undefined,
+          duration: 5000,
+        });
+      } else {
+        // Fallback message
+        toast.success(data.message || 'Material request sent for approval', {
+          description: recipient ? `Sent to: ${recipient}` : undefined,
+          duration: 5000,
+        });
+      }
+
       refetch();
     } catch (error: any) {
-      console.error('Error sending request to PM:', error);
-      toast.error(error.response?.data?.error || 'Failed to send request to PM');
+      console.error('Error sending request:', error);
+      toast.error(error.response?.data?.error || 'Failed to send request');
     }
   };
 

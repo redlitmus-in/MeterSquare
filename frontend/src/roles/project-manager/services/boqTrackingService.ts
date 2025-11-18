@@ -160,6 +160,21 @@ class BOQTrackingService {
     );
     return response.data;
   }
+
+  /**
+   * Send new purchase request (routes intelligently based on material type)
+   * - Existing BOQ materials → Sent to Buyer directly
+   * - New materials → Sent to Estimator for pricing
+   * Uses API: /api/new_purchase/estimator/<boq_id>
+   */
+  async sendPurchaseRequest(boq_id: number) {
+    const response = await axios.post(
+      `${API_URL}/new_purchase/estimator/${boq_id}`,
+      {},
+      { headers: this.getHeaders() }
+    );
+    return response.data;
+  }
 }
 
 export const boqTrackingService = new BOQTrackingService();

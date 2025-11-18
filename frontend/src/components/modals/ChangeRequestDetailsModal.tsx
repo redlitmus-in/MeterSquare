@@ -112,6 +112,9 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         changeRequest.status === 'under_review' &&
                         changeRequest.approval_required_from === 'estimator';
 
+  // Check if there are any new materials (determines if pricing columns should be shown)
+  const hasNewMaterials = materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined);
+
   // Handler for approval with updated materials
   const handleApproveWithUpdatedPrices = () => {
     if (onApprove) {
@@ -304,7 +307,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">Sub-Item</th>
                         <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs font-semibold text-gray-600">For Item</th>
                         <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Quantity</th>
-                        {!userIsSiteEngineer && (
+                        {!userIsSiteEngineer && hasNewMaterials && (
                           <>
                             <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Unit Price</th>
                             <th className="px-3 sm:px-4 py-2 sm:py-3 text-right text-xs font-semibold text-gray-600">Total</th>
@@ -357,32 +360,40 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600 text-right whitespace-nowrap">
                             {material.quantity} {material.unit}
                           </td>
-                          {!userIsSiteEngineer && (
+                          {!userIsSiteEngineer && hasNewMaterials && (
                             <>
                               <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-gray-600 text-right whitespace-nowrap">
-                                {canEditPrices ? (
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={material.unit_price || 0}
-                                    onChange={(e) => handlePriceChange(idx, e.target.value)}
-                                    className="w-24 px-2 py-1 text-right border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50 text-gray-900 font-medium"
-                                    placeholder="0.00"
-                                  />
+                                {isNewMaterial ? (
+                                  canEditPrices ? (
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      value={material.unit_price || 0}
+                                      onChange={(e) => handlePriceChange(idx, e.target.value)}
+                                      className="w-24 px-2 py-1 text-right border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50 text-gray-900 font-medium"
+                                      placeholder="0.00"
+                                    />
+                                  ) : (
+                                    formatCurrency(material.unit_price || 0)
+                                  )
                                 ) : (
-                                  formatCurrency(material.unit_price || 0)
+                                  <span className="text-gray-400 italic">From BOQ</span>
                                 )}
                               </td>
                               <td className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-semibold text-gray-900 text-right whitespace-nowrap">
-                                {formatCurrency(material.total_price || (material.quantity * material.unit_price) || 0)}
+                                {isNewMaterial ? (
+                                  formatCurrency(material.total_price || (material.quantity * material.unit_price) || 0)
+                                ) : (
+                                  <span className="text-gray-400 italic">From BOQ</span>
+                                )}
                               </td>
                             </>
                           )}
                         </tr>
                         );
                       })}
-                      {!userIsSiteEngineer && (
+                      {!userIsSiteEngineer && hasNewMaterials && (
                         <tr className="bg-purple-50 font-bold">
                           <td colSpan={7} className="px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm text-purple-900 text-right">
                             Total Cost:
@@ -397,65 +408,114 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                 </div>
               </div>
 
-              {/* Negotiable Margin Summary */}
-              {changeRequest.negotiable_margin_analysis && (
-                <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200">
-                  <h3 className="text-xs sm:text-sm font-semibold text-purple-900 mb-2 sm:mb-3">Negotiable Margin Summary</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-xs sm:text-sm">
-                    <div>
-                      <span className="text-purple-700 text-[10px] sm:text-xs">Original Allocated:</span>
-                      <p className="font-bold text-purple-900 text-xs sm:text-sm">
-                        {formatCurrency(changeRequest.negotiable_margin_analysis.original_allocated || 0)}
-                      </p>
-                      {changeRequest.negotiable_margin_analysis.discount_applied > 0 && (
-                        <p className="text-[9px] sm:text-xs text-purple-600">
-                          (Discount: {formatCurrency(changeRequest.negotiable_margin_analysis.discount_applied)})
+              {/* Negotiable Margin Summary - Only show for NEW materials and hide from Site Engineers */}
+              {!userIsSiteEngineer && changeRequest.negotiable_margin_analysis && materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined) && (() => {
+                // Check if budget is invalid (zero or negative allocation)
+                const hasInvalidBudget = changeRequest.negotiable_margin_analysis.original_allocated <= 0;
+
+                return (
+                  <div className={`mb-4 sm:mb-6 p-3 sm:p-4 rounded-lg border ${
+                    hasInvalidBudget
+                      ? 'bg-gradient-to-br from-red-50 to-orange-50 border-red-300'
+                      : 'bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200'
+                  }`}>
+                    {/* Warning Banner for Invalid Budget */}
+                    {hasInvalidBudget && (
+                      <div className="mb-3 p-2 sm:p-3 bg-red-100 border border-red-300 rounded-lg">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-xs sm:text-sm font-bold text-red-900">
+                              No Negotiable Margin Budget Available
+                            </p>
+                            <p className="text-[10px] sm:text-xs text-red-700 mt-1">
+                              Current Allocation: {formatCurrency(changeRequest.negotiable_margin_analysis.original_allocated)}
+                            </p>
+                            <p className="text-[10px] sm:text-xs text-red-600 mt-1">
+                              This budget shows invalid or insufficient allocation for change requests.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <h3 className={`text-xs sm:text-sm font-semibold mb-2 sm:mb-3 ${
+                      hasInvalidBudget ? 'text-red-900' : 'text-purple-900'
+                    }`}>
+                      Negotiable Margin Summary
+                    </h3>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-xs sm:text-sm">
+                      <div>
+                        <span className={`text-[10px] sm:text-xs ${hasInvalidBudget ? 'text-red-700' : 'text-purple-700'}`}>
+                          Original Allocated:
+                        </span>
+                        <p className={`font-bold text-xs sm:text-sm ${
+                          hasInvalidBudget ? 'text-red-900' : 'text-purple-900'
+                        }`}>
+                          {formatCurrency(changeRequest.negotiable_margin_analysis.original_allocated || 0)}
+                        </p>
+                        {changeRequest.negotiable_margin_analysis.discount_applied > 0 && (
+                          <p className={`text-[9px] sm:text-xs ${hasInvalidBudget ? 'text-red-600' : 'text-purple-600'}`}>
+                            (Discount: {formatCurrency(changeRequest.negotiable_margin_analysis.discount_applied)})
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <span className={`text-[10px] sm:text-xs ${hasInvalidBudget ? 'text-red-700' : 'text-purple-700'}`}>
+                          Already Consumed:
+                        </span>
+                        <p className="font-bold text-orange-600 text-xs sm:text-sm">
+                          {formatCurrency(changeRequest.negotiable_margin_analysis.already_consumed || 0)}
+                        </p>
+                      </div>
+                      <div>
+                        <span className={`text-[10px] sm:text-xs ${hasInvalidBudget ? 'text-red-700' : 'text-purple-700'}`}>
+                          This Request:
+                        </span>
+                        <p className="font-bold text-blue-600 text-xs sm:text-sm">
+                          {formatCurrency(changeRequest.negotiable_margin_analysis.this_request || 0)}
+                        </p>
+                      </div>
+                      <div>
+                        <span className={`text-[10px] sm:text-xs ${hasInvalidBudget ? 'text-red-700' : 'text-purple-700'}`}>
+                          Remaining After:
+                        </span>
+                        <p className={`font-bold text-xs sm:text-sm ${
+                          changeRequest.negotiable_margin_analysis.remaining_after < 0
+                            ? 'text-red-600'
+                            : 'text-green-600'
+                        }`}>
+                          {formatCurrency(changeRequest.negotiable_margin_analysis.remaining_after)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className={`mt-2 sm:mt-3 pt-2 sm:pt-3 border-t ${
+                      hasInvalidBudget ? 'border-red-300' : 'border-purple-300'
+                    }`}>
+                      <div className="flex justify-between items-center">
+                        <span className={`text-xs sm:text-sm ${hasInvalidBudget ? 'text-red-700' : 'text-purple-700'}`}>
+                          Total Consumption:
+                        </span>
+                        <span className={`text-base sm:text-lg font-bold ${
+                          changeRequest.negotiable_margin_analysis.exceeds_60_percent
+                            ? 'text-red-600'
+                            : 'text-green-600'
+                        }`}>
+                          {changeRequest.negotiable_margin_analysis.consumption_percentage.toFixed(1)}%
+                        </span>
+                      </div>
+                      {changeRequest.negotiable_margin_analysis.exceeds_60_percent && (
+                        <p className="text-[10px] sm:text-xs text-red-600 mt-1 flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3" />
+                          <span>Warning: Consumption exceeds 60% threshold</span>
                         </p>
                       )}
                     </div>
-                    <div>
-                      <span className="text-purple-700 text-[10px] sm:text-xs">Already Consumed:</span>
-                      <p className="font-bold text-orange-600 text-xs sm:text-sm">
-                        {formatCurrency(changeRequest.negotiable_margin_analysis.already_consumed || 0)}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-purple-700 text-[10px] sm:text-xs">This Request:</span>
-                      <p className="font-bold text-blue-600 text-xs sm:text-sm">
-                        {formatCurrency(changeRequest.negotiable_margin_analysis.this_request || 0)}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-purple-700 text-[10px] sm:text-xs">Remaining After:</span>
-                      <p className={`font-bold text-xs sm:text-sm ${
-                        changeRequest.negotiable_margin_analysis.remaining_after < 0
-                          ? 'text-red-600'
-                          : 'text-green-600'
-                      }`}>
-                        {formatCurrency(changeRequest.negotiable_margin_analysis.remaining_after)}
-                      </p>
-                    </div>
                   </div>
-                  <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-purple-300">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs sm:text-sm text-purple-700">Total Consumption:</span>
-                      <span className={`text-base sm:text-lg font-bold ${
-                        changeRequest.negotiable_margin_analysis.exceeds_60_percent
-                          ? 'text-red-600'
-                          : 'text-green-600'
-                      }`}>
-                        {changeRequest.negotiable_margin_analysis.consumption_percentage.toFixed(1)}%
-                      </span>
-                    </div>
-                    {changeRequest.negotiable_margin_analysis.exceeds_60_percent && (
-                      <p className="text-[10px] sm:text-xs text-red-600 mt-1 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" />
-                        <span>Warning: Consumption exceeds 60% threshold</span>
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Vendor Details - Only show if TD approved vendor */}
               {changeRequest.vendor_approved_by_td_id && (

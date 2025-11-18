@@ -56,7 +56,7 @@ const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
   const isExtraMaterial = location.pathname.includes('extra-material');
   const [activeTab, setActiveTab] = useState(isExtraMaterial ? 'requested' : 'pending');
-  const [pendingSubTab, setPendingSubTab] = useState<'drafts' | 'sent'>('drafts'); // Sub-tab for Pending
+  const [pendingSubTab, setPendingSubTab] = useState<'drafts' | 'sent_to_estimator' | 'sent_to_buyer'>('drafts'); // Sub-tab for Pending
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [selectedChangeRequest, setSelectedChangeRequest] = useState<ChangeRequestItem | null>(null);
@@ -67,8 +67,21 @@ const ChangeRequestsPage: React.FC = () => {
   const [showExtraForm, setShowExtraForm] = useState(false);
   const [showBuyerSelectionModal, setShowBuyerSelectionModal] = useState(false);
   const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
+  const [sendingCrId, setSendingCrId] = useState<number | null>(null);
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [selectedBuyerId, setSelectedBuyerId] = useState<number | null>(null);
+
+  // Lock body scroll when modals are open
+  React.useEffect(() => {
+    if (showBuyerSelectionModal || showExtraForm) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showBuyerSelectionModal, showExtraForm]);
 
   // Real-time auto-sync hook - no manual polling needed
   const { data: changeRequestsData, isLoading, isFetching, refetch } = useChangeRequestsAutoSync(
@@ -92,12 +105,33 @@ const ChangeRequestsPage: React.FC = () => {
 
   const initialLoad = isLoading;
 
-  const handleSendForReview = async (crId: number) => {
-    // Always route to Estimator for new material requests
+  const handleSendForReview = async (crId: number, buyerId?: number) => {
+    // Check if materials are new or existing to determine routing
+    const request = changeRequests.find(r => r.cr_id === crId);
+    if (!request) {
+      toast.error('Change request not found');
+      return;
+    }
+
+    // Check if there are any new materials (without master_material_id)
+    const hasNewMaterials = request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined);
+
+    // Route to Estimator if there are new materials, otherwise to Buyer for existing materials
+    const routeTo = hasNewMaterials ? 'estimator' : 'buyer';
+    const destination = hasNewMaterials ? 'Estimator' : 'Buyer';
+
+    // If routing to buyer and no buyer selected yet, show buyer selection modal
+    if (routeTo === 'buyer' && !buyerId) {
+      setSendingCrId(crId);
+      await fetchBuyers();
+      setShowBuyerSelectionModal(true);
+      return;
+    }
+
     try {
-      const response = await changeRequestService.sendForReview(crId, 'estimator');
+      const response = await changeRequestService.sendForReview(crId, routeTo, buyerId);
       if (response.success) {
-        toast.success(response.message || 'Request sent to Estimator for pricing');
+        toast.success(response.message || `Request sent to ${destination}`);
         refetch(); // Trigger background refresh
       } else {
         toast.error(response.message);
@@ -149,15 +183,23 @@ const ChangeRequestsPage: React.FC = () => {
   };
 
   const handleBuyerSelection = async () => {
-    if (!selectedBuyerId || !approvingCrId) {
+    if (!selectedBuyerId) {
       toast.error('Please select a buyer');
       return;
     }
 
-    setShowBuyerSelectionModal(false);
-    await handleApprove(approvingCrId, selectedBuyerId);
-    setApprovingCrId(null);
-    setSelectedBuyerId(null);
+    // Check if we're approving or sending
+    if (approvingCrId) {
+      setShowBuyerSelectionModal(false);
+      await handleApprove(approvingCrId, selectedBuyerId);
+      setApprovingCrId(null);
+      setSelectedBuyerId(null);
+    } else if (sendingCrId) {
+      setShowBuyerSelectionModal(false);
+      await handleSendForReview(sendingCrId, selectedBuyerId);
+      setSendingCrId(null);
+      setSelectedBuyerId(null);
+    }
   };
 
   const handleReject = (crId: number) => {
@@ -428,10 +470,14 @@ const ChangeRequestsPage: React.FC = () => {
                         </Button>
                         <Button
                           size="sm"
-                          className="bg-purple-600 hover:bg-purple-700"
+                          className={request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
+                            ? "bg-blue-600 hover:bg-blue-700"
+                            : "bg-green-600 hover:bg-green-700"}
                           onClick={() => handleSendForReview(request.cr_id)}
                         >
-                          Send to Estimator
+                          {request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
+                            ? 'Send to Estimator'
+                            : 'Send to Buyer'}
                         </Button>
                       </>
                     )}
@@ -707,10 +753,16 @@ const ChangeRequestsPage: React.FC = () => {
                               </button>
                               <button
                                 onClick={() => handleSendForReview(request.cr_id)}
-                                className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold"
+                                className={`w-full ${request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
+                                  ? 'bg-blue-600 hover:bg-blue-700'
+                                  : 'bg-green-600 hover:bg-green-700'} text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1 font-semibold`}
                               >
                                 <Check className="h-4 w-4" />
-                                <span>Send to Estimator</span>
+                                <span>
+                                  {request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
+                                    ? 'Send to Estimator'
+                                    : 'Send to Buyer'}
+                                </span>
                               </button>
                             </div>
                           )}
@@ -1089,40 +1141,58 @@ const ChangeRequestsPage: React.FC = () => {
                   <h2 className="text-lg sm:text-xl font-bold text-gray-900">Pending</h2>
 
                   {/* Sub-tabs for Pending */}
-                  <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
+                  <div className="flex items-center gap-2 p-2 bg-gray-50 rounded-xl mb-4">
                     <button
                       onClick={() => setPendingSubTab('drafts')}
-                      className={`px-4 py-2 rounded-t-lg text-sm font-semibold transition-all ${
+                      className={`rounded-lg border-2 border-transparent px-3 sm:px-4 py-2.5 font-semibold text-xs sm:text-sm transition-all hover:bg-gray-50 ${
                         pendingSubTab === 'drafts'
-                          ? 'bg-[#243d8a] text-white'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          ? 'border-[#243d8a] bg-gradient-to-r from-[#243d8a]/10 to-[#4a5fa8]/10 text-[#243d8a]'
+                          : 'text-gray-500'
                       }`}
                     >
                       <div className="flex items-center gap-2">
                         <Pencil className="w-4 h-4" />
                         <span>Drafts (Not Sent)</span>
                         <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
-                          pendingSubTab === 'drafts' ? 'bg-white/20' : 'bg-gray-200'
+                          pendingSubTab === 'drafts' ? 'bg-[#243d8a]/20' : 'bg-gray-100'
                         }`}>
                           ({filteredRequests.filter(r => r.status === 'pending').length})
                         </span>
                       </div>
                     </button>
                     <button
-                      onClick={() => setPendingSubTab('sent')}
-                      className={`px-4 py-2 rounded-t-lg text-sm font-semibold transition-all ${
-                        pendingSubTab === 'sent'
-                          ? 'bg-[#243d8a] text-white'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      onClick={() => setPendingSubTab('sent_to_estimator')}
+                      className={`rounded-lg border-2 border-transparent px-3 sm:px-4 py-2.5 font-semibold text-xs sm:text-sm transition-all hover:bg-gray-50 ${
+                        pendingSubTab === 'sent_to_estimator'
+                          ? 'border-[#243d8a] bg-gradient-to-r from-[#243d8a]/10 to-[#4a5fa8]/10 text-[#243d8a]'
+                          : 'text-gray-500'
                       }`}
                     >
                       <div className="flex items-center gap-2">
                         <Clock className="w-4 h-4" />
-                        <span>Sent for Review</span>
+                        <span>Sent to Estimator</span>
                         <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
-                          pendingSubTab === 'sent' ? 'bg-white/20' : 'bg-gray-200'
+                          pendingSubTab === 'sent_to_estimator' ? 'bg-[#243d8a]/20' : 'bg-gray-100'
                         }`}>
-                          ({filteredRequests.filter(r => r.status === 'under_review').length})
+                          ({filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator').length})
+                        </span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setPendingSubTab('sent_to_buyer')}
+                      className={`rounded-lg border-2 border-transparent px-3 sm:px-4 py-2.5 font-semibold text-xs sm:text-sm transition-all hover:bg-gray-50 ${
+                        pendingSubTab === 'sent_to_buyer'
+                          ? 'border-[#243d8a] bg-gradient-to-r from-[#243d8a]/10 to-[#4a5fa8]/10 text-[#243d8a]'
+                          : 'text-gray-500'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4" />
+                        <span>Sent to Buyer</span>
+                        <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
+                          pendingSubTab === 'sent_to_buyer' ? 'bg-[#243d8a]/20' : 'bg-gray-100'
+                        }`}>
+                          ({filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer').length})
                         </span>
                       </div>
                     </button>
@@ -1202,13 +1272,19 @@ const ChangeRequestsPage: React.FC = () => {
                                     <span>Edit</span>
                                   </button>
                                 </div>
-                                {/* Send for Review to Estimator */}
+                                {/* Send for Review to Estimator or Buyer */}
                                 <button
                                   onClick={() => handleSendForReview(request.cr_id)}
-                                  className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                  className={`w-full ${request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
+                                    ? 'bg-blue-600 hover:bg-blue-700'
+                                    : 'bg-green-600 hover:bg-green-700'} text-white text-xs h-9 rounded transition-all flex items-center justify-center gap-1.5 font-semibold`}
                                 >
                                   <Check className="h-4 w-4" />
-                                  <span>Send to Estimator</span>
+                                  <span>
+                                    {request.materials_data?.some(mat => mat.master_material_id === null || mat.master_material_id === undefined)
+                                      ? 'Send to Estimator'
+                                      : 'Send to Buyer'}
+                                  </span>
                                 </button>
                               </div>
                             </motion.div>
@@ -1218,19 +1294,19 @@ const ChangeRequestsPage: React.FC = () => {
                     </>
                   )}
 
-                  {/* Sent for Review Sub-tab Content */}
-                  {pendingSubTab === 'sent' && (
+                  {/* Sent to Estimator Sub-tab Content */}
+                  {pendingSubTab === 'sent_to_estimator' && (
                     <>
-                      {filteredRequests.filter(r => r.status === 'under_review').length === 0 ? (
+                      {filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator').length === 0 ? (
                         <div className="text-center py-12">
                           <Clock className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                          <p className="text-gray-500 text-lg">No requests under review</p>
+                          <p className="text-gray-500 text-lg">No requests sent to estimator</p>
                         </div>
                       ) : viewMode === 'table' ? (
-                        <RequestsTable requests={filteredRequests.filter(r => r.status === 'under_review')} />
+                        <RequestsTable requests={filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator')} />
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                          {filteredRequests.filter(r => r.status === 'under_review').map((request, index) => (
+                          {filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator').map((request, index) => (
                             <motion.div
                               key={request.cr_id}
                               initial={{ opacity: 0, y: 20 }}
@@ -1278,6 +1354,75 @@ const ChangeRequestsPage: React.FC = () => {
 
                               {/* View-only: Only show Review button */}
                               <div className="border-t border-gray-200 p-2 sm:p-3">
+                                <button
+                                  onClick={() => handleReview(request.cr_id)}
+                                  className="w-full text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
+                                  style={{ backgroundColor: 'rgb(36, 61, 138)' }}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  <span>View Details</span>
+                                </button>
+                              </div>
+                            </motion.div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Sent to Buyer Sub-tab Content */}
+                  {pendingSubTab === 'sent_to_buyer' && (
+                    <>
+                      {filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer').length === 0 ? (
+                        <div className="text-center py-12">
+                          <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                          <p className="text-gray-500 text-lg">No requests sent to buyer</p>
+                        </div>
+                      ) : viewMode === 'table' ? (
+                        <RequestsTable requests={filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer')} />
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                          {filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer').map((request, index) => (
+                            <motion.div
+                              key={request.cr_id}
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.05 * index }}
+                              className="bg-white rounded-lg border border-green-200 shadow-sm hover:shadow-lg transition-all duration-200"
+                            >
+                              <div className="p-4">
+                                <div className="flex items-start justify-between mb-2">
+                                  <h3 className="font-semibold text-gray-900 text-base flex-1">{request.project_name}</h3>
+                                  <Badge className="bg-purple-100 text-purple-800">ASSIGNED TO BUYER</Badge>
+                                </div>
+
+                                <div className="space-y-1 text-sm text-gray-600">
+                                  <div className="flex items-center gap-1.5">
+                                    <Package className="h-3.5 w-3.5 text-gray-400" />
+                                    <span className="truncate">By: {request.requested_by_name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                                    <span className="truncate">{new Date(request.created_at).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="px-4 pb-3 text-center text-sm">
+                                <span className="font-bold text-purple-600 text-lg">{(request.materials_data?.length || 0)}</span>
+                                <span className="text-gray-600 ml-1">Material{(request.materials_data?.length || 0) > 1 ? 's' : ''}</span>
+                              </div>
+
+                              <div className="px-4 pb-3">
+                                <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg p-3 border border-green-200">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-green-700 text-xs font-medium">Total Cost:</span>
+                                    <span className="font-bold text-green-900">{formatCurrency(request.materials_total_cost)}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="border-t border-gray-200 p-3">
                                 <button
                                   onClick={() => handleReview(request.cr_id)}
                                   className="w-full text-white text-xs h-9 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5 font-semibold"
@@ -1575,7 +1720,7 @@ const ChangeRequestsPage: React.FC = () => {
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)] custom-scrollbar" style={{ scrollBehavior: 'smooth' }}>
               <ExtraMaterialForm
                 onClose={() => {
                   setShowExtraForm(false);
@@ -1621,17 +1766,32 @@ const ChangeRequestsPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Content - Scrollable with hidden scrollbar */}
+            {/* Content - Scrollable with visible styled scrollbar */}
             <div
-              className="flex-1 overflow-y-auto p-6"
+              className="flex-1 overflow-y-auto p-6 custom-scrollbar"
               style={{
-                scrollbarWidth: 'none',
-                msOverflowStyle: 'none',
+                scrollBehavior: 'smooth',
               }}
             >
               <style>{`
-                div[class*="overflow-y-auto"]::-webkit-scrollbar {
-                  display: none;
+                .custom-scrollbar::-webkit-scrollbar {
+                  width: 8px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-track {
+                  background: #f1f5f9;
+                  border-radius: 10px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                  background: #cbd5e1;
+                  border-radius: 10px;
+                  transition: background 0.2s;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                  background: #94a3b8;
+                }
+                .custom-scrollbar {
+                  scrollbar-width: thin;
+                  scrollbar-color: #cbd5e1 #f1f5f9;
                 }
               `}</style>
               {/* Assign to Procurement Section */}
@@ -1651,12 +1811,11 @@ const ChangeRequestsPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Buyers List - Scrollable with hidden scrollbar */}
+                {/* Buyers List - Scrollable with visible styled scrollbar */}
                 <div
-                  className="space-y-3 max-h-[280px] overflow-y-auto pr-2"
+                  className="space-y-3 max-h-[280px] overflow-y-auto pr-2 custom-scrollbar"
                   style={{
-                    scrollbarWidth: 'none',
-                    msOverflowStyle: 'none',
+                    scrollBehavior: 'smooth',
                   }}
                 >
                   {buyers.length === 0 ? (

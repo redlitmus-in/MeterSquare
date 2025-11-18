@@ -401,13 +401,22 @@ class ChangeRequestService {
   /**
    * Send change request for review
    * POST /api/change-request/{cr_id}/send-for-review
-   * @param routeTo - For PM: 'technical_director' or 'estimator' (optional - will auto-route if not provided)
+   * @param routeTo - For PM: 'technical_director', 'estimator', or 'buyer' (optional - will auto-route if not provided)
+   * @param buyerId - Optional: Specific buyer ID to assign when routing to buyer
    */
-  async sendForReview(crId: number, routeTo?: 'technical_director' | 'estimator'): Promise<{ success: boolean; message?: string; next_approver?: string }> {
+  async sendForReview(crId: number, routeTo?: 'technical_director' | 'estimator' | 'buyer', buyerId?: number): Promise<{ success: boolean; message?: string; next_approver?: string }> {
     try {
+      const payload: any = {};
+      if (routeTo) {
+        payload.route_to = routeTo;
+      }
+      if (buyerId) {
+        payload.buyer_id = buyerId;
+      }
+
       const response = await axios.post(
         `${API_BASE_URL}/change-request/${crId}/send-for-review`,
-        routeTo ? { route_to: routeTo } : {},
+        payload,
         this.getAuthHeaders()
       );
 

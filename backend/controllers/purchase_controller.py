@@ -8,6 +8,7 @@ from config.logging import get_logger
 from datetime import datetime, date
 from sqlalchemy import func
 from models.user import User
+from models.role import Role
 from utils.boq_email_service import BOQEmailService
 from utils.admin_viewing_context import get_effective_user_context
 
@@ -327,7 +328,10 @@ def add_new_purchase():
 
 def new_purchase_send_estimator(boq_id):
     """
-    Send email notification to Estimator about new purchases added by Project Manager
+    Send email notification to Estimator or Buyer about new purchases added by Project Manager
+    Routes based on material type:
+    - Existing BOQ materials (have master_material_id) → Buyer
+    - New materials (no master_material_id) → Estimator
     Supports admin viewing as PM
     """
     try:
@@ -343,9 +347,11 @@ def new_purchase_send_estimator(boq_id):
         effective_role = context.get('effective_role', current_user.get('role', ''))
         actual_role = current_user.get('role', '')
 
-        log.info(f"Send new purchase to estimator - User: {pm_name}, actual_role: {actual_role}, effective_role: {effective_role}")
+        log.info(f"Send new purchase - User: {pm_name}, actual_role: {actual_role}, effective_role: {effective_role}")
         # Get BOQ
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
         # Get BOQ details
         boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq_details:
@@ -416,140 +422,287 @@ def new_purchase_send_estimator(boq_id):
             log.warning(f"BOQ {boq_id} - No unsent new purchase items found")
             return jsonify({
                 "error": "No new purchase items found",
-                "details": "All new purchase items have already been sent to the estimator"
+                "details": "All new purchase items have already been sent"
             }), 404
 
-        # Find Estimator (who created the original BOQ)
-        estimator_name = boq.created_by
-        estimator = User.query.filter_by(full_name=estimator_name, is_deleted=False).first()
+        # Check if materials are EXISTING (from BOQ) or NEW
+        # Existing materials have master_material_id for ALL materials in ALL items
+        has_new_materials = False
+        for item in new_items_data:
+            materials = item.get('materials', [])
+            for material in materials:
+                if material.get('master_material_id') is None:
+                    has_new_materials = True
+                    break
+            if has_new_materials:
+                break
 
-        if not estimator or not estimator.email:
-            return jsonify({"error": "Estimator not found or email not available"}), 404
+        log.info(f"BOQ {boq_id} - Material analysis: has_new_materials={has_new_materials}")
 
-        # Prepare data for email
-        boq_data = {
-            "boq_id": boq.boq_id,
-            "boq_name": boq.boq_name,
-            "status": boq.status
-        }
+        # Route based on material type
+        if has_new_materials:
+            # NEW materials → Send to Estimator for pricing
+            log.info(f"BOQ {boq_id} - Routing to ESTIMATOR (has new materials)")
 
-        project_data = {
-            "project_name": project.project_name,
-            "client": getattr(project, "client", "N/A"),
-            "location": getattr(project, "location", "N/A")
-        }
-        email_sent = False
-        email_service = BOQEmailService()
-        email_sent = email_service.send_new_purchase_notification(
-            estimator_email=estimator.email,
-            estimator_name=estimator.full_name,
-            pm_name=pm_name,
-            boq_data=boq_data,
-            project_data=project_data,
-            new_items_data=new_items_data
-        )
+            # Find Estimator (who created the original BOQ)
+            estimator_name = boq.created_by
+            estimator = User.query.filter_by(full_name=estimator_name, is_deleted=False).first()
 
-        # Update BOQ status to "new_purchase_request" if email sent successfully
-        if email_sent:
-            boq.status = "new_purchase_request"
-            boq.last_modified_by = pm_name
-            boq.last_modified_at = datetime.utcnow()
-            log.info(f"BOQ {boq_id} status updated to 'new_purchase_request'")
+            if not estimator or not estimator.email:
+                return jsonify({"error": "Estimator not found or email not available"}), 404
 
-        try:
-            existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
-            # Handle existing actions - ensure it's always a list
-            if existing_history:
-                if existing_history.action is None:
-                    current_actions = []
-                elif isinstance(existing_history.action, list):
-                    current_actions = existing_history.action
-                elif isinstance(existing_history.action, dict):
-                    current_actions = [existing_history.action]
+            # Prepare data for email
+            boq_data = {
+                "boq_id": boq.boq_id,
+                "boq_name": boq.boq_name,
+                "status": boq.status
+            }
+
+            project_data = {
+                "project_name": project.project_name,
+                "client": getattr(project, "client", "N/A"),
+                "location": getattr(project, "location", "N/A")
+            }
+            email_sent = False
+            email_service = BOQEmailService()
+            email_sent = email_service.send_new_purchase_notification(
+                estimator_email=estimator.email,
+                estimator_name=estimator.full_name,
+                pm_name=pm_name,
+                boq_data=boq_data,
+                project_data=project_data,
+                new_items_data=new_items_data
+            )
+
+            # Update BOQ status to "new_purchase_request" if email sent successfully
+            if email_sent:
+                boq.status = "new_purchase_request"
+                boq.last_modified_by = pm_name
+                boq.last_modified_at = datetime.utcnow()
+                log.info(f"BOQ {boq_id} status updated to 'new_purchase_request'")
+
+            try:
+                existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+                # Handle existing actions - ensure it's always a list
+                if existing_history:
+                    if existing_history.action is None:
+                        current_actions = []
+                    elif isinstance(existing_history.action, list):
+                        current_actions = existing_history.action
+                    elif isinstance(existing_history.action, dict):
+                        current_actions = [existing_history.action]
+                    else:
+                        current_actions = []
                 else:
                     current_actions = []
-            else:
-                current_actions = []
-            total_value = sum(item.get('selling_price', 0) for item in new_items_data)
-            item_identifiers = []
-            for item in new_items_data:
-                item_identifiers.append({
-                    "master_item_id": item.get("master_item_id"),
-                    "item_name": item.get("item_name")
-                })
-            new_action = {
-                "role": current_user.get('role_name', 'project_manager'),
-                "type": "new_purchase_notification_sent",
-                "sender": pm_name,
-                "receiver": estimator.full_name,
-                "sender_role": "project_manager",
-                "receiver_role": "estimator",
-                "status": "new_purchase_request",
-                "boq_status_changed_to": "new_purchase_request",
-                "boq_name": boq.boq_name,
-                "comments": f"PM sent new purchase notification to Estimator ({len(new_items_data)} item(s)). BOQ status changed to 'new_purchase_request'",
-                "timestamp": datetime.utcnow().isoformat(),
-                "sender_name": pm_name,
-                "sender_user_id": pm_id,
-                "receiver_name": estimator.full_name,
-                "receiver_user_id": estimator.user_id,
-                "receiver_email": estimator.email,
-                "project_name": project.project_name,
-                "project_id": project.project_id,
-                "item_identifiers": item_identifiers,
-                "items_count": len(new_items_data),
-                "total_value": total_value,
-                "email_sent": email_sent
-            }
-            current_actions.append(new_action)
-            if existing_history:
-                existing_history.action = current_actions
-                from sqlalchemy.orm.attributes import flag_modified
-                flag_modified(existing_history, "action")
-                existing_history.action_by = pm_name
-                existing_history.sender = pm_name
-                existing_history.receiver = estimator.full_name
-                existing_history.boq_status = "new_purchase_request"
-                existing_history.comments = f"PM sent new purchase notification to Estimator. BOQ status: new_purchase_request"
-                existing_history.sender_role = 'project_manager'
-                existing_history.receiver_role = 'estimator'
-                existing_history.action_date = datetime.utcnow()
-                existing_history.last_modified_by = pm_name
-                existing_history.last_modified_at = datetime.utcnow()
-            else:
-                boq_history_entry = BOQHistory(
-                    boq_id=boq_id,
-                    action=current_actions,
-                    action_by=pm_name,
-                    boq_status="new_purchase_request",
-                    sender=pm_name,
-                    receiver=estimator.full_name,
-                    comments=f"PM sent new purchase notification to Estimator. BOQ status: new_purchase_request",
-                    sender_role='project_manager',
-                    receiver_role='estimator',
-                    action_date=datetime.utcnow(),
-                    created_by=pm_name
-                )
-                db.session.add(boq_history_entry)
-            db.session.commit()
-        except Exception as history_error:
-            log.error(f"Error storing notification in BOQ history: {history_error}")
-            db.session.rollback()
+                total_value = sum(item.get('selling_price', 0) for item in new_items_data)
+                item_identifiers = []
+                for item in new_items_data:
+                    item_identifiers.append({
+                        "master_item_id": item.get("master_item_id"),
+                        "item_name": item.get("item_name")
+                    })
+                new_action = {
+                    "role": current_user.get('role_name', 'project_manager'),
+                    "type": "new_purchase_notification_sent",
+                    "sender": pm_name,
+                    "receiver": estimator.full_name,
+                    "sender_role": "project_manager",
+                    "receiver_role": "estimator",
+                    "status": "new_purchase_request",
+                    "boq_status_changed_to": "new_purchase_request",
+                    "boq_name": boq.boq_name,
+                    "comments": f"PM sent new purchase notification to Estimator ({len(new_items_data)} item(s)). BOQ status changed to 'new_purchase_request'",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "sender_name": pm_name,
+                    "sender_user_id": pm_id,
+                    "receiver_name": estimator.full_name,
+                    "receiver_user_id": estimator.user_id,
+                    "receiver_email": estimator.email,
+                    "project_name": project.project_name,
+                    "project_id": project.project_id,
+                    "item_identifiers": item_identifiers,
+                    "items_count": len(new_items_data),
+                    "total_value": total_value,
+                    "email_sent": email_sent
+                }
+                current_actions.append(new_action)
+                if existing_history:
+                    existing_history.action = current_actions
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(existing_history, "action")
+                    existing_history.action_by = pm_name
+                    existing_history.sender = pm_name
+                    existing_history.receiver = estimator.full_name
+                    existing_history.boq_status = "new_purchase_request"
+                    existing_history.comments = f"PM sent new purchase notification to Estimator. BOQ status: new_purchase_request"
+                    existing_history.sender_role = 'project_manager'
+                    existing_history.receiver_role = 'estimator'
+                    existing_history.action_date = datetime.utcnow()
+                    existing_history.last_modified_by = pm_name
+                    existing_history.last_modified_at = datetime.utcnow()
+                else:
+                    boq_history_entry = BOQHistory(
+                        boq_id=boq_id,
+                        action=current_actions,
+                        action_by=pm_name,
+                        boq_status="new_purchase_request",
+                        sender=pm_name,
+                        receiver=estimator.full_name,
+                        comments=f"PM sent new purchase notification to Estimator. BOQ status: new_purchase_request",
+                        sender_role='project_manager',
+                        receiver_role='estimator',
+                        action_date=datetime.utcnow(),
+                        created_by=pm_name
+                    )
+                    db.session.add(boq_history_entry)
+                db.session.commit()
+            except Exception as history_error:
+                log.error(f"Error storing notification in BOQ history: {history_error}")
+                db.session.rollback()
 
-        return jsonify({
-            "success": True,
-            "message": "New purchase notification sent to Estimator. BOQ status updated to 'new_purchase_request'",
-            "email_sent": email_sent,
-            "boq_status": boq.status,
-            "boq_status_changed": email_sent,
-            "estimator": {
-                "name": estimator.full_name,
-                "email": estimator.email
-            },
-            "items_count": len(new_items_data),
-            "project_manager": pm_name,
-            "history_stored": True
-        }), 200
+            return jsonify({
+                "success": True,
+                "message": "New purchase notification sent to Estimator. BOQ status updated to 'new_purchase_request'",
+                "email_sent": email_sent,
+                "boq_status": boq.status,
+                "boq_status_changed": email_sent,
+                "estimator": {
+                    "name": estimator.full_name,
+                    "email": estimator.email
+                },
+                "items_count": len(new_items_data),
+                "project_manager": pm_name,
+                "history_stored": True,
+                "route": "estimator"
+            }), 200
+
+        else:
+            # EXISTING materials → Send directly to Buyer
+            log.info(f"BOQ {boq_id} - Routing to BUYER (all existing materials from BOQ)")
+
+            # Find available buyers
+            buyer_role = Role.query.filter_by(role='buyer').first()
+            if not buyer_role:
+                return jsonify({"error": "Buyer role not found in system"}), 404
+
+            buyers = User.query.filter(
+                User.role_id == buyer_role.role_id,
+                User.is_deleted == False,
+                User.is_active == True
+            ).all()
+
+            if not buyers:
+                return jsonify({"error": "No active Buyer found"}), 404
+
+            # Use first available buyer for now (can be enhanced with assignment logic)
+            buyer = buyers[0]
+
+            # Update BOQ status to "assigned_to_buyer"
+            boq.status = "assigned_to_buyer"
+            boq.last_modified_by = pm_name
+            boq.last_modified_at = datetime.utcnow()
+            log.info(f"BOQ {boq_id} status updated to 'assigned_to_buyer'")
+
+            # Log to BOQ history
+            try:
+                existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+                # Handle existing actions - ensure it's always a list
+                if existing_history:
+                    if existing_history.action is None:
+                        current_actions = []
+                    elif isinstance(existing_history.action, list):
+                        current_actions = existing_history.action
+                    elif isinstance(existing_history.action, dict):
+                        current_actions = [existing_history.action]
+                    else:
+                        current_actions = []
+                else:
+                    current_actions = []
+
+                total_value = sum(item.get('selling_price', 0) for item in new_items_data)
+                item_identifiers = []
+                for item in new_items_data:
+                    item_identifiers.append({
+                        "master_item_id": item.get("master_item_id"),
+                        "item_name": item.get("item_name")
+                    })
+
+                new_action = {
+                    "role": current_user.get('role_name', 'project_manager'),
+                    "type": "purchase_assigned_to_buyer",
+                    "sender": pm_name,
+                    "receiver": buyer.full_name,
+                    "sender_role": "project_manager",
+                    "receiver_role": "buyer",
+                    "status": "assigned_to_buyer",
+                    "boq_status_changed_to": "assigned_to_buyer",
+                    "boq_name": boq.boq_name,
+                    "comments": f"PM assigned existing BOQ materials to Buyer ({len(new_items_data)} item(s)). BOQ status changed to 'assigned_to_buyer'",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "sender_name": pm_name,
+                    "sender_user_id": pm_id,
+                    "receiver_name": buyer.full_name,
+                    "receiver_user_id": buyer.user_id,
+                    "receiver_email": buyer.email,
+                    "project_name": project.project_name,
+                    "project_id": project.project_id,
+                    "item_identifiers": item_identifiers,
+                    "items_count": len(new_items_data),
+                    "total_value": total_value
+                }
+                current_actions.append(new_action)
+
+                if existing_history:
+                    existing_history.action = current_actions
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(existing_history, "action")
+                    existing_history.action_by = pm_name
+                    existing_history.sender = pm_name
+                    existing_history.receiver = buyer.full_name
+                    existing_history.boq_status = "assigned_to_buyer"
+                    existing_history.comments = f"PM assigned existing BOQ materials to Buyer. BOQ status: assigned_to_buyer"
+                    existing_history.sender_role = 'project_manager'
+                    existing_history.receiver_role = 'buyer'
+                    existing_history.action_date = datetime.utcnow()
+                    existing_history.last_modified_by = pm_name
+                    existing_history.last_modified_at = datetime.utcnow()
+                else:
+                    boq_history_entry = BOQHistory(
+                        boq_id=boq_id,
+                        action=current_actions,
+                        action_by=pm_name,
+                        boq_status="assigned_to_buyer",
+                        sender=pm_name,
+                        receiver=buyer.full_name,
+                        comments=f"PM assigned existing BOQ materials to Buyer. BOQ status: assigned_to_buyer",
+                        sender_role='project_manager',
+                        receiver_role='buyer',
+                        action_date=datetime.utcnow(),
+                        created_by=pm_name
+                    )
+                    db.session.add(boq_history_entry)
+
+                db.session.commit()
+                log.info(f"BOQ history updated for buyer assignment")
+            except Exception as history_error:
+                log.error(f"Error storing buyer assignment in BOQ history: {history_error}")
+                db.session.rollback()
+
+            return jsonify({
+                "success": True,
+                "message": "Purchase request assigned to Buyer (existing BOQ materials). BOQ status updated to 'assigned_to_buyer'",
+                "boq_status": boq.status,
+                "boq_status_changed": True,
+                "buyer": {
+                    "name": buyer.full_name,
+                    "email": buyer.email
+                },
+                "items_count": len(new_items_data),
+                "project_manager": pm_name,
+                "history_stored": True,
+                "route": "buyer"
+            }), 200
 
     except Exception as e:
         log.error(f"Error sending new purchase notification: {str(e)}")
@@ -675,25 +828,28 @@ def process_new_purchase_decision(boq_id):
         # Get original BOQ total cost
         original_boq_total = float(boq_details.total_cost) if boq_details.total_cost else 0.0
 
-        # Determine recipient based on threshold (50000)
-        THRESHOLD = 50000
+        # After Estimator approval, route to Buyer for purchasing
+        # Find available buyers
+        buyer_role = Role.query.filter_by(role='buyer').first()
+        if not buyer_role:
+            return jsonify({"error": "Buyer role not found in system"}), 404
 
-        if original_boq_total < THRESHOLD:
-            # Send to Project Manager
-            recipient_email = pm.email
-            recipient_name = pm_name
-            recipient_role = "project_manager"
-            recipient_user_id = pm_id
-        else:
-            # Send to Technical Director
-            td = User.query.filter_by(role_id=1, is_deleted=False).first()  # Assuming role_id 1 is TD
-            if not td or not td.email:
-                return jsonify({"error": "Technical Director not found or email not available"}), 404
+        buyers = User.query.filter(
+            User.role_id == buyer_role.role_id,
+            User.is_deleted == False,
+            User.is_active == True
+        ).all()
 
-            recipient_email = td.email
-            recipient_name = td.full_name
-            recipient_role = "technical_director"
-            recipient_user_id = td.user_id
+        if not buyers:
+            return jsonify({"error": "No active Buyer found"}), 404
+
+        # Use first available buyer for now (can be enhanced with assignment logic)
+        buyer = buyers[0]
+
+        recipient_email = buyer.email
+        recipient_name = buyer.full_name
+        recipient_role = "buyer"
+        recipient_user_id = buyer.user_id
 
         # Prepare data for email
         boq_data = {
@@ -723,18 +879,22 @@ def process_new_purchase_decision(boq_id):
                 new_items_data=new_items_data,
                 total_amount=total_amount
             )
-            # Update BOQ status to "approved" when Estimator approves
+            # Update BOQ status to "assigned_to_buyer" when Estimator approves (routing to Buyer)
             if email_sent:
-                boq.status = "approved"
+                boq.status = "assigned_to_buyer"
                 boq.last_modified_by = estimator_name
                 boq.last_modified_at = datetime.utcnow()
-                log.info(f"BOQ {boq_id} status updated to 'approved' after new purchase approval")
+                log.info(f"BOQ {boq_id} status updated to 'assigned_to_buyer' after Estimator approval, routing to Buyer")
 
         else:  # rejected
+            # When rejected, send notification to PM (not buyer)
+            pm_recipient_email = pm.email
+            pm_recipient_name = pm_name
+
             email_sent = email_service.send_new_purchase_rejection(
-                recipient_email=recipient_email,
-                recipient_name=recipient_name,
-                recipient_role=recipient_role,
+                recipient_email=pm_recipient_email,
+                recipient_name=pm_recipient_name,
+                recipient_role="project_manager",
                 estimator_name=estimator_name,
                 boq_data=boq_data,
                 project_data=project_data,
@@ -837,26 +997,43 @@ def process_new_purchase_decision(boq_id):
             log.error(f"Error storing decision in BOQ history: {history_error}")
             db.session.rollback()
 
-        response_data = {
-            "success": True,
-            "message": f"New purchase {status} and notification sent to {recipient_role.replace('_', ' ').title()}",
-            "status": status,
-            "email_sent": email_sent,
-            "recipient": {
-                "name": recipient_name,
-                "email": recipient_email,
-                "role": recipient_role
-            },
-            "items_count": len(new_items_data),
-            "total_amount": round(total_amount, 2),
-            "original_boq_total": round(original_boq_total, 2),
-            "threshold": THRESHOLD,
-            "sent_to": recipient_role,
-            "estimator": estimator_name
-        }
-
-        if status == 'rejected':
-            response_data["rejection_reason"] = rejection_reason
+        if status == 'approved':
+            response_data = {
+                "success": True,
+                "message": f"New purchase approved by Estimator and assigned to Buyer for purchasing",
+                "status": status,
+                "boq_status": "assigned_to_buyer",
+                "email_sent": email_sent,
+                "buyer": {
+                    "name": recipient_name,
+                    "email": recipient_email,
+                    "role": recipient_role
+                },
+                "items_count": len(new_items_data),
+                "total_amount": round(total_amount, 2),
+                "original_boq_total": round(original_boq_total, 2),
+                "sent_to": "buyer",
+                "estimator": estimator_name
+            }
+        else:  # rejected
+            response_data = {
+                "success": True,
+                "message": f"New purchase rejected by Estimator, notification sent to Project Manager",
+                "status": status,
+                "boq_status": "rejected",
+                "email_sent": email_sent,
+                "project_manager": {
+                    "name": pm_recipient_name,
+                    "email": pm_recipient_email,
+                    "role": "project_manager"
+                },
+                "items_count": len(new_items_data),
+                "total_amount": round(total_amount, 2),
+                "original_boq_total": round(original_boq_total, 2),
+                "sent_to": "project_manager",
+                "estimator": estimator_name,
+                "rejection_reason": rejection_reason
+            }
 
         return jsonify(response_data), 200
 
