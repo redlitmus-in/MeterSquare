@@ -8,7 +8,6 @@ import {
   XCircleIcon,
   ExclamationTriangleIcon,
   EyeIcon,
-  FunnelIcon,
   TableCellsIcon,
   Squares2X2Icon,
   PencilIcon,
@@ -59,10 +58,6 @@ const ExtraMaterialPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
   const [showViewModal, setShowViewModal] = useState(false);
-  const [filterProject, setFilterProject] = useState('');
-  const [filterArea, setFilterArea] = useState('');
-  const [filterItem, setFilterItem] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteRequestId, setDeleteRequestId] = useState<number | null>(null);
 
@@ -93,9 +88,7 @@ const ExtraMaterialPage: React.FC = () => {
 
       // Transform pending materials (status: 'pending' - not yet sent to PM)
       const filteredPending = seRequests
-        .filter((cr: any) => cr.status === 'pending')
-        .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
-        .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
+        .filter((cr: any) => cr.status === 'pending');
 
       const transformedPending = filteredPending.map((cr: any) => {
         const materials = cr.materials_data || [];
@@ -127,9 +120,7 @@ const ExtraMaterialPage: React.FC = () => {
 
       // Transform under review materials (status: 'under_review' - sent to PM, waiting for approval)
       const filteredUnderReview = seRequests
-        .filter((cr: any) => cr.status === 'under_review')
-        .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
-        .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
+        .filter((cr: any) => cr.status === 'under_review');
 
       const transformedUnderReview = filteredUnderReview.map((cr: any) => {
         const materials = cr.materials_data || [];
@@ -164,10 +155,7 @@ const ExtraMaterialPage: React.FC = () => {
         .filter((cr: any) => {
           const approvedStatuses = ['approved', 'approved_by_pm', 'approved_by_estimator', 'approved_by_td', 'assigned_to_buyer'];
           return approvedStatuses.includes(cr.status) && !cr.purchase_completion_date;
-        })
-        .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
-        .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea))
-        .filter((cr: any) => !filterItem || cr.item_id === filterItem);
+        });
 
       const transformedApproved = filteredApproved.map((cr: any) => {
         const materials = cr.materials_data || [];
@@ -199,9 +187,7 @@ const ExtraMaterialPage: React.FC = () => {
 
       // Transform rejected materials (only SE's own rejected requests)
       const filteredRejected = seRequests
-        .filter((cr: any) => cr.status === 'rejected')
-        .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
-        .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
+        .filter((cr: any) => cr.status === 'rejected');
 
       const transformedRejected = filteredRejected.map((cr: any) => {
         const materials = cr.materials_data || [];
@@ -236,9 +222,7 @@ const ExtraMaterialPage: React.FC = () => {
 
       // Transform completed materials (purchase completed by buyer - status is 'purchase_completed')
       const filteredCompleted = seRequests
-        .filter((cr: any) => cr.status === 'purchase_completed')
-        .filter((cr: any) => !filterProject || cr.project_id === parseInt(filterProject))
-        .filter((cr: any) => !filterArea || cr.area_id === parseInt(filterArea));
+        .filter((cr: any) => cr.status === 'purchase_completed');
 
       const transformedCompleted = filteredCompleted.map((cr: any) => {
         const materials = cr.materials_data || [];
@@ -288,7 +272,7 @@ const ExtraMaterialPage: React.FC = () => {
 
   useEffect(() => {
     refetch();
-  }, [activeTab, filterProject, filterArea, filterItem, filterStatus]);
+  }, [activeTab]);
 
   const handleSubmitExtraMaterial = async (data: any) => {
     try {
@@ -686,7 +670,7 @@ const ExtraMaterialPage: React.FC = () => {
                       <div className="space-y-2">
                         <button
                           onClick={() => handleViewDetails(request.id)}
-                          className="w-full bg-red-500 hover:bg-red-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                          className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
                         >
                           <EyeIcon className="w-4 h-4" />
                           View Details
@@ -778,7 +762,7 @@ const ExtraMaterialPage: React.FC = () => {
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleViewDetails(request.id)}
-                                className="text-red-600 hover:text-red-700 font-medium"
+                                className="text-blue-600 hover:text-blue-700 font-medium"
                               >
                                 <EyeIcon className="w-4 h-4 inline mr-1" />
                                 View
@@ -880,7 +864,7 @@ const ExtraMaterialPage: React.FC = () => {
 
                       <button
                         onClick={() => handleViewDetails(request.id)}
-                        className="w-full bg-red-500 hover:bg-red-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                        className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
                       >
                         <EyeIcon className="w-4 h-4" />
                         View Details
@@ -959,7 +943,7 @@ const ExtraMaterialPage: React.FC = () => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
                             <button
                               onClick={() => handleViewDetails(request.id)}
-                              className="text-red-600 hover:text-red-700 font-medium"
+                              className="text-blue-600 hover:text-blue-700 font-medium"
                             >
                               <EyeIcon className="w-4 h-4 inline mr-1" />
                               View
@@ -1204,7 +1188,7 @@ const ExtraMaterialPage: React.FC = () => {
                       <div className="space-y-2">
                         <button
                           onClick={() => handleViewDetails(request.id)}
-                          className="w-full bg-red-500 hover:bg-red-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                          className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
                         >
                           <EyeIcon className="w-4 h-4" />
                           View Details
@@ -1303,7 +1287,7 @@ const ExtraMaterialPage: React.FC = () => {
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleViewDetails(request.id)}
-                                className="text-red-600 hover:text-red-700 font-medium"
+                                className="text-blue-600 hover:text-blue-700 font-medium"
                               >
                                 <EyeIcon className="w-4 h-4 inline mr-1" />
                                 View
@@ -1412,7 +1396,7 @@ const ExtraMaterialPage: React.FC = () => {
 
                       <button
                         onClick={() => handleViewDetails(request.id)}
-                        className="w-full bg-red-500 hover:bg-red-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
+                        className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-2"
                       >
                         <EyeIcon className="w-4 h-4" />
                         View Details
@@ -1493,7 +1477,7 @@ const ExtraMaterialPage: React.FC = () => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
                             <button
                               onClick={() => handleViewDetails(request.id)}
-                              className="text-red-600 hover:text-red-700 font-medium"
+                              className="text-blue-600 hover:text-blue-700 font-medium"
                             >
                               <EyeIcon className="w-4 h-4 inline mr-1" />
                               View
