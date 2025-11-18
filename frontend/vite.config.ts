@@ -148,7 +148,7 @@ export default defineConfig(({ mode }) => {
         // Tree-shaking and side-effects optimization
         treeshake: {
           preset: 'recommended',
-          moduleSideEffects: false,
+          moduleSideEffects: true, // FIXED: Was false, causing all app code to be removed
           propertyReadSideEffects: false,
           tryCatchDeoptimization: false
         }
