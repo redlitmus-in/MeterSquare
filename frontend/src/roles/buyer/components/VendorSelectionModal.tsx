@@ -57,6 +57,48 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
     }
   }, [isOpen]);
 
+  // Helper function to check if a product matches a material with improved accuracy
+  const isProductMatchingMaterial = (
+    productName: string,
+    productCategory: string,
+    vendorCategory: string,
+    material: string
+  ): boolean => {
+    // Split material and product names into words for better matching
+    const materialWords = material.split(/\s+/).filter(w => w.length > 2); // Ignore short words
+    const productWords = productName.split(/\s+/).filter(w => w.length > 2);
+
+    // Calculate matching score - how many words match
+    let matchingWords = 0;
+    let totalWords = materialWords.length;
+
+    if (totalWords === 0) return false;
+
+    // Check word-by-word matching
+    materialWords.forEach(matWord => {
+      const matched = productWords.some(prodWord => {
+        // Exact match or one contains the other (for variations like "paint"/"paints")
+        return prodWord === matWord ||
+               (prodWord.length > 3 && matWord.length > 3 && (
+                 prodWord.includes(matWord) || matWord.includes(prodWord)
+               ));
+      });
+      if (matched) matchingWords++;
+    });
+
+    // Require at least 60% of words to match, or all words if only 1-2 words
+    const matchThreshold = totalWords <= 2 ? totalWords : Math.ceil(totalWords * 0.6);
+    const hasGoodWordMatch = matchingWords >= matchThreshold;
+
+    // Also check category matching as a fallback
+    const categoryMatch = !!(
+      (productCategory && material.includes(productCategory) && productCategory.length > 3) ||
+      (vendorCategory && material.includes(vendorCategory) && vendorCategory.length > 3)
+    );
+
+    return hasGoodWordMatch || categoryMatch;
+  };
+
   const loadVendors = async () => {
     try {
       setLoadingVendors(true);
@@ -103,23 +145,17 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
       if (!vendor.vendor_id) return false;
 
       const products = vendorProducts.get(vendor.vendor_id) || [];
+      const vendorCategory = vendor.category?.toLowerCase().trim() || '';
 
       // Vendor must have at least one product matching the required materials
       const hasMatchingProduct = products.some(product => {
-        const productName = product.product_name?.toLowerCase() || '';
-        const productCategory = product.category?.toLowerCase() || '';
-        const vendorCategory = vendor.category?.toLowerCase() || '';
+        const productName = product.product_name?.toLowerCase().trim() || '';
+        const productCategory = product.category?.toLowerCase().trim() || '';
 
         // Check if product matches any required material
-        return requiredMaterials.some(material => {
-          // Match by product name, product category, or vendor category
-          return productName.includes(material) ||
-                 material.includes(productName) ||
-                 productCategory.includes(material) ||
-                 material.includes(productCategory) ||
-                 vendorCategory.includes(material) ||
-                 material.includes(vendorCategory);
-        });
+        return requiredMaterials.some(material =>
+          isProductMatchingMaterial(productName, productCategory, vendorCategory, material)
+        );
       });
 
       return hasMatchingProduct;
@@ -138,24 +174,24 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
     filtered.sort((a, b) => {
       const aProducts = vendorProducts.get(a.vendor_id!) || [];
       const bProducts = vendorProducts.get(b.vendor_id!) || [];
+      const aVendorCategory = a.category?.toLowerCase().trim() || '';
+      const bVendorCategory = b.category?.toLowerCase().trim() || '';
 
-      const aMatches = aProducts.filter(p =>
-        requiredMaterials.some(m =>
-          p.product_name?.toLowerCase().includes(m) ||
-          m.includes(p.product_name?.toLowerCase() || '') ||
-          p.category?.toLowerCase().includes(m) ||
-          m.includes(p.category?.toLowerCase() || '')
-        )
-      ).length;
+      const aMatches = aProducts.filter(p => {
+        const productName = p.product_name?.toLowerCase().trim() || '';
+        const productCategory = p.category?.toLowerCase().trim() || '';
+        return requiredMaterials.some(m =>
+          isProductMatchingMaterial(productName, productCategory, aVendorCategory, m)
+        );
+      }).length;
 
-      const bMatches = bProducts.filter(p =>
-        requiredMaterials.some(m =>
-          p.product_name?.toLowerCase().includes(m) ||
-          m.includes(p.product_name?.toLowerCase() || '') ||
-          p.category?.toLowerCase().includes(m) ||
-          m.includes(p.category?.toLowerCase() || '')
-        )
-      ).length;
+      const bMatches = bProducts.filter(p => {
+        const productName = p.product_name?.toLowerCase().trim() || '';
+        const productCategory = p.category?.toLowerCase().trim() || '';
+        return requiredMaterials.some(m =>
+          isProductMatchingMaterial(productName, productCategory, bVendorCategory, m)
+        );
+      }).length;
 
       return bMatches - aMatches;
     });
@@ -311,7 +347,7 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                 <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
                   <div className="text-xs text-blue-900">
-                    <span className="font-medium">Smart Filtering:</span> Only showing vendors who have products matching your required materials. Vendors with more matches appear first.
+                    <span className="font-medium">Filtered Results:</span> Only showing vendors with products matching your required materials. Vendors with more matches appear first.
                   </div>
                 </div>
 
@@ -336,14 +372,14 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
                         .filter(Boolean);
 
                       const vendorProductsList = vendorProducts.get(vendor.vendor_id!) || [];
-                      const matchingProducts = vendorProductsList.filter(p =>
-                        requiredMaterials.some(m =>
-                          p.product_name?.toLowerCase().includes(m) ||
-                          m.includes(p.product_name?.toLowerCase() || '') ||
-                          p.category?.toLowerCase().includes(m) ||
-                          m.includes(p.category?.toLowerCase() || '')
-                        )
-                      );
+                      const vendorCategory = vendor.category?.toLowerCase().trim() || '';
+                      const matchingProducts = vendorProductsList.filter(p => {
+                        const productName = p.product_name?.toLowerCase().trim() || '';
+                        const productCategory = p.category?.toLowerCase().trim() || '';
+                        return requiredMaterials.some(m =>
+                          isProductMatchingMaterial(productName, productCategory, vendorCategory, m)
+                        );
+                      });
 
                       return (
                         <motion.div
