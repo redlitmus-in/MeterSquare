@@ -522,11 +522,9 @@ const ProjectApprovals: React.FC = () => {
     const clientName = boq.client || boq.project_details?.client || boq.project?.client || 'Unknown Client';
     const status = mapBOQStatus(boq.status);
 
-    // IMPORTANT: Prioritize total_cost as it's the most reliable field after discount
-    // Add preliminary amount to the total (items total + preliminary - discount = grand total)
-    const baseTotalCost = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
-    const preliminaryAmount = boq.preliminaries?.cost_details?.amount || 0;
-    const totalValue = baseTotalCost + preliminaryAmount;
+    // IMPORTANT: total_cost from backend now includes items + preliminaries - discount
+    // This is the GRAND TOTAL (Excluding VAT) calculated in backend
+    const totalValue = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
     const laborCost = boq.total_labour_cost || 0;
     const materialCost = boq.total_material_cost || 0;
     const itemCount = boq.items_count || 0;
@@ -537,10 +535,9 @@ const ProjectApprovals: React.FC = () => {
       selling_price: boq.selling_price,
       estimatedSellingPrice: boq.estimatedSellingPrice,
       discount_percentage: boq.discount_percentage,
-      discount_amount: boq.discount_amount,
-      preliminary_amount: preliminaryAmount
+      discount_amount: boq.discount_amount
     });
-    console.log(`💰 [TD ProjectApprovals] BOQ ${boq.boq_id} - Final totalValue: ${totalValue} (Base: ${baseTotalCost} + Preliminary: ${preliminaryAmount})`);
+    console.log(`💰 [TD ProjectApprovals] BOQ ${boq.boq_id} - Grand Total (Excluding VAT): ${totalValue}`);
 
     const projectCode = boq.project_code || boq.project_details?.project_code || boq.project?.project_code;
 
@@ -1087,6 +1084,20 @@ const ProjectApprovals: React.FC = () => {
     return false;
   }), [sortedEstimations, filterStatus, selectedRevisionNumber]);
 
+  // Calculate counts for each tab
+  const tabCounts = useMemo(() => {
+    return {
+      pending: sortedEstimations.filter(est => est.status === 'pending' && !est.pmAssigned).length,
+      approved: sortedEstimations.filter(est => (est.status === 'approved' || est.status === 'revision_approved' || est.status === 'sent_for_confirmation') && !est.pmAssigned).length,
+      sent: sortedEstimations.filter(est => (est.status === 'client_confirmed' || est.status === 'client_rejected') && !est.pmAssigned).length,
+      revisions: sortedEstimations.filter(est => (est as any).revision_number != null && (est as any).revision_number !== 0).length,
+      assigned: sortedEstimations.filter(est => est.pmAssigned === true && est.status !== 'rejected' && est.status !== 'completed' && est.status !== 'cancelled').length,
+      completed: sortedEstimations.filter(est => est.status === 'completed').length,
+      rejected: sortedEstimations.filter(est => est.status === 'rejected').length,
+      cancelled: sortedEstimations.filter(est => est.status === 'cancelled').length,
+    };
+  }, [sortedEstimations]);
+
   const handleApproval = async (id: number, approved: boolean, notes?: string) => {
     console.log('========== HANDLE APPROVAL DEBUG ==========');
     console.log('approved:', approved);
@@ -1487,13 +1498,20 @@ const ProjectApprovals: React.FC = () => {
                     setRevisionSubTab('pending_approval');
                   }
                 }}
-                className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 ${
                   filterStatus === tab.key
                     ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-900 border border-red-200 shadow-md'
                     : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                 }`}
               >
-                {tab.label}
+                <span>{tab.label}</span>
+                <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${
+                  filterStatus === tab.key
+                    ? 'bg-red-600 text-white'
+                    : 'bg-gray-200 text-gray-700'
+                }`}>
+                  {tabCounts[tab.key as keyof typeof tabCounts]}
+                </span>
               </button>
             ))}
           </div>
