@@ -418,6 +418,10 @@ def get_assigned_projects():
     """
     Get projects assigned to the current user with areas and BOQ structure (items + sub-items)
     Used for Change Requests dropdown flow
+
+    ADMIN VIEWING CONTEXT:
+    - When admin views as a role, they see ALL projects for that role type
+    - When regular user, they see only their assigned projects
     """
     try:
         current_user = g.get("user")
@@ -427,6 +431,14 @@ def get_assigned_projects():
 
         user_id = current_user.get('user_id')
         user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
+
+        # ✅ Get admin viewing context
+        from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
+        context = get_effective_user_context()
+        effective_role = context.get('effective_role', user_role)
+        is_admin_viewing = context.get('is_admin_viewing', False)
+
+        log.info(f"get_assigned_projects - actual_role: {user_role}, effective_role: {effective_role}, is_admin_viewing: {is_admin_viewing}")
 
         # ✅ PERFORMANCE OPTIMIZATION: Eager load BOQs and BOQDetails to eliminate N+1 queries
         # This changes query count from O(N²) to O(1)
@@ -441,42 +453,76 @@ def get_assigned_projects():
             selectinload(Project.boqs).selectinload(BOQ.change_requests)
         ]
 
-        # Query projects based on role - Show active/assigned projects (not completed)
-        if user_role == 'admin':
-            # Admin sees all projects where site supervisor is assigned
-            projects = Project.query.options(*eager_load_options).filter(
-                Project.site_supervisor_id.isnot(None),
-                Project.is_deleted == False,
-                Project.status != 'completed'  # Exclude completed projects
-            ).all()
+        # Query projects based on effective role - Show active/assigned projects (not completed)
+        # When admin is viewing as a role, show ALL projects for that role type
 
-        elif user_role in ['siteengineer', 'sitesupervisor', 'sitesupervisor']:
-            # Get projects where user is assigned as site engineer/supervisor
-            projects = Project.query.options(*eager_load_options).filter(
-                Project.site_supervisor_id == user_id,
-                Project.is_deleted == False,
-                Project.status != 'completed'  # Exclude completed projects
-            ).all()
+        if effective_role in ['siteengineer', 'sitesupervisor']:
+            # Site Engineer / Site Supervisor projects
+            if is_admin_viewing:
+                # Admin viewing as SE: Show ALL SE projects (no user filter)
+                projects = Project.query.options(*eager_load_options).filter(
+                    Project.site_supervisor_id.isnot(None),
+                    Project.is_deleted == False,
+                    Project.status != 'completed'
+                ).all()
+                log.info(f"Admin viewing as SE: Fetched {len(projects)} total SE projects")
+            else:
+                # Regular SE: Show only THEIR projects
+                projects = Project.query.options(*eager_load_options).filter(
+                    Project.site_supervisor_id == user_id,
+                    Project.is_deleted == False,
+                    Project.status != 'completed'
+                ).all()
+                log.info(f"Regular SE {user_id}: Fetched {len(projects)} assigned projects")
 
-        elif user_role in ['projectmanager']:
-            # Get projects where user is assigned as project manager
-            # user_id is JSONB array, so use .contains() to check if user_id is in array
-            projects = Project.query.options(*eager_load_options).filter(
-                Project.user_id.contains([user_id]),
-                Project.is_deleted == False,
-                Project.status != 'completed'  # Exclude completed projects
-            ).all()
+        elif effective_role in ['projectmanager']:
+            # Project Manager projects
+            if is_admin_viewing:
+                # Admin viewing as PM: Show ALL PM projects (no user filter)
+                projects = Project.query.options(*eager_load_options).filter(
+                    Project.user_id.isnot(None),
+                    Project.is_deleted == False,
+                    Project.status != 'completed'
+                ).all()
+                log.info(f"Admin viewing as PM: Fetched {len(projects)} total PM projects")
+            else:
+                # Regular PM: Show only THEIR projects
+                projects = Project.query.options(*eager_load_options).filter(
+                    Project.user_id.contains([user_id]),
+                    Project.is_deleted == False,
+                    Project.status != 'completed'
+                ).all()
+                log.info(f"Regular PM {user_id}: Fetched {len(projects)} assigned projects")
 
-        elif user_role in ['mep', 'mepsupervisor']:
-            # Get projects where user is assigned as MEP supervisor
-            # mep_supervisor_id is JSONB array, so use .contains() to check if user_id is in array
+        elif effective_role in ['mep', 'mepsupervisor']:
+            # MEP Supervisor projects
+            if is_admin_viewing:
+                # Admin viewing as MEP: Show ALL MEP projects (no user filter)
+                projects = Project.query.options(*eager_load_options).filter(
+                    Project.mep_supervisor_id.isnot(None),
+                    Project.is_deleted == False,
+                    Project.status != 'completed'
+                ).all()
+                log.info(f"Admin viewing as MEP: Fetched {len(projects)} total MEP projects")
+            else:
+                # Regular MEP: Show only THEIR projects
+                projects = Project.query.options(*eager_load_options).filter(
+                    Project.mep_supervisor_id.contains([user_id]),
+                    Project.is_deleted == False,
+                    Project.status != 'completed'
+                ).all()
+                log.info(f"Regular MEP {user_id}: Fetched {len(projects)} assigned projects")
+
+        elif user_role == 'admin' and not is_admin_viewing:
+            # Pure admin view (not viewing as another role) - Show all projects
             projects = Project.query.options(*eager_load_options).filter(
-                Project.mep_supervisor_id.contains([user_id]),
                 Project.is_deleted == False,
-                Project.status != 'completed'  # Exclude completed projects
+                Project.status != 'completed'
             ).all()
+            log.info(f"Pure admin view: Fetched {len(projects)} total projects")
 
         else:
+            # No projects for other roles
             return jsonify({"projects": []}), 200
 
         # Build response with BOQ structure
