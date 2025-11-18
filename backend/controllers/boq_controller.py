@@ -3298,6 +3298,11 @@ def get_sub_item_material(sub_item_id):
             material_details.append({
                 "material_id": material.material_id,
                 "material_name": material.material_name,
+                "description" : material.description,
+                "size" : material.size,
+                "specification" : material.specification,
+                "quantity" : material.quantity,
+                "brand" : material.brand,
                 "item_id": material.item_id,
                 "sub_item_id": material.sub_item_id,
                 "item_name": boq_item.item_name if boq_item else None,
@@ -4019,8 +4024,12 @@ def get_sub_item(item_id):
                 material_list.append({
                     "material_id": material.material_id,
                     "material_name": material.material_name,
+                    "description" : material.description,
+                    "size" : material.size,
+                    "specification" : material.specification,
+                    "quantity" : material.quantity,
                     "location": None,  # Location is stored in sub_item, not material
-                    "brand": None,  # Brand is stored in sub_item, not material
+                    "brand": material.brand,  # Brand is stored in sub_item, not material
                     "unit": material.default_unit,
                     "current_market_price": material.current_market_price,
                     "is_active": material.is_active
@@ -4086,6 +4095,11 @@ def get_sub_item(item_id):
                         "item_id": boq_item.item_id,
                         "item_name": boq_item.item_name,
                         "material_name": material['material_name'],
+                        "description" : material['description'],
+                        "size" : material['size'],
+                        "brand" : material['brand'],
+                        "specification" : material['specification'],
+                        "quantity" : material['quantity'],
                         "current_market_price": material['current_market_price'],
                         "default_unit": material['unit']
                     }
@@ -4113,6 +4127,11 @@ def get_sub_item(item_id):
                         "item_id": boq_item.item_id,
                         "item_name": boq_item.item_name,
                         "material_name": master_material.material_name,
+                        "description" : master_material.description,
+                        "size" : master_material.size,
+                        "specification" : master_material.specification,
+                        "quantity" : master_material.quantity,
+                        "brand" : master_material.brand,
                         "current_market_price": master_material.current_market_price,
                         "default_unit": master_material.default_unit,
                         "is_from_change_request": True

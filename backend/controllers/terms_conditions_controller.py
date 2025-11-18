@@ -147,7 +147,9 @@ def create_term():
         # Check role authorization
         current_user = g.user
         allowed_roles = ['Admin', 'Estimator', 'Technical Director']
-        if current_user['role'] not in allowed_roles:
+        # Case-insensitive role check
+        user_role = current_user.get('role', '').strip()
+        if not any(user_role.lower() == allowed.lower() for allowed in allowed_roles):
             return jsonify({
                 'success': False,
                 'message': f'Access denied. {", ".join(allowed_roles)} role required.'
@@ -207,7 +209,9 @@ def update_term(term_id):
         # Check role authorization
         current_user = g.user
         allowed_roles = ['Admin', 'Estimator', 'Technical Director']
-        if current_user['role'] not in allowed_roles:
+        # Case-insensitive role check
+        user_role = current_user.get('role', '').strip()
+        if not any(user_role.lower() == allowed.lower() for allowed in allowed_roles):
             return jsonify({
                 'success': False,
                 'message': f'Access denied. {", ".join(allowed_roles)} role required.'
@@ -270,7 +274,9 @@ def delete_term(term_id):
         # Check role authorization
         current_user = g.user
         allowed_roles = ['Admin', 'Estimator', 'Technical Director']
-        if current_user['role'] not in allowed_roles:
+        # Case-insensitive role check
+        user_role = current_user.get('role', '').strip()
+        if not any(user_role.lower() == allowed.lower() for allowed in allowed_roles):
             return jsonify({
                 'success': False,
                 'message': f'Access denied. {", ".join(allowed_roles)} role required.'
@@ -578,7 +584,9 @@ def update_term_master(term_id):
         # Check role authorization
         current_user = g.user
         allowed_roles = ['Admin', 'Estimator', 'Technical Director']
-        if current_user['role'] not in allowed_roles:
+        # Case-insensitive role check
+        user_role = current_user.get('role', '').strip()
+        if not any(user_role.lower() == allowed.lower() for allowed in allowed_roles):
             return jsonify({
                 'success': False,
                 'message': f'Access denied. {", ".join(allowed_roles)} role required.'
@@ -630,7 +638,9 @@ def delete_term_master(term_id):
         # Check role authorization
         current_user = g.user
         allowed_roles = ['Admin', 'Estimator', 'Technical Director']
-        if current_user['role'] not in allowed_roles:
+        # Case-insensitive role check
+        user_role = current_user.get('role', '').strip()
+        if not any(user_role.lower() == allowed.lower() for allowed in allowed_roles):
             return jsonify({
                 'success': False,
                 'message': f'Access denied. {", ".join(allowed_roles)} role required.'

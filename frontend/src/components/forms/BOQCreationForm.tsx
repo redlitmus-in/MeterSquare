@@ -5435,7 +5435,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                     <>
                       {/* Checklist Items - Show only 6 by default, expandable */}
                       <div className="space-y-2 mb-3">
-                        {(termsListExpanded ? termsConditions : termsConditions.slice(0, 6)).map((term) => (
+                        {(termsListExpanded ? termsConditions : termsConditions.slice(0, 6)).map((term) => {
+                          return (
                       <div
                         key={term.id}
                         onClick={() => editingTermId !== term.id && toggleTerm(term.id)}
@@ -5449,7 +5450,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           disabled={isSubmitting}
                         />
                         {editingTermId === term.id ? (
-                          <div className="flex-1 flex items-start gap-2">
+                          <div className="flex-1 flex items-center gap-2">
                             <textarea
                               value={term.terms_text}
                               onChange={(e) => {
@@ -5471,53 +5472,31 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                               autoFocus={true}
                               style={{ minHeight: '38px' }}
                             />
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  saveTermEdit(term);
-                                }}
-                                className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                                disabled={isSubmitting || !term.terms_text.trim()}
-                                title="Save changes"
-                              >
-                                <Check className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  if (term.isCustom && !term.term_id) {
-                                    await removeTerm(term.id);
-                                  } else {
-                                    setEditingTermId(null);
-                                  }
-                                }}
-                                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                                disabled={isSubmitting}
-                                title="Cancel"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                              {term.term_id && (
-                                <button
-                                  type="button"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    if (window.confirm('Are you sure you want to delete this term from the master list?')) {
-                                      setEditingTermId(null);
-                                      await removeTerm(term.id);
-                                    }
-                                  }}
-                                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                  disabled={isSubmitting}
-                                  title="Delete term"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
-                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                saveTermEdit(term);
+                              }}
+                              className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                              disabled={isSubmitting || !term.terms_text.trim()}
+                              title="Save changes"
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                setEditingTermId(null);
+                                await removeTerm(term.id);
+                              }}
+                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              disabled={isSubmitting}
+                              title="Delete term"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         ) : term.isCustom ? (
                           <div className="flex-1 flex items-start gap-2">
@@ -5569,42 +5548,27 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             </div>
                           </div>
                         ) : (
-                          <div className="flex-1 flex items-center gap-3">
-                            <span className="text-sm text-gray-700 flex-1 leading-relaxed">
+                          <div className="flex-1 flex items-center justify-between group">
+                            <label className="text-sm text-gray-700 cursor-pointer flex-1">
                               {term.terms_text}
-                            </span>
-                            <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingTermId(term.id);
-                                }}
-                                className="p-2 bg-blue-500 text-white hover:bg-blue-600 rounded-lg transition-all active:scale-95 shadow-md hover:shadow-lg"
-                                disabled={isSubmitting}
-                                title="Edit term"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  if (window.confirm('Are you sure you want to delete this term from the master list?\n\nThis will remove it from the master library but won\'t affect existing BOQs that already use it.')) {
-                                    await removeTerm(term.id);
-                                  }
-                                }}
-                                className="p-2 bg-red-500 text-white hover:bg-red-600 rounded-lg transition-all active:scale-95 shadow-md hover:shadow-lg"
-                                disabled={isSubmitting}
-                                title="Delete term"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingTermId(term.id);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                              disabled={isSubmitting}
+                              title="Edit term"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         )}
                       </div>
-                    ))}
+                          );
+                        })}
                   </div>
 
                   {/* Show More/Less Button */}
