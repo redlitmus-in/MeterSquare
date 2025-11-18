@@ -359,10 +359,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       // Show a subtle confirmation that data is backed up locally
       const mode = editMode ? 'Changes saved' : 'Draft saved';
       toast.success(mode, {
-        duration: hasImages ? 3000 : 1500,
-        description: hasImages
-          ? `${boqName} - Note: Images not saved in draft, please re-add`
-          : `${boqName} - ${items.length} items`
+        duration: 1500,
+        description: `${boqName} - ${items.length} items${hasImages ? ' with images' : ''}`
       });
     }
   };
@@ -375,23 +373,24 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     ? `boq_edit_draft_${existingBoqData.boq_id}`
     : 'boq_draft_autosave';
 
-  // Sanitize items before saving - remove File objects as they can't be serialized to localStorage
-  const sanitizeItemsForStorage = (items: BOQItemForm[]) => {
-    return items.map(item => ({
-      ...item,
-      sub_items: item.sub_items.map(subItem => ({
-        ...subItem,
-        images: [], // Remove File objects - they can't be serialized
-        // Keep imageUrls and imageData for reference only
-      }))
-    }));
+  // Helper: Convert base64 back to File
+  const base64ToFile = (base64: string, filename: string): File => {
+    const arr = base64.split(',');
+    const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
   };
 
   const { isSaving, lastSaved, saveNow, clearLocalStorage, getLocalStorageData } = useAutoSave({
     data: {
       boqName,
       selectedProjectId,
-      items: sanitizeItemsForStorage(items), // Sanitize items to remove File objects
+      items, // Pass items as-is - hook will handle base64 conversion
       overallOverhead,
       overallProfit,
       overallDiscount,
@@ -529,9 +528,47 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
       if (isDraftForThisProject) {
         // Auto-restore data directly (no popup modal)
+
+        // Convert base64Images back to File objects
+        const restoredItems = actualData.items?.map((item: any) => ({
+          ...item,
+          sub_items: item.sub_items?.map((subItem: any) => {
+            const restoredImages: File[] = [];
+            const restoredUrls: string[] = [];
+
+            // Convert base64 images back to File objects
+            if (subItem.base64Images && subItem.base64Images.length > 0) {
+              subItem.base64Images.forEach((img: any) => {
+                try {
+                  const file = base64ToFile(img.data, img.name);
+                  const url = URL.createObjectURL(file);
+                  restoredImages.push(file);
+                  restoredUrls.push(url);
+                } catch (error) {
+                  console.error('Failed to restore image from base64:', error);
+                }
+              });
+            }
+
+            return {
+              ...subItem,
+              images: restoredImages,
+              imageUrls: restoredUrls,
+              imageData: restoredUrls.map(url => ({ url, isExisting: false }))
+            };
+          })
+        })) || [];
+
+        console.log('✅ Draft restored with images:', {
+          boqName: actualData.boqName,
+          itemsCount: restoredItems.length,
+          totalImagesRestored: restoredItems.reduce((sum: number, item: any) =>
+            sum + (item.sub_items?.reduce((s: number, si: any) => s + (si.images?.length || 0), 0) || 0), 0)
+        });
+
         setBoqName(actualData.boqName || '');
         setSelectedProjectId(actualData.selectedProjectId || null);
-        setItems(actualData.items || []);
+        setItems(restoredItems);
         setOverallOverhead(actualData.overallOverhead || 10);
         setOverallProfit(actualData.overallProfit || 15);
         setOverallDiscount(actualData.overallDiscount || 0);
@@ -620,9 +657,39 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       // Handle nested structure: {data: {...}, timestamp: ...}
       const actualData = savedData.data || savedData;
 
+      // Convert base64Images back to File objects
+      const restoredItems = actualData.items?.map((item: any) => ({
+        ...item,
+        sub_items: item.sub_items?.map((subItem: any) => {
+          const restoredImages: File[] = [];
+          const restoredUrls: string[] = [];
+
+          // Convert base64 images back to File objects
+          if (subItem.base64Images && subItem.base64Images.length > 0) {
+            subItem.base64Images.forEach((img: any) => {
+              try {
+                const file = base64ToFile(img.data, img.name);
+                const url = URL.createObjectURL(file);
+                restoredImages.push(file);
+                restoredUrls.push(url);
+              } catch (error) {
+                console.error('Failed to restore image from base64:', error);
+              }
+            });
+          }
+
+          return {
+            ...subItem,
+            images: restoredImages,
+            imageUrls: restoredUrls,
+            imageData: restoredUrls.map(url => ({ url, isExisting: false }))
+          };
+        })
+      })) || [];
+
       setBoqName(actualData.boqName || '');
       setSelectedProjectId(actualData.selectedProjectId || null);
-      setItems(actualData.items || []);
+      setItems(restoredItems);
       setOverallOverhead(actualData.overallOverhead || 10);
       setOverallProfit(actualData.overallProfit || 15);
       setOverallDiscount(actualData.overallDiscount || 0);
@@ -3021,13 +3088,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         if (result.success && result.boq_id) {
           toast.success(result.message);
 
-          // Clear auto-save data on successful creation
-          clearLocalStorage();
-
-          // Check if any sub-items have images to upload
+          // Check for images BEFORE clearing localStorage
           const hasImages = items.some(item =>
             item.sub_items && item.sub_items.some(si => si.images && si.images.length > 0)
           );
+
+          // Clear auto-save data on successful creation
+          clearLocalStorage();
 
           if (hasImages) {
             toast.loading('Uploading images...', { id: 'upload-images' });
