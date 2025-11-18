@@ -7,6 +7,8 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
+    "build:staging": "vite build --mode production.ath",
+    "build:production": "vite build --mode production",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "type-check": "tsc --noEmit",

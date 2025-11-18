@@ -368,10 +368,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   // Auto-save hook - saves immediately after changes (localStorage)
   // - Silent backup to localStorage: 500ms after user stops typing
   // - Full save with notification: Every 3 seconds if data changed
-  // Use unique localStorage key for edit mode based on BOQ ID
+  // Use unique localStorage key for EACH project to prevent drafts from overwriting each other
   const autoSaveKey = editMode && existingBoqData?.boq_id
     ? `boq_edit_draft_${existingBoqData.boq_id}`
-    : 'boq_draft_autosave';
+    : `boq_draft_create_${selectedProjectId || selectedProject?.project_id || 'temp'}`;
 
   // Helper: Convert base64 back to File
   const base64ToFile = (base64: string, filename: string): File => {
