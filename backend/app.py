@@ -11,7 +11,10 @@ from config.logging import get_logger
 import os
 
 # Load environment variables from .env file
-load_dotenv()
+# Get the directory where this file is located (backend directory)
+basedir = os.path.abspath(os.path.dirname(__file__))
+# Load .env from the backend directory
+load_dotenv(os.path.join(basedir, '.env'))
 
 def create_app():
     app = Flask(__name__)
@@ -28,6 +31,8 @@ def create_app():
         allowed_origins = [
             "https://msq.kol.tel",
             "http://msq.kol.tel",
+            "https://msq.ath.cx",
+            "http://msq.ath.cx",
             "https://148.72.174.7",
             "http://148.72.174.7",
             "http://localhost:3000",  # For local development testing
