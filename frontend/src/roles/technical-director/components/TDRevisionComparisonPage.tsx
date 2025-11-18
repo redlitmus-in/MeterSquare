@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Search, TrendingUp, TrendingDown, CheckCircle, XCircle, Eye, Clock, Calculator, Info } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, CheckCircle, XCircle, Eye, Clock, Calculator, Info, Image as ImageIcon, FileCheck } from 'lucide-react';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -805,6 +805,34 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                                 </div>
                               </div>
 
+                              {/* Sub-item Images */}
+                              {subItem.sub_item_image && Array.isArray(subItem.sub_item_image) && subItem.sub_item_image.length > 0 && (
+                                <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                  <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                    <ImageIcon className="w-3.5 h-3.5" />
+                                    Attached Images ({subItem.sub_item_image.length})
+                                  </h5>
+                                  <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                    {subItem.sub_item_image.map((image: any, imgIndex: number) => (
+                                      <div
+                                        key={imgIndex}
+                                        className="relative group cursor-pointer"
+                                        onClick={() => window.open(image.url, '_blank')}
+                                      >
+                                        <img
+                                          src={image.url}
+                                          alt={`${subItem.sub_item_name} - ${image.original_name || image.filename}`}
+                                          className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:border-green-500 transition-all"
+                                        />
+                                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center">
+                                          <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
                               {/* Sub Item Materials - Professional Table */}
                               {subItem.materials && subItem.materials.length > 0 && (
                                 <div className="mb-3">
@@ -1154,6 +1182,40 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                   </div>
                   );
                 })}
+
+                {/* TERMS & CONDITIONS SECTION */}
+                {currentRevisionData.boq_details?.terms_conditions && currentRevisionData.boq_details.terms_conditions.items?.length > 0 && (
+                  <div className="mt-6 mb-6">
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-300 rounded-t-lg p-4 flex items-center gap-3">
+                      <FileCheck className="w-6 h-6 text-blue-700" />
+                      <div>
+                        <h3 className="text-lg font-bold text-gray-900">Terms & Conditions</h3>
+                        <p className="text-xs text-gray-600">Selected terms and conditions</p>
+                      </div>
+                    </div>
+
+                    {/* Terms List */}
+                    <div className="bg-white border-x border-b border-blue-300 rounded-b-lg p-4">
+                      <div className="space-y-2">
+                        {currentRevisionData.boq_details.terms_conditions.items
+                          .filter((term: any) => term.checked)
+                          .map((term: any, index: number) => (
+                          <div key={term.term_id || index} className="bg-blue-50 rounded-lg p-3 border border-blue-200 hover:shadow-sm transition-shadow">
+                            <div className="flex items-start gap-3">
+                              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">
+                                {index + 1}
+                              </span>
+                              <div className="flex-1">
+                                <p className="text-sm text-gray-800 leading-relaxed">{term.terms_text}</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Cost Breakdown Percentages */}
                 {currentRevisionData.boq_details?.cost_breakdown_percentages && (
@@ -1777,6 +1839,34 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                                         </div>
                                       </div>
 
+                                      {/* Sub-item Images */}
+                                      {subItem.sub_item_image && Array.isArray(subItem.sub_item_image) && subItem.sub_item_image.length > 0 && (
+                                        <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                          <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                            <ImageIcon className="w-3.5 h-3.5" />
+                                            Attached Images ({subItem.sub_item_image.length})
+                                          </h5>
+                                          <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                            {subItem.sub_item_image.map((image: any, imgIndex: number) => (
+                                              <div
+                                                key={imgIndex}
+                                                className="relative group cursor-pointer"
+                                                onClick={() => window.open(image.url, '_blank')}
+                                              >
+                                                <img
+                                                  src={image.url}
+                                                  alt={`${subItem.sub_item_name} - ${image.original_name || image.filename}`}
+                                                  className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:border-red-500 transition-all"
+                                                />
+                                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center">
+                                                  <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
                                       {/* Sub Item Materials - Detailed Table */}
                                       {subItem.materials && subItem.materials.length > 0 && (
                                         <div className="mb-3 bg-red-50/20 rounded-lg p-3 border border-red-300">
@@ -2088,6 +2178,40 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
                               </div>
                             </div>
                           ))}
+
+                          {/* TERMS & CONDITIONS SECTION */}
+                          {revision.boq_details?.terms_conditions && revision.boq_details.terms_conditions.items?.length > 0 && (
+                            <div className="mt-6 mb-6 mx-4">
+                              {/* Header */}
+                              <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-300 rounded-t-lg p-4 flex items-center gap-3">
+                                <FileCheck className="w-6 h-6 text-blue-700" />
+                                <div>
+                                  <h3 className="text-lg font-bold text-gray-900">Terms & Conditions</h3>
+                                  <p className="text-xs text-gray-600">Selected terms and conditions</p>
+                                </div>
+                              </div>
+
+                              {/* Terms List */}
+                              <div className="bg-white border-x border-b border-blue-300 rounded-b-lg p-4">
+                                <div className="space-y-2">
+                                  {revision.boq_details.terms_conditions.items
+                                    .filter((term: any) => term.checked)
+                                    .map((term: any, index: number) => (
+                                    <div key={term.term_id || index} className="bg-blue-50 rounded-lg p-3 border border-blue-200 hover:shadow-sm transition-shadow">
+                                      <div className="flex items-start gap-3">
+                                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">
+                                          {index + 1}
+                                        </span>
+                                        <div className="flex-1">
+                                          <p className="text-sm text-gray-800 leading-relaxed">{term.terms_text}</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
 
                           {/* Grand Total Section */}
                           {renderGrandTotalSection(revision.boq_details)}

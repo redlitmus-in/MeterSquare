@@ -224,6 +224,63 @@ def get_internal_revisions(boq_id):
 
         current_internal_revision = boq.internal_revision_number or 0
 
+        # Helper function to enrich BOQ details with terms_conditions and images
+        def enrich_internal_revision_data(changes_summary):
+            if not changes_summary:
+                return changes_summary
+
+            import copy
+            enriched = copy.deepcopy(changes_summary)
+
+            # Fetch terms & conditions from database
+            try:
+                terms_query = text("""
+                    SELECT bt.term_id, bt.terms_text, bts.is_checked
+                    FROM boq_terms_selections bts
+                    INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
+                    WHERE bts.boq_id = :boq_id
+                    AND bt.is_active = TRUE
+                    AND bt.is_deleted = FALSE
+                    ORDER BY bt.display_order, bt.term_id
+                """)
+                terms_result = db.session.execute(terms_query, {'boq_id': boq_id})
+                terms_items = []
+                for row in terms_result:
+                    terms_items.append({
+                        'term_id': row[0],
+                        'terms_text': row[1],
+                        'checked': row[2]
+                    })
+
+                # Add terms_conditions to changes_summary
+                if terms_items:
+                    enriched['terms_conditions'] = {
+                        'items': terms_items
+                    }
+            except Exception as e:
+                log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
+
+            # Fetch sub_item images from database
+            try:
+                items = enriched.get('items', [])
+                for item in items:
+                    if item.get('sub_items'):
+                        for sub_item in item['sub_items']:
+                            sub_item_id = sub_item.get('sub_item_id')
+                            if sub_item_id:
+                                # Fetch image from master_sub_items table
+                                master_sub_item = MasterSubItem.query.filter_by(
+                                    sub_item_id=sub_item_id,
+                                    is_deleted=False
+                                ).first()
+
+                                if master_sub_item and master_sub_item.sub_item_image:
+                                    sub_item['sub_item_image'] = master_sub_item.sub_item_image
+            except Exception as e:
+                log.error(f"Error fetching images for BOQ {boq_id}: {str(e)}")
+
+            return enriched
+
         # ✅ Fix: Fetch all internal revisions linked to this BOQ (not filtered by < current)
         # Because BOQInternalRevision stores history snapshots, not only numeric sequence comparisons
         revisions = BOQInternalRevision.query.filter(
@@ -237,6 +294,9 @@ def get_internal_revisions(boq_id):
         for rev in revisions:
             # 🔥 ALWAYS recalculate from items to ensure accuracy (don't trust stored total_cost)
             changes_summary = rev.changes_summary.copy() if rev.changes_summary else {}
+
+            # Enrich with terms and images from database
+            changes_summary = enrich_internal_revision_data(changes_summary)
 
             if changes_summary:
                 items = changes_summary.get('items', [])
@@ -476,6 +536,49 @@ def update_internal_revision_boq(boq_id):
         boq_details.total_labour = total_labour
         boq_details.last_modified_by = user_name
         flag_modified(boq_details, 'boq_details')
+
+        # Save preliminary selections to boq_preliminaries junction table
+        preliminaries_data = data.get("preliminaries", {})
+        if preliminaries_data and isinstance(preliminaries_data, dict):
+            prelim_items = preliminaries_data.get("items", [])
+            if prelim_items:
+                # Delete existing preliminary selections for this BOQ
+                BOQPreliminary.query.filter_by(boq_id=boq_id).delete()
+
+                # Insert new selections
+                for prelim in prelim_items:
+                    prelim_id = prelim.get('prelim_id')
+                    is_checked = prelim.get('checked', False) or prelim.get('selected', False)
+
+                    if prelim_id:  # Only save master preliminary items
+                        boq_prelim = BOQPreliminary(
+                            boq_id=boq_id,
+                            prelim_id=prelim_id,
+                            is_checked=is_checked
+                        )
+                        db.session.add(boq_prelim)
+                log.info(f"✅ Updated preliminary selections in boq_preliminaries for BOQ {boq_id} during internal revision")
+
+        # Save terms & conditions selections to boq_terms_selections junction table
+        terms_conditions = data.get("terms_conditions", [])
+        if terms_conditions and isinstance(terms_conditions, list):
+            for term in terms_conditions:
+                term_id = term.get('term_id')
+                is_checked = term.get('checked', False)
+
+                if term_id:  # Only save if it has a term_id (from master table)
+                    # Insert or update term selection
+                    db.session.execute(text("""
+                        INSERT INTO boq_terms_selections (boq_id, term_id, is_checked, created_at, updated_at)
+                        VALUES (:boq_id, :term_id, :is_checked, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT (boq_id, term_id)
+                        DO UPDATE SET is_checked = :is_checked, updated_at = CURRENT_TIMESTAMP
+                    """), {
+                        'boq_id': boq_id,
+                        'term_id': term_id,
+                        'is_checked': is_checked
+                    })
+            log.info(f"✅ Updated terms selections in boq_terms_selections for BOQ {boq_id} during internal revision")
 
         # Create internal revision record using SQLAlchemy ORM
         internal_revision = BOQInternalRevision(

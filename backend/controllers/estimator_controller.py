@@ -223,6 +223,8 @@ def cancel_boq(boq_id):
 def get_boq_details_history(boq_id):
     """Get BOQ version history and current details only if history exists"""
     try:
+        from sqlalchemy import text
+
         # 1️⃣ Check if BOQ exists
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq:
@@ -239,7 +241,7 @@ def get_boq_details_history(boq_id):
             .all()
         )
 
-        # 3️⃣ If no history exists, return empty response (don’t show BOQDetails)
+        # 3️⃣ If no history exists, return empty response (don't show BOQDetails)
         if not history_records:
             return jsonify({
                 "success": True,
@@ -258,15 +260,73 @@ def get_boq_details_history(boq_id):
             .first()
         )
 
-        # 5️⃣ Build history list
+        # Helper function to enrich BOQ details with terms_conditions and images
+        def enrich_boq_details(boq_details_json):
+            if not boq_details_json:
+                return boq_details_json
+
+            import copy
+            enriched = copy.deepcopy(boq_details_json)
+
+            # Fetch terms & conditions from database
+            try:
+                query = text("""
+                    SELECT bt.term_id, bt.terms_text, bts.is_checked
+                    FROM boq_terms_selections bts
+                    INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
+                    WHERE bts.boq_id = :boq_id
+                    AND bt.is_active = TRUE
+                    AND bt.is_deleted = FALSE
+                    ORDER BY bt.display_order, bt.term_id
+                """)
+                terms_result = db.session.execute(query, {'boq_id': boq_id})
+                terms_items = []
+                for row in terms_result:
+                    terms_items.append({
+                        'term_id': row[0],
+                        'terms_text': row[1],
+                        'checked': row[2]
+                    })
+
+                # Add terms_conditions to boq_details
+                if terms_items:
+                    enriched['terms_conditions'] = {
+                        'items': terms_items
+                    }
+            except Exception as e:
+                log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
+
+            # Fetch sub_item images from database
+            try:
+                items = enriched.get('items', [])
+                for item in items:
+                    if item.get('sub_items'):
+                        for sub_item in item['sub_items']:
+                            sub_item_id = sub_item.get('sub_item_id')
+                            if sub_item_id:
+                                # Fetch image from master_sub_items table
+                                master_sub_item = MasterSubItem.query.filter_by(
+                                    sub_item_id=sub_item_id,
+                                    is_deleted=False
+                                ).first()
+
+                                if master_sub_item and master_sub_item.sub_item_image:
+                                    sub_item['sub_item_image'] = master_sub_item.sub_item_image
+            except Exception as e:
+                log.error(f"Error fetching images for BOQ {boq_id}: {str(e)}")
+
+            return enriched
+
+        # 5️⃣ Build history list with enriched data
         history_list = []
         for history in history_records:
+            enriched_details = enrich_boq_details(history.boq_details)
             history_list.append({
                 "boq_detail_history_id": history.boq_detail_history_id,
                 "boq_id": history.boq_id,
                 "boq_detail_id": history.boq_detail_id,
                 "version": history.version,
-                "boq_details": history.boq_details,
+                "boq_details": enriched_details,
                 "total_cost": history.total_cost,
                 "total_items": history.total_items,
                 "total_materials": history.total_materials,
@@ -275,14 +335,15 @@ def get_boq_details_history(boq_id):
                 "created_by": history.created_by
             })
 
-        # 6️⃣ Prepare current version info
+        # 6️⃣ Prepare current version info with enriched data
         current_version = None
         if current_boq_details:
+            enriched_current = enrich_boq_details(current_boq_details.boq_details)
             current_version = {
                 "boq_detail_id": current_boq_details.boq_detail_id,
                 "boq_id": current_boq_details.boq_id,
                 "version": "current",
-                "boq_details": current_boq_details.boq_details,
+                "boq_details": enriched_current,
                 "total_cost": current_boq_details.total_cost,
                 "total_items": current_boq_details.total_items,
                 "total_materials": current_boq_details.total_materials,
