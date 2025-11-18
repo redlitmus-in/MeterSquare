@@ -89,8 +89,10 @@ class NegotiableProfitCalculator:
             # Step 1: Calculate total negotiable margin from all sub-items
             total_negotiable_margin = 0.0
             for item in items:
-                if item.get('has_sub_items') and item.get('sub_items'):
-                    for sub_item in item['sub_items']:
+                # Check if sub_items exists and is a non-empty list
+                sub_items = item.get('sub_items', [])
+                if sub_items and isinstance(sub_items, list):
+                    for sub_item in sub_items:
                         # negotiable_margin is stored as 'actual_profit' in database
                         sub_negotiable = (
                             sub_item.get('negotiable_margin', 0) or

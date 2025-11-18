@@ -445,10 +445,21 @@ def get_buyer_pending_purchases():
         current_user = g.user
         buyer_id = current_user['user_id']
 
-        # Get change requests DIRECTLY assigned to this buyer (via assigned_to_buyer_user_id)
+        # Get change requests for buyer:
+        # 1. Under review AND approval_required_from='buyer' (pending buyer's review/acceptance)
+        # 2. Assigned to this buyer (via assigned_to_buyer_user_id) - actively being worked on
+        from sqlalchemy import or_, and_
         change_requests = ChangeRequest.query.filter(
-            ChangeRequest.status == 'assigned_to_buyer',
-            ChangeRequest.assigned_to_buyer_user_id == buyer_id,
+            or_(
+                and_(
+                    ChangeRequest.status == 'under_review',
+                    ChangeRequest.approval_required_from == 'buyer'
+                ),
+                and_(
+                    ChangeRequest.status == 'assigned_to_buyer',
+                    ChangeRequest.assigned_to_buyer_user_id == buyer_id
+                )
+            ),
             ChangeRequest.is_deleted == False
         ).all()
 
