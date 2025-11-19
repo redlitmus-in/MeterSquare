@@ -2,6 +2,7 @@ from flask import request, jsonify, g
 from config.db import db
 from models.project import Project
 from models.boq import *
+from models.preliminary_master import BOQPreliminary, BOQInternalRevision
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils.boq_email_service import BOQEmailService
