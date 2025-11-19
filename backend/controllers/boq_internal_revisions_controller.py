@@ -537,6 +537,82 @@ def update_internal_revision_boq(boq_id):
         boq_details.last_modified_by = user_name
         flag_modified(boq_details, 'boq_details')
 
+        # ===== MASTER TABLES SYNC =====
+        # Process ALL items to store/update in master tables (handles all 3 scenarios)
+        # Scenario 1: New item + new sub-items + materials/labour
+        # Scenario 2: Existing item + new sub-items + materials/labour
+        # Scenario 3: Existing sub-item + new materials/labour
+        boq_items = data.get("items", [])
+        created_by = user_name
+
+        for idx, item_data in enumerate(boq_items):
+            # Check if item has sub_items structure
+            if "sub_items" in item_data and item_data.get("sub_items"):
+                # Get item-level data
+                item_quantity = clean_numeric_value(item_data.get("quantity", 1.0))
+                item_rate = clean_numeric_value(item_data.get("rate", 0.0))
+                item_unit = item_data.get("unit", "nos")
+                item_total = item_quantity * item_rate
+
+                # Get percentages
+                miscellaneous_percentage = clean_numeric_value(item_data.get("overhead_percentage", 10.0))
+                overhead_profit_percentage = clean_numeric_value(item_data.get("profit_margin_percentage", 15.0))
+
+                # Calculate amounts
+                total_miscellaneous_amount = (item_total * miscellaneous_percentage) / 100
+                total_overhead_profit_amount = (item_total * overhead_profit_percentage) / 100
+
+                # Add item to master tables (or update if exists)
+                master_item_id, _, _ = add_to_master_tables(
+                    item_data.get("item_name"),
+                    item_data.get("description", ""),
+                    item_data.get("work_type", "contract"),
+                    [],  # Don't add materials here, will add per sub-item
+                    [],  # Don't add labour here, will add per sub-item
+                    created_by,
+                    miscellaneous_percentage,
+                    total_miscellaneous_amount,
+                    overhead_profit_percentage,
+                    total_overhead_profit_amount,
+                    overhead_profit_percentage,
+                    total_overhead_profit_amount,
+                    clean_numeric_value(item_data.get("discount_percentage", 0.0)),
+                    clean_numeric_value(item_data.get("discount_amount", 0.0)),
+                    clean_numeric_value(item_data.get("vat_percentage", 0.0)),
+                    clean_numeric_value(item_data.get("vat_amount", 0.0)),
+                    unit=item_unit,
+                    quantity=item_quantity,
+                    per_unit_cost=item_rate,
+                    total_amount=item_total,
+                    item_total_cost=item_total
+                )
+
+                # Update master_item_id in the item data
+                item_data["master_item_id"] = master_item_id
+                boq_details_json["items"][idx]["master_item_id"] = master_item_id
+
+                # Process sub-items with their materials and labour
+                sub_items_list = item_data.get("sub_items", [])
+                if sub_items_list:
+                    master_sub_item_ids = add_sub_items_to_master_tables(
+                        master_item_id,
+                        sub_items_list,
+                        created_by
+                    )
+
+                    # Add master sub-item IDs back to payload
+                    for sub_idx, sub_item_id in enumerate(master_sub_item_ids):
+                        if sub_idx < len(sub_items_list):
+                            sub_items_list[sub_idx]["sub_item_id"] = sub_item_id
+                            sub_items_list[sub_idx]["master_sub_item_id"] = sub_item_id
+                            boq_details_json["items"][idx]["sub_items"][sub_idx]["sub_item_id"] = sub_item_id
+                            boq_details_json["items"][idx]["sub_items"][sub_idx]["master_sub_item_id"] = sub_item_id
+
+        # Update boq_details with master IDs
+        boq_details.boq_details = boq_details_json
+        flag_modified(boq_details, 'boq_details')
+        # ===== END MASTER TABLES SYNC =====
+
         # Save preliminary selections to boq_preliminaries junction table
         preliminaries_data = data.get("preliminaries", {})
         if preliminaries_data and isinstance(preliminaries_data, dict):
