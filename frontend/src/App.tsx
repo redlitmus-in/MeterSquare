@@ -524,7 +524,9 @@ function App() {
   useEffect(() => {
     if (isAuthenticated && user) {
       const userRole = (user as any)?.role || '';
-      const unsubscribe = setupRealtimeSubscriptions(userRole);
+
+      // Only setup subscriptions once - don't recreate on every user object change
+      const currentSubs = setupRealtimeSubscriptions(userRole);
 
       // Update background service with credentials
       const token = localStorage.getItem('access_token');
@@ -534,15 +536,23 @@ function App() {
       // Reconnect real-time hub with new credentials
       realtimeNotificationHub.reconnect();
 
+      // ONLY cleanup on actual logout (isAuthenticated changes to false)
       return () => {
-        unsubscribe();
+        // Don't cleanup if user is still authenticated (prevents killing subscriptions on page navigation)
+        const stillAuthenticated = localStorage.getItem('access_token');
+        if (!stillAuthenticated) {
+          console.log('🔌 User logged out - cleaning up subscriptions');
+          currentSubs();
+          backgroundNotificationService.updateCredentials(null, null, null);
+          realtimeNotificationHub.disconnect();
+        }
       };
     } else {
       // Clear credentials on logout
       backgroundNotificationService.updateCredentials(null, null, null);
       realtimeNotificationHub.disconnect();
     }
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated]); // REMOVED 'user' from dependencies to prevent unnecessary re-runs
 
   useEffect(() => {
     // Setup cache validation for role mismatches

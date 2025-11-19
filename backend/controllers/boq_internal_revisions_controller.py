@@ -41,13 +41,31 @@ def get_all_internal_revision():
         boq_ids = [row[0] for row in boq_ids_with_revisions]
 
         # Get all BOQs that either have the flag set OR have internal revision records
-        boqs_query = BOQ.query.filter(
-            BOQ.is_deleted == False,
-            db.or_(
-                BOQ.has_internal_revisions == True,
-                BOQ.boq_id.in_(boq_ids)
+        # For TD: EXCLUDE Internal_Revision_Pending status (estimator still editing)
+        if user_role == 'technical_director':
+            # TD sees BOQs with internal revisions EXCEPT those still being edited
+            boqs_query = BOQ.query.filter(
+                BOQ.is_deleted == False,
+                db.or_(
+                    BOQ.has_internal_revisions == True,
+                    BOQ.boq_id.in_(boq_ids)
+                ),
+                # CRITICAL: Exclude Internal_Revision_Pending for TD (case-insensitive)
+                db.func.lower(BOQ.status) != 'internal_revision_pending'
             )
-        )
+            log.info(f"Technical Director {user_id} - showing all internal revision BOQs (excluding Internal_Revision_Pending)")
+        else:
+            # For Estimator and other roles: Show all BOQs with internal revisions
+            # EXCLUDE Internal_Revision_Pending (still editing, not sent to TD yet - stays in Rejected tab only)
+            boqs_query = BOQ.query.filter(
+                BOQ.is_deleted == False,
+                db.or_(
+                    BOQ.has_internal_revisions == True,
+                    BOQ.boq_id.in_(boq_ids)
+                ),
+                # Exclude Internal_Revision_Pending for ALL users (only show after sent to TD)
+                db.func.lower(BOQ.status) != 'internal_revision_pending'
+            )
 
         # Filter based on user role
         if user_role == 'estimator':
@@ -63,11 +81,8 @@ def get_all_internal_revision():
 
             # Filter BOQs to only those belonging to the estimator's projects
             boqs_query = boqs_query.filter(BOQ.project_id.in_(estimator_project_ids))
-        elif user_role == 'technical_director':
-            # Technical directors see all BOQs
-            log.info(f"Technical Director {user_id} - showing all internal revision BOQs")
-        else:
-            # For other roles, you may want to apply different filters
+        elif user_role != 'technical_director':
+            # For other roles (not estimator, not TD), show all
             log.info(f"User role '{user_role}' - showing all internal revision BOQs")
 
         boqs = boqs_query.all()
@@ -158,6 +173,91 @@ def get_all_internal_revision():
                             log.info(f"📊 BOQ {boq.boq_id}: Applied discount from boq_details: {details_discount_amount}, new total = {latest_revision_total_cost}")
                     log.info(f"📊 BOQ {boq.boq_id}: Using boq_details.total_cost = {latest_revision_total_cost}")
 
+            # 🔥 Get full BOQ details including items, terms, images
+            # Parse boq_details JSON to get items
+            items = []
+            preliminaries = None
+            discount_percentage = 0
+            discount_amount = 0
+
+            if boq_details and boq_details.boq_details:
+                details_json = boq_details.boq_details
+                items = details_json.get('items', [])
+                preliminaries = details_json.get('preliminaries', None)
+                discount_percentage = details_json.get('discount_percentage', 0) or 0
+                discount_amount = details_json.get('discount_amount', 0) or 0
+
+                # 🔥 Fetch sub_item_image from database for all items
+                from models.boq import MasterSubItem, MasterItem
+                for item in items:
+                    sub_items = item.get("sub_items", [])
+                    for sub_item in sub_items:
+                        sub_item_id = sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")
+
+                        if sub_item_id:
+                            # Query database for sub_item_image using ID
+                            master_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id).first()
+                            if master_sub_item and master_sub_item.sub_item_image:
+                                sub_item["sub_item_image"] = master_sub_item.sub_item_image
+                                log.info(f"Added image for sub-item {sub_item_id}: {master_sub_item.sub_item_image}")
+                        else:
+                            # Fallback: Try to find by item_name and sub_item_name
+                            item_name = item.get("item_name")
+                            sub_item_name = sub_item.get("sub_item_name")
+
+                            if item_name and sub_item_name:
+                                # First find the master item
+                                master_item = MasterItem.query.filter_by(item_name=item_name).first()
+                                if master_item:
+                                    # Then find the sub-item by item_id and sub_item_name
+                                    master_sub_item = MasterSubItem.query.filter_by(
+                                        item_id=master_item.item_id,
+                                        sub_item_name=sub_item_name
+                                    ).first()
+
+                                    if master_sub_item:
+                                        # Add the ID back for future use
+                                        sub_item["sub_item_id"] = master_sub_item.sub_item_id
+                                        # Add image if available
+                                        if master_sub_item.sub_item_image:
+                                            sub_item["sub_item_image"] = master_sub_item.sub_item_image
+                                            log.info(f"Added image (by name match) for sub-item {sub_item_name}: {master_sub_item.sub_item_image}")
+
+            # Get terms & conditions from boq_terms_selections junction table
+            try:
+                query = text("""
+                    SELECT
+                        bt.term_id,
+                        bt.terms_text,
+                        bt.display_order,
+                        bts.is_checked,
+                        bts.id as selection_id
+                    FROM boq_terms_selections bts
+                    INNER JOIN boq_terms bt ON bts.term_id = bt.term_id
+                    WHERE bts.boq_id = :boq_id
+                    AND bt.is_active = TRUE AND bt.is_deleted = FALSE
+                    ORDER BY bt.display_order, bt.term_id
+                """)
+
+                terms_result = db.session.execute(query, {'boq_id': boq.boq_id})
+                terms_items = []
+
+                for row in terms_result:
+                    terms_items.append({
+                        'id': f'term-{row[0]}',
+                        'term_id': row[0],
+                        'terms_text': row[1],
+                        'display_order': row[2],
+                        'checked': row[3],
+                        'isCustom': False
+                    })
+
+                terms_conditions = {'items': terms_items}
+                log.info(f"Retrieved {len(terms_items)} terms for BOQ {boq.boq_id} in internal revisions")
+            except Exception as e:
+                log.error(f"Error fetching terms for BOQ {boq.boq_id}: {str(e)}")
+                terms_conditions = {'items': []}
+
             # Build BOQ data with complete information
             boq_data = {
                 "boq_id": boq.boq_id,
@@ -175,12 +275,25 @@ def get_all_internal_revision():
                 "revision_count": len(revisions_list),
                 "project": {
                     "name": project.project_name if project else boq.boq_name,
-                    "client": project.client if project else "Unknown"
+                    "client": project.client if project else "Unknown",
+                    "location": project.location if project else "Unknown"
                 } if project else None,
                 "project_details": {
                     "project_name": project.project_name if project else boq.boq_name,
-                    "client": project.client if project else "Unknown"
-                } if project else None
+                    "client": project.client if project else "Unknown",
+                    "location": project.location if project else "Unknown"
+                } if project else None,
+                # 🔥 Include full BOQ details
+                "details": {
+                    "items": items,
+                    "total_items": len(items)
+                },
+                "items": items,  # For backwards compatibility
+                "total_items": len(items),
+                "preliminaries": preliminaries,
+                "terms_conditions": terms_conditions,
+                "discount_percentage": discount_percentage,
+                "discount_amount": discount_amount
             }
 
             result.append(boq_data)

@@ -8,7 +8,7 @@ const envConfig = getEnvironmentConfig();
 // API Configuration
 export const API_BASE_URL = envConfig.api.baseUrl;
 
-// Supabase Configuration
+// Supabase Configuration with optimized Realtime settings
 export const supabase = createClient(envConfig.supabase.url, envConfig.supabase.anonKey, {
   auth: {
     autoRefreshToken: true,
@@ -18,6 +18,13 @@ export const supabase = createClient(envConfig.supabase.url, envConfig.supabase.
   realtime: {
     params: {
       eventsPerSecond: 10
+    },
+    timeout: 30000, // Increase timeout to 30 seconds
+    heartbeatIntervalMs: 15000, // Send heartbeat every 15 seconds
+  },
+  global: {
+    headers: {
+      'apikey': envConfig.supabase.anonKey
     }
   }
 });

@@ -691,9 +691,12 @@ const EstimatorHub: React.FC = () => {
         });
       } else if (activeTab === 'rejected') {
         // Rejected: TD rejected OR client rejected OR PM rejected
+        // INCLUDE Internal_Revision_Pending (rejected BOQs being edited - stay here until sent to TD)
+        // Once sent to TD, status becomes Pending_Revision and moves out of this tab
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
-          return status === 'rejected' || status === 'client_rejected' || status === 'pm_rejected';
+          return status === 'rejected' || status === 'client_rejected' || status === 'pm_rejected' ||
+                 status === 'internal_revision_pending';
         });
       } else if (activeTab === 'completed') {
         // Completed BOQs (PM assigned)
@@ -1484,13 +1487,21 @@ const EstimatorHub: React.FC = () => {
               </button>
               <button
                 className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
-                onClick={() => {
-                  setBoqToEmail(boq);
-                  setEmailMode('td'); // Set mode to TD
-                  setShowSendEmailModal(true);
+                onClick={async () => {
+                  // Direct send to TD without email popup (like Internal Revisions)
+                  const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
+                  if (result.success) {
+                    toast.success('BOQ sent to Technical Director successfully!');
+                    await loadBOQs();
+                    // Switch to Revisions tab to see the sent BOQ
+                    setActiveTab('revisions');
+                  } else {
+                    toast.error(result.message || 'Failed to send BOQ');
+                  }
                 }}
+                title="Send revised BOQ to Technical Director for approval"
               >
-                <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 <span className="hidden sm:inline">Send to TD</span>
                 <span className="sm:hidden">To TD</span>
               </button>
@@ -1573,17 +1584,20 @@ const EstimatorHub: React.FC = () => {
               <button
                 className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
                 onClick={async () => {
+                  // Direct send to TD without email popup (like Internal Revisions)
                   const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
                   if (result.success) {
-                    toast.success('Revision sent to Technical Director successfully!');
-                    loadBOQs();
+                    toast.success('BOQ sent to Technical Director successfully!');
+                    await loadBOQs();
+                    // Switch to Revisions tab to see the sent BOQ
+                    setActiveTab('revisions');
                   } else {
-                    toast.error(result.message || 'Failed to send revision');
+                    toast.error(result.message || 'Failed to send BOQ');
                   }
                 }}
                 title="Send revised BOQ to Technical Director for approval"
               >
-                <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 <span className="hidden sm:inline">Send to TD</span>
                 <span className="sm:hidden">To TD</span>
               </button>
@@ -1674,7 +1688,7 @@ const EstimatorHub: React.FC = () => {
                 {isSendingToTD ? (
                   <div className="animate-spin rounded-full h-3 w-3 sm:h-3.5 sm:w-3.5 border-b-2 border-red-900"></div>
                 ) : (
-                  <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                  <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 )}
                 <span className="hidden sm:inline">Send to TD</span>
                 <span className="sm:hidden">To TD</span>
@@ -1735,13 +1749,21 @@ const EstimatorHub: React.FC = () => {
               </button>
               <button
                 className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
-                onClick={() => {
-                  setBoqToEmail(boq);
-                  setEmailMode('td');
-                  setShowSendEmailModal(true);
+                onClick={async () => {
+                  // Direct send to TD without email popup (like Internal Revisions)
+                  const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
+                  if (result.success) {
+                    toast.success('BOQ sent to Technical Director successfully!');
+                    await loadBOQs();
+                    // Switch to Revisions tab to see the sent BOQ
+                    setActiveTab('revisions');
+                  } else {
+                    toast.error(result.message || 'Failed to send BOQ');
+                  }
                 }}
+                title="Send revised BOQ to Technical Director for approval"
               >
-                <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                <Send className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 <span className="hidden sm:inline">Send to TD</span>
                 <span className="sm:hidden">TD</span>
               </button>
@@ -1897,7 +1919,7 @@ const EstimatorHub: React.FC = () => {
                                 toast.error(result.message || 'Failed to send revision');
                               }
                             }} className="h-8 w-8 p-0" title="Send Revision to TD">
-                              <Mail className="h-4 w-4 text-red-600" />
+                              <Send className="h-4 w-4 text-red-600" />
                             </Button>
                           </>
                         );
@@ -1907,8 +1929,18 @@ const EstimatorHub: React.FC = () => {
                             <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }} className="h-8 w-8 p-0" title="Revise BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('td'); setShowSendEmailModal(true); }} className="h-8 w-8 p-0" title="Send Revision to TD">
-                              <Mail className="h-4 w-4 text-red-600" />
+                            <Button variant="ghost" size="sm" onClick={async () => {
+                              // Direct send to TD without email popup
+                              const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
+                              if (result.success) {
+                                toast.success('BOQ sent to Technical Director successfully!');
+                                await loadBOQs();
+                                setActiveTab('revisions');
+                              } else {
+                                toast.error(result.message || 'Failed to send BOQ');
+                              }
+                            }} className="h-8 w-8 p-0" title="Send Revision to TD">
+                              <Send className="h-4 w-4 text-red-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => { setBoqToCancel(boq); setShowCancelModal(true); }} className="h-8 w-8 p-0" title="Cancel Project">
                               <XCircleIcon className="h-4 w-4 text-red-600" />
@@ -1921,8 +1953,18 @@ const EstimatorHub: React.FC = () => {
                             <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }} className="h-8 w-8 p-0" title="Edit BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => { setBoqToEmail(boq); setEmailMode('td'); setShowSendEmailModal(true); }} className="h-8 w-8 p-0" title="Send to TD">
-                              <Mail className="h-4 w-4 text-red-600" />
+                            <Button variant="ghost" size="sm" onClick={async () => {
+                              // Direct send to TD without email popup
+                              const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending BOQ for review' });
+                              if (result.success) {
+                                toast.success('BOQ sent to Technical Director successfully!');
+                                await loadBOQs();
+                                setActiveTab('pending');
+                              } else {
+                                toast.error(result.message || 'Failed to send BOQ');
+                              }
+                            }} className="h-8 w-8 p-0" title="Send to TD">
+                              <Send className="h-4 w-4 text-red-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => setDeletingBoq(boq)} className="h-8 w-8 p-0" title="Delete BOQ">
                               <Trash2 className="h-4 w-4 text-red-600" />
@@ -3813,13 +3855,9 @@ const EstimatorHub: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Send to TD Popup after Edit */}
-      <Dialog open={showSendToTDPopup} onOpenChange={(open) => {
-        if (!open) {
-          setShowSendToTDPopup(false);
-          setBoqToSendToTD(null);
-          setEditingBoq(null); // Clear editingBoq when popup is closed
-        }
+      {/* Send to TD Popup after Edit - Do not auto-close on outside click */}
+      <Dialog open={showSendToTDPopup} onOpenChange={() => {
+        // Prevent auto-close when clicking outside - user must explicitly choose Send or Send Later
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -3869,21 +3907,19 @@ const EstimatorHub: React.FC = () => {
                 </>
               )}
             </Button>
-            {/* Only show "Send Later" if BOQ is not from rejected tab */}
-            {boqToSendToTD?.status?.toLowerCase() !== 'rejected' && boqToSendToTD?.status?.toLowerCase() !== 'client_rejected' && (
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => {
-                  setShowSendToTDPopup(false);
-                  setBoqToSendToTD(null);
-                  setEditingBoq(null); // Clear editingBoq after "Send Later"
-                  toast.success('BOQ saved! You can send it to TD later.');
-                }}
-              >
-                Send Later
-              </Button>
-            )}
+            {/* Always show "Send Later" button for rejected tab - estimator can save and send later */}
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                setShowSendToTDPopup(false);
+                setBoqToSendToTD(null);
+                setEditingBoq(null); // Clear editingBoq after "Send Later"
+                toast.success('BOQ saved! You can send it to TD later.');
+              }}
+            >
+              Send Later
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

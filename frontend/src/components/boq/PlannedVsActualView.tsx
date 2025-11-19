@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { boqTrackingService } from '../../roles/project-manager/services/boqTrackingService';
 import { toast } from 'sonner';
+import ModernLoadingSpinners from '../ui/ModernLoadingSpinners';
 
 interface PlannedVsActualViewProps {
   boqId: number;
@@ -122,8 +123,8 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading comparison data...</p>
+          <ModernLoadingSpinners size="lg" className="mx-auto" />
+          <p className="mt-4 text-gray-600 font-medium">Loading comparison data...</p>
         </div>
       </div>
     );
@@ -155,7 +156,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
           >
             {sendingRequest ? (
               <>
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[#243d8a]"></div>
+                <ModernLoadingSpinners size="sm" />
                 <span>Sending...</span>
               </>
             ) : (
