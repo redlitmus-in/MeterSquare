@@ -2750,6 +2750,81 @@ def revision_boq(boq_id):
             boq_details.total_labour = total_labour
             boq_details.last_modified_by = user_name
 
+            # ===== MASTER TABLES SYNC =====
+            # Process ALL items to store/update in master tables (handles all 3 scenarios)
+            # Scenario 1: New item + new sub-items + materials/labour
+            # Scenario 2: Existing item + new sub-items + materials/labour
+            # Scenario 3: Existing sub-item + new materials/labour
+            created_by = user_name
+
+            for idx, item_data in enumerate(boq_items):
+                # Check if item has sub_items structure
+                if "sub_items" in item_data and item_data.get("sub_items"):
+                    # Get item-level data
+                    item_quantity = clean_numeric_value(item_data.get("quantity", 1.0))
+                    item_rate = clean_numeric_value(item_data.get("rate", 0.0))
+                    item_unit = item_data.get("unit", "nos")
+                    item_total = item_quantity * item_rate
+
+                    # Get percentages
+                    miscellaneous_percentage = clean_numeric_value(item_data.get("overhead_percentage", 10.0))
+                    overhead_profit_percentage = clean_numeric_value(item_data.get("profit_margin_percentage", 15.0))
+
+                    # Calculate amounts
+                    total_miscellaneous_amount = (item_total * miscellaneous_percentage) / 100
+                    total_overhead_profit_amount = (item_total * overhead_profit_percentage) / 100
+
+                    # Add item to master tables (or update if exists)
+                    master_item_id, _, _ = add_to_master_tables(
+                        item_data.get("item_name"),
+                        item_data.get("description", ""),
+                        item_data.get("work_type", "contract"),
+                        [],  # Don't add materials here, will add per sub-item
+                        [],  # Don't add labour here, will add per sub-item
+                        created_by,
+                        miscellaneous_percentage,
+                        total_miscellaneous_amount,
+                        overhead_profit_percentage,
+                        total_overhead_profit_amount,
+                        overhead_profit_percentage,
+                        total_overhead_profit_amount,
+                        clean_numeric_value(item_data.get("discount_percentage", 0.0)),
+                        clean_numeric_value(item_data.get("discount_amount", 0.0)),
+                        clean_numeric_value(item_data.get("vat_percentage", 0.0)),
+                        clean_numeric_value(item_data.get("vat_amount", 0.0)),
+                        unit=item_unit,
+                        quantity=item_quantity,
+                        per_unit_cost=item_rate,
+                        total_amount=item_total,
+                        item_total_cost=item_total
+                    )
+
+                    # Update master_item_id in the item data
+                    item_data["master_item_id"] = master_item_id
+                    payload_copy["items"][idx]["master_item_id"] = master_item_id
+
+                    # Process sub-items with their materials and labour
+                    sub_items_list = item_data.get("sub_items", [])
+                    if sub_items_list:
+                        master_sub_item_ids = add_sub_items_to_master_tables(
+                            master_item_id,
+                            sub_items_list,
+                            created_by
+                        )
+
+                        # Add master sub-item IDs back to payload
+                        for sub_idx, sub_item_id in enumerate(master_sub_item_ids):
+                            if sub_idx < len(sub_items_list):
+                                sub_items_list[sub_idx]["sub_item_id"] = sub_item_id
+                                sub_items_list[sub_idx]["master_sub_item_id"] = sub_item_id
+                                payload_copy["items"][idx]["sub_items"][sub_idx]["sub_item_id"] = sub_item_id
+                                payload_copy["items"][idx]["sub_items"][sub_idx]["master_sub_item_id"] = sub_item_id
+
+            # Update boq_details and history with master IDs
+            boq_details.boq_details = payload_copy
+            boq_detail_history.boq_details = payload_copy
+            # ===== END MASTER TABLES SYNC =====
+
             # Save preliminary selections to boq_preliminaries junction table
             preliminaries_data = data.get("preliminaries", {})
             if preliminaries_data and isinstance(preliminaries_data, dict):
@@ -2973,6 +3048,52 @@ def revision_boq(boq_id):
                         "totalMaterialCost": total_materials_cost,
                         "totalLabourCost": total_labour_cost
                     }
+
+                    # Add/Update to master tables
+                    # Step 1: Add item to boq_items table
+                    master_item_id, _, _ = add_to_master_tables(
+                        item_data.get("item_name"),
+                        item_data.get("description", ""),
+                        item_data.get("work_type", "contract"),
+                        [],  # Don't add materials here, will add per sub-item
+                        [],  # Don't add labour here, will add per sub-item
+                        created_by,
+                        miscellaneous_percentage,
+                        total_miscellaneous_amount,
+                        overhead_profit_percentage,
+                        total_overhead_profit_amount,
+                        overhead_profit_percentage,
+                        total_overhead_profit_amount,
+                        discount_percentage,
+                        total_discount_amount,
+                        vat_percentage,
+                        total_vat_amount,
+                        unit=item_unit,
+                        quantity=item_quantity,
+                        per_unit_cost=item_rate,
+                        total_amount=item_total,
+                        item_total_cost=item_total
+                    )
+
+                    # Step 2: Add sub-items to boq_sub_items table, and their materials & labour
+                    master_sub_item_ids = []
+                    if sub_items_list:
+                        # Pass the processed sub_items_list that contains materials and labour
+                        master_sub_item_ids = add_sub_items_to_master_tables(
+                            master_item_id,
+                            sub_items_list,
+                            created_by
+                        )
+
+                        # Assign master sub-item IDs back to the sub_items in item_json
+                        # This ensures sub_item_id is preserved for future edits
+                        for idx, sub_item_id in enumerate(master_sub_item_ids):
+                            if idx < len(item_json.get("sub_items", [])):
+                                # Only assign if not already present (preserve existing IDs)
+                                if "sub_item_id" not in item_json["sub_items"][idx]:
+                                    item_json["sub_items"][idx]["sub_item_id"] = sub_item_id
+                                if "master_sub_item_id" not in item_json["sub_items"][idx]:
+                                    item_json["sub_items"][idx]["master_sub_item_id"] = sub_item_id
 
                     boq_items.append(item_json)
                     total_boq_cost += total_selling_price
