@@ -106,9 +106,9 @@ apiClient.interceptors.response.use(
       
       // DISABLED: Auto redirect to login for debugging
       // Uncomment to re-enable redirects
-      // if (!window.location.pathname.includes('/login')) {
-      //   window.location.replace('/login');
-      // }
+      if (!window.location.pathname.includes('/login')) {
+        window.location.replace('/login');
+      }
     }
     
     // DISABLED: All automatic error page redirects for debugging

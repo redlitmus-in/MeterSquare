@@ -24,7 +24,9 @@
       "Bash(for file in boq_upload_controller.py upload_image_controller.py send_boq_client.py vendor_controller.py settings_controller.py)",
       "Bash(do echo \"=== Checking $file ===\")",
       "Bash(done)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Bash(/c/Users/admin/AppData/Local/Programs/Python/Python312/python:*)"
     ],
     "deny": [],
     "ask": []
