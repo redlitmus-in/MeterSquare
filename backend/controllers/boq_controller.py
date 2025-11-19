@@ -1769,8 +1769,33 @@ def get_boq(boq_id):
                 total_cr_materials_cost = 0
                 total_cr_overhead_consumed = 0
 
+                # Build material lookup map from BOQ for enrichment
+                material_lookup = {}
+                for item in all_items:
+                    for sub_item in item.get('sub_items', []):
+                        for material in sub_item.get('materials', []):
+                            material_id = material.get('master_material_id')
+                            if material_id:
+                                material_lookup[material_id] = {
+                                    'brand': material.get('brand'),
+                                    'specification': material.get('specification')
+                                }
+
                 for cr in approved_change_requests:
                     cr_materials = cr.materials_data or []
+
+                    # Enrich materials with brand/specification from BOQ if missing
+                    enriched_materials = []
+                    for mat in cr_materials:
+                        enriched_mat = dict(mat)  # Create a copy
+                        # If material doesn't have brand/spec, try to get from BOQ
+                        if not enriched_mat.get('brand') and not enriched_mat.get('specification'):
+                            material_id = enriched_mat.get('master_material_id')
+                            if material_id and material_id in material_lookup:
+                                boq_mat = material_lookup[material_id]
+                                enriched_mat['brand'] = boq_mat.get('brand')
+                                enriched_mat['specification'] = boq_mat.get('specification')
+                        enriched_materials.append(enriched_mat)
 
                     change_request_items.append({
                         'cr_id': cr.cr_id,
@@ -1778,7 +1803,7 @@ def get_boq(boq_id):
                         'request_date': cr.created_at.isoformat() if cr.created_at else None,
                         'approval_date': cr.approval_date.isoformat() if cr.approval_date else None,
                         'justification': cr.justification,
-                        'materials': cr_materials,
+                        'materials': enriched_materials,
                         'materials_cost': cr.materials_total_cost,
                         'overhead_consumed': cr.overhead_consumed,
                         'is_over_budget': cr.is_over_budget

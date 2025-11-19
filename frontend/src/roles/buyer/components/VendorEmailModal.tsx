@@ -246,9 +246,9 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       <tr style="background-color: ${idx % 2 === 0 ? '#EBF5FF' : '#FFFFFF'};">
         <td style="padding: 8px; border: 1px solid #2563EB;">${idx + 1}</td>
         <td style="padding: 8px; border: 1px solid #2563EB; font-weight: 500;">${material.material_name}</td>
+        <td style="padding: 8px; border: 1px solid #2563EB;">${material.brand || '-'}</td>
+        <td style="padding: 8px; border: 1px solid #2563EB;">${material.specification || '-'}</td>
         <td style="padding: 8px; border: 1px solid #2563EB;">${material.quantity} ${material.unit}</td>
-        <td style="padding: 8px; text-align: right; border: 1px solid #2563EB;">AED ${material.unit_price?.toFixed(2)}</td>
-        <td style="padding: 8px; text-align: right; border: 1px solid #2563EB; font-weight: 600;">AED ${material.total_price?.toFixed(2)}</td>
       </tr>
     `).join('') || '';
 
@@ -289,20 +289,14 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
               <tr style="background-color: #2563EB; color: white;">
                 <th style="padding: 8px; text-align: left; border: 1px solid #2563EB;">S.No</th>
                 <th style="padding: 8px; text-align: left; border: 1px solid #2563EB;">Material Name</th>
+                <th style="padding: 8px; text-align: left; border: 1px solid #2563EB;">Brand</th>
+                <th style="padding: 8px; text-align: left; border: 1px solid #2563EB;">Specs</th>
                 <th style="padding: 8px; text-align: left; border: 1px solid #2563EB;">Quantity</th>
-                <th style="padding: 8px; text-align: right; border: 1px solid #2563EB;">Unit Price</th>
-                <th style="padding: 8px; text-align: right; border: 1px solid #2563EB;">Total Price</th>
               </tr>
             </thead>
             <tbody>
               ${materialsRows}
             </tbody>
-            <tfoot>
-              <tr style="background-color: #DBEAFE; font-weight: bold;">
-                <td colspan="4" style="padding: 8px; text-align: right; border: 1px solid #2563EB;">Total Order Value:</td>
-                <td style="padding: 8px; text-align: right; border: 1px solid #2563EB; color: #16A34A; font-size: 16px;">AED ${purchase.total_cost?.toFixed(2)}</td>
-              </tr>
-            </tfoot>
           </table>
         </div>
 
@@ -500,7 +494,6 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                             <p className="font-medium mb-2">Purchase Order Details:</p>
                             <ul className="space-y-1 ml-4 list-disc">
                               <li>Total Items: {purchase.materials_count}</li>
-                              <li>Total Value: AED {purchase.total_cost.toLocaleString()}</li>
                               <li>Project: {purchase.project_name}</li>
                             </ul>
                           </div>
@@ -698,9 +691,9 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                     <tr className="bg-blue-600 text-white">
                                       <th className="p-2 text-left border">S.No</th>
                                       <th className="p-2 text-left border">Material Name</th>
+                                      <th className="p-2 text-left border">Brand</th>
+                                      <th className="p-2 text-left border">Specs</th>
                                       <th className="p-2 text-left border">Quantity</th>
-                                      <th className="p-2 text-right border">Unit Price</th>
-                                      <th className="p-2 text-right border">Total Price</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -708,20 +701,12 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                                       <tr key={idx} className={idx % 2 === 0 ? 'bg-blue-50' : 'bg-white'}>
                                         <td className="p-2 border">{idx + 1}</td>
                                         <td className="p-2 border font-medium">{material.material_name}</td>
+                                        <td className="p-2 border">{material.brand || '-'}</td>
+                                        <td className="p-2 border">{material.specification || '-'}</td>
                                         <td className="p-2 border">{material.quantity} {material.unit}</td>
-                                        <td className="p-2 text-right border">AED {material.unit_price?.toFixed(2)}</td>
-                                        <td className="p-2 text-right border font-semibold">AED {material.total_price?.toFixed(2)}</td>
                                       </tr>
                                     ))}
                                   </tbody>
-                                  <tfoot>
-                                    <tr className="bg-blue-100 font-bold">
-                                      <td colSpan={4} className="p-2 text-right border">Total Order Value:</td>
-                                      <td className="p-2 text-right border text-green-600 text-base">
-                                        AED {purchase.total_cost?.toFixed(2)}
-                                      </td>
-                                    </tr>
-                                  </tfoot>
                                 </table>
                               </div>
                             </div>

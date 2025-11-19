@@ -1931,10 +1931,10 @@ class BOQEmailService:
         materials_table_rows = ""
         for idx, material in enumerate(materials, 1):
             material_name = material.get('material_name', 'N/A')
+            brand = material.get('brand', '-')
+            specification = material.get('specification', '-')
             quantity = material.get('quantity') or 0
             unit = material.get('unit', 'unit')
-            unit_price = material.get('unit_price') or 0
-            total_price = material.get('total_price') or 0
 
             # Alternate row background color
             bg_color = '#f0f9ff' if idx % 2 == 0 else '#ffffff'
@@ -1943,9 +1943,9 @@ class BOQEmailService:
                 <tr style="background-color: {bg_color}; border-bottom: 1px solid #3b82f6;">
                     <td style="padding: 12px 10px; color: #000000; font-size: 13px;">{idx}</td>
                     <td style="padding: 12px 10px; color: #000000; font-size: 13px;"><strong>{material_name}</strong></td>
+                    <td style="padding: 12px 10px; color: #000000; font-size: 13px;">{brand}</td>
+                    <td style="padding: 12px 10px; color: #000000; font-size: 13px;">{specification}</td>
                     <td style="padding: 12px 10px; color: #000000; font-size: 13px;">{quantity} {unit}</td>
-                    <td style="padding: 12px 10px; color: #000000; font-size: 13px;">AED {unit_price:,.2f}</td>
-                    <td style="padding: 12px 10px; color: #000000; font-size: 13px;"><strong>AED {total_price:,.2f}</strong></td>
                 </tr>
             """
 
@@ -2001,24 +2001,14 @@ class BOQEmailService:
                                         <tr style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);">
                                             <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">S.No</th>
                                             <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Material Name</th>
+                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Brand</th>
+                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Specs</th>
                                             <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Quantity</th>
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Unit Price</th>
-                                            <th style="color: #ffffff; padding: 12px 10px; text-align: left; font-size: 13px; font-weight: bold;">Total Price</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {materials_table_rows}
                                     </tbody>
-                                </table>
-
-                                <!-- Total Cost -->
-                                <table width="100%" cellpadding="20" cellspacing="0" border="0" style="background: linear-gradient(135deg, #f0f9ff 0%, #dbeafe 100%); border: 1px solid #bfdbfe; border-radius: 10px; margin: 25px 0;">
-                                    <tr>
-                                        <td style="text-align: right;">
-                                            <span style="color: #000000; font-size: 16px; font-weight: bold;">Total Order Value:</span>
-                                            <span style="color: #16a34a; font-size: 24px; font-weight: bold; margin-left: 10px;">AED {total_cost:,.2f}</span>
-                                        </td>
-                                    </tr>
                                 </table>
 
                                 <div style="height: 2px; background: linear-gradient(90deg, transparent, #3b82f6, transparent); margin: 25px 0;"></div>
