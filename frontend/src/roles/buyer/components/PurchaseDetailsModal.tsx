@@ -48,19 +48,10 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
   const [selectedVendorId, setSelectedVendorId] = useState<number | null>(purchase.vendor_id || null);
   const [isSelectingVendor, setIsSelectingVendor] = useState(false);
   const [loadingVendors, setLoadingVendors] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedMaterials, setEditedMaterials] = useState(purchase.materials);
-  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (isOpen && purchase.status === 'pending') {
       loadVendors();
-      // Check if should open in edit mode
-      const shouldEdit = sessionStorage.getItem('purchaseEditMode') === 'true';
-      if (shouldEdit && purchase.status === 'pending') {
-        setIsEditing(true);
-        sessionStorage.removeItem('purchaseEditMode'); // Clear after use
-      }
     }
   }, [isOpen, purchase.status]);
 
@@ -103,50 +94,8 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
     }
   };
 
-  const handleSavePurchase = async () => {
-    try {
-      setIsSaving(true);
-      // Calculate total cost
-      const totalCost = editedMaterials.reduce((sum, mat) => sum + mat.total_price, 0);
-
-      await buyerService.updatePurchaseOrder({
-        cr_id: purchase.cr_id,
-        materials: editedMaterials,
-        total_cost: totalCost
-      });
-      toast.success('Purchase order updated successfully!');
-      setIsEditing(false);
-      onVendorSelected?.(); // Refetch data
-    } catch (error: any) {
-      console.error('Error saving purchase order:', error);
-      toast.error(error.message || 'Failed to update purchase order');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleCancelEdit = () => {
-    setEditedMaterials(purchase.materials);
-    setIsEditing(false);
-  };
-
   const handleClose = () => {
-    setIsEditing(false);
-    setEditedMaterials(purchase.materials);
-    sessionStorage.removeItem('purchaseEditMode');
     onClose();
-  };
-
-  const handleMaterialChange = (index: number, field: string, value: any) => {
-    const updated = [...editedMaterials];
-    updated[index] = { ...updated[index], [field]: value };
-
-    // Recalculate total price if quantity or unit_price changed
-    if (field === 'quantity' || field === 'unit_price') {
-      updated[index].total_price = updated[index].quantity * updated[index].unit_price;
-    }
-
-    setEditedMaterials(updated);
   };
 
   if (!isOpen) return null;
@@ -348,49 +297,6 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                       <Package className="w-5 h-5" />
                       Materials Breakdown
                     </h3>
-                    {purchase.status === 'pending' && (
-                      !isEditing ? (
-                        <Button
-                          onClick={() => setIsEditing(true)}
-                          size="sm"
-                          variant="outline"
-                          className="h-8 text-xs px-3"
-                        >
-                          <Edit className="w-3.5 h-3.5 mr-1.5" />
-                          Edit
-                        </Button>
-                      ) : (
-                        <div className="flex gap-2">
-                          <Button
-                            onClick={handleCancelEdit}
-                            size="sm"
-                            variant="outline"
-                            className="h-8 text-xs px-3"
-                            disabled={isSaving}
-                          >
-                            Cancel
-                          </Button>
-                          <Button
-                            onClick={handleSavePurchase}
-                            size="sm"
-                            className="h-8 text-xs px-3 bg-green-600 hover:bg-green-700 text-white"
-                            disabled={isSaving}
-                          >
-                            {isSaving ? (
-                              <>
-                                <div className="w-3.5 h-3.5 mr-1.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                Saving...
-                              </>
-                            ) : (
-                              <>
-                                <Save className="w-3.5 h-3.5 mr-1.5" />
-                                Save Changes
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      )
-                    )}
                   </div>
                   <div className="border rounded-xl overflow-hidden">
                     <Table>
@@ -398,6 +304,8 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         <TableRow className="bg-gray-50">
                           <TableHead className="font-semibold text-sm">Material Name</TableHead>
                           <TableHead className="font-semibold text-sm">Sub-Item</TableHead>
+                          <TableHead className="font-semibold text-sm">Brand</TableHead>
+                          <TableHead className="font-semibold text-sm">Specs</TableHead>
                           <TableHead className="font-semibold text-sm">Quantity</TableHead>
                           <TableHead className="font-semibold text-sm">Unit</TableHead>
                           <TableHead className="font-semibold text-sm">Unit Price</TableHead>
@@ -405,9 +313,11 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {(isEditing ? editedMaterials : purchase.materials).map((material, idx) => {
-                          // Check if material is NEW
-                          const isNewMaterial = material.master_material_id === null || material.master_material_id === undefined;
+                        {purchase.materials.map((material, idx) => {
+                          // Check if material is NEW (only show badge for truly new materials, not BOQ materials)
+                          // Don't show NEW badge if master_material_id is just missing from backend response
+                          const isNewMaterial = (material.master_material_id === null || material.master_material_id === undefined) &&
+                                                 material.is_new === true;
                           return (
                           <TableRow key={idx} className="hover:bg-gray-50">
                             <TableCell className="font-medium text-sm">
@@ -427,35 +337,11 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                                 </span>
                               )}
                             </TableCell>
-                            <TableCell className="text-sm">
-                              {isEditing ? (
-                                <input
-                                  type="number"
-                                  value={material.quantity}
-                                  onChange={(e) => handleMaterialChange(idx, 'quantity', parseFloat(e.target.value) || 0)}
-                                  className="w-20 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                  min="0"
-                                  step="0.01"
-                                />
-                              ) : (
-                                material.quantity
-                              )}
-                            </TableCell>
+                            <TableCell className="text-sm">{material.brand || '-'}</TableCell>
+                            <TableCell className="text-sm">{material.specification || '-'}</TableCell>
+                            <TableCell className="text-sm">{material.quantity}</TableCell>
                             <TableCell className="text-sm">{material.unit}</TableCell>
-                            <TableCell className="text-sm">
-                              {isEditing ? (
-                                <input
-                                  type="number"
-                                  value={material.unit_price}
-                                  onChange={(e) => handleMaterialChange(idx, 'unit_price', parseFloat(e.target.value) || 0)}
-                                  className="w-24 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                  min="0"
-                                  step="0.01"
-                                />
-                              ) : (
-                                formatCurrency(material.unit_price)
-                              )}
-                            </TableCell>
+                            <TableCell className="text-sm">{formatCurrency(material.unit_price)}</TableCell>
                             <TableCell className="text-right font-bold text-green-600 text-sm">
                               {formatCurrency(material.total_price)}
                             </TableCell>
@@ -463,13 +349,9 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                           );
                         })}
                         <TableRow className="bg-blue-50 font-bold">
-                          <TableCell colSpan={5} className="text-right text-sm">Total Cost:</TableCell>
+                          <TableCell colSpan={7} className="text-right text-sm">Total Cost:</TableCell>
                           <TableCell className="text-right text-green-700 text-base">
-                            {formatCurrency(
-                              isEditing
-                                ? editedMaterials.reduce((sum, mat) => sum + mat.total_price, 0)
-                                : purchase.total_cost
-                            )}
+                            {formatCurrency(purchase.total_cost)}
                           </TableCell>
                         </TableRow>
                       </TableBody>

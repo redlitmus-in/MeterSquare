@@ -502,7 +502,9 @@ def get_buyer_pending_purchases():
                                     "quantity": material.get('quantity', 0),
                                     "unit": material.get('unit', ''),
                                     "unit_price": material.get('unit_price', 0),
-                                    "total_price": material_total
+                                    "total_price": material_total,
+                                    "brand": material.get('brand'),
+                                    "specification": material.get('specification')
                                 })
                         else:
                             # Sub-item is the material itself
@@ -514,7 +516,9 @@ def get_buyer_pending_purchases():
                                 "quantity": sub_item.get('quantity', 0),
                                 "unit": sub_item.get('unit', ''),
                                 "unit_price": sub_item.get('unit_price', 0),
-                                "total_price": sub_total
+                                "total_price": sub_total,
+                                "brand": sub_item.get('brand'),
+                                "specification": sub_item.get('specification')
                             })
             else:
                 # Legacy format: materials_data is direct array of materials
@@ -527,7 +531,9 @@ def get_buyer_pending_purchases():
                         "quantity": material.get('quantity', 0),
                         "unit": material.get('unit', ''),
                         "unit_price": material.get('unit_price', 0),
-                        "total_price": material_total
+                        "total_price": material_total,
+                        "brand": material.get('brand'),
+                        "specification": material.get('specification')
                     })
 
             total_cost += cr_total
