@@ -86,6 +86,34 @@ def create_change_request():
         if not project:
             return jsonify({"error": "Project not found"}), 404
 
+        # Build material lookup map from BOQ for auto-populating brand/specification
+        # Use both material_id and material_name for lookup
+        material_lookup_by_id = {}
+        material_lookup_by_name = {}
+        if boq_details and boq_details.boq_details:
+            boq_items = boq_details.boq_details.get('items', [])
+            for item_idx, item in enumerate(boq_items):
+                for sub_item_idx, sub_item in enumerate(item.get('sub_items', [])):
+                    for mat_idx, boq_material in enumerate(sub_item.get('materials', [])):
+                        material_data = {
+                            'brand': boq_material.get('brand'),
+                            'specification': boq_material.get('specification')
+                        }
+
+                        # Lookup by master_material_id if exists
+                        material_id = boq_material.get('master_material_id')
+                        if material_id:
+                            material_lookup_by_id[material_id] = material_data
+
+                        # Also generate ID pattern: mat_{boq_id}_{item_idx}_{sub_item_idx}_{mat_idx}
+                        generated_id = f"mat_{boq_id}_{item_idx+1}_{sub_item_idx+1}_{mat_idx+1}"
+                        material_lookup_by_id[generated_id] = material_data
+
+                        # Lookup by material name (case-insensitive)
+                        material_name = boq_material.get('material_name', '').lower().strip()
+                        if material_name:
+                            material_lookup_by_name[material_name] = material_data
+
         # Calculate materials total cost
         materials_total_cost = 0.0
         materials_data = []
@@ -96,15 +124,43 @@ def create_change_request():
             total_price = quantity * unit_price
             materials_total_cost += total_price
 
+            # Get brand/specification from request, or lookup from BOQ if missing
+            brand = mat.get('brand')
+            specification = mat.get('specification')
+            master_material_id = mat.get('master_material_id')
+
+            # If brand/spec not provided, lookup from BOQ
+            if not brand or not specification:
+                boq_mat = None
+
+                # Try lookup by material ID first
+                if master_material_id and master_material_id in material_lookup_by_id:
+                    boq_mat = material_lookup_by_id[master_material_id]
+
+                # Fallback to lookup by material name
+                if not boq_mat:
+                    material_name = mat.get('material_name', '').lower().strip()
+                    if material_name and material_name in material_lookup_by_name:
+                        boq_mat = material_lookup_by_name[material_name]
+
+                # Populate brand/spec from BOQ if found
+                if boq_mat:
+                    if not brand:
+                        brand = boq_mat.get('brand')
+                    if not specification:
+                        specification = boq_mat.get('specification')
+
             materials_data.append({
                 'material_name': mat.get('material_name'),
                 'quantity': quantity,
                 'unit': mat.get('unit', 'nos'),
                 'unit_price': unit_price,
                 'total_price': total_price,
-                'master_material_id': mat.get('master_material_id'),  # Optional
+                'master_material_id': master_material_id,  # Optional
                 'justification': mat.get('justification', ''),  # Per-material justification
-                'reason': mat.get('reason', '')  # Reason for new material (used in routing logic)
+                'reason': mat.get('reason', ''),  # Reason for new material (used in routing logic)
+                'brand': brand,  # Brand for materials (from request or BOQ)
+                'specification': specification  # Specification for materials (from request or BOQ)
             })
 
         # Calculate already consumed from previous approved change requests (NEW materials only)
@@ -130,6 +186,32 @@ def create_change_request():
         else:
             # Direct API call - convert materials to sub_items format
             for mat in materials:
+                # Get brand/specification from request, or lookup from BOQ if missing
+                brand = mat.get('brand')
+                specification = mat.get('specification')
+                master_material_id = mat.get('master_material_id')
+
+                # If brand/spec not provided, lookup from BOQ
+                if not brand or not specification:
+                    boq_mat = None
+
+                    # Try lookup by material ID first
+                    if master_material_id and master_material_id in material_lookup_by_id:
+                        boq_mat = material_lookup_by_id[master_material_id]
+
+                    # Fallback to lookup by material name
+                    if not boq_mat:
+                        material_name = mat.get('material_name', '').lower().strip()
+                        if material_name and material_name in material_lookup_by_name:
+                            boq_mat = material_lookup_by_name[material_name]
+
+                    # Populate brand/spec from BOQ if found
+                    if boq_mat:
+                        if not brand:
+                            brand = boq_mat.get('brand')
+                        if not specification:
+                            specification = boq_mat.get('specification')
+
                 sub_items_data.append({
                     'sub_item_id': mat.get('sub_item_id'),  # Sub-item ID (INTEGER from boq_sub_items table)
                     'sub_item_name': mat.get('sub_item_name'),  # Sub-item name (e.g., "Protection")
@@ -138,11 +220,11 @@ def create_change_request():
                     'unit': mat.get('unit', 'nos'),
                     'unit_price': mat.get('unit_price'),
                     'total_price': mat.get('quantity', 0) * mat.get('unit_price', 0),
-                    'master_material_id': mat.get('master_material_id'),  # Include material ID from BOQ
+                    'master_material_id': master_material_id,  # Include material ID from BOQ
                     'is_new': mat.get('master_material_id') is None,
                     'reason': mat.get('reason'),
-                    'brand': mat.get('brand'),  # Brand for materials
-                    'specification': mat.get('specification'),  # Specification for materials
+                    'brand': brand,  # Brand for materials (from request or BOQ)
+                    'specification': specification,  # Specification for materials (from request or BOQ)
                     'size': mat.get('size')  # Size for materials
                 })
 

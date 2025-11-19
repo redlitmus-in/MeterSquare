@@ -334,7 +334,9 @@ def get_buyer_boq_materials():
                                     "unit_price": material.get('unit_price'),
                                     "total_price": material_total,
                                     "master_material_id": material.get('master_material_id'),
-                                    "material_type": "BOQ"
+                                    "material_type": "BOQ",
+                                    "brand": material.get('brand'),
+                                    "specification": material.get('specification')
                                 })
 
         return jsonify({
@@ -644,7 +646,9 @@ def get_buyer_completed_purchases():
                                     "quantity": material.get('quantity', 0),
                                     "unit": material.get('unit', ''),
                                     "unit_price": material.get('unit_price', 0),
-                                    "total_price": material_total
+                                    "total_price": material_total,
+                                    "brand": material.get('brand'),
+                                    "specification": material.get('specification')
                                 })
                         else:
                             sub_total = float(sub_item.get('total_price', 0) or 0)
@@ -655,7 +659,9 @@ def get_buyer_completed_purchases():
                                 "quantity": sub_item.get('quantity', 0),
                                 "unit": sub_item.get('unit', ''),
                                 "unit_price": sub_item.get('unit_price', 0),
-                                "total_price": sub_total
+                                "total_price": sub_total,
+                                "brand": sub_item.get('brand'),
+                                "specification": sub_item.get('specification')
                             })
             else:
                 for material in sub_items_data:
@@ -667,7 +673,9 @@ def get_buyer_completed_purchases():
                         "quantity": material.get('quantity', 0),
                         "unit": material.get('unit', ''),
                         "unit_price": material.get('unit_price', 0),
-                        "total_price": material_total
+                        "total_price": material_total,
+                        "brand": material.get('brand'),
+                        "specification": material.get('specification')
                     })
 
             total_cost += cr_total
