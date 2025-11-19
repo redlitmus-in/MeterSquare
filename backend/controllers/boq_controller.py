@@ -284,14 +284,18 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
         # Add materials for this sub-item
         materials = sub_item.get("materials", [])
         if materials:
-            material_names = [mat.get("material_name") for mat in materials]
-            existing_materials = MasterMaterial.query.filter(
-                MasterMaterial.material_name.in_(material_names)
-            ).all()
-            existing_materials_map = {mat.material_name: mat for mat in existing_materials}
+            # Filter out materials with empty names before querying
+            material_names = [mat.get("material_name", "").strip() for mat in materials if mat.get("material_name", "").strip()]
+
+            existing_materials_map = {}
+            if material_names:
+                existing_materials = MasterMaterial.query.filter(
+                    MasterMaterial.material_name.in_(material_names)
+                ).all()
+                existing_materials_map = {mat.material_name: mat for mat in existing_materials}
 
             for mat in materials:
-                material_name = mat.get("material_name")
+                material_name = mat.get("material_name", "").strip()
                 if not material_name:
                     continue
 
@@ -340,14 +344,18 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
         # Add labour for this sub-item
         labour_list = sub_item.get("labour", [])
         if labour_list:
-            labour_roles = [labour.get("labour_role") for labour in labour_list]
-            existing_labour = MasterLabour.query.filter(
-                MasterLabour.labour_role.in_(labour_roles)
-            ).all()
-            existing_labour_map = {labour.labour_role: labour for labour in existing_labour}
+            # Filter out labour with empty roles before querying
+            labour_roles = [labour.get("labour_role", "").strip() for labour in labour_list if labour.get("labour_role", "").strip()]
+
+            existing_labour_map = {}
+            if labour_roles:
+                existing_labour = MasterLabour.query.filter(
+                    MasterLabour.labour_role.in_(labour_roles)
+                ).all()
+                existing_labour_map = {labour.labour_role: labour for labour in existing_labour}
 
             for labour in labour_list:
-                labour_role = labour.get("labour_role")
+                labour_role = labour.get("labour_role", "").strip()
                 if not labour_role:
                     continue
 
@@ -355,13 +363,16 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                 hours = labour.get("hours", 0.0)
                 labour_amount = float(rate_per_hour) * float(hours)
 
+                # Check if labour_role already exists in master table
                 master_labour = existing_labour_map.get(labour_role)
+
                 if not master_labour:
+                    # Insert new labour entry
                     master_labour = MasterLabour(
                         labour_role=labour_role,
                         item_id=master_item_id,
                         sub_item_id=master_sub_item_id,
-                        work_type=labour.get("work_type"),
+                        work_type=labour.get("work_type", "daily_wages"),
                         hours=float(hours),
                         rate_per_hour=float(rate_per_hour),
                         amount=labour_amount,
@@ -370,11 +381,10 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     db.session.add(master_labour)
                     db.session.flush()
                 else:
-                    # Update existing labour
+                    # Update existing labour entry with new values
+                    master_labour.item_id = master_item_id
                     master_labour.sub_item_id = master_sub_item_id
-                    if master_labour.item_id is None:
-                        master_labour.item_id = master_item_id
-                    if master_labour.work_type is None:
+                    if labour.get("work_type"):
                         master_labour.work_type = labour.get("work_type")
                     master_labour.hours = float(hours)
                     master_labour.rate_per_hour = float(rate_per_hour)
@@ -1925,17 +1935,13 @@ def update_boq(boq_id):
         user_name = current_user.get('full_name') or current_user.get('username') or 'Unknown' if current_user else 'Unknown'
 
         boq = BOQ.query.filter_by(boq_id=boq_id).first()
-
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
-
         # Update BOQ basic details
         if "boq_name" in data:
             boq.boq_name = data["boq_name"]
-
         # Check if this is a revision edit (from Revisions button)
         is_revision = data.get("is_revision", False)
-
         # Set status based on current status and revision mode
         current_status = boq.status
         if is_revision:
@@ -1954,7 +1960,6 @@ def update_boq(boq_id):
 
         # Update last modified by
         boq.last_modified_by = user_name
-
         # Get existing BOQ details
         boq_details = BOQDetails.query.filter_by(boq_id=boq_id).first()
         if not boq_details:
@@ -1969,12 +1974,9 @@ def update_boq(boq_id):
 
         # Update last modified timestamp
         boq.last_modified_at = datetime.utcnow()
-
         # Note: BOQDetailsHistory is NOT stored in update_boq
         # History is only stored in revision_boq function
         next_version = 1
-
-        # Initialize variables
         boq_items = []
         total_boq_cost = 0
 
@@ -1983,7 +1985,6 @@ def update_boq(boq_id):
             # Store payload directly without recalculation
             import copy
             payload_copy = copy.deepcopy(data)
-
             # Get values directly from payload
             boq_items = data.get("items", [])
             combined_summary = data.get("combined_summary", {})
@@ -1991,6 +1992,79 @@ def update_boq(boq_id):
             total_items = combined_summary.get("total_items", len(boq_items))
             total_materials = combined_summary.get("total_materials", 0)
             total_labour = combined_summary.get("total_labour", 0)
+
+            # Get current user for master table operations
+            current_user = getattr(g, 'user', None)
+            if current_user:
+                created_by = current_user.get('username') or current_user.get('full_name') or current_user.get('user_id', 'Admin')
+            else:
+                created_by = data.get("modified_by", "Admin")
+
+            # Process ALL items to store in master tables (both new and existing)
+            # This ensures materials/labour added to existing items are also saved
+            for idx, item_data in enumerate(boq_items):
+                # Check if item has sub_items structure
+                if "sub_items" in item_data and item_data.get("sub_items"):
+                    # Get item-level data
+                    item_quantity = clean_numeric_value(item_data.get("quantity", 1.0))
+                    item_rate = clean_numeric_value(item_data.get("rate", 0.0))
+                    item_unit = item_data.get("unit", "nos")
+                    item_total = item_quantity * item_rate
+
+                    # Get percentages
+                    miscellaneous_percentage = clean_numeric_value(item_data.get("overhead_percentage", 10.0))
+                    overhead_profit_percentage = clean_numeric_value(item_data.get("profit_margin_percentage", 15.0))
+
+                    # Calculate amounts
+                    total_miscellaneous_amount = (item_total * miscellaneous_percentage) / 100
+                    total_overhead_profit_amount = (item_total * overhead_profit_percentage) / 100
+
+                    # Add item to master tables (or update if exists)
+                    # Use existing master_item_id if available, otherwise will create new
+                    existing_master_item_id = item_data.get("master_item_id")
+                    master_item_id, _, _ = add_to_master_tables(
+                        item_data.get("item_name"),
+                        item_data.get("description", ""),
+                        item_data.get("work_type", "contract"),
+                        [],  # Don't add materials here, will add per sub-item
+                        [],  # Don't add labour here, will add per sub-item
+                        created_by,
+                        miscellaneous_percentage,
+                        total_miscellaneous_amount,
+                        overhead_profit_percentage,
+                        total_overhead_profit_amount,
+                        overhead_profit_percentage,
+                        total_overhead_profit_amount,
+                        clean_numeric_value(item_data.get("discount_percentage", 0.0)),
+                        clean_numeric_value(item_data.get("discount_amount", 0.0)),
+                        clean_numeric_value(item_data.get("vat_percentage", 0.0)),
+                        clean_numeric_value(item_data.get("vat_amount", 0.0)),
+                        unit=item_unit,
+                        quantity=item_quantity,
+                        per_unit_cost=item_rate,
+                        total_amount=item_total,
+                        item_total_cost=item_total
+                    )
+
+                    # Add master_item_id back to payload
+                    item_data["master_item_id"] = master_item_id
+                    payload_copy["items"][idx]["master_item_id"] = master_item_id
+
+                    # Process sub-items with their materials and labour
+                    sub_items_list = item_data.get("sub_items", [])
+                    if sub_items_list:
+                        master_sub_item_ids = add_sub_items_to_master_tables(
+                            master_item_id,
+                            sub_items_list,
+                            created_by
+                        )
+                        # Add master sub-item IDs back to payload
+                        for sub_idx, sub_item_id in enumerate(master_sub_item_ids):
+                            if sub_idx < len(sub_items_list):
+                                sub_items_list[sub_idx]["sub_item_id"] = sub_item_id
+                                sub_items_list[sub_idx]["master_sub_item_id"] = sub_item_id
+                                payload_copy["items"][idx]["sub_items"][sub_idx]["sub_item_id"] = sub_item_id
+                                payload_copy["items"][idx]["sub_items"][sub_idx]["master_sub_item_id"] = sub_item_id
 
             # Update BOQDetails with the raw payload directly
             boq_details.boq_details = payload_copy
@@ -2059,13 +2133,18 @@ def update_boq(boq_id):
                         sub_item_materials = []
                         materials_cost = 0
                         for mat_data in sub_item_data.get("materials", []):
+                            material_name = mat_data.get("material_name", "").strip()
+                            # Skip materials with empty or null names
+                            if not material_name:
+                                continue
+
                             quantity = clean_numeric_value(mat_data.get("quantity", 1.0))
                             unit_price = clean_numeric_value(mat_data.get("unit_price", 0.0))
                             total_price = quantity * unit_price
                             materials_cost += total_price
 
                             sub_item_materials.append({
-                                "material_name": mat_data.get("material_name"),
+                                "material_name": material_name,
                                 "location": mat_data.get("location", ""),
                                 "brand": mat_data.get("brand", ""),
                                 "size": mat_data.get("size", ""),
@@ -2082,13 +2161,19 @@ def update_boq(boq_id):
                         sub_item_labour = []
                         labour_cost = 0
                         for labour_data_item in sub_item_data.get("labour", []):
+                            labour_role = labour_data_item.get("labour_role", "").strip()
+                            # Skip labour with empty or null roles
+                            if not labour_role:
+                                continue
+
                             hours = clean_numeric_value(labour_data_item.get("hours", 0.0))
                             rate_per_hour = clean_numeric_value(labour_data_item.get("rate_per_hour", 0.0))
                             total_cost_labour = hours * rate_per_hour
                             labour_cost += total_cost_labour
 
                             sub_item_labour.append({
-                                "labour_role": labour_data_item.get("labour_role"),
+                                "labour_role": labour_role,
+                                "work_type": labour_data_item.get("work_type", "daily_wages"),
                                 "hours": hours,
                                 "rate_per_hour": rate_per_hour,
                                 "total_cost": total_cost_labour
@@ -2105,9 +2190,22 @@ def update_boq(boq_id):
                             "quantity": sub_item_quantity,
                             "unit": sub_item_unit,
                             "rate": sub_item_rate,
+                            "per_unit_cost": sub_item_rate,  # Added for master table
                             "base_total": sub_item_base_total,
+                            "sub_item_total_cost": sub_item_base_total,  # Added for master table
                             "materials_cost": materials_cost,
                             "labour_cost": labour_cost,
+                            "material_cost": materials_cost,  # Added for master table (uses singular)
+                            "internal_cost": sub_item_data.get("internal_cost", 0.0),
+                            "planned_profit": sub_item_data.get("planned_profit", 0.0),
+                            "actual_profit": sub_item_data.get("actual_profit", 0.0),
+                            "negotiable_margin": sub_item_data.get("actual_profit", 0.0),  # Same as actual_profit
+                            "misc_percentage": sub_item_data.get("misc_percentage", 10.0),
+                            "misc_amount": sub_item_data.get("misc_amount", 0.0),
+                            "overhead_profit_percentage": sub_item_data.get("overhead_profit_percentage", 25.0),
+                            "overhead_profit_amount": sub_item_data.get("overhead_profit_amount", 0.0),
+                            "transport_percentage": sub_item_data.get("transport_percentage", 5.0),
+                            "transport_amount": sub_item_data.get("transport_amount", 0.0),
                             "materials": sub_item_materials,
                             "labour": sub_item_labour
                         }
@@ -2159,21 +2257,13 @@ def update_boq(boq_id):
                     }
 
                     # Add/Update to master tables
-                    # Collect all materials and labour from sub-items for master tables
-                    all_materials = []
-                    all_labour = []
-                    for sub_item in item_data.get("sub_items", []):
-                        all_materials.extend(sub_item.get("materials", []))
-                        all_labour.extend(sub_item.get("labour", []))
-
-                    # Add to master tables
-                    log.info(f"Updating master tables for item: {item_data.get('item_name')}, materials: {len(all_materials)}")
-                    master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
+                    # Step 1: Add item to boq_items table
+                    master_item_id, _, _ = add_to_master_tables(
                         item_data.get("item_name"),
                         item_data.get("description", ""),
                         item_data.get("work_type", "contract"),
-                        all_materials,
-                        all_labour,
+                        [],  # Don't add materials here, will add per sub-item
+                        [],  # Don't add labour here, will add per sub-item
                         created_by,
                         miscellaneous_percentage,
                         total_miscellaneous_amount,
@@ -2191,14 +2281,14 @@ def update_boq(boq_id):
                         total_amount=item_total,
                         item_total_cost=item_total
                     )
-                    log.info(f"Master tables updated: item_id={master_item_id}, materials={len(master_material_ids)}, labour={len(master_labour_ids)}")
 
-                    # Add sub-items to master tables
+                    # Step 2: Add sub-items to boq_sub_items table, and their materials & labour
                     master_sub_item_ids = []
-                    if item_data.get("sub_items"):
+                    if sub_items_list:
+                        # Pass the processed sub_items_list that contains materials and labour
                         master_sub_item_ids = add_sub_items_to_master_tables(
                             master_item_id,
-                            item_data.get("sub_items"),
+                            sub_items_list,
                             created_by
                         )
 
@@ -2220,14 +2310,7 @@ def update_boq(boq_id):
 
             # Get preliminaries from request data (for discount calculation only)
             preliminaries = data.get("preliminaries", {})
-
-            # NOTE: Preliminary updates are now handled by dedicated /preliminary/{project_id} endpoint
-            # to prevent race conditions and data conflicts. This section only reads preliminary data
-            # for discount calculations, it does not save/update preliminary records.
             preliminary_id = old_boq_details_json.get("preliminary_id") if old_boq_details_json else None
-
-            # Note: Old preliminary system removed - preliminary_id no longer used
-            # preliminary_id = None  # Kept for backward compatibility but not used
 
             # Apply BOQ-level discount to total
             boq_discount_percentage = data.get("discount_percentage", old_boq_details_json.get("discount_percentage", 0)) or 0
@@ -2246,8 +2329,6 @@ def update_boq(boq_id):
 
             # Apply BOQ-level discount to get final total
             final_boq_cost = combined_subtotal - boq_discount_amount if boq_discount_amount > 0 else combined_subtotal
-
-            log.info(f"BOQ {boq.boq_id} update totals - Items: {total_boq_cost}, Preliminaries: {preliminary_amount}, Combined: {combined_subtotal}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), Final: {final_boq_cost}")
 
             # Update JSON structure
             updated_json = {
@@ -2469,12 +2550,8 @@ def update_boq(boq_id):
             from models.preliminary_master import BOQPreliminary, PreliminaryMaster
 
             preliminary_items = preliminaries.get('items', [])
-            log.info(f"[UPDATE_BOQ] Processing {len(preliminary_items)} preliminary items for BOQ {boq_id}")
-
             # Delete all existing preliminary selections for this BOQ
             BOQPreliminary.query.filter_by(boq_id=boq_id).delete()
-            log.info(f"[UPDATE_BOQ] Deleted existing preliminary selections for BOQ {boq_id}")
-
             # Insert new selections
             preliminary_selections_saved = 0
             custom_preliminaries_created = 0
@@ -2483,8 +2560,6 @@ def update_boq(boq_id):
                 prelim_id = item.get('prelim_id')
                 is_checked = item.get('checked', False) or item.get('selected', False)
                 is_custom = item.get('isCustom', False)
-
-                log.info(f"[UPDATE_BOQ] Preliminary item: prelim_id={prelim_id}, checked={is_checked}, isCustom={is_custom}")
 
                 # Handle edited master preliminaries - update the master record
                 if prelim_id and not is_custom:
@@ -2496,7 +2571,6 @@ def update_boq(boq_id):
                             # Update the master preliminary description
                             master_prelim.description = description
                             master_prelim.updated_by = user_name
-                            log.info(f"[UPDATE_BOQ] Updated master preliminary: prelim_id={prelim_id}, new description={description}")
 
                 # Handle custom preliminaries - create new row in preliminaries_master
                 if is_custom and not prelim_id:
@@ -2512,7 +2586,6 @@ def update_boq(boq_id):
 
                         if existing_custom:
                             prelim_id = existing_custom.prelim_id
-                            log.info(f"[UPDATE_BOQ] Found existing custom preliminary: prelim_id={prelim_id}")
                         else:
                             # Create new custom preliminary in master table
                             new_custom_prelim = PreliminaryMaster(
@@ -2529,7 +2602,6 @@ def update_boq(boq_id):
                             db.session.flush()  # Get the prelim_id
                             prelim_id = new_custom_prelim.prelim_id
                             custom_preliminaries_created += 1
-                            log.info(f"[UPDATE_BOQ] Created new custom preliminary: prelim_id={prelim_id}, description={description}")
 
                 if prelim_id:
                     boq_prelim = BOQPreliminary(
@@ -2539,8 +2611,6 @@ def update_boq(boq_id):
                     )
                     db.session.add(boq_prelim)
                     preliminary_selections_saved += 1
-
-            log.info(f"[UPDATE_BOQ] Created {custom_preliminaries_created} custom preliminaries, saved {preliminary_selections_saved} selections to boq_preliminaries for BOQ {boq_id}")
 
         db.session.commit()
 
@@ -2781,13 +2851,18 @@ def revision_boq(boq_id):
                         sub_item_materials = []
                         materials_cost = 0
                         for mat_data in sub_item_data.get("materials", []):
+                            material_name = mat_data.get("material_name", "").strip()
+                            # Skip materials with empty or null names
+                            if not material_name:
+                                continue
+
                             quantity = clean_numeric_value(mat_data.get("quantity", 1.0))
                             unit_price = clean_numeric_value(mat_data.get("unit_price", 0.0))
                             total_price = quantity * unit_price
                             materials_cost += total_price
 
                             sub_item_materials.append({
-                                "material_name": mat_data.get("material_name"),
+                                "material_name": material_name,
                                 "location": mat_data.get("location", ""),
                                 "brand": mat_data.get("brand", ""),
                                 "size": mat_data.get("size", ""),
@@ -2804,13 +2879,19 @@ def revision_boq(boq_id):
                         sub_item_labour = []
                         labour_cost = 0
                         for labour_data_item in sub_item_data.get("labour", []):
+                            labour_role = labour_data_item.get("labour_role", "").strip()
+                            # Skip labour with empty or null roles
+                            if not labour_role:
+                                continue
+
                             hours = clean_numeric_value(labour_data_item.get("hours", 0.0))
                             rate_per_hour = clean_numeric_value(labour_data_item.get("rate_per_hour", 0.0))
                             total_cost_labour = hours * rate_per_hour
                             labour_cost += total_cost_labour
 
                             sub_item_labour.append({
-                                "labour_role": labour_data_item.get("labour_role"),
+                                "labour_role": labour_role,
+                                "work_type": labour_data_item.get("work_type", "daily_wages"),
                                 "hours": hours,
                                 "rate_per_hour": rate_per_hour,
                                 "total_cost": total_cost_labour
@@ -2827,9 +2908,22 @@ def revision_boq(boq_id):
                             "quantity": sub_item_quantity,
                             "unit": sub_item_unit,
                             "rate": sub_item_rate,
+                            "per_unit_cost": sub_item_rate,  # Added for master table
                             "base_total": sub_item_base_total,
+                            "sub_item_total_cost": sub_item_base_total,  # Added for master table
                             "materials_cost": materials_cost,
                             "labour_cost": labour_cost,
+                            "material_cost": materials_cost,  # Added for master table (uses singular)
+                            "internal_cost": sub_item_data.get("internal_cost", 0.0),
+                            "planned_profit": sub_item_data.get("planned_profit", 0.0),
+                            "actual_profit": sub_item_data.get("actual_profit", 0.0),
+                            "negotiable_margin": sub_item_data.get("actual_profit", 0.0),  # Same as actual_profit
+                            "misc_percentage": sub_item_data.get("misc_percentage", 10.0),
+                            "misc_amount": sub_item_data.get("misc_amount", 0.0),
+                            "overhead_profit_percentage": sub_item_data.get("overhead_profit_percentage", 25.0),
+                            "overhead_profit_amount": sub_item_data.get("overhead_profit_amount", 0.0),
+                            "transport_percentage": sub_item_data.get("transport_percentage", 5.0),
+                            "transport_amount": sub_item_data.get("transport_amount", 0.0),
                             "materials": sub_item_materials,
                             "labour": sub_item_labour
                         }
@@ -3057,6 +3151,151 @@ def revision_boq(boq_id):
             final_boq_cost = combined_subtotal - boq_discount_amount if boq_discount_amount > 0 else combined_subtotal
 
             log.info(f"BOQ {boq.boq_id} revision update totals - Items: {total_boq_cost}, Preliminaries: {preliminary_amount}, Combined: {combined_subtotal}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), Final: {final_boq_cost}")
+
+            # Store new items, sub-items, and materials to master tables
+            for item_data in boq_items:
+                # Check if item has sub_items structure
+                if item_data.get("has_sub_items") and "sub_items" in item_data:
+                    # NEW FORMAT: Item with sub_items
+                    # 1. Store/Update Item in boq_items table
+                    item_name = item_data.get("item_name")
+                    existing_item = MasterItem.query.filter_by(item_name=item_name).first()
+
+                    if not existing_item:
+                        new_item = MasterItem(
+                            item_name=item_name,
+                            description=item_data.get("description", ""),
+                            unit=item_data.get("unit", "nos"),
+                            quantity=item_data.get("quantity", 1.0),
+                            per_unit_cost=item_data.get("rate", 0.0),
+                            total_amount=item_data.get("item_total", 0.0),
+                            item_total_cost=item_data.get("base_cost", 0.0),
+                            overhead_percentage=item_data.get("overhead_percentage", 10.0),
+                            overhead_amount=item_data.get("overhead_amount", 0.0),
+                            profit_margin_percentage=item_data.get("profit_margin_percentage", 15.0),
+                            profit_margin_amount=item_data.get("profit_margin_amount", 0.0),
+                            discount_percentage=item_data.get("discount_percentage", 0.0),
+                            discount_amount=item_data.get("discount_amount", 0.0),
+                            vat_percentage=item_data.get("vat_percentage", 0.0),
+                            vat_amount=item_data.get("vat_amount", 0.0),
+                            is_active=True,
+                            created_by=user_name
+                        )
+                        db.session.add(new_item)
+                        db.session.flush()  # Get the item_id
+                        master_item_id = new_item.item_id
+
+                        # Update item_data with master_item_id
+                        item_data["master_item_id"] = master_item_id
+                    else:
+                        master_item_id = existing_item.item_id
+                        if "master_item_id" not in item_data:
+                            item_data["master_item_id"] = master_item_id
+
+                    # 2. Process sub_items for this item
+                    for sub_item_data in item_data.get("sub_items", []):
+                        sub_item_name = sub_item_data.get("sub_item_name")
+
+                        # Check if sub_item already exists for this item
+                        existing_sub_item = MasterSubItem.query.filter_by(
+                            item_id=master_item_id,
+                            sub_item_name=sub_item_name
+                        ).first()
+
+                        if not existing_sub_item:
+                            new_sub_item = MasterSubItem(
+                                item_id=master_item_id,
+                                sub_item_name=sub_item_name,
+                                description=sub_item_data.get("description", ""),
+                                size=sub_item_data.get("size", ""),
+                                location=sub_item_data.get("location", ""),
+                                brand=sub_item_data.get("brand", ""),
+                                unit=sub_item_data.get("unit", "nos"),
+                                quantity=sub_item_data.get("quantity", 1.0),
+                                per_unit_cost=sub_item_data.get("rate", 0.0),
+                                sub_item_total_cost=sub_item_data.get("base_total", 0.0),
+                                material_cost=sub_item_data.get("materials_cost", 0.0),
+                                labour_cost=sub_item_data.get("labour_cost", 0.0),
+                                is_active=True,
+                                created_by=user_name
+                            )
+                            db.session.add(new_sub_item)
+                            db.session.flush()  # Get the sub_item_id
+                            master_sub_item_id = new_sub_item.sub_item_id
+
+                            # Update sub_item_data with master_sub_item_id
+                            sub_item_data["master_sub_item_id"] = master_sub_item_id
+                        else:
+                            master_sub_item_id = existing_sub_item.sub_item_id
+                            if "master_sub_item_id" not in sub_item_data:
+                                sub_item_data["master_sub_item_id"] = master_sub_item_id
+
+                        # 3. Process materials for this sub_item
+                        for material_data in sub_item_data.get("materials", []):
+                            material_name = material_data.get("material_name")
+
+                            # Check if material already exists
+                            existing_material = MasterMaterial.query.filter_by(
+                                material_name=material_name
+                            ).first()
+
+                            if not existing_material:
+                                new_material = MasterMaterial(
+                                    material_name=material_name,
+                                    item_id=master_item_id,
+                                    sub_item_id=master_sub_item_id,
+                                    description=material_data.get("description", ""),
+                                    brand=material_data.get("brand", ""),
+                                    size=material_data.get("size", ""),
+                                    specification=material_data.get("specification", ""),
+                                    quantity=material_data.get("quantity", 1.0),
+                                    default_unit=material_data.get("unit", "nos"),
+                                    current_market_price=material_data.get("unit_price", 0.0),
+                                    total_price=material_data.get("total_price", 0.0),
+                                    vat_percentage=material_data.get("vat_percentage", 0.0),
+                                    is_active=True,
+                                    created_by=user_name,
+                                    last_modified_by=user_name
+                                )
+                                db.session.add(new_material)
+                                db.session.flush()  # Get the material_id
+                                master_material_id = new_material.material_id
+
+                                # Update material_data with master_material_id
+                                material_data["master_material_id"] = master_material_id
+                            else:
+                                if "master_material_id" not in material_data:
+                                    material_data["master_material_id"] = existing_material.material_id
+
+                        # 4. Process labour for this sub_item
+                        for labour_data_item in sub_item_data.get("labour", []):
+                            labour_role = labour_data_item.get("labour_role")
+
+                            # Check if labour already exists
+                            existing_labour = MasterLabour.query.filter_by(
+                                labour_role=labour_role
+                            ).first()
+
+                            if not existing_labour:
+                                new_labour = MasterLabour(
+                                    labour_role=labour_role,
+                                    item_id=master_item_id,
+                                    sub_item_id=master_sub_item_id,
+                                    hours=labour_data_item.get("hours", 0.0),
+                                    rate_per_hour=labour_data_item.get("rate_per_hour", 0.0),
+                                    amount=labour_data_item.get("total_cost", 0.0),
+                                    is_active=True,
+                                    created_by=user_name
+                                )
+                                db.session.add(new_labour)
+                                db.session.flush()  # Get the labour_id
+                                master_labour_id = new_labour.labour_id
+
+                                # Update labour_data with master_labour_id
+                                labour_data_item["master_labour_id"] = master_labour_id
+                            else:
+                                if "master_labour_id" not in labour_data_item:
+                                    labour_data_item["master_labour_id"] = existing_labour.labour_id
 
             # Update JSON structure
             updated_json = {

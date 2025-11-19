@@ -141,7 +141,7 @@ class MasterLabour(db.Model):
     __tablename__ = "boq_labours"
 
     labour_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    labour_role = db.Column(db.String(255), nullable=False, unique=True)
+    labour_role = db.Column(db.String(255), nullable=False)  # Removed unique=True to allow duplicate labour roles
     item_id = db.Column(db.Integer)
     sub_item_id = db.Column(db.Integer, db.ForeignKey("boq_sub_items.sub_item_id"), nullable=True)
     work_type = db.Column(db.String(100), nullable=True)  # Construction, Electrical, etc
