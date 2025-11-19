@@ -9,6 +9,9 @@ type SubscriptionChannel = 'purchases' | 'tasks' | 'notifications' | 'materials'
 // Store active subscriptions
 const activeSubscriptions = new Map<SubscriptionChannel, any>();
 
+// Track if subscriptions are already initialized
+let subscriptionsInitialized = false;
+
 // Interface for custom subscription configuration
 interface SubscribeToRealtimeConfig {
   table: string;
@@ -77,6 +80,15 @@ export const setupRealtimeSubscriptions = (userId?: string) => {
     console.warn('Supabase client not initialized, skipping realtime subscriptions');
     return () => {}; // Return empty function for cleanup
   }
+
+  // Prevent duplicate subscriptions
+  if (subscriptionsInitialized) {
+    console.log('⚠️ Subscriptions already initialized, skipping duplicate setup');
+    return cleanupSubscriptions;
+  }
+
+  console.log('🚀 Setting up real-time subscriptions...');
+  subscriptionsInitialized = true;
 
   // Clean up existing subscriptions
   cleanupSubscriptions();
@@ -281,8 +293,18 @@ const subscribeToBOQs = () => {
 
   const createSubscription = () => {
     try {
+      // Remove existing subscription first to prevent duplicates
+      const existing = activeSubscriptions.get('boqs');
+      if (existing) {
+        console.log('🧹 Removing existing BOQ subscription before recreating...');
+        supabase.removeChannel(existing);
+        activeSubscriptions.delete('boqs');
+      }
+
+      // Use unique channel name to prevent conflicts
+      const channelName = `boq-changes-${Date.now()}`;
       const subscription = supabase
-        .channel('boq-changes')
+        .channel(channelName)
         .on(
           'postgres_changes',
           {
@@ -331,13 +353,17 @@ const subscribeToBOQs = () => {
 
           // Handle subscription being closed and reconnect
           if (status === 'CLOSED') {
-            console.warn('⚠️ BOQ subscription was closed, reconnecting in 2 seconds...');
-            setTimeout(() => {
-              if (!activeSubscriptions.has('boqs')) {
-                console.log('🔄 Reconnecting BOQ subscription...');
+            console.warn('⚠️ BOQ subscription was closed, reconnecting in 3 seconds...');
+            // Only reconnect if we haven't exceeded retries
+            if (retryCount < MAX_RETRIES) {
+              retryCount++;
+              setTimeout(() => {
+                console.log(`🔄 Reconnecting BOQ subscription (attempt ${retryCount}/${MAX_RETRIES})...`);
                 createSubscription();
-              }
-            }, 2000);
+              }, 3000);
+            } else {
+              console.error('❌ BOQ subscription closed too many times. Stopping reconnection attempts.');
+            }
             return;
           }
 
@@ -421,8 +447,18 @@ const subscribeToBOQInternalRevisions = () => {
 
   const createSubscription = () => {
     try {
+      // Remove existing subscription first to prevent duplicates
+      const existing = activeSubscriptions.get('boq_internal_revisions');
+      if (existing) {
+        console.log('🧹 Removing existing Internal Revisions subscription before recreating...');
+        supabase.removeChannel(existing);
+        activeSubscriptions.delete('boq_internal_revisions');
+      }
+
+      // Use unique channel name to prevent conflicts
+      const channelName = `boq-internal-revision-changes-${Date.now()}`;
       const subscription = supabase
-        .channel('boq-internal-revision-changes')
+        .channel(channelName)
         .on(
           'postgres_changes',
           {
@@ -461,13 +497,17 @@ const subscribeToBOQInternalRevisions = () => {
 
           // Handle subscription being closed and reconnect
           if (status === 'CLOSED') {
-            console.warn('⚠️ Internal Revisions subscription was closed, reconnecting in 2 seconds...');
-            setTimeout(() => {
-              if (!activeSubscriptions.has('boq_internal_revisions')) {
-                console.log('🔄 Reconnecting Internal Revisions subscription...');
+            console.warn('⚠️ Internal Revisions subscription was closed, reconnecting in 3 seconds...');
+            // Only reconnect if we haven't exceeded retries
+            if (retryCount < MAX_RETRIES) {
+              retryCount++;
+              setTimeout(() => {
+                console.log(`🔄 Reconnecting Internal Revisions subscription (attempt ${retryCount}/${MAX_RETRIES})...`);
                 createSubscription();
-              }
-            }, 2000);
+              }, 3000);
+            } else {
+              console.error('❌ Internal Revisions subscription closed too many times. Stopping reconnection attempts.');
+            }
             return;
           }
 
@@ -562,6 +602,7 @@ const subscribeToChangeRequests = () => {
  * Clean up all active subscriptions
  */
 export const cleanupSubscriptions = () => {
+  console.log('🧹 Cleaning up all subscriptions...');
   activeSubscriptions.forEach((subscription, channel) => {
     try {
       supabase.removeChannel(subscription);
@@ -570,6 +611,7 @@ export const cleanupSubscriptions = () => {
     }
   });
   activeSubscriptions.clear();
+  subscriptionsInitialized = false; // Reset flag so subscriptions can be recreated
 };
 
 /**

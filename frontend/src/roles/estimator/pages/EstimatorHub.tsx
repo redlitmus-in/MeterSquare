@@ -658,7 +658,7 @@ const EstimatorHub: React.FC = () => {
         // Pending: Draft BOQs not sent to TD/PM yet (no status or status = draft) OR client_rejected (needs revision)
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase() || '';
-          return !status || status === 'draft' || status === 'client_rejected' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled');
+          return !status || status === 'draft' || status === 'client_rejected' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'approved' && status !== 'revision_approved' && status !== 'rejected' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'completed' && status !== 'client_cancelled');
         });
       } else if (activeTab === 'sent') {
         // Send BOQ: Sent to TD or PM, waiting for approval
@@ -686,8 +686,8 @@ const EstimatorHub: React.FC = () => {
         filtered = filtered.filter(boq => {
           const status = boq.status?.toLowerCase();
 
-          // Show if PM approved, pending TD approval, TD approved, sent to client, or client confirmed (but not yet PM assigned/completed)
-          return (status === 'pm_approved' || status === 'pending_td_approval' || status === 'approved' || status === 'sent_for_confirmation' || status === 'client_confirmed') && !boq.pm_assigned;
+          // Show if PM approved, pending TD approval, TD approved, revision approved, sent to client, or client confirmed (but not yet PM assigned/completed)
+          return (status === 'pm_approved' || status === 'pending_td_approval' || status === 'approved' || status === 'revision_approved' || status === 'sent_for_confirmation' || status === 'client_confirmed') && !boq.pm_assigned;
         });
       } else if (activeTab === 'rejected') {
         // Rejected: TD rejected OR client rejected OR PM rejected

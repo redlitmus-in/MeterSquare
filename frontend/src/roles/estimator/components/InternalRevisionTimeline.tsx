@@ -207,18 +207,11 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
         const sorted = regularRevisions.sort((a: InternalRevision, b: InternalRevision) =>
           b.internal_revision_number - a.internal_revision_number
         );
-        console.log('🔄 Revisions:', sorted.map((r: InternalRevision) =>
-          `Rev ${r.internal_revision_number} (${r.action_type})`
-        ).join(', '));
         setInternalRevisions(sorted);
 
         // Check if there's an original_boq in the response
         if (data.data.original_boq) {
-          console.log('✅ Original BOQ found in API response with',
-            data.data.original_boq.boq_details?.items?.length || 0, 'items');
           setOriginalBOQ(data.data.original_boq);
-        } else {
-          console.log('⚠️ No original BOQ in response');
         }
 
         // Auto-select the latest revision for comparison
@@ -237,7 +230,6 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
   const handleEditBOQ = async (boq: BOQWithInternalRevisions) => {
     try {
-      console.log('🔧 Fetching BOQ for editing:', boq.boq_id);
       // Fetch the latest BOQ data with full details
       const response = await fetch(`${API_URL}/boq/${boq.boq_id}`, {
         headers: {
@@ -245,31 +237,27 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
         }
       });
 
-      console.log('🔧 Response status:', response.status);
-
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('🔧 Response data:', data);
 
-      // 🔥 The /boq/{boq_id} endpoint returns BOQ data directly (not wrapped in success/data)
+      // The /boq/{boq_id} endpoint returns BOQ data directly (not wrapped in success/data)
       // Check if response has error field (error response) or boq_id (success response)
       if (data.error) {
-        console.error('❌ API returned error:', data.error);
+        console.error('API returned error:', data.error);
         toast.error(data.error || 'Failed to load BOQ details');
       } else if (data.boq_id) {
-        console.log('✅ BOQ data loaded successfully');
         // The data IS the BOQ data itself, no need to unwrap
         setEditingBOQ(data);
         setShowEditModal(true);
       } else {
-        console.error('❌ Unexpected response format:', data);
+        console.error('Unexpected response format:', data);
         toast.error('Unexpected response format');
       }
     } catch (error) {
-      console.error('❌ Error loading BOQ for editing:', error);
+      console.error('Error loading BOQ for editing:', error);
       toast.error('Failed to load BOQ details: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
@@ -1709,19 +1697,9 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                         if (currentSnapshot.discount_percentage && currentSnapshot.discount_percentage > 0) {
                           overallDiscountPercentage = currentSnapshot.discount_percentage;
                           overallDiscount = (subtotal * currentSnapshot.discount_percentage) / 100;
-                          console.log('💰 Overall BOQ Discount:', {
-                            percentage: currentSnapshot.discount_percentage,
-                            amount: overallDiscount,
-                            subtotal
-                          });
                         } else if (currentSnapshot.discount_amount && currentSnapshot.discount_amount > 0) {
                           overallDiscount = currentSnapshot.discount_amount;
                           overallDiscountPercentage = subtotal > 0 ? (overallDiscount / subtotal) * 100 : 0;
-                          console.log('💰 Overall BOQ Discount (amount):', {
-                            amount: overallDiscount,
-                            percentage: overallDiscountPercentage,
-                            subtotal
-                          });
                         } else {
                           // Priority 2: Calculate item-level discounts
                           allItems.forEach((item: any) => {
@@ -2525,7 +2503,6 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           existingBoqData={editingBOQ}
           isInternalRevisionMode={true}
           onSubmit={async (boqId) => {
-            console.log('Internal revision created:', boqId);
             toast.success('BOQ updated successfully!');
             setShowEditModal(false);
             setEditingBOQ(null);
