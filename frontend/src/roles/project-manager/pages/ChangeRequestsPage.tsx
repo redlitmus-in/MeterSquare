@@ -355,7 +355,7 @@ const ChangeRequestsPage: React.FC = () => {
         // Admin user logic
         matchesTab = (
           (activeTab === 'requested' && req.status === 'under_review') ||  // All under_review requests in Request tab
-          (activeTab === 'pending' && isPMRequest && ['pending', 'under_review'].includes(req.status)) ||  // PM's own requests (all statuses)
+          (activeTab === 'pending' && isPMRequest && ['pending', 'under_review', 'assigned_to_buyer'].includes(req.status)) ||  // PM's own requests (all statuses including assigned to buyer)
           (activeTab === 'accepted' && !isPMRequest && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||  // Only SE requests PM approved
           (activeTab === 'completed' && req.status === 'purchase_completed') ||
           (activeTab === 'rejected' && req.status === 'rejected')
@@ -364,7 +364,7 @@ const ChangeRequestsPage: React.FC = () => {
         // Non-admin user logic
         matchesTab = (
           (activeTab === 'requested' && req.status === 'under_review' && req.approval_required_from === 'project_manager') ||  // Requests waiting for PM approval
-          (activeTab === 'pending' && isPMRequest && ['pending', 'under_review'].includes(req.status)) ||  // User's own requests (all statuses)
+          (activeTab === 'pending' && isPMRequest && ['pending', 'under_review', 'assigned_to_buyer'].includes(req.status)) ||  // User's own requests (all statuses including assigned to buyer)
           (activeTab === 'accepted' && !isPMRequest && (req.status === 'approved_by_pm' || isPMApprovedAndSent || req.status === 'assigned_to_buyer')) ||  // Only SE requests PM approved
           (activeTab === 'completed' && req.status === 'purchase_completed') ||
           (activeTab === 'rejected' && req.status === 'rejected')

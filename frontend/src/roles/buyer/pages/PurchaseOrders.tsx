@@ -101,14 +101,21 @@ const PurchaseOrders: React.FC = () => {
   }, [activeTab, ongoingSubTab, pendingPurchaseItems, vendorApprovedItems, pendingApprovalPurchases, completedPurchases]);
 
   const filteredPurchases = useMemo(() => {
-    return currentPurchases.filter(purchase => {
-      const matchesSearch =
-        purchase.project_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        purchase.client.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        purchase.item_name.toLowerCase().includes(searchTerm.toLowerCase());
+    return currentPurchases
+      .filter(purchase => {
+        const matchesSearch =
+          purchase.project_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          purchase.client.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          purchase.item_name.toLowerCase().includes(searchTerm.toLowerCase());
 
-      return matchesSearch;
-    });
+        return matchesSearch;
+      })
+      .sort((a, b) => {
+        // Sort by created_at in descending order (newest first)
+        const dateA = new Date(a.created_at).getTime();
+        const dateB = new Date(b.created_at).getTime();
+        return dateB - dateA;
+      });
   }, [currentPurchases, searchTerm]);
 
   const stats = useMemo(() => {
