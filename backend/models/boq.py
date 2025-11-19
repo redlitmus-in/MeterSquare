@@ -115,7 +115,7 @@ class MasterMaterial(db.Model):
     __tablename__ = "boq_material"
 
     material_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    material_name = db.Column(db.String(255), nullable=False, unique=True, index=True)  # ✅ Added index
+    material_name = db.Column(db.Text, nullable=False, index=True)  # Removed unique=True, increased length to 500
     item_id = db.Column(db.Integer)
     sub_item_id = db.Column(db.Integer, db.ForeignKey("boq_sub_items.sub_item_id"), nullable=True)
     description = db.Column(db.Text, nullable=True)
