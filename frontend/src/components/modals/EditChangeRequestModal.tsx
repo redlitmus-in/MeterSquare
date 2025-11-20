@@ -59,8 +59,8 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
           material_name: item.material_name || item.sub_item_name || '',
           sub_item_name: item.sub_item_name || item.material_name || '',
           brand: item.brand || '',
-          size: item.size || '',
-          specification: item.specification || '',
+          size: item.size || item.dimensions || item.size_dimension || '',
+          specification: item.specification || item.spec || '',
           quantity: parseFloat(item.quantity || item.qty || 0),
           unit: item.unit || 'nos',
           unit_price: parseFloat(item.unit_price || item.unit_rate || 0),
@@ -186,29 +186,31 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
 
   const { totalCost } = calculateTotals();
 
-  // Calculate negotiable price (overhead) info
-  const overhead = changeRequest.overhead_analysis || {
+  // Calculate negotiable price (negotiable margin) info
+  const negotiableMargin = changeRequest.negotiable_margin_analysis || {
     original_allocated: 0,
-    consumed_before_request: 0,
-    consumed_by_this_request: 0,
-    remaining_after_approval: 0
+    already_consumed: 0,
+    this_request: 0,
+    remaining_after: 0,
+    consumption_percentage: 0,
+    exceeds_60_percent: false
   };
 
   const overheadInfo = {
     // Original negotiable price allocated for the project
-    originalAllocated: overhead.original_allocated || 0,
+    originalAllocated: negotiableMargin.original_allocated || 0,
     // Already consumed before this request (from previous approved CRs)
-    consumed: overhead.consumed_before_request || 0,
+    consumed: negotiableMargin.already_consumed || 0,
     // New request total from current edit
     newRequest: totalCost,
     // Calculate total consumption after this edit:
-    // = consumed_before + new_request
-    totalConsumedAfterEdit: (overhead.consumed_before_request || 0) + totalCost,
-    // Available after edit: original - consumed_before - new_request
-    available: (overhead.original_allocated || 0) - (overhead.consumed_before_request || 0) - totalCost,
+    // = already_consumed + new_request
+    totalConsumedAfterEdit: (negotiableMargin.already_consumed || 0) + totalCost,
+    // Available after edit: original - already_consumed - new_request
+    available: (negotiableMargin.original_allocated || 0) - (negotiableMargin.already_consumed || 0) - totalCost,
     // Percentage of negotiable price consumed
-    percentageOfOverhead: ((overhead.original_allocated || 0) > 0)
-      ? (((overhead.consumed_before_request || 0) + totalCost) / (overhead.original_allocated || 0) * 100)
+    percentageOfOverhead: ((negotiableMargin.original_allocated || 0) > 0)
+      ? (((negotiableMargin.already_consumed || 0) + totalCost) / (negotiableMargin.original_allocated || 0) * 100)
       : 0
   };
 

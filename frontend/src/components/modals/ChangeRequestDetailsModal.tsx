@@ -31,12 +31,13 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const [editedMaterials, setEditedMaterials] = useState<any[]>([]);
 
   // Initialize edited materials when modal opens or changeRequest changes
+  // Use isOpen and changeRequest as dependencies to ensure fresh data on every open
   React.useEffect(() => {
-    if (changeRequest) {
+    if (isOpen && changeRequest) {
       const materials = changeRequest.sub_items_data || changeRequest.materials_data || [];
       setEditedMaterials(JSON.parse(JSON.stringify(materials))); // Deep copy
     }
-  }, [changeRequest?.cr_id]);
+  }, [isOpen, changeRequest]);
 
   if (!isOpen || !changeRequest) return null;
 
