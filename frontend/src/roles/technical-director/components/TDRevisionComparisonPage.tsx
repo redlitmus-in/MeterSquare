@@ -198,7 +198,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
             discount_amount: boqData.discount_amount || 0,
             total_cost: boqData.total_cost || 0,
             profit_analysis: boqData.profit_analysis || null,
-            preliminaries: boqData.preliminaries || {}
+            preliminaries: boqData.preliminaries || {},
+            terms_conditions: boqData.terms_conditions || { items: [] }
           },
           total_cost: boqData.total_cost || 0,
           created_at: boqData.created_at

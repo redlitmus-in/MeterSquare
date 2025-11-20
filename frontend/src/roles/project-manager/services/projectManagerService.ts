@@ -5,9 +5,11 @@ export interface BOQItem {
   boq_name: string;
   project_id: number;
   project_name?: string;
+  project_code?: string;
   user_id?: number;
   user_name?: string;
-  status: string;
+  status?: string; // Legacy field
+  boq_status?: string; // Actual field returned by backend
   created_at?: string;
   created_by?: string;
   last_modified_at?: string;

@@ -344,10 +344,34 @@ def get_all_pm_boqs():
                     elif not assigned_to_se:
                         items_pending_assignment += 1
 
+            # Get BOQ details for materials and labour counts
+            boq_details_data = None
+            total_materials = 0
+            total_labour = 0
+            if boq_details_record and boq_details_record.boq_details:
+                items = boq_details_record.boq_details.get('items', [])
+                # Count materials and labour from all items
+                for item in items:
+                    sub_items = item.get('sub_items', [])
+                    for sub_item in sub_items:
+                        materials = sub_item.get('materials', [])
+                        labour = sub_item.get('labour', [])
+                        total_materials += len(materials) if materials else 0
+                        total_labour += len(labour) if labour else 0
+
+                boq_details_data = {
+                    "total_cost": boq_details_record.boq_details.get('totals', {}).get('total_client_cost', 0),
+                    "total_materials": total_materials,
+                    "total_labour": total_labour,
+                    "total_items": total_items
+                }
+
             boq_data = {
                 "boq_id": boq.boq_id,
                 "boq_name": boq.boq_name,
                 "boq_status": display_status,  # Use the determined status based on role
+                "project_id": boq.project_id,  # Add project_id at top level for dashboard
+                "project_code": boq.project.project_code if boq.project else None,
                 "created_at": boq.created_at.isoformat() if boq.created_at else None,
                 "created_by": boq.created_by,
                 "last_modified_at": boq.last_modified_at.isoformat() if boq.last_modified_at else None,
@@ -355,6 +379,7 @@ def get_all_pm_boqs():
                 "email_sent": boq.email_sent,
                 "project_name": boq.project.project_name if boq.project else None,
                 "project_details": project_details,  # Complete project information
+                "boq_details": boq_details_data,  # BOQ summary for dashboard charts
                 # Day extension status
                 "has_pending_day_extension": has_pending_day_extension,
                 "pending_day_extension_count": pending_day_extension_count,

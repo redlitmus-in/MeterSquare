@@ -189,7 +189,8 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
             discount_percentage: boqData.discount_percentage || 0,
             discount_amount: boqData.discount_amount || 0,
             total_cost: boqData.total_cost || 0,
-            preliminaries: boqData.preliminaries || {}
+            preliminaries: boqData.preliminaries || {},
+            terms_conditions: boqData.terms_conditions || { items: [] }
           },
           total_cost: boqData.total_cost || 0,
           created_at: boqData.created_at

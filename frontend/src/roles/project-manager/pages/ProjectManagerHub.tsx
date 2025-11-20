@@ -26,8 +26,18 @@ const ProjectManagerHub: React.FC = () => {
 
       const boqsData = await projectManagerService.getMyBOQs();
 
+      // Calculate material purchase stats from BOQs
+      const boqs = boqsData.boqs || [];
+      const materialPurchaseStats = {
+        total_items: boqs.reduce((sum, b) => sum + (b.total_items || 0), 0),
+        items_assigned: boqs.reduce((sum, b) => sum + (b.items_assigned_by_me || 0), 0),
+        items_pending: boqs.reduce((sum, b) => sum + (b.items_pending_assignment || 0), 0),
+        total_cost: boqs.reduce((sum, b) => sum + (b.boq_details?.total_cost || 0), 0)
+      };
+
       return {
-        boqs: boqsData.boqs || []
+        boqs,
+        materialPurchaseStats
       };
     }
   );
@@ -46,18 +56,27 @@ const ProjectManagerHub: React.FC = () => {
           project_id: boq.project_id,
           project_name: boq.project_name || 'Unknown Project',
           project_code: boq.project_code,
-          // Calculate progress as percentage of approved BOQs for this project
           progress: 0
         });
       }
     });
 
-    // Calculate progress for each project
+    // Calculate progress for each project based on item assignments
     projectMap.forEach((project, projectId) => {
       const projectBoqs = boqs.filter(b => b.project_id === projectId);
-      const approvedCount = projectBoqs.filter(b => b.status === 'approved').length;
-      project.progress = projectBoqs.length > 0
-        ? Math.round((approvedCount / projectBoqs.length) * 100)
+
+      // Calculate total items and assigned items across all BOQs for this project
+      let totalItems = 0;
+      let assignedItems = 0;
+
+      projectBoqs.forEach(boq => {
+        totalItems += boq.total_items || 0;
+        assignedItems += boq.items_assigned_by_me || 0;
+      });
+
+      // Progress = percentage of items assigned to Site Engineers
+      project.progress = totalItems > 0
+        ? Math.round((assignedItems / totalItems) * 100)
         : 0;
     });
 
@@ -76,32 +95,60 @@ const ProjectManagerHub: React.FC = () => {
     });
   }, []);
 
-  // Project Status Chart - Dynamic data from API
+  // BOQ Status Overview Chart - Dynamic data from API
+  // Backend returns 'boq_status' not 'status'
+  const statusCounts = {
+    approved: boqs.filter(b => (b.boq_status || b.status) === 'approved').length,
+    pending: boqs.filter(b => {
+      const status = (b.boq_status || b.status);
+      return status === 'pending' || status === 'draft' || status === 'items_assigned';
+    }).length,
+    rejected: boqs.filter(b => (b.boq_status || b.status) === 'rejected').length,
+    completed: boqs.filter(b => (b.boq_status || b.status) === 'completed').length
+  };
+
+  const hasStatusData = statusCounts.approved > 0 || statusCounts.pending > 0 || statusCounts.rejected > 0 || statusCounts.completed > 0;
+
   const projectStatusOptions = {
     chart: {
       type: 'column',
-      backgroundColor: 'transparent'
+      backgroundColor: 'transparent',
+      height: 300
     },
     title: {
       text: 'BOQ Status Overview',
       style: {
         fontSize: '16px',
-        fontWeight: 'bold'
+        fontWeight: 'bold',
+        color: '#1f2937'
       }
     },
     xAxis: {
-      categories: boqs.slice(0, 5).map(b => b.boq_name || b.project_name || 'Unknown'),
+      categories: ['Approved', 'Pending', 'Rejected', 'Completed'],
       labels: {
         style: {
-          fontSize: '12px'
+          fontSize: '12px',
+          fontWeight: '600',
+          color: '#4b5563'
         }
       }
     },
     yAxis: {
       title: {
-        text: 'Status'
+        text: 'Count',
+        style: {
+          fontSize: '12px',
+          color: '#6b7280'
+        }
       },
-      categories: ['Pending', 'Approved', 'Rejected']
+      allowDecimals: false,
+      min: 0,
+      labels: {
+        style: {
+          fontSize: '11px',
+          color: '#6b7280'
+        }
+      }
     },
     legend: {
       enabled: false
@@ -112,34 +159,62 @@ const ProjectManagerHub: React.FC = () => {
         dataLabels: {
           enabled: true,
           style: {
-            fontSize: '11px'
+            fontSize: '12px',
+            fontWeight: 'bold',
+            textOutline: 'none'
           }
         }
       }
     },
     series: [{
-      name: 'Status',
-      data: boqs.slice(0, 5).map(b => ({
-        y: b.status === 'approved' ? 2 : b.status === 'rejected' ? 0 : 1,
-        color: b.status === 'approved' ? '#10B981' : b.status === 'rejected' ? '#EF4444' : '#F59E0B'
-      }))
-    }]
+      name: 'BOQs',
+      data: [
+        { y: statusCounts.approved, color: '#10B981', name: 'Approved' },
+        { y: statusCounts.pending, color: '#F59E0B', name: 'Pending' },
+        { y: statusCounts.rejected, color: '#EF4444', name: 'Rejected' },
+        { y: statusCounts.completed, color: '#3B82F6', name: 'Completed' }
+      ],
+      colorByPoint: true
+    }],
+    tooltip: {
+      pointFormat: '<b>{point.y}</b> BOQs',
+      style: {
+        fontSize: '12px'
+      }
+    },
+    credits: { enabled: false }
   };
 
-  // Budget Utilization Chart - Calculate from BOQ data
+  // Project Activity Chart - Calculate from BOQ data
   const totalBudget = boqs.reduce((sum, b) => sum + (b.boq_details?.total_cost || 0), 0);
-  const avgUtilization = totalBudget > 0 ? 60 : 0; // Can be enhanced with actual spent data
+
+  // Calculate activity stats - Include all active statuses
+  // Backend returns 'boq_status' not 'status'
+  const activeBoqs = boqs.filter(b => {
+    const status = b.boq_status || b.status;
+    return status === 'approved' ||
+      status === 'pending' ||
+      status === 'draft' ||
+      status === 'items_assigned' ||
+      status === 'in_progress' ||
+      status === 'active';
+  }).length;
+  const completedBoqs = boqs.filter(b => (b.boq_status || b.status) === 'completed').length;
+  const rejectedBoqs = boqs.filter(b => (b.boq_status || b.status) === 'rejected').length;
+  const hasActivityData = activeBoqs > 0 || completedBoqs > 0 || rejectedBoqs > 0;
 
   const budgetUtilizationOptions = {
     chart: {
       type: 'pie',
-      backgroundColor: 'transparent'
+      backgroundColor: 'transparent',
+      height: 300
     },
     title: {
       text: 'Project Activity',
       style: {
         fontSize: '16px',
-        fontWeight: 'bold'
+        fontWeight: 'bold',
+        color: '#1f2937'
       }
     },
     plotOptions: {
@@ -148,88 +223,168 @@ const ProjectManagerHub: React.FC = () => {
         borderRadius: 8,
         dataLabels: {
           enabled: true,
-          format: '{point.name}: {point.percentage:.1f}%',
+          format: '<b>{point.name}</b><br>{point.y} ({point.percentage:.1f}%)',
           style: {
-            fontSize: '11px'
+            fontSize: '12px',
+            fontWeight: '600',
+            textOutline: 'none',
+            color: '#374151'
           }
-        }
+        },
+        showInLegend: true
+      }
+    },
+    legend: {
+      align: 'center',
+      verticalAlign: 'bottom',
+      layout: 'horizontal',
+      itemStyle: {
+        fontSize: '11px',
+        fontWeight: '600'
       }
     },
     series: [{
-      name: 'Activity',
-      data: [
-        { name: 'Active BOQs', y: boqs.filter(b => b.status === 'approved' || b.status === 'pending').length, color: '#3B82F6' },
-        { name: 'Completed', y: boqs.filter(b => b.status === 'completed').length, color: '#10B981' },
-        { name: 'Others', y: boqs.filter(b => b.status === 'rejected').length || 1, color: '#E5E7EB' }
+      name: 'BOQs',
+      data: hasActivityData ? [
+        { name: 'Active', y: activeBoqs, color: '#3B82F6' },
+        { name: 'Completed', y: completedBoqs, color: '#10B981' },
+        { name: 'Rejected', y: rejectedBoqs, color: '#EF4444' }
+      ].filter(item => item.y > 0) : [
+        { name: 'No Data', y: 1, color: '#E5E7EB' }
       ]
-    }]
+    }],
+    tooltip: {
+      pointFormat: '<b>{point.y}</b> BOQs ({point.percentage:.1f}%)'
+    },
+    credits: { enabled: false }
   };
 
-  // BOQ Items Trend Chart
+  // BOQ Items Breakdown Chart
+  const totalMaterials = boqs.reduce((sum, b) => sum + (b.boq_details?.total_materials || 0), 0);
+  const totalLabour = boqs.reduce((sum, b) => sum + (b.boq_details?.total_labour || 0), 0);
+
   const boqTrendOptions = {
     chart: {
-      type: 'area',
-      backgroundColor: 'transparent'
+      type: 'column',
+      backgroundColor: 'transparent',
+      height: 300
     },
     title: {
       text: 'BOQ Items Breakdown',
       style: {
         fontSize: '16px',
-        fontWeight: 'bold'
+        fontWeight: 'bold',
+        color: '#1f2937'
       }
     },
     xAxis: {
-      categories: boqs.slice(0, 7).map(b => b.boq_name?.substring(0, 10) || 'BOQ')
+      categories: ['Materials', 'Labour'],
+      labels: {
+        style: {
+          fontSize: '12px',
+          fontWeight: '600',
+          color: '#4b5563'
+        }
+      }
     },
     yAxis: {
       title: {
-        text: 'Items Count'
+        text: 'Total Count',
+        style: {
+          fontSize: '12px',
+          color: '#6b7280'
+        }
+      },
+      allowDecimals: false,
+      min: 0,
+      labels: {
+        style: {
+          fontSize: '11px',
+          color: '#6b7280'
+        }
       }
     },
     legend: {
-      align: 'center',
-      verticalAlign: 'bottom'
+      enabled: false
     },
     plotOptions: {
-      area: {
-        fillOpacity: 0.3,
-        marker: {
-          radius: 3
+      column: {
+        borderRadius: 8,
+        dataLabels: {
+          enabled: true,
+          style: {
+            fontSize: '12px',
+            fontWeight: 'bold',
+            textOutline: 'none'
+          }
         }
       }
     },
     series: [{
-      name: 'Materials',
-      data: boqs.slice(0, 7).map(b => b.boq_details?.total_materials || 0),
-      color: '#10B981'
-    }, {
-      name: 'Labour',
-      data: boqs.slice(0, 7).map(b => b.boq_details?.total_labour || 0),
-      color: '#F59E0B'
-    }]
+      name: 'Items',
+      data: [
+        { y: totalMaterials, color: '#10B981', name: 'Materials' },
+        { y: totalLabour, color: '#F59E0B', name: 'Labour' }
+      ],
+      colorByPoint: true
+    }],
+    tooltip: {
+      pointFormat: '<b>{point.y}</b> items',
+      style: {
+        fontSize: '12px'
+      }
+    },
+    credits: { enabled: false }
   };
 
   // Project Progress Chart
+  const topProjects = projects.slice(0, 5);
+  const avgProgress = projects.length > 0
+    ? Math.round(projects.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.length)
+    : 0;
+
   const projectProgressOptions = {
     chart: {
       type: 'bar',
-      backgroundColor: 'transparent'
+      backgroundColor: 'transparent',
+      height: 300
     },
     title: {
-      text: 'Project Progress',
+      text: `Project Progress (Avg: ${avgProgress}%)`,
       style: {
         fontSize: '16px',
-        fontWeight: 'bold'
+        fontWeight: 'bold',
+        color: '#1f2937'
       }
     },
     xAxis: {
-      categories: projects.slice(0, 5).map(p => p.project_name?.substring(0, 20) || 'Project')
+      categories: topProjects.length > 0
+        ? topProjects.map(p => p.project_name?.substring(0, 20) || 'Project')
+        : ['No Projects'],
+      labels: {
+        style: {
+          fontSize: '11px',
+          fontWeight: '600',
+          color: '#4b5563'
+        }
+      }
     },
     yAxis: {
       title: {
-        text: 'Completion (%)'
+        text: 'Completion (%)',
+        style: {
+          fontSize: '12px',
+          color: '#6b7280'
+        }
       },
-      max: 100
+      min: 0,
+      max: 100,
+      labels: {
+        style: {
+          fontSize: '11px',
+          color: '#6b7280'
+        }
+      }
     },
     legend: {
       enabled: false
@@ -241,18 +396,30 @@ const ProjectManagerHub: React.FC = () => {
           enabled: true,
           format: '{y}%',
           style: {
-            fontSize: '11px'
+            fontSize: '11px',
+            fontWeight: 'bold',
+            textOutline: 'none',
+            color: '#ffffff'
           }
         }
       }
     },
     series: [{
       name: 'Progress',
-      data: projects.slice(0, 5).map((p, i) => ({
-        y: p.progress || 0, // Use actual progress from backend
-        color: i % 2 === 0 ? '#10B981' : '#3B82F6'
-      }))
-    }]
+      data: topProjects.length > 0
+        ? topProjects.map((p) => ({
+            y: p.progress || 0,
+            color: (p.progress || 0) >= 75 ? '#10B981' : (p.progress || 0) >= 50 ? '#3B82F6' : (p.progress || 0) >= 25 ? '#F59E0B' : '#EF4444'
+          }))
+        : [{ y: 0, color: '#E5E7EB' }]
+    }],
+    tooltip: {
+      pointFormat: '<b>{point.y}%</b> complete',
+      style: {
+        fontSize: '12px'
+      }
+    },
+    credits: { enabled: false }
   };
 
   if (loading) {
@@ -279,6 +446,88 @@ const ProjectManagerHub: React.FC = () => {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* Material Purchase Stats Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-md border border-blue-200 p-4"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-blue-600 uppercase tracking-wide mb-1">Total BOQ Items</p>
+                <p className="text-2xl font-bold text-blue-900">{dashboardData?.materialPurchaseStats?.total_items || 0}</p>
+                <p className="text-xs text-blue-700 mt-1">Across all projects</p>
+              </div>
+              <div className="text-blue-500">
+                <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl shadow-md border border-green-200 p-4"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-green-600 uppercase tracking-wide mb-1">Items Assigned</p>
+                <p className="text-2xl font-bold text-green-900">{dashboardData?.materialPurchaseStats?.items_assigned || 0}</p>
+                <p className="text-xs text-green-700 mt-1">To Site Engineers</p>
+              </div>
+              <div className="text-green-500">
+                <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl shadow-md border border-orange-200 p-4"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">Pending Assignment</p>
+                <p className="text-2xl font-bold text-orange-900">{dashboardData?.materialPurchaseStats?.items_pending || 0}</p>
+                <p className="text-xs text-orange-700 mt-1">Awaiting action</p>
+              </div>
+              <div className="text-orange-500">
+                <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl shadow-md border border-purple-200 p-4"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-purple-600 uppercase tracking-wide mb-1">Total Project Value</p>
+                <p className="text-2xl font-bold text-purple-900">AED {(dashboardData?.materialPurchaseStats?.total_cost || 0).toLocaleString()}</p>
+                <p className="text-xs text-purple-700 mt-1">All BOQs combined</p>
+              </div>
+              <div className="text-purple-500">
+                <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+
         {/* Charts Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <motion.div
