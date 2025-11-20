@@ -35,15 +35,18 @@ def get_all_td_boqs():
                 BOQ.email_sent == True
             ).order_by(BOQ.created_at.desc())
         else:
-            # TD should see: Pending_TD_Approval, approved, rejected, sent_for_review, new_purchase_create
+            # TD should see: Pending_TD_Approval, Pending_Revision, approved, rejected, sent_for_review, new_purchase_create
             # TD should NOT see: Pending_PM_Approval (those are for PM only)
+            # TD should NOT see: Internal_Revision_Pending (estimator still editing, not sent to TD yet)
+            # Use db.func.lower() for case-insensitive comparison
             query = db.session.query(BOQ).options(
                 selectinload(BOQ.history),
                 selectinload(BOQ.details)
             ).filter(
                 BOQ.is_deleted == False,
                 BOQ.email_sent == True,
-                BOQ.status != 'Pending_PM_Approval'  # Exclude BOQs pending PM approval
+                db.func.lower(BOQ.status) != 'pending_pm_approval',  # Exclude BOQs pending PM approval
+                db.func.lower(BOQ.status) != 'internal_revision_pending'  # Exclude BOQs still being edited by estimator
             ).order_by(BOQ.created_at.desc())
         # Paginate
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
@@ -472,48 +475,11 @@ def td_mail_send():
                 "recipient_name": recipient_name
             }
 
-            # ==================== CREATE INTERNAL REVISION FOR TD REJECTION ====================
-            # Increment internal revision number and create snapshot
-            current_internal_rev = boq.internal_revision_number or 0
-            new_internal_rev = current_internal_rev + 1
-            boq.internal_revision_number = new_internal_rev
-            boq.has_internal_revisions = True
-
-            # Create complete BOQ snapshot for internal revision tracking
-            complete_boq_snapshot = {
-                "boq_id": boq.boq_id,
-                "boq_name": boq.boq_name,
-                "status": boq.status,
-                "revision_number": boq.revision_number or 0,
-                "internal_revision_number": new_internal_rev,
-                "total_cost": float(boq_details.total_cost) if boq_details.total_cost else 0,
-                "total_items": boq_details.total_items or 0,
-                "total_materials": boq_details.total_materials or 0,
-                "total_labour": boq_details.total_labour or 0,
-                "preliminaries": boq_details.boq_details.get("preliminaries", {}) if boq_details.boq_details else {},
-                "items": items_summary.get('items', []),
-                "summary": items_summary if items_summary else {},
-                "created_by": boq.created_by,
-                "created_at": boq.created_at.isoformat() if boq.created_at else None,
-                "last_modified_by": td_name,
-                "last_modified_at": datetime.utcnow().isoformat()
-            }
-
-            # # Create internal revision record for TD rejection
-            # internal_revision = BOQInternalRevision(
-            #     boq_id=boq_id,
-            #     internal_revision_number=new_internal_rev,
-            #     action_type='TD_REJECTED',
-            #     actor_role='technicalDirector',
-            #     actor_name=td_name,
-            #     actor_user_id=td_user_id,
-            #     status_before=boq.status,
-            #     status_after=new_status,
-            #     rejection_reason=rejection_reason or comments,
-            #     changes_summary=complete_boq_snapshot
-            # )
-            # db.session.add(internal_revision)
-            # log.info(f"✅ Internal revision {new_internal_rev} created for TD rejection of BOQ {boq_id}")
+            # ==================== TD REJECTION - DO NOT CREATE INTERNAL REVISION ====================
+            # TD rejection should ONLY show in Rejected tab, NOT in Internal Revisions tab
+            # Internal revisions are for tracking estimator edits during internal approval cycle
+            # TD rejection is a final decision that sends BOQ back to estimator for complete rework
+            log.info(f"✅ TD rejection - BOQ {boq_id} will show only in Rejected tab")
 
         # ==================== UPDATE BOQ & HISTORY ====================
         # Update BOQ status
@@ -729,3 +695,331 @@ def get_td_se_boq_vendor_requests():
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to fetch vendor requests: {str(e)}"}), 500
+
+
+def get_td_dashboard_stats():
+    """Get comprehensive dashboard statistics for Technical Director - using SAME data as Project Approvals"""
+    try:
+        from sqlalchemy import func, extract
+        from datetime import datetime, timedelta
+
+        current_user = g.user
+        user_role = current_user.get('role', '').lower()
+
+        # ============ Use EXACT same query as Project Approvals page ============
+        boqs_query = db.session.query(BOQ).options(
+            selectinload(BOQ.project),
+            selectinload(BOQ.details)
+        ).filter(
+            BOQ.is_deleted == False,
+            BOQ.email_sent == True,
+            BOQ.status != 'Pending_PM_Approval'
+        ).all()
+
+        # Count BOQs using EXACT same logic as frontend tabs
+        status_counts = {
+            'in_progress': 0,  # Revisions
+            'completed': 0,     # Approved
+            'pending': 0,       # Pending
+            'delayed': 0        # Rejected by TD
+        }
+
+        for boq in boqs_query:
+            project = boq.project
+            if not project or project.is_deleted:
+                continue
+
+            # Check PM assignment - matching frontend logic exactly
+            pm_assigned = project.user_id is not None and (
+                (isinstance(project.user_id, list) and len(project.user_id) > 0) or
+                (not isinstance(project.user_id, list) and project.user_id)
+            )
+
+            status_lower = boq.status.lower() if boq.status else ''
+
+            # Pending: status='pending' AND no PM assigned
+            if status_lower == 'pending' and not pm_assigned:
+                status_counts['pending'] += 1
+            # Revisions: status='pending_revision'
+            elif status_lower == 'pending_revision':
+                status_counts['in_progress'] += 1
+            # Approved: status in ['approved', 'revision_approved', 'sent_for_confirmation'] AND no PM assigned
+            elif status_lower in ['approved', 'revision_approved', 'sent_for_confirmation'] and not pm_assigned:
+                status_counts['completed'] += 1
+            # Rejected by TD: status='rejected'
+            elif status_lower == 'rejected':
+                status_counts['delayed'] += 1
+
+        # ============ Budget Distribution by Work Type (from same BOQs) ============
+        budget_distribution = {}
+        total_budget = 0
+
+        for boq in boqs_query:
+            project = boq.project
+            if not project or project.is_deleted:
+                continue
+
+            # Get BOQ cost
+            boq_details = next((bd for bd in boq.details if not bd.is_deleted), None)
+            if not boq_details or not boq_details.total_cost:
+                continue
+
+            work_type = project.work_type if project.work_type else 'Uncategorized'
+            cost = float(boq_details.total_cost)
+
+            budget_distribution[work_type] = budget_distribution.get(work_type, 0) + cost
+            total_budget += cost
+
+        # Calculate percentages
+        budget_percentages = {}
+        for type_name, budget_val in budget_distribution.items():
+            budget_percentages[type_name] = round((budget_val / total_budget * 100), 1) if total_budget > 0 else 0
+
+        # ============ Performance Metrics (BOQ Approval Rate by Month - Last 12 Months) ============
+        from datetime import datetime, timedelta
+        monthly_performance = []
+        performance_month_labels = []
+        current_date = datetime.now()
+
+        # Get last 12 months of data
+        for i in range(11, -1, -1):
+            # Calculate month start and end
+            month_date = current_date - timedelta(days=30 * i)
+            month_start = month_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+            # Get next month's start
+            if month_start.month == 12:
+                month_end = month_start.replace(year=month_start.year + 1, month=1)
+            else:
+                month_end = month_start.replace(month=month_start.month + 1)
+
+            # Add month label (e.g., "Jan", "Feb", etc.)
+            performance_month_labels.append(month_start.strftime('%b'))
+
+            total_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
+                BOQ.is_deleted == False,
+                BOQ.created_at >= month_start,
+                BOQ.created_at < month_end
+            ).scalar() or 0
+
+            approved_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
+                BOQ.is_deleted == False,
+                BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'new_purchase_create', 'sent_for_review']),
+                BOQ.created_at >= month_start,
+                BOQ.created_at < month_end
+            ).scalar() or 0
+
+            success_rate = round((approved_boqs / total_boqs * 100), 0) if total_boqs > 0 else 0
+            monthly_performance.append(success_rate)
+
+        # ============ Revenue Growth (Quarterly) ============
+        current_year = datetime.now().year
+        quarterly_revenue = {
+            'current_year': [],
+            'previous_year': []
+        }
+
+        for year in [current_year - 1, current_year]:
+            year_revenue = []
+            for quarter in range(1, 5):
+                quarter_start_month = (quarter - 1) * 3 + 1
+                quarter_start = datetime(year, quarter_start_month, 1)
+                if quarter == 4:
+                    quarter_end = datetime(year + 1, 1, 1)
+                else:
+                    quarter_end = datetime(year, quarter_start_month + 3, 1)
+
+                revenue = db.session.query(
+                    func.sum(BOQDetails.total_cost)
+                ).join(
+                    BOQ, BOQ.boq_id == BOQDetails.boq_id
+                ).filter(
+                    BOQ.is_deleted == False,
+                    BOQDetails.is_deleted == False,
+                    BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review']),
+                    BOQ.created_at >= quarter_start,
+                    BOQ.created_at < quarter_end
+                ).scalar() or 0
+
+                # Convert to lakhs
+                revenue_lakhs = round(float(revenue) / 100000, 0) if revenue else 0
+                year_revenue.append(revenue_lakhs)
+
+            if year == current_year - 1:
+                quarterly_revenue['previous_year'] = year_revenue
+            else:
+                quarterly_revenue['current_year'] = year_revenue
+
+        # ============ BOQ Status Distribution (from same BOQs) ============
+        boq_status_counts = {}
+        for boq in boqs_query:
+            status = boq.status if boq.status else 'Unknown'
+            # Normalize status names for better display
+            display_status = status.replace('_', ' ').title()
+            boq_status_counts[display_status] = boq_status_counts.get(display_status, 0) + 1
+
+        # ============ Top 5 Projects by Budget (from same BOQs) ============
+        project_budgets = {}
+        for boq in boqs_query:
+            project = boq.project
+            if not project or project.is_deleted:
+                continue
+
+            boq_details = next((bd for bd in boq.details if not bd.is_deleted), None)
+            if not boq_details or not boq_details.total_cost:
+                continue
+
+            project_name = project.project_name
+            project_budgets[project_name] = project_budgets.get(project_name, 0) + float(boq_details.total_cost)
+
+        # Sort and get top 5
+        top_projects = [
+            {'name': name, 'budget': int(budget)}
+            for name, budget in sorted(project_budgets.items(), key=lambda x: x[1], reverse=True)[:5]
+        ]
+
+        # ============ Monthly Revenue Trend (Last 6 Months) ============
+        from datetime import datetime, timedelta
+        monthly_revenue = []
+        month_labels = []
+
+        for i in range(5, -1, -1):  # Last 6 months
+            month_start = datetime.now().replace(day=1) - timedelta(days=30*i)
+            month_end = (month_start + timedelta(days=32)).replace(day=1)
+
+            revenue = db.session.query(
+                func.sum(BOQDetails.total_cost)
+            ).join(
+                BOQ, BOQ.boq_id == BOQDetails.boq_id
+            ).filter(
+                BOQ.is_deleted == False,
+                BOQDetails.is_deleted == False,
+                BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review']),
+                BOQ.created_at >= month_start,
+                BOQ.created_at < month_end
+            ).scalar() or 0
+
+            # Convert to lakhs
+            revenue_lakhs = round(float(revenue) / 100000, 0) if revenue else 0
+            monthly_revenue.append(revenue_lakhs)
+            month_labels.append(month_start.strftime('%b %Y'))
+
+        # ============ Team Performance (Top Estimators by BOQ Count from same BOQs) ============
+        estimator_counts = {}
+        for boq in boqs_query:
+            if boq.created_by:
+                estimator_counts[boq.created_by] = estimator_counts.get(boq.created_by, 0) + 1
+
+        # Sort and get top 5
+        top_estimators = [
+            {'name': name, 'count': count}
+            for name, count in sorted(estimator_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        ]
+
+        # ============ Active Projects Overview ============
+        active_projects_query = db.session.query(Project).filter(
+            Project.is_deleted == False,
+            Project.status.in_(['In Progress', 'in_progress', 'ongoing', 'Ongoing'])
+        ).order_by(Project.created_at.desc()).limit(10).all()
+
+        active_projects = []
+        for project in active_projects_query:
+            # Get total budget from all BOQs
+            total_budget = db.session.query(
+                func.sum(BOQDetails.total_cost)
+            ).join(
+                BOQ, BOQ.boq_id == BOQDetails.boq_id
+            ).filter(
+                BOQ.project_id == project.project_id,
+                BOQ.is_deleted == False,
+                BOQDetails.is_deleted == False
+            ).scalar() or 0
+
+            # Get project manager names from user_id JSONB array
+            pm_names = 'Unassigned'
+            if project.user_id:
+                try:
+                    # user_id is a JSONB array of PM IDs
+                    pm_ids = project.user_id if isinstance(project.user_id, list) else []
+                    if pm_ids:
+                        pms = User.query.filter(
+                            User.user_id.in_(pm_ids),
+                            User.is_deleted == False
+                        ).all()
+                        if pms:
+                            pm_names = ', '.join([pm.full_name for pm in pms])
+                except Exception as pm_error:
+                    log.warning(f"Error fetching PM names for project {project.project_id}: {str(pm_error)}")
+
+            # Calculate progress based on BOQ status (simplified metric)
+            total_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
+                BOQ.project_id == project.project_id,
+                BOQ.is_deleted == False
+            ).scalar() or 0
+
+            approved_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
+                BOQ.project_id == project.project_id,
+                BOQ.is_deleted == False,
+                BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review'])
+            ).scalar() or 0
+
+            # Calculate progress as percentage of approved BOQs
+            progress = int((approved_boqs / total_boqs * 100)) if total_boqs > 0 else 0
+
+            # Estimate spent based on progress
+            spent = int(total_budget * (progress / 100)) if total_budget else 0
+
+            # Determine status based on end date and progress
+            from datetime import datetime, date
+            status = 'on-track'
+            if project.end_date:
+                today = date.today()
+                days_remaining = (project.end_date - today).days
+                # If overdue or close to deadline with low progress, mark as delayed
+                if days_remaining < 0 or (days_remaining < 30 and progress < 70):
+                    status = 'delayed'
+
+            active_projects.append({
+                'id': project.project_id,
+                'name': project.project_name,
+                'pm': pm_names,
+                'progress': progress,
+                'budget': int(total_budget) if total_budget else 0,
+                'spent': spent,
+                'status': status,
+                'dueDate': project.end_date.strftime('%Y-%m-%d') if project.end_date else None
+            })
+
+        # ============ Return Complete Dashboard Data ============
+        dashboard_data = {
+            'projectStatus': status_counts,
+            'budgetDistribution': budget_percentages,
+            'monthlyPerformance': monthly_performance,
+            'performanceMonthLabels': performance_month_labels,
+            'quarterlyRevenue': quarterly_revenue,
+            'boqStatusDistribution': boq_status_counts,
+            'topProjects': top_projects,
+            'monthlyRevenue': monthly_revenue,
+            'monthLabels': month_labels,
+            'topEstimators': top_estimators,
+            'activeProjects': active_projects
+        }
+
+        # Simple logging for verification
+        log.info(f"TD Dashboard - BOQ Counts: Pending={status_counts['pending']}, Approved={status_counts['completed']}, Revisions={status_counts['in_progress']}, Rejected={status_counts['delayed']}")
+        log.info(f"TD Dashboard - Total BOQs processed: {len(boqs_query)}")
+        log.info(f"TD Dashboard - Active Projects: {len(active_projects)}")
+
+        return jsonify({
+            'success': True,
+            'data': dashboard_data
+        }), 200
+
+    except Exception as e:
+        import traceback
+        log.error(f"Error fetching TD dashboard stats: {str(e)}")
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": f"Failed to fetch dashboard statistics: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500

@@ -359,6 +359,80 @@ class TechnicalDirectorService {
       };
     }
   }
+
+  /**
+   * Get dashboard statistics for Technical Director
+   */
+  async getDashboardStats(): Promise<{
+    success: boolean;
+    data?: {
+      projectStatus: {
+        in_progress: number;
+        completed: number;
+        pending: number;
+        delayed: number;
+      };
+      budgetDistribution: { [key: string]: number };
+      monthlyPerformance: number[];
+      performanceMonthLabels: string[];
+      quarterlyRevenue: {
+        current_year: number[];
+        previous_year: number[];
+      };
+      boqStatusDistribution: { [key: string]: number };
+      topProjects: Array<{
+        name: string;
+        budget: number;
+      }>;
+      monthlyRevenue: number[];
+      monthLabels: string[];
+      topEstimators: Array<{
+        name: string;
+        count: number;
+      }>;
+      activeProjects: Array<{
+        id: number;
+        name: string;
+        pm: string;
+        progress: number;
+        budget: number;
+        spent: number;
+        status: string;
+        dueDate: string;
+      }>;
+    };
+    message?: string;
+  }> {
+    try {
+      const response = await apiClient.get('/td-dashboard-stats');
+
+      if (response.data && response.data.success) {
+        return {
+          success: true,
+          data: response.data.data
+        };
+      }
+
+      return {
+        success: false,
+        message: 'Failed to fetch dashboard statistics'
+      };
+    } catch (error: any) {
+      console.error('Error fetching dashboard stats:', error.response?.data || error.message);
+
+      if (error.response?.status === 403) {
+        return {
+          success: false,
+          message: 'You do not have permission to access this resource'
+        };
+      }
+
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to fetch dashboard statistics'
+      };
+    }
+  }
 }
 
 export const technicalDirectorService = new TechnicalDirectorService();

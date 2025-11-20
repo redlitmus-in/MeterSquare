@@ -377,13 +377,6 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: DocumentPlusIcon,
         iconSolid: DocumentPlusSolid,
         color: 'text-red-600'
-      },
-      {
-        name: 'Projects Overview',
-        href: buildPath('/projects-overview'),
-        icon: BuildingOfficeIcon,
-        iconSolid: BuildingOfficeSolid,
-        color: 'text-purple-600'
       }
     ];
 

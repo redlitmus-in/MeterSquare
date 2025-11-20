@@ -34,6 +34,16 @@ interface BOQWithInternalRevisions {
     client: string;
     location: string;
   };
+  // 🔥 Added from backend - current BOQ data
+  items?: any[];
+  terms_conditions?: {
+    items: Array<{
+      id: string;
+      term_id: number;
+      terms_text: string;
+      checked: boolean;
+    }>;
+  };
 }
 
 interface InternalRevisionTimelineProps {
@@ -69,6 +79,8 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingBOQ, setEditingBOQ] = useState<BOQWithInternalRevisions | null>(null);
   const [isSendingToTD, setIsSendingToTD] = useState(false);
+  const [showSendPopupAfterEdit, setShowSendPopupAfterEdit] = useState(false);
+  const [editedBOQId, setEditedBOQId] = useState<number | null>(null);
 
   // TD Approval/Rejection states
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -81,7 +93,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   const loadingRevisionsRef = useRef<number | null>(null);
   const isInitialMount = useRef(true);
 
-  // ✅ LISTEN TO REAL-TIME UPDATES - Internal revisions update automatically
+  // ✅ LISTEN TO REAL-TIME UPDATES - Internal revisions update automatically via Supabase
   const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
 
   useEffect(() => {
@@ -125,11 +137,12 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     }
   }, [refreshTrigger]);
 
-  // ✅ RELOAD internal revisions when real-time update is received
+  // ✅ RELOAD internal revisions when real-time update is received from Supabase
+  // Supabase listens to PostgreSQL changes and triggers this automatically (no polling needed!)
   useEffect(() => {
     if (boqUpdateTimestamp === 0) return;
 
-    // Reload BOQ list
+    // Reload BOQ list when Supabase detects database changes
     loadBOQsWithInternalRevisions();
 
     // Reload internal revisions for selected BOQ
@@ -194,18 +207,11 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
         const sorted = regularRevisions.sort((a: InternalRevision, b: InternalRevision) =>
           b.internal_revision_number - a.internal_revision_number
         );
-        console.log('🔄 Revisions:', sorted.map((r: InternalRevision) =>
-          `Rev ${r.internal_revision_number} (${r.action_type})`
-        ).join(', '));
         setInternalRevisions(sorted);
 
         // Check if there's an original_boq in the response
         if (data.data.original_boq) {
-          console.log('✅ Original BOQ found in API response with',
-            data.data.original_boq.boq_details?.items?.length || 0, 'items');
           setOriginalBOQ(data.data.original_boq);
-        } else {
-          console.log('⚠️ No original BOQ in response');
         }
 
         // Auto-select the latest revision for comparison
@@ -224,7 +230,6 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
   const handleEditBOQ = async (boq: BOQWithInternalRevisions) => {
     try {
-      console.log('🔧 Fetching BOQ for editing:', boq.boq_id);
       // Fetch the latest BOQ data with full details
       const response = await fetch(`${API_URL}/boq/${boq.boq_id}`, {
         headers: {
@@ -232,31 +237,27 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
         }
       });
 
-      console.log('🔧 Response status:', response.status);
-
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('🔧 Response data:', data);
 
-      // 🔥 The /boq/{boq_id} endpoint returns BOQ data directly (not wrapped in success/data)
+      // The /boq/{boq_id} endpoint returns BOQ data directly (not wrapped in success/data)
       // Check if response has error field (error response) or boq_id (success response)
       if (data.error) {
-        console.error('❌ API returned error:', data.error);
+        console.error('API returned error:', data.error);
         toast.error(data.error || 'Failed to load BOQ details');
       } else if (data.boq_id) {
-        console.log('✅ BOQ data loaded successfully');
         // The data IS the BOQ data itself, no need to unwrap
         setEditingBOQ(data);
         setShowEditModal(true);
       } else {
-        console.error('❌ Unexpected response format:', data);
+        console.error('Unexpected response format:', data);
         toast.error('Unexpected response format');
       }
     } catch (error) {
-      console.error('❌ Error loading BOQ for editing:', error);
+      console.error('Error loading BOQ for editing:', error);
       toast.error('Failed to load BOQ details: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
@@ -753,12 +754,12 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           const isNew = !prevItem;
 
           return (
-            <div key={itemIdx} className={`border-2 rounded-lg overflow-hidden mb-4 ${isNew ? 'bg-yellow-50 border-yellow-400' : 'bg-white border-blue-300'}`}>
-              {/* Item Header - More Prominent */}
-              <div className={`px-4 py-3 ${isNew ? 'bg-yellow-100 border-b-2 border-yellow-400' : 'bg-blue-50 border-b-2 border-blue-300'}`}>
+            <div key={itemIdx} className={`border rounded-lg overflow-hidden mb-2 ${isNew ? 'bg-yellow-50 border-yellow-300' : 'bg-white border-gray-300'}`}>
+              {/* Item Header - Compact */}
+              <div className={`px-3 py-2 ${isNew ? 'bg-yellow-100 border-b border-yellow-300' : 'bg-gray-50 border-b border-gray-200'}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <h4 className="font-bold text-gray-900 text-base flex items-center gap-2">
+                    <h4 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
                       {isNew && <span className="text-xs bg-yellow-300 text-yellow-900 px-2 py-1 rounded font-bold">NEW</span>}
                       🔷 {item.item_name}
                       {item.work_type && (
@@ -791,16 +792,32 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
               {/* Sub Items */}
               {item.sub_items && item.sub_items.length > 0 && (
-                <div className="mb-4 space-y-3">
-                  <h5 className="text-sm font-bold text-indigo-900 mb-3 pb-2 border-b-2 border-indigo-200 bg-indigo-50 px-3 py-2 rounded-t">
+                <div className="mb-2 space-y-2">
+                  <h5 className="text-xs font-bold text-indigo-900 mb-2 pb-1 border-b border-indigo-200 bg-indigo-50 px-2 py-1 rounded">
                     📋 Sub Items ({item.sub_items.length})
                   </h5>
                   {item.sub_items.map((subItem: any, subIdx: number) => {
                     const prevSubItem = prevItem?.sub_items?.find((ps: any) => ps.sub_item_name === subItem.sub_item_name);
 
+                    // 🔥 Get image - try multiple sources
+                    const currentBOQItem = selectedBoq?.items?.find((i: any) => i.item_name === item.item_name);
+                    const currentBOQSubItem = currentBOQItem?.sub_items?.find((si: any) => si.sub_item_name === subItem.sub_item_name);
+                    // Try: 1. Current BOQ data, 2. Snapshot data, 3. API response
+                    let rawImageData = currentBOQSubItem?.sub_item_image || subItem.sub_item_image || subItem.image;
+
+                    // 🔥 Handle image format - it comes as array of objects with 'url' property
+                    let subItemImages: string[] = [];
+                    if (Array.isArray(rawImageData)) {
+                      subItemImages = rawImageData.map((img: any) => img.url || img).filter(Boolean);
+                    } else if (typeof rawImageData === 'string') {
+                      subItemImages = [rawImageData];
+                    } else if (rawImageData?.url) {
+                      subItemImages = [rawImageData.url];
+                    }
+
                     return (
                       <div key={subIdx} className="bg-green-50 border border-green-200 rounded p-2">
-                        <div className="flex justify-between items-start mb-1">
+                        <div className="flex justify-between items-start mb-1 gap-3">
                           <div className="flex-1">
                             <p className="font-semibold text-xs text-gray-900">{subItem.sub_item_name}</p>
                             {subItem.scope && <p className="text-xs text-gray-600">{subItem.scope}</p>}
@@ -809,7 +826,22 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                               Qty: {subItem.quantity} {subItem.unit} × Rate: AED {subItem.rate?.toFixed(2) || '0.00'}
                             </p>
                           </div>
-                          <div className="text-right text-xs ml-2">
+                          {/* 🔥 Display sub-item images if available */}
+                          {subItemImages.length > 0 && (
+                            <div className="flex-shrink-0 flex gap-1">
+                              {subItemImages.map((imageUrl, imgIdx) => (
+                                <img
+                                  key={imgIdx}
+                                  src={imageUrl}
+                                  alt={`${subItem.sub_item_name} ${imgIdx + 1}`}
+                                  className="w-12 h-12 object-cover rounded border border-blue-400 shadow-sm cursor-pointer hover:scale-125 transition-transform"
+                                  onClick={() => window.open(imageUrl, '_blank')}
+                                  title="Click to view full size"
+                                />
+                              ))}
+                            </div>
+                          )}
+                          <div className="text-right text-xs">
                             {subItem.size && <div className="text-gray-600">Size: {subItem.size}</div>}
                             {subItem.location && <div className="text-gray-600">Loc: {subItem.location}</div>}
                             {subItem.brand && <div className="text-gray-600">Brand: {subItem.brand}</div>}
@@ -1564,6 +1596,37 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   </div>
                 )}
 
+                {/* 🔥 Terms & Conditions - From current BOQ data */}
+                {selectedBoq?.terms_conditions && selectedBoq.terms_conditions.items && selectedBoq.terms_conditions.items.filter(t => t.checked).length > 0 && (
+                  <div className="mb-6 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-5 border-2 border-indigo-300 shadow-lg">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="p-2 bg-white rounded-lg shadow-sm">
+                        <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-indigo-900">📝 Terms & Conditions</h3>
+                        <p className="text-sm text-indigo-700">{selectedBoq.terms_conditions.items.filter(t => t.checked).length} terms selected</p>
+                      </div>
+                    </div>
+                    <div className="bg-white rounded-lg p-4 border border-indigo-200">
+                      <div className="space-y-3">
+                        {selectedBoq.terms_conditions.items
+                          .filter(term => term.checked)
+                          .map((term, idx) => (
+                            <div key={term.id || idx} className="flex items-start gap-3 p-3 hover:bg-indigo-50 rounded-lg transition-colors border-b border-gray-100 last:border-0">
+                              <span className="text-green-600 font-bold mt-0.5 text-xl flex-shrink-0">✓</span>
+                              <div className="flex-1">
+                                <p className="text-sm text-gray-800 leading-relaxed">{term.terms_text}</p>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Items */}
                 <div>
                   <h4 className="font-semibold text-gray-900 mb-2">Items</h4>
@@ -1634,19 +1697,9 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                         if (currentSnapshot.discount_percentage && currentSnapshot.discount_percentage > 0) {
                           overallDiscountPercentage = currentSnapshot.discount_percentage;
                           overallDiscount = (subtotal * currentSnapshot.discount_percentage) / 100;
-                          console.log('💰 Overall BOQ Discount:', {
-                            percentage: currentSnapshot.discount_percentage,
-                            amount: overallDiscount,
-                            subtotal
-                          });
                         } else if (currentSnapshot.discount_amount && currentSnapshot.discount_amount > 0) {
                           overallDiscount = currentSnapshot.discount_amount;
                           overallDiscountPercentage = subtotal > 0 ? (overallDiscount / subtotal) * 100 : 0;
-                          console.log('💰 Overall BOQ Discount (amount):', {
-                            amount: overallDiscount,
-                            percentage: overallDiscountPercentage,
-                            subtotal
-                          });
                         } else {
                           // Priority 2: Calculate item-level discounts
                           allItems.forEach((item: any) => {
@@ -1767,23 +1820,20 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   const isInternalRevisionPending = status === 'internalrevisionpending';
                   const lastAction = currentRevision?.action_type;
                   const isPendingApproval = status === 'pendingapproval' || status === 'pending';
-                  const isSentToTD = lastAction === 'SENT_TO_TD' || isInternalRevisionPending;
+                  // 🔥 Fix: Internal_Revision_Pending means it's saved but NOT yet sent to TD
+                  // Only consider it sent to TD if the action was explicitly SENT_TO_TD
+                  const isSentToTD = lastAction === 'SENT_TO_TD';
 
                   // Statuses where buttons should be hidden (BOQ is in a final or processing state)
                   // Note: isClientRevisionRejected IS included here to hide buttons in Internal Revisions tab
-                  const isInFinalOrProcessingState = isApproved || isUnderRevision || isSentForConfirmation || isPendingTDApproval || isClientConfirmed || isPendingRevision || isClientRevisionRejected || isRejected;
+                  // Note: isPendingRevision is EXCLUDED - TD needs to see Approve/Reject buttons for internal revisions
+                  const isInFinalOrProcessingState = isApproved || isUnderRevision || isSentForConfirmation || isPendingTDApproval || isClientConfirmed || isClientRevisionRejected || isRejected;
 
                   // Technical Director: Show Approve/Reject buttons when pending approval
                   if (userRole === 'technical_director' || userRole === 'technical-director') {
                     // Hide buttons if BOQ is already in a final/processing state
-                    if (isInFinalOrProcessingState) {
-                      if (isPendingRevision) {
-                        return (
-                          <div className="mt-4 text-center py-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                            <p className="text-sm font-medium text-yellow-800">⏳ Pending Revision - Waiting for updates</p>
-                          </div>
-                        );
-                      }
+                    // Note: isPendingRevision is NOT a final state - TD needs to review!
+                    if (isInFinalOrProcessingState && !isPendingRevision) {
                       if (isApproved) {
                         return (
                           <div className="mt-4 text-center py-3 bg-green-50 border border-green-200 rounded-lg">
@@ -1814,8 +1864,9 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                       }
                     }
 
-                    // Show Approve/Reject buttons only for pending approval statuses
-                    if (isPendingApproval && !isInFinalOrProcessingState) {
+                    // Show Approve/Reject buttons for pending approval OR pending revision (internal revision sent to TD)
+                    // isPendingRevision = estimator sent internal revision to TD for approval
+                    if ((isPendingApproval || isPendingRevision) && !isInFinalOrProcessingState) {
                       return (
                         <div className="mt-4 flex gap-2">
                           <button
@@ -1904,8 +1955,10 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                       );
                     }
 
-                    // If sent to TD (either by action or status), hide buttons and show waiting message
-                    if (isSentToTD || isPendingApproval) {
+                    // If sent to TD (actually sent, not just saved), hide buttons and show waiting message
+                    // isPendingRevision means estimator sent revision to TD and TD hasn't responded yet
+                    // Note: Internal_Revision_Pending is NOT included - it means saved but not yet sent
+                    if (isSentToTD || isPendingApproval || isPendingRevision) {
                       return (
                         <div className="mt-4 text-center py-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                           <p className="text-sm font-medium text-yellow-800">⏳ Sent to TD - Waiting for approval</p>
@@ -1913,8 +1966,10 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                       );
                     }
 
-                    // Show buttons only for rejected or draft status (not in any final/processing state)
-                    if (isRejected || (!isSentToTD && !isPendingApproval && !isInFinalOrProcessingState)) {
+                    // Show buttons for: Rejected, Internal_Revision_Pending, or other editable states
+                    // Internal_Revision_Pending means BOQ was edited and saved but NOT yet sent to TD
+                    // Exclude isPendingRevision - already sent to TD, waiting for approval (no buttons)
+                    if (isRejected || isInternalRevisionPending || (!isSentToTD && !isPendingApproval && !isPendingRevision && !isInFinalOrProcessingState)) {
                       return (
                         <div className="space-y-2 mt-4">
                           <div className="flex gap-2">
@@ -2126,6 +2181,37 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                           </div>
                         )}
 
+                        {/* 🔥 Terms & Conditions - From current BOQ data */}
+                        {selectedBoq?.terms_conditions && selectedBoq.terms_conditions.items && selectedBoq.terms_conditions.items.filter(t => t.checked).length > 0 && (
+                          <div className="mb-6 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-5 border-2 border-indigo-300 shadow-lg">
+                            <div className="flex items-center gap-3 mb-4">
+                              <div className="p-2 bg-white rounded-lg shadow-sm">
+                                <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                              </div>
+                              <div>
+                                <h3 className="text-lg font-bold text-indigo-900">📝 Terms & Conditions</h3>
+                                <p className="text-sm text-indigo-700">{selectedBoq.terms_conditions.items.filter(t => t.checked).length} terms selected</p>
+                              </div>
+                            </div>
+                            <div className="bg-white rounded-lg p-4 border border-indigo-200 max-h-48 overflow-y-auto">
+                              <div className="space-y-2">
+                                {selectedBoq.terms_conditions.items
+                                  .filter(term => term.checked)
+                                  .map((term, idx) => (
+                                    <div key={term.id || idx} className="flex items-start gap-2 p-2 hover:bg-indigo-50 rounded-lg transition-colors border-b border-gray-100 last:border-0">
+                                      <span className="text-green-600 font-bold mt-0.5 flex-shrink-0">✓</span>
+                                      <div className="flex-1">
+                                        <p className="text-xs text-gray-800 leading-relaxed">{term.terms_text}</p>
+                                      </div>
+                                    </div>
+                                  ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         {renderBOQItemsComparison(originalBOQ.boq_details, null)}
                         {renderGrandTotalSection(originalBOQ.boq_details)}
                       </div>
@@ -2334,6 +2420,37 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                             </div>
                           )}
 
+                          {/* 🔥 Terms & Conditions - From current BOQ data */}
+                          {selectedBoq?.terms_conditions && selectedBoq.terms_conditions.items && selectedBoq.terms_conditions.items.filter(t => t.checked).length > 0 && (
+                            <div className="mb-6 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-5 border-2 border-indigo-300 shadow-lg">
+                              <div className="flex items-center gap-3 mb-4">
+                                <div className="p-2 bg-white rounded-lg shadow-sm">
+                                  <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                </div>
+                                <div>
+                                  <h3 className="text-lg font-bold text-indigo-900">📝 Terms & Conditions</h3>
+                                  <p className="text-sm text-indigo-700">{selectedBoq.terms_conditions.items.filter(t => t.checked).length} terms selected</p>
+                                </div>
+                              </div>
+                              <div className="bg-white rounded-lg p-4 border border-indigo-200 max-h-48 overflow-y-auto">
+                                <div className="space-y-2">
+                                  {selectedBoq.terms_conditions.items
+                                    .filter(term => term.checked)
+                                    .map((term, idx) => (
+                                      <div key={term.id || idx} className="flex items-start gap-2 p-2 hover:bg-indigo-50 rounded-lg transition-colors border-b border-gray-100 last:border-0">
+                                        <span className="text-green-600 font-bold mt-0.5 flex-shrink-0">✓</span>
+                                        <div className="flex-1">
+                                          <p className="text-xs text-gray-800 leading-relaxed">{term.terms_text}</p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
                           {renderBOQItemsComparison(revision.changes_summary, previousRevisionForComparison)}
                           {renderGrandTotalSection(revision.changes_summary)}
                         </div>
@@ -2385,16 +2502,32 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           editMode={true}
           existingBoqData={editingBOQ}
           isInternalRevisionMode={true}
-          onSubmit={(boqId) => {
-            console.log('Internal revision created:', boqId);
-            toast.success('Internal revision created successfully');
+          onSubmit={async (boqId) => {
+            toast.success('BOQ updated successfully!');
             setShowEditModal(false);
             setEditingBOQ(null);
+
             // Reload the internal revisions to show the new changes
             if (selectedBoq) {
-              loadInternalRevisions(selectedBoq.boq_id);
-              loadBOQsWithInternalRevisions();
+              await loadInternalRevisions(selectedBoq.boq_id);
+              await loadBOQsWithInternalRevisions();
+
+              // Refresh selectedBoq to get latest status
+              const response = await fetch(`${API_URL}/boqs/internal_revisions`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+              });
+              const data = await response.json();
+              if (data.success) {
+                const updatedBoq = data.data.find((b: BOQWithInternalRevisions) => b.boq_id === selectedBoq.boq_id);
+                if (updatedBoq) {
+                  setSelectedBoq(updatedBoq);
+                }
+              }
             }
+
+            // 🔥 Show popup asking to send or send later
+            setEditedBOQId(selectedBoq?.boq_id || null);
+            setShowSendPopupAfterEdit(true);
           }}
         />
       )}
@@ -2497,6 +2630,57 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                 >
                   <XCircle className="w-5 h-5" />
                   {isProcessing ? 'Rejecting...' : 'Reject BOQ'}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* 🔥 Send Popup After Edit (Like Reject Tab) */}
+      {showSendPopupAfterEdit && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full"
+          >
+            <div className="bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-4 rounded-t-2xl">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Mail className="w-6 h-6" />
+                Send Revised BOQ to TD?
+              </h2>
+              <p className="text-sm text-blue-100 mt-1">Your changes have been saved successfully</p>
+            </div>
+
+            <div className="p-6">
+              <p className="text-gray-700 mb-6">
+                Would you like to send this revised BOQ to the Technical Director now, or send it later?
+              </p>
+
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={async () => {
+                    if (selectedBoq) {
+                      setShowSendPopupAfterEdit(false);
+                      await handleSendToTD(selectedBoq);
+                    }
+                  }}
+                  className="w-full px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-lg font-semibold transition-all flex items-center justify-center gap-2 shadow-md"
+                >
+                  <Mail className="w-5 h-5" />
+                  Send to TD Now
+                </button>
+
+                <button
+                  onClick={() => {
+                    setShowSendPopupAfterEdit(false);
+                    setEditedBOQId(null);
+                    toast.success('BOQ saved! You can send it to TD later.');
+                  }}
+                  className="w-full px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors"
+                >
+                  Send Later
                 </button>
               </div>
             </div>

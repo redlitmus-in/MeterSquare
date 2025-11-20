@@ -4,10 +4,13 @@ import { toast } from 'sonner';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 // Types for subscription channels
-type SubscriptionChannel = 'purchases' | 'tasks' | 'notifications' | 'materials' | 'projects' | 'boqs' | 'boq_details' | 'change_requests';
+type SubscriptionChannel = 'purchases' | 'tasks' | 'notifications' | 'materials' | 'projects' | 'boqs' | 'boq_details' | 'boq_internal_revisions' | 'change_requests';
 
 // Store active subscriptions
 const activeSubscriptions = new Map<SubscriptionChannel, any>();
+
+// Track if subscriptions are already initialized
+let subscriptionsInitialized = false;
 
 // Interface for custom subscription configuration
 interface SubscribeToRealtimeConfig {
@@ -78,6 +81,15 @@ export const setupRealtimeSubscriptions = (userId?: string) => {
     return () => {}; // Return empty function for cleanup
   }
 
+  // Prevent duplicate subscriptions
+  if (subscriptionsInitialized) {
+    console.log('⚠️ Subscriptions already initialized, skipping duplicate setup');
+    return cleanupSubscriptions;
+  }
+
+  console.log('🚀 Setting up real-time subscriptions...');
+  subscriptionsInitialized = true;
+
   // Clean up existing subscriptions
   cleanupSubscriptions();
 
@@ -95,6 +107,9 @@ export const setupRealtimeSubscriptions = (userId?: string) => {
 
   // Subscribe to BOQ details updates
   subscribeToBOQDetails();
+
+  // Subscribe to BOQ internal revisions (for internal revision workflow)
+  subscribeToBOQInternalRevisions();
 
   // Subscribe to change request updates
   subscribeToChangeRequests();
@@ -273,56 +288,122 @@ const subscribeToProjects = () => {
  * Fixes issue where TD approval doesn't instantly show in Estimator's approved tab
  */
 const subscribeToBOQs = () => {
-  try {
-    const subscription = supabase
-      .channel('boq-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'boq',
-        },
-        (payload) => {
-          // ✅ TRIGGER STORE UPDATE - This makes pages refetch data!
-          useRealtimeUpdateStore.getState().triggerBOQUpdate(payload);
+  let retryCount = 0;
+  const MAX_RETRIES = 3;
 
-          // Invalidate all BOQ-related queries for ALL roles (for React Query pages)
-          invalidateQueries(['boqs']);
-          invalidateQueries(['boq', payload.new?.boq_id || payload.old?.boq_id]);
-          invalidateQueries(['td_boqs']); // Technical Director BOQs
-          invalidateQueries(['pm_boqs']); // Project Manager BOQs
-          invalidateQueries(['estimator_boqs']); // Estimator BOQs
-          invalidateQueries(['project-boqs']); // Project-specific BOQs
+  const createSubscription = () => {
+    try {
+      // Remove existing subscription first to prevent duplicates
+      const existing = activeSubscriptions.get('boqs');
+      if (existing) {
+        console.log('🧹 Removing existing BOQ subscription before recreating...');
+        supabase.removeChannel(existing);
+        activeSubscriptions.delete('boqs');
+      }
 
-          // Show notification based on status change
-          const newStatus = payload.new?.status;
-          const oldStatus = payload.old?.status;
+      // Use unique channel name to prevent conflicts
+      const channelName = `boq-changes-${Date.now()}`;
+      const subscription = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'boq',
+          },
+          (payload) => {
+            console.log('🔥 BOQ CHANGE DETECTED:', payload.eventType, payload);
 
-          if (payload.eventType === 'UPDATE' && newStatus !== oldStatus) {
-            // Status changed - show appropriate notification
-            if (newStatus === 'PM_Approved') {
-              toast.success('BOQ approved by PM');
-            } else if (newStatus === 'Approved' || newStatus === 'TD_Approved') {
-              toast.success('BOQ approved by Technical Director');
-            } else if (newStatus === 'Pending_TD_Approval') {
-              toast.info('BOQ sent to Technical Director for approval');
-            } else if (newStatus === 'Client_Confirmed') {
-              toast.success('BOQ confirmed by client');
-            } else if (newStatus === 'Rejected') {
-              toast.error('BOQ rejected');
+            // ✅ TRIGGER STORE UPDATE - This makes pages refetch data!
+            useRealtimeUpdateStore.getState().triggerBOQUpdate(payload);
+
+            // Invalidate all BOQ-related queries for ALL roles (for React Query pages)
+            invalidateQueries(['boqs']);
+            invalidateQueries(['boq', payload.new?.boq_id || payload.old?.boq_id]);
+            invalidateQueries(['td_boqs']); // Technical Director BOQs
+            invalidateQueries(['pm_boqs']); // Project Manager BOQs
+            invalidateQueries(['estimator_boqs']); // Estimator BOQs
+            invalidateQueries(['project-boqs']); // Project-specific BOQs
+
+            // Show notification based on status change
+            const newStatus = payload.new?.status;
+            const oldStatus = payload.old?.status;
+
+            if (payload.eventType === 'UPDATE' && newStatus !== oldStatus) {
+              // Status changed - show appropriate notification
+              if (newStatus === 'PM_Approved') {
+                toast.success('BOQ approved by PM');
+              } else if (newStatus === 'Approved' || newStatus === 'TD_Approved') {
+                toast.success('BOQ approved by Technical Director');
+              } else if (newStatus === 'Pending_TD_Approval') {
+                toast.info('BOQ sent to Technical Director for approval');
+              } else if (newStatus === 'Client_Confirmed') {
+                toast.success('BOQ confirmed by client');
+              } else if (newStatus === 'Rejected') {
+                toast.error('BOQ rejected');
+              }
+            } else if (payload.eventType === 'INSERT') {
+              toast.info('New BOQ created');
             }
-          } else if (payload.eventType === 'INSERT') {
-            toast.info('New BOQ created');
           }
-        }
-      )
-      .subscribe();
+        )
+        .subscribe((status, err) => {
+          console.log('📡 BOQ subscription status:', status, err);
 
-    activeSubscriptions.set('boqs', subscription);
-  } catch (error) {
-    console.error('Failed to subscribe to BOQs:', error);
-  }
+          // Handle subscription being closed and reconnect
+          if (status === 'CLOSED') {
+            console.warn('⚠️ BOQ subscription was closed, reconnecting in 3 seconds...');
+            // Only reconnect if we haven't exceeded retries
+            if (retryCount < MAX_RETRIES) {
+              retryCount++;
+              setTimeout(() => {
+                console.log(`🔄 Reconnecting BOQ subscription (attempt ${retryCount}/${MAX_RETRIES})...`);
+                createSubscription();
+              }, 3000);
+            } else {
+              console.error('❌ BOQ subscription closed too many times. Stopping reconnection attempts.');
+            }
+            return;
+          }
+
+          // Handle subscription failures and retry
+          if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+            console.error(`❌ BOQ subscription ${status}`, err);
+            console.error('Debug info:', {
+              supabaseUrl: supabase.supabaseUrl,
+              channel: subscription.topic,
+              error: err
+            });
+
+            if (retryCount < MAX_RETRIES) {
+              retryCount++;
+              console.log(`🔄 Retrying BOQ subscription (${retryCount}/${MAX_RETRIES}) in 5 seconds...`);
+              setTimeout(() => {
+                supabase.removeChannel(subscription);
+                createSubscription();
+              }, 5000);
+            } else {
+              console.error('❌ BOQ subscription failed after max retries.');
+              console.error('Possible fixes:');
+              console.error('1. Check if RLS is enabled on "boq" table - disable it or add SELECT policy');
+              console.error('2. Run this SQL: ALTER PUBLICATION supabase_realtime ADD TABLE boq;');
+              console.error('3. Check Supabase Dashboard > Database > Replication');
+              toast.error('Real-time updates unavailable. Please refresh manually.');
+            }
+          } else if (status === 'SUBSCRIBED') {
+            console.log('✅ BOQ real-time subscription active');
+            retryCount = 0; // Reset retry count on success
+          }
+        });
+
+      activeSubscriptions.set('boqs', subscription);
+    } catch (error) {
+      console.error('Failed to subscribe to BOQs:', error);
+    }
+  };
+
+  createSubscription();
 };
 
 /**
@@ -354,6 +435,118 @@ const subscribeToBOQDetails = () => {
   } catch (error) {
     console.error('Failed to subscribe to BOQ details:', error);
   }
+};
+
+/**
+ * Subscribe to BOQ internal revisions table changes
+ * This ensures TD and Estimator see internal revision updates in real-time
+ */
+const subscribeToBOQInternalRevisions = () => {
+  let retryCount = 0;
+  const MAX_RETRIES = 3;
+
+  const createSubscription = () => {
+    try {
+      // Remove existing subscription first to prevent duplicates
+      const existing = activeSubscriptions.get('boq_internal_revisions');
+      if (existing) {
+        console.log('🧹 Removing existing Internal Revisions subscription before recreating...');
+        supabase.removeChannel(existing);
+        activeSubscriptions.delete('boq_internal_revisions');
+      }
+
+      // Use unique channel name to prevent conflicts
+      const channelName = `boq-internal-revision-changes-${Date.now()}`;
+      const subscription = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'boq_internal_revisions',
+          },
+          (payload) => {
+            console.log('🔄 Internal revision change detected:', payload.eventType);
+
+            // ✅ TRIGGER STORE UPDATE - This makes InternalRevisionTimeline refetch!
+            useRealtimeUpdateStore.getState().triggerBOQUpdate(payload);
+
+            // Invalidate BOQ queries since internal revisions affect BOQ state
+            invalidateQueries(['boqs']);
+            invalidateQueries(['boq', payload.new?.boq_id || payload.old?.boq_id]);
+
+            // Show notification based on event
+            if (payload.eventType === 'INSERT') {
+              const actorRole = payload.new?.actor_role;
+              if (actorRole === 'estimator') {
+                toast.info('New internal revision created');
+              } else if (actorRole === 'technical_director') {
+                const actionType = payload.new?.action_type;
+                if (actionType === 'APPROVED') {
+                  toast.success('Internal revision approved');
+                } else if (actionType === 'REJECTED') {
+                  toast.error('Internal revision rejected');
+                }
+              }
+            }
+          }
+        )
+        .subscribe((status, err) => {
+          console.log('📡 BOQ Internal Revisions subscription status:', status, err);
+
+          // Handle subscription being closed and reconnect
+          if (status === 'CLOSED') {
+            console.warn('⚠️ Internal Revisions subscription was closed, reconnecting in 3 seconds...');
+            // Only reconnect if we haven't exceeded retries
+            if (retryCount < MAX_RETRIES) {
+              retryCount++;
+              setTimeout(() => {
+                console.log(`🔄 Reconnecting Internal Revisions subscription (attempt ${retryCount}/${MAX_RETRIES})...`);
+                createSubscription();
+              }, 3000);
+            } else {
+              console.error('❌ Internal Revisions subscription closed too many times. Stopping reconnection attempts.');
+            }
+            return;
+          }
+
+          // Handle subscription failures and retry
+          if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+            console.error(`❌ Internal Revisions subscription ${status}`, err);
+            console.error('Debug info:', {
+              supabaseUrl: supabase.supabaseUrl,
+              channel: subscription.topic,
+              error: err
+            });
+
+            if (retryCount < MAX_RETRIES) {
+              retryCount++;
+              console.log(`🔄 Retrying Internal Revisions subscription (${retryCount}/${MAX_RETRIES}) in 5 seconds...`);
+              setTimeout(() => {
+                supabase.removeChannel(subscription);
+                createSubscription();
+              }, 5000);
+            } else {
+              console.error('❌ Internal Revisions subscription failed after max retries.');
+              console.error('Possible fixes:');
+              console.error('1. Check if RLS is enabled on "boq_internal_revisions" table');
+              console.error('2. Run this SQL: ALTER PUBLICATION supabase_realtime ADD TABLE boq_internal_revisions;');
+              console.error('3. Run this SQL: ALTER TABLE boq_internal_revisions DISABLE ROW LEVEL SECURITY;');
+            }
+          } else if (status === 'SUBSCRIBED') {
+            console.log('✅ Internal Revisions real-time subscription active');
+            retryCount = 0;
+          }
+        });
+
+      activeSubscriptions.set('boq_internal_revisions' as SubscriptionChannel, subscription);
+    } catch (error) {
+      console.error('Failed to subscribe to BOQ internal revisions:', error);
+    }
+  };
+
+  createSubscription();
 };
 
 /**
@@ -409,6 +602,7 @@ const subscribeToChangeRequests = () => {
  * Clean up all active subscriptions
  */
 export const cleanupSubscriptions = () => {
+  console.log('🧹 Cleaning up all subscriptions...');
   activeSubscriptions.forEach((subscription, channel) => {
     try {
       supabase.removeChannel(subscription);
@@ -417,6 +611,7 @@ export const cleanupSubscriptions = () => {
     }
   });
   activeSubscriptions.clear();
+  subscriptionsInitialized = false; // Reset flag so subscriptions can be recreated
 };
 
 /**

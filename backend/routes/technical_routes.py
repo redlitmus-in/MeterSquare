@@ -189,5 +189,15 @@ def get_td_se_boq_vendor_requests_route():
     access_check = check_td_or_admin_access()
     if access_check:
         return access_check
-    return get_td_se_boq_vendor_requests() 
+    return get_td_se_boq_vendor_requests()
+
+# Dashboard Statistics
+@technical_routes.route('/td-dashboard-stats', methods=['GET'])
+@jwt_required
+def get_td_dashboard_stats_route():
+    """Get comprehensive dashboard statistics for Technical Director"""
+    access_check = check_td_or_admin_access()
+    if access_check:
+        return access_check
+    return get_td_dashboard_stats() 
 

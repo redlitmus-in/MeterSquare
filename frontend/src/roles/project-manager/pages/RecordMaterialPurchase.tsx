@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { boqTrackingService } from '../services/boqTrackingService';
 import PlannedVsActualView from '@/components/boq/PlannedVsActualView';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 export default function RecordMaterialPurchase() {
   const [selectedBOQ, setSelectedBOQ] = useState<any | null>(null);
@@ -71,10 +72,7 @@ export default function RecordMaterialPurchase() {
         {loading && (
           <div className="bg-white rounded-xl shadow-md p-12">
             <div className="flex flex-col items-center justify-center">
-              <div className="relative">
-                <div className="w-16 h-16 rounded-full border-4 border-gray-200"></div>
-                <div className="w-16 h-16 rounded-full border-4 border-blue-600 border-t-transparent animate-spin absolute top-0 left-0"></div>
-              </div>
+              <ModernLoadingSpinners size="xl" />
               <p className="mt-4 text-gray-600 font-medium">Loading BOQs...</p>
             </div>
           </div>

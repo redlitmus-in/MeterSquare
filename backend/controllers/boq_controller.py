@@ -3935,8 +3935,8 @@ def send_boq_email(boq_id):
 
             # if email_sent:
                 # Update BOQ status and mark email as sent to TD
-            # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, Revision_Approved, or client_revision_rejected) or a new submission
-            is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved", "client_revision_rejected"]
+            # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, Revision_Approved, Internal_Revision_Pending, or client_revision_rejected) or a new submission
+            is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved", "Internal_Revision_Pending", "client_revision_rejected"]
             new_status = "Pending_Revision" if is_revision else "Pending"
             boq.email_sent = True
             boq.status = new_status
@@ -4081,8 +4081,8 @@ def send_boq_email(boq_id):
 
             # if email_sent:
                 # Update BOQ status and mark email as sent to TD
-                # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, Revision_Approved, or client_revision_rejected) or a new submission
-            is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved", "client_revision_rejected"]
+                # Check if this is a revision (was Rejected, Client_Rejected, Under_Revision, Pending_Revision, Revision_Approved, Internal_Revision_Pending, or client_revision_rejected) or a new submission
+            is_revision = boq.status in ["Rejected", "Client_Rejected", "Under_Revision", "Pending_Revision", "Revision_Approved", "Internal_Revision_Pending", "client_revision_rejected"]
             new_status = "Pending_Revision" if is_revision else "Pending"
 
             boq.email_sent = True
