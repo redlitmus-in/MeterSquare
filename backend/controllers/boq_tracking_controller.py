@@ -43,6 +43,7 @@ def get_boq_planned_vs_actual(boq_id):
         ).all()
 
         # Merge CR materials into BOQ data as sub-items
+        # IMPORTANT: Only add truly NEW materials, not updates to existing materials
         for cr in change_requests:
             materials_data = cr.materials_data or []
             if not materials_data:
@@ -67,39 +68,67 @@ def get_boq_planned_vs_actual(boq_id):
                 target_item = boq_data['items'][0]
 
             if target_item:
+                # First, collect all existing materials from the target item to check for duplicates
+                existing_materials_ids = set()
+                existing_materials_names = set()
+
+                for sub_item in target_item.get('sub_items', []):
+                    for existing_mat in sub_item.get('materials', []):
+                        mat_id = existing_mat.get('master_material_id')
+                        mat_name = existing_mat.get('material_name', '').lower().strip()
+                        if mat_id:
+                            existing_materials_ids.add(mat_id)
+                        if mat_name:
+                            existing_materials_names.add(mat_name)
+
                 # Ensure sub_items array exists
                 if 'sub_items' not in target_item:
                     target_item['sub_items'] = []
 
-                # Create CR sub-item
-                cr_sub_item = {
-                    'sub_item_name': f"Extra Materials - CR #{cr.cr_id}",
-                    'description': f"{cr.justification} [Status: {cr.status}]",
-                    'materials': []
-                }
+                # Create CR sub-item - but only add truly NEW materials
+                cr_new_materials = []
 
-                # Add materials from CR
+                # Filter materials: only include NEW materials, not updates to existing ones
                 for mat in materials_data:
-                    # Use CR-level justification if material doesn't have its own
-                    material_justification = mat.get('justification') or cr.justification or ''
+                    mat_id = mat.get('master_material_id')
+                    mat_name = mat.get('material_name', '').lower().strip()
 
-                    cr_sub_item['materials'].append({
-                        'master_material_id': mat.get('master_material_id'),
-                        'material_name': mat.get('material_name'),
-                        'quantity': mat.get('quantity', 0),
-                        'unit': mat.get('unit', 'nos'),
-                        'unit_price': mat.get('unit_price', 0),
-                        'total_price': mat.get('total_price', 0),
-                        'is_from_change_request': True,
-                        'change_request_id': cr.cr_id,
-                        'justification': material_justification,
-                        # Mark planned as 0 = unplanned spending
-                        'planned_quantity': 0,
-                        'planned_unit_price': 0,
-                        'planned_total_price': 0
-                    })
+                    # Check if this material already exists in the BOQ
+                    is_updating_existing = False
+                    if mat_id and mat_id in existing_materials_ids:
+                        is_updating_existing = True
+                    elif mat_name and mat_name in existing_materials_names:
+                        is_updating_existing = True
 
-                target_item['sub_items'].append(cr_sub_item)
+                    # Only add if it's a NEW material (not updating existing)
+                    if not is_updating_existing:
+                        # Use CR-level justification if material doesn't have its own
+                        material_justification = mat.get('justification') or cr.justification or ''
+
+                        cr_new_materials.append({
+                            'master_material_id': mat.get('master_material_id'),
+                            'material_name': mat.get('material_name'),
+                            'quantity': mat.get('quantity', 0),
+                            'unit': mat.get('unit', 'nos'),
+                            'unit_price': mat.get('unit_price', 0),
+                            'total_price': mat.get('total_price', 0),
+                            'is_from_change_request': True,
+                            'change_request_id': cr.cr_id,
+                            'justification': material_justification,
+                            # Mark planned as 0 = unplanned spending
+                            'planned_quantity': 0,
+                            'planned_unit_price': 0,
+                            'planned_total_price': 0
+                        })
+
+                # Only create and add the CR sub-item if there are NEW materials
+                if cr_new_materials:
+                    cr_sub_item = {
+                        'sub_item_name': f"Extra Materials - CR #{cr.cr_id}",
+                        'description': f"{cr.justification} [Status: {cr.status}]",
+                        'materials': cr_new_materials
+                    }
+                    target_item['sub_items'].append(cr_sub_item)
         # Get actual material purchases from MaterialPurchaseTracking
         # Group by (master_item_id, master_material_id) and take only the latest entry for each group
         from sqlalchemy import func
@@ -715,7 +744,12 @@ def get_boq_planned_vs_actual(boq_id):
             planned_labour_total = Decimal('0')
             actual_labour_total = Decimal('0')
 
-            for planned_lab in planned_item.get('labour', []):
+            # Collect labour from both item level and sub-item level
+            all_labour = list(planned_item.get('labour', []))
+            for sub_item in planned_item.get('sub_items', []):
+                all_labour.extend(sub_item.get('labour', []))
+
+            for planned_lab in all_labour:
                 master_labour_id = planned_lab.get('master_labour_id')
 
                 # Find actual labour tracking for this role - Try exact match first
@@ -811,6 +845,13 @@ def get_boq_planned_vs_actual(boq_id):
             # NEW FLOW: Calculate overhead, profit, and miscellaneous at SUB-ITEM level
             # Then aggregate to item level
 
+            # Reset materials and labour totals - they will be recalculated from sub-items
+            # This avoids double counting from the materials/labour loops above
+            planned_materials_total = Decimal('0')
+            planned_labour_total = Decimal('0')
+            actual_materials_total = Decimal('0')
+            actual_labour_total = Decimal('0')
+
             # Calculate planned amounts from sub-items
             planned_base = Decimal('0')
             planned_overhead = Decimal('0')
@@ -831,18 +872,61 @@ def get_boq_planned_vs_actual(boq_id):
 
             sub_items_breakdown = []
 
+            # Track if item-level labour has been assigned to a sub-item
+            item_level_labour_assigned = False
+
             for sub_item in planned_item.get('sub_items', []):
                 sub_item_name = sub_item.get('sub_item_name', '')
                 master_sub_item_id = sub_item.get('master_sub_item_id')
 
-                # Get the base_total (client rate) from sub-item
-                # This is the main amount on which percentages are calculated
-                sub_item_base_total = Decimal(str(sub_item.get('base_total', 0)))
+                # Check if this is a CR sub-item
+                is_cr_sub_item = sub_item_name.startswith('Extra Materials - CR #')
 
                 # Also track internal costs (materials + labour) for comparison
-                sub_item_materials_cost = Decimal(str(sub_item.get('materials_cost', 0)))
-                sub_item_labour_cost = Decimal(str(sub_item.get('labour_cost', 0)))
+                # Calculate from materials and labour arrays if not provided
+                # IMPORTANT: CR sub-items should have ZERO planned costs (they're unplanned additions)
+                if is_cr_sub_item:
+                    # CR sub-items have no planned costs
+                    sub_item_materials_cost = Decimal('0')
+                    sub_item_labour_cost = Decimal('0')
+                else:
+                    # Original sub-items - calculate planned costs from arrays
+                    sub_item_materials_cost = Decimal(str(sub_item.get('materials_cost', 0)))
+                    if sub_item_materials_cost == 0:
+                        # Calculate from materials array
+                        for mat in sub_item.get('materials', []):
+                            mat_qty = Decimal(str(mat.get('quantity', 0)))
+                            mat_price = Decimal(str(mat.get('unit_price', 0)))
+                            sub_item_materials_cost += mat_qty * mat_price
+
+                    sub_item_labour_cost = Decimal(str(sub_item.get('labour_cost', 0)))
+                    if sub_item_labour_cost == 0:
+                        # Calculate from labour array
+                        for lab in sub_item.get('labour', []):
+                            lab_cost = Decimal(str(lab.get('total_cost', 0)))
+                            if lab_cost == 0:
+                                # Calculate from hours * rate if total_cost not provided
+                                lab_hours = Decimal(str(lab.get('hours', 0)))
+                                lab_rate = Decimal(str(lab.get('rate_per_hour', 0)))
+                                lab_cost = lab_hours * lab_rate
+                            sub_item_labour_cost += lab_cost
+
                 sub_item_internal_cost = sub_item_materials_cost + sub_item_labour_cost
+
+                # Get the base_total (client rate) from sub-item
+                # This is the main amount on which percentages are calculated
+                # Try base_total first, then fall back to per_unit_cost or client_rate
+                # If none provided, use internal_cost as base
+                sub_item_base_total = Decimal(str(
+                    sub_item.get('base_total') or
+                    sub_item.get('per_unit_cost') or
+                    sub_item.get('client_rate') or
+                    0
+                ))
+
+                # If no base_total provided, use internal_cost as the base
+                if sub_item_base_total == 0:
+                    sub_item_base_total = sub_item_internal_cost
 
                 # Get percentages from sub-item or use defaults
                 misc_pct = Decimal(str(sub_item.get('misc_percentage', 10)))
@@ -878,17 +962,88 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # Get actual materials for this sub-item from tracking
                 for mat in materials_comparison:
-                    if mat.get('sub_item_name') == sub_item_name or mat.get('master_sub_item_id') == master_sub_item_id:
+                    # Match by sub_item_name first (exact match), then by master_sub_item_id if name doesn't match
+                    mat_sub_item_name = mat.get('sub_item_name')
+                    mat_master_sub_item_id = mat.get('master_sub_item_id')
+
+                    # For exact matching, prioritize sub_item_name match
+                    is_match = False
+                    if mat_sub_item_name == sub_item_name:
+                        is_match = True
+                    elif master_sub_item_id and mat_master_sub_item_id == master_sub_item_id and not mat_sub_item_name:
+                        # Only match by ID if sub_item_name is not set
+                        is_match = True
+
+                    if is_match:
                         if mat.get('actual') and mat['actual'].get('total'):
                             sub_actual_materials_cost += Decimal(str(mat['actual']['total']))
                         elif mat.get('planned') and mat['planned'].get('total'):
                             # If not purchased yet, use planned as estimate
                             sub_actual_materials_cost += Decimal(str(mat['planned']['total']))
 
-                # Get actual labour for this sub-item (from labour tracking if available)
-                for lab in sub_item.get('labour', []):
-                    lab_cost = Decimal(str(lab.get('total_cost', 0)))
-                    sub_actual_labour_cost += lab_cost
+                # Get actual labour for this sub-item from labour_comparison
+                # Handle two cases:
+                # 1. Labour defined in sub-item's labour array
+                # 2. Item-level labour (should be assigned to first non-CR sub-item only)
+
+                # Case 1: Process labour from sub-item's labour array
+                for planned_labour_entry in sub_item.get('labour', []):
+                    labour_id = planned_labour_entry.get('master_labour_id')
+
+                    # Find matching entry in labour_comparison
+                    matching_labour = next(
+                        (lab for lab in labour_comparison if lab.get('master_labour_id') == labour_id),
+                        None
+                    )
+
+                    if matching_labour:
+                        # Use actual if available, otherwise use planned for pending labour
+                        if matching_labour.get('actual') and matching_labour['actual'].get('total', 0) > 0:
+                            lab_cost = Decimal(str(matching_labour['actual']['total']))
+                        else:
+                            # Pending labour - use planned cost
+                            lab_cost = Decimal(str(matching_labour['planned']['total']))
+                        sub_actual_labour_cost += lab_cost
+                    else:
+                        # If no tracking data found, use planned from sub_item
+                        lab_cost = Decimal(str(planned_labour_entry.get('total_cost', 0)))
+                        if lab_cost == 0:
+                            lab_hours = Decimal(str(planned_labour_entry.get('hours', 0)))
+                            lab_rate = Decimal(str(planned_labour_entry.get('rate_per_hour', 0)))
+                            lab_cost = lab_hours * lab_rate
+                        sub_actual_labour_cost += lab_cost
+
+                # Case 2: If this is the first non-CR sub-item and item-level labour hasn't been assigned yet,
+                # assign item-level labour to this sub-item
+                if not item_level_labour_assigned and not is_cr_sub_item:
+                    for item_labour_entry in planned_item.get('labour', []):
+                        labour_id = item_labour_entry.get('master_labour_id')
+
+                        # Find matching entry in labour_comparison
+                        matching_labour = next(
+                            (lab for lab in labour_comparison if lab.get('master_labour_id') == labour_id),
+                            None
+                        )
+
+                        if matching_labour:
+                            # Use actual if available, otherwise use planned for pending labour
+                            if matching_labour.get('actual') and matching_labour['actual'].get('total', 0) > 0:
+                                lab_cost = Decimal(str(matching_labour['actual']['total']))
+                            else:
+                                # Pending labour - use planned cost
+                                lab_cost = Decimal(str(matching_labour['planned']['total']))
+                            sub_actual_labour_cost += lab_cost
+                        else:
+                            # If no tracking data found, use planned from item
+                            lab_cost = Decimal(str(item_labour_entry.get('total_cost', 0)))
+                            if lab_cost == 0:
+                                lab_hours = Decimal(str(item_labour_entry.get('hours', 0)))
+                                lab_rate = Decimal(str(item_labour_entry.get('rate_per_hour', 0)))
+                                lab_cost = lab_hours * lab_rate
+                            sub_actual_labour_cost += lab_cost
+
+                    # Mark that item-level labour has been assigned
+                    item_level_labour_assigned = True
 
                 sub_actual_internal_cost = sub_actual_materials_cost + sub_actual_labour_cost
 
@@ -918,7 +1073,11 @@ def get_boq_planned_vs_actual(boq_id):
                 planned_total += sub_planned_total
 
                 # Aggregate to item level (actual) - using actual internal costs
-                actual_base += sub_item_base_total  # Client rate stays the same
+                # For CR sub-items, use actual internal cost instead of base_total (which is 0)
+                if is_cr_sub_item:
+                    actual_base += sub_actual_internal_cost  # CR items: use actual cost
+                else:
+                    actual_base += sub_item_base_total  # Regular items: client rate stays the same
                 actual_materials_total += sub_actual_materials_cost
                 actual_labour_total += sub_actual_labour_cost
                 actual_miscellaneous += sub_actual_misc  # Misc % stays the same
@@ -969,10 +1128,17 @@ def get_boq_planned_vs_actual(boq_id):
                     'calculation_note': 'Total = Materials + Labour + Misc + Overhead + Profit + Transport - Discount'
                 })
 
-            # Get overall percentages for display (from item level)
-            overhead_pct = Decimal(str(planned_item.get('overhead_percentage', 0)))
-            profit_pct = Decimal(str(planned_item.get('profit_margin_percentage', 0)))
-            misc_pct = Decimal(str(planned_item.get('miscellaneous_percentage', 10)))
+            # Get overall percentages for display
+            # Calculate actual percentages from the aggregated amounts and base cost
+            misc_pct = (planned_miscellaneous / planned_base * 100) if planned_base > 0 else Decimal('0')
+
+            # Calculate combined overhead + profit percentage from actual amounts
+            combined_overhead_profit = planned_overhead + planned_profit
+            overhead_profit_pct = (combined_overhead_profit / planned_base * 100) if planned_base > 0 else Decimal('0')
+
+            # Split the combined percentage 40/60 for display
+            overhead_pct = overhead_profit_pct * Decimal('0.4')
+            profit_pct = overhead_profit_pct * Decimal('0.6')
 
             # The selling price BEFORE discount is calculated from sub-items
             selling_price_before_discount = planned_base
@@ -1135,8 +1301,8 @@ def get_boq_planned_vs_actual(boq_id):
                     "miscellaneous_percentage": float(misc_pct),
                     "overhead_amount": float(planned_overhead),
                     "overhead_percentage": float(overhead_pct),
-                    "profit_amount": float(planned_profit),
-                    "profit_percentage": float(profit_pct),
+                    "profit_amount": float(combined_overhead_profit),
+                    "profit_percentage": float(overhead_profit_pct),
                     "transport_amount": float(planned_transport),
                     "total": float(planned_total),
                     "selling_price": float(selling_price)
@@ -1226,6 +1392,13 @@ def get_boq_planned_vs_actual(boq_id):
         total_client_amount_after_discount = sum(float(item['planned']['client_amount_after_discount']) for item in comparison['items'])
         total_profit_before_discount = sum(float(item['actual']['profit_before_discount']) for item in comparison['items'])
         total_after_discount_profit = sum(float(item['actual']['negotiable_margin']) for item in comparison['items'])
+
+        # Add materials and labour totals for variance display
+        total_planned_materials = sum(float(item['planned']['materials_total']) for item in comparison['items'])
+        total_actual_materials = sum(float(item['actual']['materials_total']) for item in comparison['items'])
+        total_planned_labour = sum(float(item['planned']['labour_total']) for item in comparison['items'])
+        total_actual_labour = sum(float(item['actual']['labour_total']) for item in comparison['items'])
+
         total_planned_miscellaneous = sum(float(item['planned']['miscellaneous_amount']) for item in comparison['items'])
         total_actual_miscellaneous = sum(float(item['actual']['miscellaneous_amount']) for item in comparison['items'])
         total_planned_overhead = sum(float(item['planned']['overhead_amount']) for item in comparison['items'])
@@ -1259,8 +1432,9 @@ def get_boq_planned_vs_actual(boq_id):
         # Calculate net loss (costs that exceeded all buffers)
         total_loss_beyond_buffers = total_extra_costs - total_misc_consumed - total_overhead_consumed - total_profit_consumed
 
-        # Calculate actual profit using formula: Base Cost (Selling Price) - Total Actual Spending
-        actual_project_profit = total_base_cost - total_actual
+        # Calculate actual profit using formula: Client Amount (After Discount) - Total Actual Spending
+        # This is the REAL profit/loss - what client pays minus what we spent
+        actual_project_profit = total_client_amount_after_discount - total_actual
 
         comparison['summary'] = {
             "base_cost": float(total_base_cost),  # Add base cost to summary
@@ -1270,7 +1444,7 @@ def get_boq_planned_vs_actual(boq_id):
             "client_amount_after_discount": float(total_client_amount_after_discount),
             "grand_total": float(total_client_amount_after_discount),
             "profit_before_discount": float(total_profit_before_discount),
-            "negotiable_margin": float(total_after_discount_profit),
+            "negotiable_margin": float(actual_project_profit),  # Use the correctly calculated profit
             "discount_details": {
                 "has_discount": float(total_discount_amount) > 0,
                 "client_cost_before_discount": float(total_client_amount_before_discount),
@@ -1279,8 +1453,8 @@ def get_boq_planned_vs_actual(boq_id):
                 "grand_total_after_discount": float(total_client_amount_after_discount),
                 "profit_impact": {
                     "profit_before_discount": float(total_profit_before_discount),
-                    "profit_after_discount": float(total_after_discount_profit),
-                    "profit_reduction": float(total_profit_before_discount - total_after_discount_profit)
+                    "profit_after_discount": float(actual_project_profit),  # Use the correctly calculated profit
+                    "profit_reduction": float(total_profit_before_discount - actual_project_profit)
                 }
             },
             "planned_total": float(total_planned),
@@ -1288,6 +1462,13 @@ def get_boq_planned_vs_actual(boq_id):
             "variance": float(abs(total_actual - total_planned)),  # Always positive number
             "variance_percentage": float(abs((total_actual - total_planned) / total_planned * 100)) if total_planned > 0 else 0,
             "status": "under_budget" if total_actual < total_planned else "over_budget" if total_actual > total_planned else "on_budget",
+
+            # Add materials and labour totals for variance calculations
+            "planned_materials_total": float(total_planned_materials),
+            "actual_materials_total": float(total_actual_materials),
+            "planned_labour_total": float(total_planned_labour),
+            "actual_labour_total": float(total_actual_labour),
+
             "total_planned_miscellaneous": float(total_planned_miscellaneous),
             "total_actual_miscellaneous": float(total_actual_miscellaneous),
             "miscellaneous_variance": float(abs(total_actual_miscellaneous - total_planned_miscellaneous)),
@@ -1295,7 +1476,8 @@ def get_boq_planned_vs_actual(boq_id):
             "total_actual_overhead": float(total_actual_overhead),
             "overhead_variance": float(abs(total_actual_overhead - total_planned_overhead)),
             "total_planned_profit": float(total_planned_profit),
-            "total_negotiable_margin": float(actual_project_profit),  # Use simple formula: Planned - Actual
+            "total_negotiable_margin": float(actual_project_profit),  # Use simple formula: Client Amount - Actual Spending
+            "total_actual_profit": float(actual_project_profit),  # Add this for frontend compatibility
             "profit_variance": float(abs(actual_project_profit - total_planned_profit)),
             "profit_status": "loss" if actual_project_profit < 0 else ("reduced" if actual_project_profit < total_planned_profit else "maintained" if actual_project_profit == total_planned_profit else "increased"),
             "total_planned_transport": float(total_planned_transport),
