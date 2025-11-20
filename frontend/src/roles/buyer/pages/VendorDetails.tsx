@@ -29,6 +29,44 @@ const VendorDetails: React.FC = () => {
   const roleSlug = getRoleSlug(user?.role_id || '');
   const vendorsPath = `/${roleSlug}/vendors`;
 
+  // Get tax number label based on country
+  const getTaxNumberLabel = (country: string) => {
+    const taxInfo: Record<string, string> = {
+      'India': 'GST Number',
+      'UAE': 'VAT/TRN Number',
+      'Saudi Arabia': 'VAT Number',
+      'Qatar': 'Tax Number',
+      'Kuwait': 'Tax Number',
+      'Bahrain': 'Tax Number',
+      'Oman': 'Tax Number',
+      'UK': 'VAT Number',
+      'USA': 'EIN (Employer ID)',
+      'Canada': 'Business Number',
+      'Australia': 'ABN/ACN',
+      'Germany': 'VAT-ID (USt-IdNr)',
+      'France': 'VAT Number',
+      'Spain': 'NIF/CIF',
+      'Italy': 'VAT Number',
+      'Netherlands': 'VAT Number',
+      'Singapore': 'GST Registration Number',
+      'Malaysia': 'SST/GST Number',
+      'China': 'Taxpayer ID',
+      'Japan': 'Corporate Number',
+      'South Korea': 'Business Registration Number',
+      'Brazil': 'CNPJ',
+      'Mexico': 'RFC',
+      'South Africa': 'VAT Number',
+      'New Zealand': 'GST Number',
+      'Switzerland': 'UID/VAT',
+      'Norway': 'Organization Number',
+      'Sweden': 'Organization Number',
+      'Denmark': 'CVR Number',
+      'Finland': 'Business ID',
+    };
+
+    return taxInfo[country] || 'Tax/VAT Number';
+  };
+
   const [vendor, setVendor] = useState<Vendor | null>(null);
   const [products, setProducts] = useState<VendorProduct[]>([]);
   const [loading, setLoading] = useState(true);
@@ -270,7 +308,7 @@ const VendorDetails: React.FC = () => {
 
               {vendor.gst_number && (
                 <div>
-                  <p className="text-xs text-gray-500 mb-0.5">GST Number</p>
+                  <p className="text-xs text-gray-500 mb-0.5">{getTaxNumberLabel(vendor.country || 'UAE')}</p>
                   <p className="text-sm text-gray-800 font-mono">{vendor.gst_number}</p>
                 </div>
               )}
