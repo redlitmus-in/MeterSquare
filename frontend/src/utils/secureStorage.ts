@@ -186,7 +186,7 @@ class SecureStorage {
     };
 
     this.setItem('user_public', publicData, { encrypt: false });
-    this.setItem('user_sensitive', sensitiveData, { encrypt: true, ttl: 7 * 60 * 60 * 1000 }); // 7 hours
+    this.setItem('user_sensitive', sensitiveData, { encrypt: true, ttl: 10 * 60 * 60 * 1000 }); // 10 hours
   }
 
   /**

@@ -259,6 +259,154 @@ const RoleSpecificVendorHub: React.FC = () => {
   );
 };
 
+// Role-specific Vendor Details Component
+const RoleSpecificVendorDetails: React.FC = () => {
+  const { user } = useAuthStore();
+  const { viewingAsRole } = useAdminViewStore();
+
+  // Get user role (backend sends camelCase: technicalDirector)
+  let userRole = (user as any)?.role || '';
+
+  // If admin is viewing as another role, use that role instead
+  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
+    userRole = viewingAsRole;
+  }
+
+  const userRoleLower = userRole.toLowerCase();
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  // Check if user is Buyer
+  const isBuyer = roleId === 'buyer' ||
+                  roleIdLower === 'buyer' ||
+                  userRoleLower === 'buyer';
+
+  // Check if user is Technical Director
+  const isTechnicalDirector = userRole === 'Technical Director' ||
+                             userRole === 'technicalDirector' ||
+                             userRoleLower === 'technical director' ||
+                             userRoleLower === 'technical_director' ||
+                             userRoleLower === 'technicaldirector' ||
+                             roleId === UserRole.TECHNICAL_DIRECTOR ||
+                             roleId === 'technicalDirector' ||
+                             roleIdLower === 'technical_director';
+
+  // Buyer, Technical Director, and Admin have vendor details access
+  if (isBuyer || isTechnicalDirector || isAdmin) {
+    return <VendorDetails />;
+  }
+
+  // For any other roles, show no access message
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gray-50">
+      <div className="text-center p-8 bg-white rounded-lg shadow-md max-w-md">
+        <div className="mb-4">
+          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Access Denied</h3>
+        <p className="text-gray-600">
+          Your role does not have access to vendor details.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// Role-specific Materials Component
+const RoleSpecificMaterials: React.FC = () => {
+  const { user } = useAuthStore();
+  const { viewingAsRole } = useAdminViewStore();
+
+  let userRole = (user as any)?.role || '';
+  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
+    userRole = viewingAsRole;
+  }
+
+  const userRoleLower = userRole.toLowerCase();
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  const isBuyer = roleId === 'buyer' || roleIdLower === 'buyer' || userRoleLower === 'buyer';
+  const isTechnicalDirector = userRole === 'Technical Director' ||
+                             userRole === 'technicalDirector' ||
+                             userRoleLower === 'technical director' ||
+                             userRoleLower === 'technical_director' ||
+                             userRoleLower === 'technicaldirector' ||
+                             roleId === UserRole.TECHNICAL_DIRECTOR ||
+                             roleId === 'technicalDirector' ||
+                             roleIdLower === 'technical_director';
+
+  if (isBuyer || isTechnicalDirector || isAdmin) {
+    return <MaterialsToPurchase />;
+  }
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gray-50">
+      <div className="text-center p-8 bg-white rounded-lg shadow-md max-w-md">
+        <div className="mb-4">
+          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Access Denied</h3>
+        <p className="text-gray-600">
+          Your role does not have access to materials management.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// Role-specific Purchase Orders Component
+const RoleSpecificPurchaseOrders: React.FC = () => {
+  const { user } = useAuthStore();
+  const { viewingAsRole } = useAdminViewStore();
+
+  let userRole = (user as any)?.role || '';
+  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
+    userRole = viewingAsRole;
+  }
+
+  const userRoleLower = userRole.toLowerCase();
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  const isBuyer = roleId === 'buyer' || roleIdLower === 'buyer' || userRoleLower === 'buyer';
+  const isTechnicalDirector = userRole === 'Technical Director' ||
+                             userRole === 'technicalDirector' ||
+                             userRoleLower === 'technical director' ||
+                             userRoleLower === 'technical_director' ||
+                             userRoleLower === 'technicaldirector' ||
+                             roleId === UserRole.TECHNICAL_DIRECTOR ||
+                             roleId === 'technicalDirector' ||
+                             roleIdLower === 'technical_director';
+
+  if (isBuyer || isTechnicalDirector || isAdmin) {
+    return <PurchaseOrders />;
+  }
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gray-50">
+      <div className="text-center p-8 bg-white rounded-lg shadow-md max-w-md">
+        <div className="mb-4">
+          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Access Denied</h3>
+        <p className="text-gray-600">
+          Your role does not have access to purchase orders.
+        </p>
+      </div>
+    </div>
+  );
+};
+
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, getCurrentUser, user } = useAuthStore();
@@ -438,23 +586,10 @@ const SiteEngineerRoute: React.FC<{ children: React.ReactNode }> = ({ children }
 // Buyer and Admin Route Component
 const BuyerRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuthStore();
-  const userRole = (user as any)?.role || '';
-  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
-  const roleId = user?.role_id;
-  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
 
-  const isBuyer = userRoleLower === 'buyer' ||
-                 roleId === 'buyer' ||
-                 roleIdLower === 'buyer';
-
-  const isAdmin = userRole === 'Admin' ||
-                 userRoleLower === 'admin' ||
-                 roleId === 'admin' ||
-                 roleIdLower === 'admin' ||
-                 roleId === 5;
-
-  if (!isBuyer && !isAdmin) {
-    return <Navigate to="/403" replace />;
+  // If user is logged in, allow access - backend will handle authorization
+  if (!user) {
+    return <Navigate to="/login" replace />;
   }
 
   return <>{children}</>;
@@ -687,8 +822,13 @@ function App() {
               </EstimatorRoute>
             } />
 
+            {/* Buyer & Technical Director Routes - Role-specific access */}
+            <Route path="materials" element={<RoleSpecificMaterials />} />
+            <Route path="purchase-orders" element={<RoleSpecificPurchaseOrders />} />
+
             {/* Vendor Management Routes - Role-specific vendor hub */}
             <Route path="vendors" element={<RoleSpecificVendorHub />} />
+            <Route path="vendors/:vendorId" element={<RoleSpecificVendorDetails />} />
             <Route path="vendor-management" element={<RoleSpecificVendorHub />} />
 
             {/* Vendor Form Routes - Temporarily commented out */}
@@ -727,6 +867,27 @@ function App() {
                 <ProjectsOverview />
               </TechnicalDirectorRoute>
             } />
+            {/* Technical Director materials, purchase-orders, and vendor routes moved to general routes above (lines 826-832) */}
+            {/* <Route path="materials" element={
+              <TechnicalDirectorRoute>
+                <MaterialsToPurchase />
+              </TechnicalDirectorRoute>
+            } />
+            <Route path="purchase-orders" element={
+              <TechnicalDirectorRoute>
+                <PurchaseOrders />
+              </TechnicalDirectorRoute>
+            } /> */}
+            {/* <Route path="vendors" element={
+              <TechnicalDirectorRoute>
+                <VendorManagement />
+              </TechnicalDirectorRoute>
+            } />
+            <Route path="vendors/:vendorId" element={
+              <TechnicalDirectorRoute>
+                <VendorDetails />
+              </TechnicalDirectorRoute>
+            } /> */}
 
             {/* Project Manager specific routes */}
             <Route path="my-projects" element={
@@ -749,8 +910,8 @@ function App() {
             <Route path="change-requests" element={<RoleBasedChangeRequests />} />
             <Route path="extra-material" element={<RoleBasedChangeRequests />} />
 
-            {/* Buyer Routes */}
-            <Route path="materials" element={
+            {/* Buyer materials, purchase-orders, and vendor routes moved to general routes above (lines 826-832) */}
+            {/* <Route path="materials" element={
               <BuyerRoute>
                 <MaterialsToPurchase />
               </BuyerRoute>
@@ -759,8 +920,8 @@ function App() {
               <BuyerRoute>
                 <PurchaseOrders />
               </BuyerRoute>
-            } />
-            <Route path="vendors" element={
+            } /> */}
+            {/* <Route path="vendors" element={
               <BuyerRoute>
                 <VendorManagement />
               </BuyerRoute>
@@ -769,7 +930,7 @@ function App() {
               <BuyerRoute>
                 <VendorDetails />
               </BuyerRoute>
-            } />
+            } /> */}
 
             {/* Production Manager Routes - M2 Store Management */}
             <Route path="m2-store" element={

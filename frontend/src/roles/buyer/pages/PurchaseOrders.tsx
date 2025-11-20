@@ -19,7 +19,6 @@ import {
   LayoutGrid,
   Table as TableIcon,
   Store,
-  Edit,
   Mail,
   TruckIcon,
   XCircleIcon,
@@ -128,19 +127,9 @@ const PurchaseOrders: React.FC = () => {
     };
   }, [pendingPurchaseItems, vendorApprovedItems, pendingApprovalPurchases, completedPurchases]);
 
-  const handleViewDetails = (purchase: Purchase, openInEditMode: boolean = false) => {
+  const handleViewDetails = (purchase: Purchase) => {
     setSelectedPurchase(purchase);
     setIsDetailsModalOpen(true);
-    // Store edit mode preference
-    if (openInEditMode) {
-      sessionStorage.setItem('purchaseEditMode', 'true');
-    } else {
-      sessionStorage.removeItem('purchaseEditMode');
-    }
-  };
-
-  const handleEditPurchase = (purchase: Purchase) => {
-    handleViewDetails(purchase, true);
   };
 
   const handleSelectVendor = (purchase: Purchase) => {
@@ -398,10 +387,16 @@ const PurchaseOrders: React.FC = () => {
                             ? 'bg-amber-100 text-amber-800'
                             : 'bg-red-100 text-red-800'
                       } text-xs whitespace-nowrap`}>
-                        CR #{purchase.cr_id}
+                        PO: CR-{purchase.cr_id}
                       </Badge>
                     </div>
                     <div className="space-y-1 text-xs text-gray-600">
+                      {purchase.project_code && (
+                        <div className="flex items-center gap-1.5">
+                          <FileText className="w-3 h-3 flex-shrink-0 text-blue-600" />
+                          <span className="truncate font-semibold text-blue-900">Project Code: {purchase.project_code}</span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-1.5">
                         <Building2 className="w-3 h-3 flex-shrink-0" />
                         <span className="truncate">{purchase.client}</span>
@@ -489,28 +484,16 @@ const PurchaseOrders: React.FC = () => {
                         )
                       )}
 
-                      {/* Second Row: View and Edit */}
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <Button
-                          onClick={() => handleViewDetails(purchase, false)}
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs border-gray-300 hover:bg-gray-50 px-2 py-1"
-                        >
-                          <Eye className="w-3 h-3 mr-1" />
-                          View
-                        </Button>
-                        <Button
-                          onClick={() => handleEditPurchase(purchase)}
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs border-gray-300 hover:bg-gray-50 px-2 py-1"
-                          disabled={purchase.status === 'completed' || purchase.vendor_selection_pending_td_approval || purchase.vendor_email_sent}
-                        >
-                          <Edit className="w-3 h-3 mr-1" />
-                          Edit
-                        </Button>
-                      </div>
+                      {/* Second Row: View */}
+                      <Button
+                        onClick={() => handleViewDetails(purchase)}
+                        variant="outline"
+                        size="sm"
+                        className="w-full h-7 text-xs border-gray-300 hover:bg-gray-50 px-2 py-1"
+                      >
+                        <Eye className="w-3 h-3 mr-1" />
+                        View Details
+                      </Button>
 
                       {/* Third Row: Mark as Complete - Only show after email is sent */}
                       {purchase.status === 'pending' && !purchase.vendor_selection_pending_td_approval && purchase.vendor_id && purchase.vendor_email_sent && (
@@ -635,19 +618,6 @@ const PurchaseOrders: React.FC = () => {
                                   <span className="hidden lg:inline">Send</span>
                                 </Button>
                               )
-                            )}
-
-                            {purchase.status === 'pending' && (
-                              <Button
-                                onClick={() => handleEditPurchase(purchase)}
-                                variant="outline"
-                                size="sm"
-                                className="px-2 py-1 h-auto text-xs border-gray-300"
-                                disabled={purchase.vendor_selection_pending_td_approval || purchase.vendor_email_sent}
-                              >
-                                <Edit className="w-3 h-3 sm:mr-1" />
-                                <span className="hidden xl:inline">Edit</span>
-                              </Button>
                             )}
 
                             {/* Mark as Complete - Only show after email is sent */}

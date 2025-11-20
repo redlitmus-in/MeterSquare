@@ -20,10 +20,18 @@ vendor_routes = Blueprint('vendor_routes', __name__, url_prefix='/api/vendor')
 def check_vendor_access():
     """Check if current user can access Vendor operations"""
     current_user = g.user
-    user_role = current_user.get('role', '').lower()
+    original_role = current_user.get('role', '')
+    user_role = original_role.lower().replace('_', '').replace(' ', '')
+
+    # DEBUG: Print actual role values
+    print(f"🔍 DEBUG - Original role: '{original_role}' | Normalized: '{user_role}' | Role ID: {current_user.get('role_id')}")
+
     allowed_roles = ['buyer', 'technicaldirector', 'admin']
     if user_role not in allowed_roles:
+        print(f"❌ Access denied. Role '{user_role}' not in {allowed_roles}")
         return jsonify({"error": "Access denied. Buyer, TD, or Admin role required."}), 403
+
+    print(f"✅ Access granted for role '{user_role}'")
     return None
 
 
@@ -128,3 +136,17 @@ def get_vendor_categories_route():
     if access_check:
         return access_check
     return get_vendor_categories()
+
+# DEBUG endpoint - temporary
+@vendor_routes.route('/debug-role', methods=['GET'])
+@jwt_required
+def debug_role():
+    """Debug endpoint to check current user role"""
+    current_user = g.user
+    return jsonify({
+        "user_id": current_user.get('user_id'),
+        "email": current_user.get('email'),
+        "role": current_user.get('role'),
+        "role_id": current_user.get('role_id'),
+        "role_name": current_user.get('role_name')
+    }), 200

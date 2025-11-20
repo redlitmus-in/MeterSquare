@@ -7,6 +7,7 @@ export interface ChangeRequestItem {
   boq_id: number;
   project_id: number;
   project_name?: string;
+  project_code?: string;
   boq_name?: string;
   item_id?: string | null;
   item_name?: string | null;

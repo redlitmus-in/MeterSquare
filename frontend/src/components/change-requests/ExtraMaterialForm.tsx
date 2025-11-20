@@ -14,9 +14,12 @@ import { useAuthStore } from '@/store/authStore';
 interface Project {
   project_id: number;
   project_name: string;
+  status?: string;  // Project status (e.g., "ongoing", "completed")
   areas: Area[];
   assigned_items_details?: any[];  // For Site Engineers - contains items assigned to them
   boqs_with_items?: any[];  // For Site Engineers - BOQs with assigned items
+  my_work_confirmed?: boolean;  // SE's work confirmation status
+  my_completion_requested?: boolean;  // SE's completion request status
 }
 
 interface Area {
@@ -274,12 +277,26 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
   // Handle editing mode - pre-fill form with initialData
   useEffect(() => {
+    console.log('📋 Form initialData check:', {
+      hasInitialData: !!initialData,
+      editMode: initialData?.editMode,
+      projectsLength: projects.length
+    });
+
     if (initialData && initialData.editMode && projects.length > 0) {
-      // Debug log removed
+      console.log('🔄 EDIT MODE DETECTED - Pre-filling form with data:', {
+        editMode: initialData.editMode,
+        cr_id: initialData.cr_id,
+        project_id: initialData.project_id,
+        boq_id: initialData.boq_id,
+        item_id: initialData.item_id,
+        materials_count: initialData.sub_items_data?.length
+      });
 
       // Find and select the project
       const project = projects.find(p => p.project_id === initialData.project_id);
       if (project) {
+        console.log('✅ Found project for editing:', project.project_name);
         setSelectedProject(project);
 
         // Find the area and BOQ - need to search through all areas
@@ -296,12 +313,22 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         }
 
         if (foundArea && foundBoq) {
+          console.log('✅ Found area and BOQ:', { area: foundArea.area_name, boq: foundBoq.boq_name });
+          console.log('📊 Available items in BOQ:', foundBoq.items?.map(i => ({ id: i.item_id, name: i.item_name })));
           setSelectedArea(foundArea);
           setSelectedBoq(foundBoq);
 
-          // Find and select the item
-          const item = foundBoq.items?.find(i => String(i.item_id) === String(initialData.item_id));
+          // Find and select the item - try multiple field name possibilities
+          const itemIdToFind = initialData.item_id || initialData.master_item_id || initialData.boq_item_id;
+          console.log('🔍 Looking for item with ID:', itemIdToFind, 'from initialData:', {
+            item_id: initialData.item_id,
+            master_item_id: initialData.master_item_id,
+            boq_item_id: initialData.boq_item_id
+          });
+
+          const item = foundBoq.items?.find(i => String(i.item_id) === String(itemIdToFind));
           if (item) {
+            console.log('✅ Found item:', item.item_name, 'with ID:', item.item_id);
             setSelectedItem(item);
 
             // Find all unique sub-items from sub_items_data
@@ -310,6 +337,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
               const subItems = item.sub_items?.filter(si =>
                 uniqueSubItemIds.includes(si.sub_item_id)
               ) || [];
+              console.log('✅ Found sub-items:', subItems.map(si => si.sub_item_name));
               setSelectedSubItems(subItems);
             }
 
@@ -334,10 +362,19 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                 brand: mat.brand || '',
                 specification: mat.specification || ''
               }));
+              console.log('✅ Pre-filled materials:', transformedMaterials.length);
               setMaterials(transformedMaterials);
             }
+
+            console.log('🎉 Edit mode pre-fill completed successfully!');
+          } else {
+            console.error('❌ Item not found in BOQ:', { looking_for: initialData.item_id, available: foundBoq?.items?.map(i => i.item_id) });
           }
+        } else {
+          console.error('❌ Area or BOQ not found:', { area: !!foundArea, boq: !!foundBoq });
         }
+      } else {
+        console.error('❌ Project not found:', { looking_for: initialData.project_id, available: projects.map(p => p.project_id) });
       }
     }
   }, [initialData, projects]);
@@ -389,12 +426,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         // Filter out completed/confirmed projects (only show active work)
         filteredProjects = projectsList.filter(project => {
           // Only hide projects where THIS SE's work is confirmed or THIS SE requested completion
-          // Don't hide projects just because someone else requested completion
+          // Also hide projects with "completed" or "Completed" status
           const isCompleted =
             project.my_work_confirmed === true ||
-            project.my_completion_requested === true;
+            project.my_completion_requested === true ||
+            project.status?.toLowerCase() === 'completed';
 
-          console.log(`Project "${project.project_name}": isCompleted=${isCompleted}, my_work_confirmed=${project.my_work_confirmed}, my_completion_requested=${project.my_completion_requested}`);
+          console.log(`Project "${project.project_name}": isCompleted=${isCompleted}, status=${project.status}, my_work_confirmed=${project.my_work_confirmed}, my_completion_requested=${project.my_completion_requested}`);
 
           return !isCompleted; // Only include non-completed projects
         });
@@ -573,14 +611,17 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
   // Helper function to map items to standardized structure
   const mapItemsToStructure = (items: any[]) => {
-    return items.map((item: any, index: number) => ({
+    const mapped = items.map((item: any, index: number) => ({
       item_id: item.item_id || item.master_item_id || item.id || `item_${index}`,
-      item_name: item.item_name || item.name,
+      item_name: item.item_name || item.name || `Unnamed Item`,
       overhead_allocated: item.overhead_allocated || 0,
       overhead_consumed: item.overhead_consumed || 0,
       overhead_available: item.overhead_available || 0,
       sub_items: item.sub_items || []
     }));
+
+    console.log('📋 Mapped Items:', mapped.map(m => ({ id: m.item_id, name: m.item_name, sub_items_count: m.sub_items?.length || 0 })));
+    return mapped;
   };
 
   // Helper function to get assigned items for Site Engineers
@@ -832,7 +873,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
   const handleItemChange = (itemId: string) => {
     if (!selectedBoq) return;
-    const item = selectedBoq.items.find(i => i.item_id === itemId);
+
+    console.log('🔍 Searching for item:', itemId, 'Type:', typeof itemId);
+    console.log('📋 Available items:', selectedBoq.items?.map(i => ({ id: i.item_id, type: typeof i.item_id, name: i.item_name })));
+
+    // Handle both string and number comparisons
+    const item = selectedBoq.items.find(i => String(i.item_id) === String(itemId));
+
+    console.log('✅ Found item:', item ? { id: item.item_id, name: item.item_name } : 'NOT FOUND');
+
     setSelectedItem(item || null);
     resetDownstreamSelections('item');
   };
@@ -971,15 +1020,19 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           <select
             value={selectedItem?.item_id || ''}
             onChange={(e) => handleItemChange(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] text-sm"
             required
           >
             <option value="">Select BOQ Item</option>
-            {selectedBoq.items.map(item => (
-              <option key={item.item_id} value={item.item_id}>
-                {item.item_name || `Item ${item.item_id}`}
-              </option>
-            ))}
+            {selectedBoq.items && selectedBoq.items.length > 0 ? (
+              selectedBoq.items.map((item, index) => (
+                <option key={item.item_id || index} value={item.item_id}>
+                  {item.item_name || `Item ${item.item_id}`}
+                </option>
+              ))
+            ) : (
+              <option value="" disabled>No items available</option>
+            )}
           </select>
         </motion.div>
       )}

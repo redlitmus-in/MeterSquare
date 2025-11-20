@@ -21,6 +21,7 @@ import { useAuthStore } from '@/store/authStore';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 import { useExtraMaterialsAutoSync } from '@/hooks/useAutoSync';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
+import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
 
 interface ExtraMaterialRequest {
   id: number;
@@ -58,6 +59,7 @@ const ExtraMaterialPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteRequestId, setDeleteRequestId] = useState<number | null>(null);
 
@@ -382,17 +384,9 @@ const ExtraMaterialPage: React.FC = () => {
       if (response.data && response.data.data) {
         const cr = response.data.data;
 
-        // Set the selected request for editing
-        setSelectedRequest({
-          ...cr,
-          editMode: true,
-          cr_id: requestId
-        });
-
-        // Open the form
-        setShowForm(true);
-
-        toast.info('Loading change request for editing...');
+        // Set the selected request and open edit modal
+        setSelectedRequest(cr);
+        setShowEditModal(true);
       } else {
         toast.error('Failed to load change request');
       }
@@ -400,6 +394,14 @@ const ExtraMaterialPage: React.FC = () => {
       console.error('Error loading change request for edit:', error);
       toast.error('Failed to load change request');
     }
+  };
+
+  const handleEditSuccess = () => {
+    // Refresh the list after successful edit
+    refetch();
+    setShowEditModal(false);
+    setSelectedRequest(null);
+    toast.success('Change request updated successfully');
   };
 
   const handleSendToPM = async (requestId: number) => {
@@ -492,7 +494,10 @@ const ExtraMaterialPage: React.FC = () => {
                 <p className="text-gray-600">Request additional sub-items for assigned projects</p>
               </div>
               <button
-                onClick={() => setShowForm(true)}
+                onClick={() => {
+                  setSelectedRequest(null); // Clear any previous edit data
+                  setShowForm(true);
+                }}
                 className="inline-flex items-center px-4 py-2 bg-[#243d8a] text-white rounded-lg hover:bg-[#1e3270] transition-colors shadow-md"
               >
                 <PlusIcon className="w-5 h-5 mr-2" />
@@ -675,14 +680,7 @@ const ExtraMaterialPage: React.FC = () => {
                           <EyeIcon className="w-4 h-4" />
                           View Details
                         </button>
-                        <div className="grid grid-cols-3 gap-2">
-                          <button
-                            onClick={() => handleEdit(request.id)}
-                            className="bg-green-600 hover:bg-green-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
-                          >
-                            <PencilIcon className="w-4 h-4" />
-                            Edit
-                          </button>
+                        <div className="grid grid-cols-2 gap-2">
                           <button
                             onClick={() => handleSendToPM(request.id)}
                             className="bg-[#243d8a] hover:bg-[#1e3270] text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
@@ -766,13 +764,6 @@ const ExtraMaterialPage: React.FC = () => {
                               >
                                 <EyeIcon className="w-4 h-4 inline mr-1" />
                                 View
-                              </button>
-                              <button
-                                onClick={() => handleEdit(request.id)}
-                                className="text-green-600 hover:text-green-800 font-medium"
-                              >
-                                <PencilIcon className="w-4 h-4 inline mr-1" />
-                                Edit
                               </button>
                               <button
                                 onClick={() => handleSendToPM(request.id)}
@@ -1193,14 +1184,7 @@ const ExtraMaterialPage: React.FC = () => {
                           <EyeIcon className="w-4 h-4" />
                           View Details
                         </button>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            onClick={() => handleEdit(request.id)}
-                            className="bg-green-600 hover:bg-green-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
-                          >
-                            <PencilIcon className="w-4 h-4" />
-                            Edit
-                          </button>
+                        <div className="grid grid-cols-1 gap-2">
                           <button
                             onClick={() => handleDelete(request.id)}
                             className="bg-red-600 hover:bg-red-700 text-white text-sm py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
@@ -1291,13 +1275,6 @@ const ExtraMaterialPage: React.FC = () => {
                               >
                                 <EyeIcon className="w-4 h-4 inline mr-1" />
                                 View
-                              </button>
-                              <button
-                                onClick={() => handleEdit(request.id)}
-                                className="text-green-600 hover:text-green-800 font-medium"
-                              >
-                                <PencilIcon className="w-4 h-4 inline mr-1" />
-                                Edit
                               </button>
                               <button
                                 onClick={() => handleDelete(request.id)}
@@ -1535,6 +1512,19 @@ const ExtraMaterialPage: React.FC = () => {
           changeRequest={selectedRequest}
           canApprove={false}
         />
+
+        {/* Edit Change Request Modal */}
+        {selectedRequest && (
+          <EditChangeRequestModal
+            isOpen={showEditModal}
+            onClose={() => {
+              setShowEditModal(false);
+              setSelectedRequest(null);
+            }}
+            changeRequest={selectedRequest}
+            onSuccess={handleEditSuccess}
+          />
+        )}
 
         {/* Delete Confirmation Modal */}
         {showDeleteModal && (

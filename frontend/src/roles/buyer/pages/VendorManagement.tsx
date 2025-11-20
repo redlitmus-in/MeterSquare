@@ -15,12 +15,18 @@ import {
 import { buyerVendorService, Vendor } from '@/roles/buyer/services/buyerVendorService';
 import AddVendorModal from '@/components/buyer/AddVendorModal';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
+import { getRoleSlug } from '@/utils/roleRouting';
 
 const VendorManagement: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
+
+  // Get role-specific vendor detail path
+  const roleSlug = getRoleSlug(user?.role_id || '');
+  const vendorsBasePath = `/${roleSlug}/vendors`;
 
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +36,8 @@ const VendorManagement: React.FC = () => {
   const [categories, setCategories] = useState<string[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [vendorToDelete, setVendorToDelete] = useState<Vendor | null>(null);
   const [statistics, setStatistics] = useState({
     total_active: 0,
     total_inactive: 0,
@@ -85,19 +93,21 @@ const VendorManagement: React.FC = () => {
     setShowAddModal(true);
   };
 
-  const handleDeleteVendor = async (vendor: Vendor) => {
+  const handleDeleteVendor = (vendor: Vendor) => {
     if (!vendor.vendor_id) return;
+    setVendorToDelete(vendor);
+    setShowDeleteConfirm(true);
+  };
 
-    const confirmed = window.confirm(
-      `Are you sure you want to delete ${vendor.company_name}? This action cannot be undone.`
-    );
-
-    if (!confirmed) return;
+  const confirmDeleteVendor = async () => {
+    if (!vendorToDelete?.vendor_id) return;
 
     try {
-      await buyerVendorService.deleteVendor(vendor.vendor_id);
+      await buyerVendorService.deleteVendor(vendorToDelete.vendor_id);
       toast.success('Vendor deleted successfully');
       loadVendors();
+      setShowDeleteConfirm(false);
+      setVendorToDelete(null);
     } catch (error: any) {
       console.error('Error deleting vendor:', error);
       toast.error(error.message || 'Failed to delete vendor');
@@ -109,7 +119,7 @@ const VendorManagement: React.FC = () => {
   };
 
   const handleViewVendor = (vendor: Vendor) => {
-    navigate(`/buyer/vendors/${vendor.vendor_id}`);
+    navigate(`${vendorsBasePath}/${vendor.vendor_id}`);
   };
 
   const handleClearFilters = () => {
@@ -339,6 +349,22 @@ const VendorManagement: React.FC = () => {
         }}
         onVendorAdded={handleVendorAdded}
         editVendor={editingVendor}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmationDialog
+        isOpen={showDeleteConfirm}
+        onClose={() => {
+          setShowDeleteConfirm(false);
+          setVendorToDelete(null);
+        }}
+        type="warning"
+        title="Delete Vendor"
+        message={`Are you sure you want to delete ${vendorToDelete?.company_name}? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        showCancel={true}
+        onConfirm={confirmDeleteVendor}
       />
     </div>
   );
