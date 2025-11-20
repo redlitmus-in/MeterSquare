@@ -608,7 +608,22 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataCh
                   )}
 
                   {/* Comments */}
-                  {action.comments && (
+                  {(action.role?.toLowerCase() === 'technicaldirector' &&
+                    (action.status?.toLowerCase().includes('approved') || action.status?.toLowerCase() === 'rejected')) ? (
+                    // Always show for TD approval/rejection with fallback message
+                    <div className="bg-white/60 rounded p-2 mt-2">
+                      <div className="flex items-start gap-2">
+                        <MessageSquare className="w-4 h-4 text-gray-500 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-medium text-gray-700 mb-1">Comments:</p>
+                          <p className="text-xs text-gray-600 italic">
+                            {action.comments || '(No remarks provided)'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : action.comments && (
+                    // Show only if comments exist for other action types
                     <div className="bg-white/60 rounded p-2 mt-2">
                       <div className="flex items-start gap-2">
                         <MessageSquare className="w-4 h-4 text-gray-500 mt-0.5" />

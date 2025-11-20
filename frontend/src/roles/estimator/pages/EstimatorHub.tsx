@@ -59,6 +59,7 @@ import {
   Mail,
   Download,
   XCircle as XCircleIcon,
+  CheckCircle as CheckCircleIcon,
   ArrowRight,
 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -322,6 +323,9 @@ const EstimatorHub: React.FC = () => {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [boqToCancel, setBoqToCancel] = useState<BOQ | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
+  const [expandedRemarks, setExpandedRemarks] = useState<Set<number>>(new Set()); // Track expanded remarks by BOQ ID
+  const [showRemarksModal, setShowRemarksModal] = useState(false);
+  const [remarksModalData, setRemarksModalData] = useState<{ text: string; type: 'approval' | 'rejection'; boqName: string } | null>(null);
   const [showRevisionModal, setShowRevisionModal] = useState(false);
   const [boqDetailsRefreshTrigger, setBoqDetailsRefreshTrigger] = useState(0); // Trigger for refreshing BOQ details modal
   const [selectedBoqForRevision, setSelectedBoqForRevision] = useState<BOQ | null>(null);
@@ -503,6 +507,7 @@ const EstimatorHub: React.FC = () => {
             status: boq.status || 'draft',
             revision_number: boq.revision_number || 0,
             client_rejection_reason: boq.client_rejection_reason,
+            notes: boq.notes,  // TD approval/rejection comments
             created_at: boq.created_at,
             email_sent: boq.email_sent || false,
             pm_assigned: boq.pm_assigned || false
@@ -1426,6 +1431,65 @@ const EstimatorHub: React.FC = () => {
               <span className="font-medium text-gray-700">{format(new Date(boq.created_at), 'dd MMM yyyy')}</span>
             </div>
           )}
+
+          {/* TD Approval/Rejection Remarks */}
+          {(boq.notes || (boq.status.toLowerCase() === 'rejected' && boq.client_rejection_reason)) && (() => {
+            const remarksText = boq.notes || boq.client_rejection_reason;
+            const maxLength = 80;
+            const isLongText = remarksText && remarksText.length > maxLength;
+            const displayText = isLongText
+              ? remarksText.substring(0, maxLength) + '...'
+              : remarksText;
+
+            const isApproved = boq.status.toLowerCase().includes('approved') || boq.status.toLowerCase() === 'revision_approved';
+
+            const openRemarksModal = () => {
+              setRemarksModalData({
+                text: remarksText,
+                type: isApproved ? 'approval' : 'rejection',
+                boqName: boq.boq_name || 'BOQ'
+              });
+              setShowRemarksModal(true);
+            };
+
+            return (
+              <div className={`mt-2 rounded-lg p-2 border ${
+                isApproved
+                  ? 'bg-green-50 border-green-200'
+                  : 'bg-red-50 border-red-200'
+              }`}>
+                <div className="flex items-start gap-1.5">
+                  {isApproved ? (
+                    <CheckCircleIcon className="w-3.5 h-3.5 text-green-600 mt-0.5 flex-shrink-0" />
+                  ) : (
+                    <XCircleIcon className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-[10px] font-semibold mb-0.5 ${
+                      isApproved ? 'text-green-700' : 'text-red-700'
+                    }`}>
+                      {isApproved ? 'Approval Comments:' : 'Rejection Reason:'}
+                    </p>
+                    <p className={`text-[10px] leading-relaxed ${
+                      isApproved ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {displayText}
+                    </p>
+                    {isLongText && (
+                      <button
+                        onClick={openRemarksModal}
+                        className={`text-[10px] font-medium mt-0.5 hover:underline ${
+                          isApproved ? 'text-green-700' : 'text-red-700'
+                        }`}
+                      >
+                        Read more
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Actions */}
@@ -4230,6 +4294,69 @@ const EstimatorHub: React.FC = () => {
                   <Download className="w-5 h-5" />
                   Download PDF
                 </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Remarks Modal */}
+      {showRemarksModal && remarksModalData && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden"
+          >
+            {/* Header */}
+            <div className={`px-6 py-4 border-b ${
+              remarksModalData.type === 'approval'
+                ? 'bg-green-50 border-green-200'
+                : 'bg-red-50 border-red-200'
+            }`}>
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3">
+                  {remarksModalData.type === 'approval' ? (
+                    <CheckCircleIcon className="w-6 h-6 text-green-600 mt-0.5 flex-shrink-0" />
+                  ) : (
+                    <XCircleIcon className="w-6 h-6 text-red-600 mt-0.5 flex-shrink-0" />
+                  )}
+                  <div>
+                    <h3 className={`text-lg font-semibold ${
+                      remarksModalData.type === 'approval' ? 'text-green-900' : 'text-red-900'
+                    }`}>
+                      {remarksModalData.type === 'approval' ? 'Approval Comments' : 'Rejection Reason'}
+                    </h3>
+                    <p className="text-sm text-gray-600 mt-0.5">{remarksModalData.boqName}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowRemarksModal(false);
+                    setRemarksModalData(null);
+                  }}
+                  className="p-1 rounded-lg bg-white hover:bg-gray-100 text-gray-700 hover:text-gray-900 transition-colors shadow-sm border border-gray-200"
+                  title="Close"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="px-6 py-4 overflow-y-auto max-h-[calc(80vh-120px)]">
+              <div className={`rounded-lg p-4 ${
+                remarksModalData.type === 'approval'
+                  ? 'bg-green-50 border border-green-200'
+                  : 'bg-red-50 border border-red-200'
+              }`}>
+                <p className={`text-sm leading-relaxed whitespace-pre-wrap ${
+                  remarksModalData.type === 'approval' ? 'text-green-800' : 'text-red-800'
+                }`}>
+                  {remarksModalData.text}
+                </p>
               </div>
             </div>
           </motion.div>

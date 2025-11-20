@@ -426,7 +426,7 @@ def td_mail_send():
                 "receiver": "estimator",
                 "status": "revision_approved" if is_revision_approval else "approved",
                 "boq_name": boq.boq_name,
-                "comments": comments or ("BOQ revision approved by Technical Director" if is_revision_approval else "BOQ approved by Technical Director"),
+                "comments": comments,
                 "timestamp": datetime.utcnow().isoformat(),
                 "decided_by": td_name,
                 "decided_by_user_id": td_user_id,
@@ -464,7 +464,7 @@ def td_mail_send():
                 "receiver": "estimator",
                 "status": "rejected",
                 "boq_name": boq.boq_name,
-                "comments": comments or rejection_reason or "BOQ rejected",
+                "comments": comments or rejection_reason,
                 "rejection_reason": rejection_reason if rejection_reason else None,
                 "timestamp": datetime.utcnow().isoformat(),
                 "decided_by": td_name,
@@ -505,7 +505,7 @@ def td_mail_send():
             existing_history.boq_status = new_status
             existing_history.sender = td_name
             existing_history.receiver = recipient_name
-            existing_history.comments = comments or rejection_reason or f"BOQ {new_status.lower()}"
+            existing_history.comments = comments or rejection_reason
             existing_history.sender_role = 'technicalDirector'
             existing_history.receiver_role = recipient_role
             existing_history.action_date = datetime.utcnow()
@@ -522,7 +522,7 @@ def td_mail_send():
                 boq_status=new_status,
                 sender=td_name,
                 receiver=recipient_name,
-                comments=comments or rejection_reason or f"BOQ {new_status.lower()}",
+                comments=comments or rejection_reason,
                 sender_role='technicalDirector',
                 receiver_role=recipient_role,
                 action_date=datetime.utcnow(),

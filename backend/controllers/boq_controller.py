@@ -1911,7 +1911,26 @@ def get_all_boq():
         for boq, project in boqs:
             # Check BOQ history for sender and receiver roles
             display_status = boq.status
-           
+
+            # Get TD comments from latest history record with technicalDirector role
+            td_comments = None
+            boq_histories = history_by_boq.get(boq.boq_id, [])
+            for history in boq_histories:
+                # Check if this is a TD approval/rejection
+                if history.sender_role and history.sender_role.lower() == 'technicaldirector':
+                    # Get comments from the action array or the comments field
+                    if history.action and isinstance(history.action, list) and len(history.action) > 0:
+                        # Get the latest action with TD role (iterate in REVERSE - newest actions are at the end)
+                        for action in reversed(history.action):
+                            if isinstance(action, dict) and action.get('role', '').lower() == 'technicaldirector':
+                                td_comments = action.get('comments')
+                                if td_comments is not None:  # Allow empty string
+                                    break
+                    if td_comments is None and history.comments:
+                        td_comments = history.comments
+                    if td_comments is not None:  # Allow empty string
+                        break
+
             boq_summary = {
                 "boq_id": boq.boq_id,
                 "boq_name": boq.boq_name,
@@ -1929,6 +1948,8 @@ def get_all_boq():
                 "user_id": project.user_id if project else None,  # PM assignment indicator
                 "created_at": boq.created_at.isoformat() if boq.created_at else None,
                 "created_by": boq.created_by,
+                "client_rejection_reason": boq.client_rejection_reason,
+                "notes": td_comments  # TD approval/rejection comments
             }
 
             complete_boqs.append(boq_summary)

@@ -255,6 +255,7 @@ const ProjectApprovals: React.FC = () => {
   const [selectedProjectPMs, setSelectedProjectPMs] = useState<any[]>([]); // Changed to array for multiple PMs
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [isRevisionApproval, setIsRevisionApproval] = useState(false);
+  const [expandedRemarks, setExpandedRemarks] = useState<Set<number>>(new Set()); // Track expanded remarks by BOQ ID
 
   // Day Extension States
   const [pendingDayExtensions, setPendingDayExtensions] = useState<any[]>([]);
@@ -1891,6 +1892,75 @@ const ProjectApprovals: React.FC = () => {
                         <p className="text-[9px] text-orange-700">OH: {estimation.overheadPercentage}% | P: {estimation.profitMargin}%</p>
                       </div>
                     </div>
+
+                    {/* Approval/Rejection Remarks Section */}
+                    {(estimation.approvalNotes || estimation.rejectionReason) && (() => {
+                      const remarksText = estimation.approvalNotes || estimation.rejectionReason;
+                      const maxLength = 100;
+                      const isLongText = remarksText.length > maxLength;
+                      const isExpanded = expandedRemarks.has(estimation.id);
+                      const displayText = isLongText && !isExpanded
+                        ? remarksText.substring(0, maxLength) + '...'
+                        : remarksText;
+
+                      const toggleExpanded = () => {
+                        setExpandedRemarks(prev => {
+                          const newSet = new Set(prev);
+                          if (newSet.has(estimation.id)) {
+                            newSet.delete(estimation.id);
+                          } else {
+                            newSet.add(estimation.id);
+                          }
+                          return newSet;
+                        });
+                      };
+
+                      return (
+                        <div className="mt-3">
+                          <div className={`rounded-lg p-3 border ${
+                            estimation.status === 'approved'
+                              ? 'bg-green-50 border-green-200'
+                              : 'bg-red-50 border-red-200'
+                          }`}>
+                            <div className="flex items-start gap-2">
+                              {estimation.status === 'approved' ? (
+                                <CheckCircleIcon className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                              ) : (
+                                <XCircleIcon className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-xs font-semibold mb-1 ${
+                                  estimation.status === 'approved'
+                                    ? 'text-green-700'
+                                    : 'text-red-700'
+                                }`}>
+                                  {estimation.status === 'approved' ? 'Approval Comments:' : 'Rejection Reason:'}
+                                </p>
+                                <p className={`text-xs leading-relaxed ${
+                                  estimation.status === 'approved'
+                                    ? 'text-green-600'
+                                    : 'text-red-600'
+                                }`}>
+                                  {displayText}
+                                </p>
+                                {isLongText && (
+                                  <button
+                                    onClick={toggleExpanded}
+                                    className={`text-xs font-medium mt-1 hover:underline ${
+                                      estimation.status === 'approved'
+                                        ? 'text-green-700'
+                                        : 'text-red-700'
+                                    }`}
+                                  >
+                                    {isExpanded ? 'Show less' : 'Read more'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="flex items-center gap-1.5 ml-3">

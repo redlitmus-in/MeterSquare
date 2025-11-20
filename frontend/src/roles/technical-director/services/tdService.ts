@@ -7,7 +7,7 @@ class TDService {
         boq_id: boqId,
         technical_director_status: 'approved',
         rejection_reason: '',
-        comments: notes || 'All documents verified, moving to next step.'
+        comments: notes || ''
       });
       return {
         success: true,
@@ -57,7 +57,7 @@ class TDService {
         boq_id: boqId,
         technical_director_status: 'approved',
         rejection_reason: '',
-        comments: notes || 'Client revision approved.'
+        comments: notes || ''
       });
       return {
         success: true,
