@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Save, AlertCircle, Plus, Trash2, Package } from 'lucide-react';
+import { X, Save, AlertCircle, Trash2, Package } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
+import { useAuthStore } from '@/store/authStore';
 
 interface EditChangeRequestModalProps {
   isOpen: boolean;
@@ -34,9 +35,15 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
   changeRequest,
   onSuccess
 }) => {
+  const { user } = useAuthStore();
   const [loading, setLoading] = useState(false);
   const [justification, setJustification] = useState('');
   const [materials, setMaterials] = useState<MaterialItem[]>([]);
+
+  // Check if user is Site Engineer - hide price fields for SE
+  const isSiteEngineer = user?.role?.toLowerCase() === 'siteengineer' ||
+                         user?.role?.toLowerCase() === 'site engineer' ||
+                         user?.role_id === 3;
 
   // Initialize form data when modal opens
   useEffect(() => {
@@ -52,8 +59,8 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
           material_name: item.material_name || item.sub_item_name || '',
           sub_item_name: item.sub_item_name || item.material_name || '',
           brand: item.brand || '',
-          size: item.size || '',
-          specification: item.specification || '',
+          size: item.size || item.dimensions || item.size_dimension || '',
+          specification: item.specification || item.spec || '',
           quantity: parseFloat(item.quantity || item.qty || 0),
           unit: item.unit || 'nos',
           unit_price: parseFloat(item.unit_price || item.unit_rate || 0),
@@ -79,10 +86,6 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
     total_price: 0,
     reason: ''
   });
-
-  const handleAddMaterial = () => {
-    setMaterials([...materials, createEmptyMaterial()]);
-  };
 
   const handleRemoveMaterial = (id: string) => {
     if (materials.length === 1) {
@@ -183,29 +186,31 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
 
   const { totalCost } = calculateTotals();
 
-  // Calculate negotiable price (overhead) info
-  const overhead = changeRequest.overhead_analysis || {
+  // Calculate negotiable price (negotiable margin) info
+  const negotiableMargin = changeRequest.negotiable_margin_analysis || {
     original_allocated: 0,
-    consumed_before_request: 0,
-    consumed_by_this_request: 0,
-    remaining_after_approval: 0
+    already_consumed: 0,
+    this_request: 0,
+    remaining_after: 0,
+    consumption_percentage: 0,
+    exceeds_60_percent: false
   };
 
   const overheadInfo = {
     // Original negotiable price allocated for the project
-    originalAllocated: overhead.original_allocated || 0,
+    originalAllocated: negotiableMargin.original_allocated || 0,
     // Already consumed before this request (from previous approved CRs)
-    consumed: overhead.consumed_before_request || 0,
+    consumed: negotiableMargin.already_consumed || 0,
     // New request total from current edit
     newRequest: totalCost,
     // Calculate total consumption after this edit:
-    // = consumed_before + new_request
-    totalConsumedAfterEdit: (overhead.consumed_before_request || 0) + totalCost,
-    // Available after edit: original - consumed_before - new_request
-    available: (overhead.original_allocated || 0) - (overhead.consumed_before_request || 0) - totalCost,
+    // = already_consumed + new_request
+    totalConsumedAfterEdit: (negotiableMargin.already_consumed || 0) + totalCost,
+    // Available after edit: original - already_consumed - new_request
+    available: (negotiableMargin.original_allocated || 0) - (negotiableMargin.already_consumed || 0) - totalCost,
     // Percentage of negotiable price consumed
-    percentageOfOverhead: ((overhead.original_allocated || 0) > 0)
-      ? (((overhead.consumed_before_request || 0) + totalCost) / (overhead.original_allocated || 0) * 100)
+    percentageOfOverhead: ((negotiableMargin.original_allocated || 0) > 0)
+      ? (((negotiableMargin.already_consumed || 0) + totalCost) / (negotiableMargin.original_allocated || 0) * 100)
       : 0
   };
 
@@ -278,44 +283,46 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Negotiable Price Summary */}
-                  <div className="mb-6 p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200">
-                    <h4 className="text-sm font-semibold text-purple-900 mb-3">Negotiable Price Summary</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      <div>
-                        <span className="text-purple-700 text-xs">Original Allocated:</span>
-                        <p className="font-bold text-purple-900">{formatCurrency(overheadInfo.originalAllocated)}</p>
+                  {/* Negotiable Price Summary - Hidden for Site Engineers */}
+                  {!isSiteEngineer && (
+                    <div className="mb-6 p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200">
+                      <h4 className="text-sm font-semibold text-purple-900 mb-3">Negotiable Price Summary</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="text-purple-700 text-xs">Original Allocated:</span>
+                          <p className="font-bold text-purple-900">{formatCurrency(overheadInfo.originalAllocated)}</p>
+                        </div>
+                        <div>
+                          <span className="text-purple-700 text-xs">Already Consumed:</span>
+                          <p className="font-bold text-orange-600">{formatCurrency(overheadInfo.consumed)}</p>
+                        </div>
+                        <div>
+                          <span className="text-purple-700 text-xs">New Request Total:</span>
+                          <p className="font-bold text-blue-600">{formatCurrency(overheadInfo.newRequest)}</p>
+                        </div>
+                        <div>
+                          <span className="text-purple-700 text-xs">Available After Edit:</span>
+                          <p className={`font-bold ${overheadInfo.available < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            {formatCurrency(overheadInfo.available)}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-purple-700 text-xs">Already Consumed:</span>
-                        <p className="font-bold text-orange-600">{formatCurrency(overheadInfo.consumed)}</p>
-                      </div>
-                      <div>
-                        <span className="text-purple-700 text-xs">New Request Total:</span>
-                        <p className="font-bold text-blue-600">{formatCurrency(overheadInfo.newRequest)}</p>
-                      </div>
-                      <div>
-                        <span className="text-purple-700 text-xs">Available After Edit:</span>
-                        <p className={`font-bold ${overheadInfo.available < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                          {formatCurrency(overheadInfo.available)}
-                        </p>
+                      <div className="mt-3 pt-3 border-t border-purple-300">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-purple-700">Total Negotiable Price Consumption:</span>
+                          <span className={`text-lg font-bold ${overheadInfo.percentageOfOverhead > 40 ? 'text-red-600' : 'text-green-600'}`}>
+                            {overheadInfo.percentageOfOverhead.toFixed(1)}%
+                          </span>
+                        </div>
+                        {overheadInfo.percentageOfOverhead > 40 && (
+                          <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            <span>Exceeds 40% threshold - TD approval required</span>
+                          </p>
+                        )}
                       </div>
                     </div>
-                    <div className="mt-3 pt-3 border-t border-purple-300">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-purple-700">Total Negotiable Price Consumption:</span>
-                        <span className={`text-lg font-bold ${overheadInfo.percentageOfOverhead > 40 ? 'text-red-600' : 'text-green-600'}`}>
-                          {overheadInfo.percentageOfOverhead.toFixed(1)}%
-                        </span>
-                      </div>
-                      {overheadInfo.percentageOfOverhead > 40 && (
-                        <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                          <AlertCircle className="w-3 h-3" />
-                          <span>Exceeds 40% threshold - TD approval required</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
+                  )}
 
                   {/* Justification */}
                   <div className="mb-6">
@@ -339,15 +346,6 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                       <h4 className="text-sm font-semibold text-gray-700">
                         Materials / Sub-Items <span className="text-red-500">*</span>
                       </h4>
-                      <button
-                        type="button"
-                        onClick={handleAddMaterial}
-                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
-                        disabled={loading}
-                      >
-                        <Plus className="w-4 h-4" />
-                        Add Material
-                      </button>
                     </div>
 
                     <div className="space-y-4">
@@ -440,10 +438,12 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                                 step="0.01"
                                 value={material.quantity || ''}
                                 onChange={(e) => handleMaterialChange(material.id, 'quantity', parseFloat(e.target.value) || 0)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                                  (material.master_material_id !== null && material.master_material_id !== undefined) ? 'bg-gray-50 cursor-not-allowed' : ''
+                                }`}
                                 placeholder="0.00"
                                 required
-                                disabled={loading}
+                                disabled={loading || (material.master_material_id !== null && material.master_material_id !== undefined)}
                               />
                             </div>
 
@@ -464,37 +464,41 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                               />
                             </div>
 
-                            {/* Unit Price */}
-                            <div>
-                              <label className="block text-xs font-medium text-gray-600 mb-1">
-                                Unit Price (AED) <span className="text-red-500">*</span>
-                              </label>
-                              <input
-                                type="number"
-                                min="0.01"
-                                step="0.01"
-                                value={material.unit_price || ''}
-                                onChange={(e) => handleMaterialChange(material.id, 'unit_price', parseFloat(e.target.value) || 0)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                                placeholder="0.00"
-                                required
-                                disabled={loading}
-                              />
-                            </div>
+                            {/* Unit Price - Hidden for Site Engineers */}
+                            {!isSiteEngineer && (
+                              <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                  Unit Price (AED) <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0.01"
+                                  step="0.01"
+                                  value={material.unit_price || ''}
+                                  onChange={(e) => handleMaterialChange(material.id, 'unit_price', parseFloat(e.target.value) || 0)}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                  placeholder="0.00"
+                                  required
+                                  disabled={loading}
+                                />
+                              </div>
+                            )}
 
-                            {/* Total Price (Auto-calculated, read-only) */}
-                            <div>
-                              <label className="block text-xs font-medium text-gray-600 mb-1">
-                                Total Amount
-                              </label>
-                              <input
-                                type="text"
-                                value={formatCurrency(material.total_price)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-blue-50 text-sm font-semibold text-blue-700"
-                                readOnly
-                                disabled
-                              />
-                            </div>
+                            {/* Total Price (Auto-calculated, read-only) - Hidden for Site Engineers */}
+                            {!isSiteEngineer && (
+                              <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                  Total Amount
+                                </label>
+                                <input
+                                  type="text"
+                                  value={formatCurrency(material.total_price)}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-blue-50 text-sm font-semibold text-blue-700"
+                                  readOnly
+                                  disabled
+                                />
+                              </div>
+                            )}
 
                             {/* Reason */}
                             <div className="md:col-span-2">
@@ -517,18 +521,20 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Total Summary */}
-                  <div className="mb-6 p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg border border-blue-200">
-                    <div className="flex justify-between items-center">
-                      <span className="text-lg font-semibold text-blue-900">Total Request Amount:</span>
-                      <span className="text-2xl font-bold text-blue-600">
-                        {formatCurrency(totalCost)}
-                      </span>
+                  {/* Total Summary - Hidden for Site Engineers */}
+                  {!isSiteEngineer && (
+                    <div className="mb-6 p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg border border-blue-200">
+                      <div className="flex justify-between items-center">
+                        <span className="text-lg font-semibold text-blue-900">Total Request Amount:</span>
+                        <span className="text-2xl font-bold text-blue-600">
+                          {formatCurrency(totalCost)}
+                        </span>
+                      </div>
+                      <p className="text-xs text-blue-700 mt-2">
+                        {materials.length} material{materials.length !== 1 ? 's' : ''} • Original: {formatCurrency(changeRequest.materials_total_cost || 0)} • Change: {formatCurrency(totalCost - (changeRequest.materials_total_cost || 0))}
+                      </p>
                     </div>
-                    <p className="text-xs text-blue-700 mt-2">
-                      {materials.length} material{materials.length !== 1 ? 's' : ''} • Original: {formatCurrency(changeRequest.materials_total_cost || 0)} • Change: {formatCurrency(totalCost - (changeRequest.materials_total_cost || 0))}
-                    </p>
-                  </div>
+                  )}
 
                   {/* Warning Message */}
                   <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">

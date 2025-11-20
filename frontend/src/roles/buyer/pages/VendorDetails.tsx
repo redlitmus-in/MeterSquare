@@ -17,10 +17,17 @@ import AddVendorModal from '@/components/buyer/AddVendorModal';
 import AddProductModal from '@/components/buyer/AddProductModal';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { toast } from 'sonner';
+import { useAuthStore } from '@/store/authStore';
+import { getRoleSlug } from '@/utils/roleRouting';
 
 const VendorDetails: React.FC = () => {
   const { vendorId } = useParams<{ vendorId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+
+  // Get role-specific vendor list path
+  const roleSlug = getRoleSlug(user?.role_id || '');
+  const vendorsPath = `/${roleSlug}/vendors`;
 
   const [vendor, setVendor] = useState<Vendor | null>(null);
   const [products, setProducts] = useState<VendorProduct[]>([]);
@@ -46,7 +53,7 @@ const VendorDetails: React.FC = () => {
     } catch (error: any) {
       console.error('Error loading vendor details:', error);
       toast.error(error.message || 'Failed to load vendor details');
-      navigate('/buyer/vendors');
+      navigate(vendorsPath);
     } finally {
       setLoading(false);
     }
@@ -106,7 +113,7 @@ const VendorDetails: React.FC = () => {
     try {
       await buyerVendorService.deleteVendor(parseInt(vendorId));
       toast.success('Vendor deleted successfully');
-      navigate('/buyer/vendors');
+      navigate(vendorsPath);
     } catch (error: any) {
       console.error('Error deleting vendor:', error);
       toast.error(error.message || 'Failed to delete vendor');
@@ -131,7 +138,7 @@ const VendorDetails: React.FC = () => {
           <BuildingOfficeIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-gray-700 mb-2">Vendor Not Found</h3>
           <button
-            onClick={() => navigate('/buyer/vendors')}
+            onClick={() => navigate(vendorsPath)}
             className="text-[#243d8a] hover:text-[#1e3270]"
           >
             Back to Vendors
@@ -150,7 +157,7 @@ const VendorDetails: React.FC = () => {
         className="mb-6"
       >
         <button
-          onClick={() => navigate('/buyer/vendors')}
+          onClick={() => navigate(vendorsPath)}
           className="inline-flex items-center justify-center w-8 h-8 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors mb-4"
           title="Back to Vendors"
         >

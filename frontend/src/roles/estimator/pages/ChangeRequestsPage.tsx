@@ -176,12 +176,19 @@ const ChangeRequestsPage: React.FC = () => {
     setShowRejectionModal(true);
   };
 
-  const handleEdit = (crId: number) => {
-    // Find the purchase request and open it in the edit modal directly
-    const request = changeRequests.find(r => r.cr_id === crId);
-    if (request) {
-      setSelectedChangeRequest(request);
-      setShowEditModal(true);
+  const handleEdit = async (crId: number) => {
+    try {
+      // Fetch full change request details including negotiable_margin_analysis
+      const response = await changeRequestService.getChangeRequestDetail(crId);
+      if (response.success && response.data) {
+        setSelectedChangeRequest(response.data);
+        setShowEditModal(true);
+      } else {
+        toast.error(response.message || 'Failed to load change request details');
+      }
+    } catch (error) {
+      console.error('Error loading change request for edit:', error);
+      toast.error('Failed to load change request details');
     }
   };
 

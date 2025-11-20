@@ -478,7 +478,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   };
 
   const formatCurrency = (amount: number) => {
-    return `AED ${amount?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`;
+    return `AED ${amount?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`;
   };
 
   const getStatusBadge = (status: string) => {

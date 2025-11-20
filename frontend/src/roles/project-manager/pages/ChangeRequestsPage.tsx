@@ -687,6 +687,16 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
 
                           <div className="space-y-1 text-sm text-gray-600">
+                            {request.project_code && (
+                              <div className="flex items-center gap-1.5">
+                                <FolderOpen className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-semibold">Project Code: {request.project_code}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1.5">
+                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                            </div>
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
                               <span className="truncate">By: {request.requested_by_name}</span>
@@ -829,6 +839,16 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
 
                           <div className="space-y-1 text-sm text-gray-600">
+                            {request.project_code && (
+                              <div className="flex items-center gap-1.5">
+                                <FolderOpen className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-semibold">Project Code: {request.project_code}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1.5">
+                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                            </div>
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
                               <span className="truncate">By: {request.requested_by_name}</span>
@@ -903,6 +923,16 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
 
                           <div className="space-y-1 text-sm text-gray-600">
+                            {request.project_code && (
+                              <div className="flex items-center gap-1.5">
+                                <FolderOpen className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-semibold">Project Code: {request.project_code}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1.5">
+                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                            </div>
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
                               <span className="truncate">By: {request.requested_by_name}</span>
@@ -973,6 +1003,16 @@ const ChangeRequestsPage: React.FC = () => {
                             <Badge className={getStatusColor(request.status)}>REJECTED</Badge>
                           </div>
                           <div className="space-y-1 text-sm text-gray-600">
+                            {request.project_code && (
+                              <div className="flex items-center gap-1.5">
+                                <FolderOpen className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-semibold">Project Code: {request.project_code}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1.5">
+                              <Package className="h-3.5 w-3.5 text-gray-400" />
+                              <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                            </div>
                             <div className="flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5 text-gray-400" />
                               <span className="truncate">By: {request.requested_by_name}</span>
@@ -1048,6 +1088,16 @@ const ChangeRequestsPage: React.FC = () => {
                             </div>
 
                             <div className="space-y-1 text-sm text-gray-600">
+                              {request.project_code && (
+                                <div className="flex items-center gap-1.5">
+                                  <FolderOpen className="h-3.5 w-3.5 text-gray-400" />
+                                  <span className="truncate font-semibold">Project Code: {request.project_code}</span>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-1.5">
+                                <Package className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                              </div>
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
                                 <span className="truncate">By: {request.requested_by_name}</span>
@@ -1232,6 +1282,16 @@ const ChangeRequestsPage: React.FC = () => {
                                 </div>
 
                                 <div className="space-y-1 text-sm text-gray-600">
+                                  {request.project_code && (
+                                    <div className="flex items-center gap-1.5">
+                                      <FolderOpen className="h-3.5 w-3.5 text-gray-400" />
+                                      <span className="truncate font-semibold">Project Code: {request.project_code}</span>
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-1.5">
+                                    <Package className="h-3.5 w-3.5 text-gray-400" />
+                                    <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                                  </div>
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
                                     <span className="truncate">By: {request.requested_by_name}</span>
@@ -1330,6 +1390,16 @@ const ChangeRequestsPage: React.FC = () => {
                                 </div>
 
                                 <div className="space-y-1 text-sm text-gray-600">
+                                  {request.project_code && (
+                                    <div className="flex items-center gap-1.5">
+                                      <FolderOpen className="h-3.5 w-3.5 text-gray-400" />
+                                      <span className="truncate font-semibold">Project Code: {request.project_code}</span>
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-1.5">
+                                    <Package className="h-3.5 w-3.5 text-gray-400" />
+                                    <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                                  </div>
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
                                     <span className="truncate">By: {request.requested_by_name}</span>
@@ -1404,6 +1474,16 @@ const ChangeRequestsPage: React.FC = () => {
                                 </div>
 
                                 <div className="space-y-1 text-sm text-gray-600">
+                                  {request.project_code && (
+                                    <div className="flex items-center gap-1.5">
+                                      <FolderOpen className="h-3.5 w-3.5 text-gray-400" />
+                                      <span className="truncate font-semibold">Project Code: {request.project_code}</span>
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-1.5">
+                                    <Package className="h-3.5 w-3.5 text-gray-400" />
+                                    <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                                  </div>
                                   <div className="flex items-center gap-1.5">
                                     <Package className="h-3.5 w-3.5 text-gray-400" />
                                     <span className="truncate">By: {request.requested_by_name}</span>
@@ -1476,6 +1556,16 @@ const ChangeRequestsPage: React.FC = () => {
                               <Badge className="bg-green-100 text-green-800">ACCEPTED</Badge>
                             </div>
                             <div className="space-y-1 text-sm text-gray-600">
+                              {request.project_code && (
+                                <div className="flex items-center gap-1.5">
+                                  <FolderOpen className="h-3.5 w-3.5 text-gray-400" />
+                                  <span className="truncate font-semibold">Project Code: {request.project_code}</span>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-1.5">
+                                <Package className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                              </div>
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
                                 <span className="truncate">By: {request.requested_by_name}</span>
@@ -1541,6 +1631,16 @@ const ChangeRequestsPage: React.FC = () => {
                               <Badge className="bg-purple-100 text-purple-800">COMPLETED</Badge>
                             </div>
                             <div className="space-y-1 text-sm text-gray-600">
+                              {request.project_code && (
+                                <div className="flex items-center gap-1.5">
+                                  <FolderOpen className="h-3.5 w-3.5 text-gray-400" />
+                                  <span className="truncate font-semibold">Project Code: {request.project_code}</span>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-1.5">
+                                <Package className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                              </div>
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
                                 <span className="truncate">By: {request.requested_by_name}</span>
@@ -1606,6 +1706,16 @@ const ChangeRequestsPage: React.FC = () => {
                               <Badge className="bg-red-100 text-red-800">REJECTED</Badge>
                             </div>
                             <div className="space-y-1 text-sm text-gray-600">
+                              {request.project_code && (
+                                <div className="flex items-center gap-1.5">
+                                  <FolderOpen className="h-3.5 w-3.5 text-gray-400" />
+                                  <span className="truncate font-semibold">Project Code: {request.project_code}</span>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-1.5">
+                                <Package className="h-3.5 w-3.5 text-gray-400" />
+                                <span className="truncate font-semibold">PO: CR-{request.cr_id}</span>
+                              </div>
                               <div className="flex items-center gap-1.5">
                                 <Package className="h-3.5 w-3.5 text-gray-400" />
                                 <span className="truncate">By: {request.requested_by_name}</span>

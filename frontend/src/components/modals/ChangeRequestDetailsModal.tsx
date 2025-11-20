@@ -31,12 +31,13 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const [editedMaterials, setEditedMaterials] = useState<any[]>([]);
 
   // Initialize edited materials when modal opens or changeRequest changes
+  // Use isOpen and changeRequest as dependencies to ensure fresh data on every open
   React.useEffect(() => {
-    if (changeRequest) {
+    if (isOpen && changeRequest) {
       const materials = changeRequest.sub_items_data || changeRequest.materials_data || [];
       setEditedMaterials(JSON.parse(JSON.stringify(materials))); // Deep copy
     }
-  }, [changeRequest?.cr_id]);
+  }, [isOpen, changeRequest]);
 
   if (!isOpen || !changeRequest) return null;
 
@@ -116,8 +117,11 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   // Check if there are any new materials (determines if pricing columns should be shown)
   const hasNewMaterials = materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined);
 
-  // Buyers should always see pricing columns
-  const shouldShowPricing = userIsBuyer || (!userIsSiteEngineer && hasNewMaterials);
+  // Determine if user is PM
+  const userIsProjectManager = user?.role?.toLowerCase() === 'project_manager' || user?.role_name?.toLowerCase() === 'project_manager';
+
+  // Buyers and PM should always see pricing columns for both existing and new materials
+  const shouldShowPricing = userIsBuyer || userIsProjectManager || (!userIsSiteEngineer && hasNewMaterials);
 
   // Handler for approval with updated materials
   const handleApproveWithUpdatedPrices = () => {

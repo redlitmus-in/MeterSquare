@@ -9,8 +9,19 @@ buyer_routes = Blueprint('buyer_routes', __name__, url_prefix='/api/buyer')
 def check_buyer_or_admin_access():
     """Check if current user is a Buyer or Admin"""
     current_user = g.user
-    user_role = current_user.get('role', '').lower()
-    if user_role not in ['buyer', 'admin']:
+    original_role = current_user.get('role', '')
+    user_role = original_role.lower().replace('_', '').replace(' ', '')
+    role_id = current_user.get('role_id')
+
+    # Check role by name or role_id (4 = Buyer, 5 = Admin)
+    is_buyer_or_admin = (
+        'buyer' in user_role or
+        'admin' in user_role or
+        role_id == 4 or
+        role_id == 5
+    )
+
+    if not is_buyer_or_admin:
         return jsonify({"error": "Access denied. Buyer or Admin role required."}), 403
     return None
 
@@ -18,8 +29,18 @@ def check_buyer_or_admin_access():
 def check_td_or_admin_access():
     """Check if current user is a Technical Director or Admin"""
     current_user = g.user
-    user_role = current_user.get('role', '').lower()
-    if user_role not in ['technicaldirector', 'admin']:
+    user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
+    role_id = current_user.get('role_id')
+
+    # Check role by name or role_id (3 = TD, 5 = Admin)
+    is_td_or_admin = (
+        'technicaldirector' in user_role or
+        'admin' in user_role or
+        role_id == 3 or
+        role_id == 5
+    )
+
+    if not is_td_or_admin:
         return jsonify({"error": "Access denied. Technical Director or Admin role required."}), 403
     return None
 
@@ -27,8 +48,20 @@ def check_td_or_admin_access():
 def check_buyer_td_or_admin_access():
     """Check if current user is a Buyer, Technical Director, or Admin"""
     current_user = g.user
-    user_role = current_user.get('role', '').lower()
-    if user_role not in ['buyer', 'technicaldirector', 'technical_director', 'admin']:
+    user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
+    role_id = current_user.get('role_id')
+
+    # Check role by name or role_id (4 = Buyer, 3 = TD, 5 = Admin)
+    is_authorized = (
+        'buyer' in user_role or
+        'technicaldirector' in user_role or
+        'admin' in user_role or
+        role_id == 4 or
+        role_id == 3 or
+        role_id == 5
+    )
+
+    if not is_authorized:
         return jsonify({"error": "Access denied. Buyer, Technical Director, or Admin role required."}), 403
     return None
 

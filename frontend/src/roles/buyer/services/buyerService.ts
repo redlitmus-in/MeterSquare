@@ -16,6 +16,7 @@ export interface Purchase {
   cr_id: number;
   project_id: number;
   project_name: string;
+  project_code?: string;
   client: string;
   location: string;
   boq_id: number;

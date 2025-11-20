@@ -306,7 +306,7 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({
                         <p><strong>Created By:</strong> {version.created_by}</p>
                       )}
                       <p><strong>Total Items:</strong> {version.total_items || 0}</p>
-                      <p><strong>Total Cost:</strong> AED {(version.total_cost || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                      <p><strong>Total Cost:</strong> AED {(version.total_cost || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                       <div className="mt-2 grid grid-cols-2 gap-2 text-xs bg-white/50 p-2 rounded">
                         <div>
                           <span className="text-gray-600">Materials:</span> {version.total_materials || 0}
@@ -415,7 +415,7 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({
                               </div>
                               <div className="flex justify-between font-bold text-gray-900 pt-1 border-t border-gray-300">
                                 <span>Selling Price:</span>
-                                <span>AED {item.selling_price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <span>AED {item.selling_price?.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                               </div>
                             </div>
                           </div>
@@ -558,11 +558,11 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({
                                       <span className="text-gray-600">{cost.field}:</span>
                                       <span>
                                         <span className="line-through text-red-600">
-                                          {cost.field.includes('%') ? `${cost.old}%` : `AED ${cost.old.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                                          {cost.field.includes('%') ? `${cost.old}%` : `AED ${cost.old.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
                                         </span>
                                         <span className="mx-1">→</span>
                                         <span className="text-green-700 font-semibold">
-                                          {cost.field.includes('%') ? `${cost.new}%` : `AED ${cost.new.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                                          {cost.field.includes('%') ? `${cost.new}%` : `AED ${cost.new.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
                                         </span>
                                       </span>
                                     </div>
@@ -583,9 +583,9 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({
                               <div className="flex justify-between">
                                 <span className="text-gray-700">Total Cost:</span>
                                 <span>
-                                  <span className="line-through text-red-600">AED {changes.summary.total_cost.old.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="line-through text-red-600">AED {changes.summary.total_cost.old.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                                   <span className="mx-2">→</span>
-                                  <span className="text-green-700 font-bold">AED {changes.summary.total_cost.new.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="text-green-700 font-bold">AED {changes.summary.total_cost.new.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                                 </span>
                               </div>
                             )}
@@ -593,9 +593,9 @@ const BOQRevisionHistory: React.FC<BOQRevisionHistoryProps> = ({
                               <div className="flex justify-between font-bold">
                                 <span className="text-gray-900">Selling Price:</span>
                                 <span>
-                                  <span className="line-through text-red-600">AED {changes.summary.selling_price.old.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="line-through text-red-600">AED {changes.summary.selling_price.old.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                                   <span className="mx-2">→</span>
-                                  <span className="text-green-700">AED {changes.summary.selling_price.new.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                  <span className="text-green-700">AED {changes.summary.selling_price.new.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                                 </span>
                               </div>
                             )}

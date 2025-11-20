@@ -363,7 +363,7 @@ def verification_otp():
                 role_permissions = role.permissions if isinstance(role.permissions, list) else []
 
     # Create JWT token with role information
-    expiration_time = current_time + timedelta(hours=7)
+    expiration_time = current_time + timedelta(hours=10)
     payload = {
         'user_id': user.user_id,
         'email': user.email,

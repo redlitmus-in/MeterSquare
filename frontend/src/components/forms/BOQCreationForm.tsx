@@ -4215,7 +4215,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       <label className="block text-xs font-medium text-gray-700 mb-1">Total</label>
                                       <input
                                         type="text"
-                                        value={(subItem.quantity * subItem.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                        value={(subItem.quantity * subItem.rate).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                         className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 font-semibold text-gray-700"
                                         disabled
                                       />
@@ -4364,7 +4364,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 disabled={isSubmitting}
                                               />
                                               <span className="w-24 text-sm font-medium text-gray-700">
-                                                {(material.quantity * material.unit_price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                                {(material.quantity * material.unit_price).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                               </span>
                                               <button
                                                 type="button"
@@ -4439,7 +4439,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           <div className="flex justify-between items-center">
                                             <span className="text-sm font-bold text-blue-900">Raw Materials Total:</span>
                                             <span className="text-sm font-bold text-blue-900">
-                                              AED {subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                              AED {subItem.materials.reduce((sum, m) => sum + (m.quantity * m.unit_price), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                             </span>
                                           </div>
                                         </div>
@@ -4600,7 +4600,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               disabled={isSubmitting}
                                             />
                                             <span className="w-24 text-sm font-medium text-gray-700">
-                                              {(labour.hours * labour.rate_per_hour).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                              {(labour.hours * labour.rate_per_hour).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                             </span>
                                             <button
                                               type="button"
@@ -4637,7 +4637,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                         <div className="mt-3 pt-3 border-t border-orange-200 flex justify-between items-center bg-orange-50/50 rounded-lg px-3 py-2">
                                           <span className="text-sm font-bold text-orange-900">Labour Total:</span>
                                           <span className="text-sm font-bold text-orange-900">
-                                            AED {subItem.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                            AED {subItem.labour.reduce((sum, l) => sum + (l.hours * l.rate_per_hour), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                           </span>
                                         </div>
                                       )}
@@ -4736,19 +4736,19 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       <div className="text-center">
                                         <span className="text-gray-600">Misc:</span>
                                         <span className="ml-1 font-semibold text-purple-700">
-                                          {((subItem.quantity * subItem.rate) * (subItem.misc_percentage / 100)).toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                          {((subItem.quantity * subItem.rate) * (subItem.misc_percentage / 100)).toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
                                         </span>
                                       </div>
                                       <div className="text-center">
                                         <span className="text-gray-600">O&P:</span>
                                         <span className="ml-1 font-semibold text-purple-700">
-                                          {((subItem.quantity * subItem.rate) * (subItem.overhead_profit_percentage / 100)).toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                          {((subItem.quantity * subItem.rate) * (subItem.overhead_profit_percentage / 100)).toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
                                         </span>
                                       </div>
                                       <div className="text-center">
                                         <span className="text-gray-600">Trans:</span>
                                         <span className="ml-1 font-semibold text-purple-700">
-                                          {((subItem.quantity * subItem.rate) * (subItem.transport_percentage / 100)).toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                          {((subItem.quantity * subItem.rate) * (subItem.transport_percentage / 100)).toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
                                         </span>
                                       </div>
                                     </div>
@@ -4822,31 +4822,31 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                           <div className="space-y-1.5">
                                             <div className="flex justify-between text-gray-600">
                                               <span>Client Amount:</span>
-                                              <span className="font-semibold text-gray-800">{subItemCalc.clientAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.clientAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
                                             <div className="flex justify-between text-gray-600">
                                               <span>Materials Cost:</span>
-                                              <span className="font-semibold text-gray-800">{subItemCalc.materialCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.materialCost.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
                                             <div className="flex justify-between text-gray-600">
                                               <span>Labour Cost:</span>
-                                              <span className="font-semibold text-gray-800">{subItemCalc.labourCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.labourCost.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
                                             <div className="flex justify-between text-gray-600">
                                               <span>Misc ({subItem.misc_percentage}%):</span>
-                                              <span className="font-semibold text-gray-800">{subItemCalc.miscAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.miscAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
                                             <div className="flex justify-between text-gray-600">
                                               <span>Overhead & Profit ({subItem.overhead_profit_percentage}%):</span>
-                                              <span className="font-semibold text-gray-800">{subItemCalc.overheadProfitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.overheadProfitAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
                                             <div className="flex justify-between text-gray-600">
                                               <span>Transport ({subItem.transport_percentage}%):</span>
-                                              <span className="font-semibold text-gray-800">{subItemCalc.transportAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                              <span className="font-semibold text-gray-800">{subItemCalc.transportAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
                                             <div className="flex justify-between text-gray-600 mt-2 pt-2 border-t border-gray-300">
                                               <span className="font-bold">Internal Cost (Total):</span>
-                                              <span className="font-bold text-red-600">{subItemCalc.internalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                              <span className="font-bold text-red-600">{subItemCalc.internalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                             </div>
                                           </div>
 
@@ -4857,7 +4857,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               <span className="ml-2 text-gray-500 italic">(from {subItem.overhead_profit_percentage}% O&P)</span>
                                             </div>
                                             <span className="font-bold text-green-700">
-                                              {subItemCalc.plannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                              {subItemCalc.plannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
                                             </span>
                                           </div>
 
@@ -4868,7 +4868,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               <span className="ml-2 text-gray-500 italic">(Client - Internal Cost Total)</span>
                                             </div>
                                             <span className={`font-bold ${subItemCalc.negotiableMargin >= subItemCalc.plannedProfit ? 'text-emerald-700' : 'text-red-600'}`}>
-                                              {subItemCalc.negotiableMargin.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                              {subItemCalc.negotiableMargin.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
                                             </span>
                                           </div>
 
@@ -4979,7 +4979,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     Client Cost {overallDiscount > 0 ? '(Before Discount)' : ''}
                                   </span>
                                   <span className="text-lg font-bold text-blue-700">
-                                    {costs.totalClientCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                    {costs.totalClientCost.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
                                   </span>
                                 </div>
 
@@ -4987,7 +4987,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                   <div className="flex justify-between items-center py-1 bg-blue-50 rounded px-2 -mt-1">
                                     <span className="text-xs font-medium text-blue-700">After {itemDiscountShare.toFixed(1)}% Discount:</span>
                                     <span className="text-sm font-bold text-blue-900">
-                                      {clientCostAfterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                      {clientCostAfterDiscount.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
                                     </span>
                                   </div>
                                 )}
@@ -4995,16 +4995,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 <div className="flex justify-between items-center py-2 border-b border-gray-200">
                                   <span className="text-sm font-semibold text-gray-700">Internal Cost</span>
                                   <span className="text-lg font-bold text-red-600">
-                                    {costs.totalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                    {costs.totalInternalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
                                   </span>
                                 </div>
                                 <div className="flex justify-between items-center py-2">
                                   <div>
                                     <span className="text-sm font-semibold text-gray-700">Project Margin</span>
-                                    <div className="text-xs text-gray-500 italic">(Excluding planned profit of {costs.totalPlannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED)</div>
+                                    <div className="text-xs text-gray-500 italic">(Excluding planned profit of {costs.totalPlannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED)</div>
                                   </div>
                                   <span className={`text-lg font-bold ${costs.projectMargin >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                                    {costs.projectMargin.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                    {costs.projectMargin.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
                                   </span>
                                 </div>
 
@@ -5013,30 +5013,30 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                   <div className="font-semibold text-gray-800 mb-2">Detailed Breakdown:</div>
                                   <div className="flex justify-between text-gray-600">
                                     <span>Total Misc Amount:</span>
-                                    <span className="font-semibold">{costs.totalMiscAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                    <span className="font-semibold">{costs.totalMiscAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                   </div>
                                   <div className="flex justify-between text-gray-600">
                                     <span>Total Overhead & Profit:</span>
-                                    <span className="font-semibold">{costs.totalOverheadProfitAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                    <span className="font-semibold">{costs.totalOverheadProfitAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                   </div>
                                   <div className="flex justify-between text-gray-600">
                                     <span>Total Transport:</span>
-                                    <span className="font-semibold">{costs.totalTransportAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                    <span className="font-semibold">{costs.totalTransportAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                   </div>
                                   <div className="flex justify-between font-semibold text-green-700 pt-2 border-t border-gray-300">
                                     <span>Total Planned Profit:</span>
-                                    <span>{costs.totalPlannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                    <span>{costs.totalPlannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                   </div>
                                   <div className="flex justify-between font-semibold text-emerald-700">
                                     <span>Total Negotiable Margins {overallDiscount > 0 ? '(Before Discount)' : ''}:</span>
-                                    <span>{costs.totalActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED</span>
+                                    <span>{costs.totalActualProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED</span>
                                   </div>
 
                                   {overallDiscount > 0 && (
                                     <div className="flex justify-between font-semibold text-indigo-700 bg-indigo-50 rounded px-2 py-1">
                                       <span>Negotiable Margins (After Discount):</span>
                                       <span className={negotiableMarginAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}>
-                                        {negotiableMarginAfterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} AED
+                                        {negotiableMarginAfterDiscount.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
                                       </span>
                                     </div>
                                   )}
@@ -5147,11 +5147,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             <div className="space-y-2 text-sm">
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Client Cost:</span>
-                                <span className="font-semibold text-blue-700">{itemsSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <span className="font-semibold text-blue-700">{itemsSubtotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Internal Cost:</span>
-                                <span className="font-semibold text-red-600">{totalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <span className="font-semibold text-red-600">{totalInternalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between pt-2 border-t">
                                 <span className="text-gray-600">Planned Profit:</span>
@@ -5159,13 +5159,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                   {items.reduce((sum, item) => {
                                     const costs = calculateItemCost(item);
                                     return sum + costs.totalPlannedProfit;
-                                  }, 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                  }, 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                 </span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Negotiable Margins:</span>
                                 <span className={`font-semibold ${totalActualProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                  {totalActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                  {totalActualProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                 </span>
                               </div>
                             </div>
@@ -5179,20 +5179,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             <div className="space-y-2 text-sm">
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Client Amount:</span>
-                                <span className="font-semibold text-blue-700">{costAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <span className="font-semibold text-blue-700">{costAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Internal Cost:</span>
-                                <span className="font-semibold text-red-600">{preliminaryTotalInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <span className="font-semibold text-red-600">{preliminaryTotalInternalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between pt-2 border-t">
                                 <span className="text-gray-600">Planned Profit:</span>
-                                <span className="font-semibold text-indigo-600">{preliminaryPlannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <span className="font-semibold text-indigo-600">{preliminaryPlannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Negotiable Margins:</span>
                                 <span className={`font-semibold ${preliminaryActualProfit >= preliminaryPlannedProfit ? 'text-green-600' : 'text-red-600'}`}>
-                                  {preliminaryActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                  {preliminaryActualProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                 </span>
                               </div>
                             </div>
@@ -5207,20 +5207,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                             <div className="text-center">
                               <p className="text-xs text-gray-600 mb-1">Total Client</p>
-                              <p className="text-lg font-bold text-blue-700">{combinedSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                              <p className="text-lg font-bold text-blue-700">{combinedSubtotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                             </div>
                             <div className="text-center">
                               <p className="text-xs text-gray-600 mb-1">Total Internal</p>
-                              <p className="text-lg font-bold text-red-600">{combinedInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                              <p className="text-lg font-bold text-red-600">{combinedInternalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                             </div>
                             <div className="text-center">
                               <p className="text-xs text-gray-600 mb-1">Planned Profit</p>
-                              <p className="text-lg font-bold text-indigo-600">{combinedPlannedProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                              <p className="text-lg font-bold text-indigo-600">{combinedPlannedProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                             </div>
                             <div className="text-center">
                               <p className="text-xs text-gray-600 mb-1">Negotiable Margins</p>
                               <p className={`text-lg font-bold ${combinedActualProfit >= combinedPlannedProfit ? 'text-green-600' : 'text-red-600'}`}>
-                                {combinedActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                {combinedActualProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                               </p>
                             </div>
                           </div>
@@ -5242,7 +5242,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                     <div className="flex justify-between items-center">
                       <span className="text-gray-700 font-medium">Items Subtotal:</span>
                       <span className="text-lg font-semibold text-gray-900">
-                        AED {itemsSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        AED {itemsSubtotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
 
@@ -5251,7 +5251,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                       <div className="flex justify-between items-center">
                         <span className="text-gray-700 font-medium">Preliminary Amount:</span>
                         <span className="text-lg font-semibold text-gray-900">
-                          AED {preliminaryAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          AED {preliminaryAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                         </span>
                       </div>
                     )}
@@ -5261,7 +5261,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                       <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                         <span className="text-gray-800 font-semibold">Combined Subtotal:</span>
                         <span className="text-xl font-bold text-gray-900">
-                          AED {combinedSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          AED {combinedSubtotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                         </span>
                       </div>
                     )}
@@ -5290,7 +5290,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           </div>
                         </div>
                         <span className="text-lg font-semibold text-red-600">
-                          - AED {discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          - AED {discountAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                         </span>
                       </div>
 
@@ -5317,7 +5317,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                         Grand Total: <span className="text-sm font-normal text-gray-600">(Excluding VAT)</span>
                       </span>
                       <span className="text-3xl font-bold text-green-900">
-                        AED {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        AED {grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
 
@@ -5333,27 +5333,27 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                             <span className="text-gray-600">Client Cost:</span>
                             <div className="flex items-center gap-2">
                               <span className="text-gray-500 line-through">
-                                {combinedSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                {combinedSubtotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                               </span>
                               <span className="text-blue-700 font-bold">
-                                → {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                → {grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                               </span>
                             </div>
                           </div>
                           <div className="flex justify-between items-center">
                             <span className="text-gray-600">Internal Cost:</span>
                             <span className="font-semibold text-red-600">
-                              {combinedInternalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              {combinedInternalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                             </span>
                           </div>
                           <div className="flex justify-between items-center pt-2 border-t border-gray-300">
                             <span className="text-gray-700 font-medium">Negotiable Margins:</span>
                             <div className="flex items-center gap-2">
                               <span className="text-gray-500 line-through">
-                                {combinedActualProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                {combinedActualProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                               </span>
                               <span className={`font-bold ${negotiableMarginAfterDiscount >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                                → {negotiableMarginAfterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                → {negotiableMarginAfterDiscount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                               </span>
                             </div>
                           </div>
