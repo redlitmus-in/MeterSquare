@@ -1115,6 +1115,10 @@ def get_boq_planned_vs_actual(boq_id):
                         'planned_amount': float(sub_planned_profit),
                         'actual_amount': float(sub_negotiable_margin)
                     },
+                    'negotiable_margin': {
+                        'planned': float(sub_planned_profit),
+                        'actual': float(sub_negotiable_margin)
+                    },
                     'transport': {
                         'percentage': float(transport_pct),
                         'amount': float(sub_planned_transport)
@@ -1198,50 +1202,24 @@ def get_boq_planned_vs_actual(boq_id):
                     if lab_variance > 0:
                         extra_costs += lab_variance
 
-            # 2. Consumption flow: extra costs consume miscellaneous first, then overhead, then profit
-            remaining_miscellaneous = planned_miscellaneous
-            remaining_overhead = planned_overhead
-            remaining_profit = planned_profit
-            misc_consumed = Decimal('0')
-            overhead_consumed = Decimal('0')
-            profit_consumed = Decimal('0')
+            # 2. Allocation Impact Analysis
+            # NOTE: Miscellaneous, Overhead, and Transport are FIXED allocations
+            # Only the Negotiable Margin (profit) absorbs all variances
 
+            # Calculate profit variance (how much profit was impacted)
+            profit_variance = after_discount_negotiable_margin - planned_profit
+
+            # Determine if extra costs impacted profit
+            profit_impact_from_extra_costs = Decimal('0')
             if extra_costs > 0:
-                # Step 1: Consume miscellaneous first
-                misc_consumed = min(extra_costs, planned_miscellaneous)
-                remaining_miscellaneous = planned_miscellaneous - misc_consumed
+                # Extra costs directly reduce negotiable margin
+                profit_impact_from_extra_costs = extra_costs
 
-                # Step 2: If extra costs exceed miscellaneous, consume overhead
-                if extra_costs > planned_miscellaneous:
-                    excess_after_misc = extra_costs - planned_miscellaneous
-                    overhead_consumed = min(excess_after_misc, planned_overhead)
-                    remaining_overhead = planned_overhead - overhead_consumed
-
-                    # Step 3: If extra costs exceed miscellaneous + overhead, consume profit
-                    if excess_after_misc > planned_overhead:
-                        excess_after_overhead = excess_after_misc - planned_overhead
-                        profit_consumed = min(excess_after_overhead, planned_profit)
-                        remaining_profit = planned_profit - profit_consumed
-            else:
-                # No extra costs - keep full miscellaneous, overhead and profit
-                remaining_miscellaneous = planned_miscellaneous
-                remaining_overhead = planned_overhead
-                remaining_profit = planned_profit
-
-            # 3. Update actual amounts based on consumption (if needed for consumption flow display)
-            # But don't recalculate actual_total - it's already correctly calculated from sub-items
-            remaining_actual_miscellaneous = actual_miscellaneous - misc_consumed
-            remaining_actual_overhead = actual_overhead - overhead_consumed
-            remaining_negotiable_margin = negotiable_margin - profit_consumed
-
-            # 4. actual_total is already correctly calculated from sub-items aggregation
-            # Don't recalculate it here!
-
-            # 5. Calculate variances
-            base_cost_variance = actual_base - planned_base  # For reporting
-            misc_variance = remaining_actual_miscellaneous - planned_miscellaneous
-            overhead_variance = remaining_actual_overhead - planned_overhead
-            profit_variance = remaining_negotiable_margin - planned_profit
+            # Calculate variances (allocations stay same, only profit changes)
+            base_cost_variance = actual_base - planned_base
+            misc_variance = Decimal('0')  # Miscellaneous stays at allocation
+            overhead_variance = Decimal('0')  # Overhead stays at allocation
+            transport_variance = Decimal('0')  # Transport stays at allocation
 
             # Calculate savings/overrun (use absolute values for display)
             cost_savings = abs(planned_base - actual_base)  # Always positive
@@ -1297,6 +1275,7 @@ def get_boq_planned_vs_actual(boq_id):
                     "discount_percentage": float(item_discount_percentage),
                     "client_amount_after_discount": float(client_amount_after_discount),
                     "grand_total": float(client_amount_after_discount),
+                    "negotiable_margin": float(planned_profit),  # Planned profit/negotiable margin
                     "miscellaneous_amount": float(planned_miscellaneous),
                     "miscellaneous_percentage": float(misc_pct),
                     "overhead_amount": float(planned_overhead),
@@ -1332,16 +1311,16 @@ def get_boq_planned_vs_actual(boq_id):
                     "extra_costs": float(extra_costs),
                     "base_cost_variance": float(base_cost_variance),
                     "variance_status": "overspent" if extra_costs > 0 else "saved",
-                    "miscellaneous_consumed": float(misc_consumed),
-                    "miscellaneous_remaining": float(remaining_actual_miscellaneous),
+                    "miscellaneous_consumed": 0.0,  # Miscellaneous is fixed allocation
+                    "miscellaneous_remaining": float(actual_miscellaneous),
                     "miscellaneous_variance": float(misc_variance),
-                    "overhead_consumed": float(overhead_consumed),
-                    "overhead_remaining": float(remaining_actual_overhead),
+                    "overhead_consumed": 0.0,  # Overhead is fixed allocation
+                    "overhead_remaining": float(actual_overhead),
                     "overhead_variance": float(overhead_variance),
-                    "profit_consumed": float(profit_consumed),
-                    "profit_remaining": float(remaining_negotiable_margin),
+                    "profit_consumed": float(profit_impact_from_extra_costs),  # All extra costs impact profit
+                    "profit_remaining": float(after_discount_negotiable_margin),  # Actual negotiable margin
                     "profit_variance": float(profit_variance),
-                    "explanation": "Extra costs (overruns + unplanned items) consume miscellaneous first, then overhead, then profit. Calculations are done at sub-item level and aggregated."
+                    "explanation": "Miscellaneous, Overhead, and Transport are fixed allocations. All extra costs (overruns + unplanned items) directly reduce the Negotiable Margin (profit)."
                 },
                 "savings_breakdown": {
                     "total_cost_savings": float(cost_savings),
@@ -1365,17 +1344,17 @@ def get_boq_planned_vs_actual(boq_id):
                     },
                     "miscellaneous": {
                         "planned": float(planned_miscellaneous),
-                        "actual": float(remaining_actual_miscellaneous),
+                        "actual": float(actual_miscellaneous),  # Fixed allocation
                         "difference": float(abs(misc_variance))
                     },
                     "overhead": {
                         "planned": float(planned_overhead),
-                        "actual": float(remaining_actual_overhead),
+                        "actual": float(actual_overhead),  # Fixed allocation
                         "difference": float(abs(overhead_variance))
                     },
                     "profit": {
                         "planned": float(planned_profit),
-                        "actual": float(remaining_negotiable_margin),
+                        "actual": float(after_discount_negotiable_margin),  # Actual negotiable margin
                         "difference": float(abs(profit_variance))
                     }
                 }

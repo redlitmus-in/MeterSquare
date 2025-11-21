@@ -429,7 +429,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                           <span className="font-medium text-gray-900">{formatCurrency(item.discount_details.profit_impact.profit_before_discount)}</span>
                         </div>
                         <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">Profit After Discount:</span>
+                          <span className="text-gray-600">Negotiable Margin:</span>
                           <span className="font-medium text-green-700">{formatCurrency(item.discount_details.profit_impact.profit_after_discount)}</span>
                         </div>
                         <div className="flex justify-between text-xs text-red-700 font-semibold">
@@ -633,9 +633,9 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                           <span className="font-medium text-gray-900">{formatCurrency(item.actual.profit_before_discount || 0)}</span>
                         </div>
                         <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">Actual Profit (After Discount):</span>
-                          <span className={`font-medium ${item.actual.actual_profit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                            {formatCurrency(item.actual.actual_profit || 0)}
+                          <span className="text-gray-600">Negotiable Margin:</span>
+                          <span className={`font-medium ${(item.actual.negotiable_margin || 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                            {formatCurrency(item.actual.negotiable_margin || 0)}
                           </span>
                         </div>
                       </div>
@@ -828,7 +828,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       <p className="text-lg font-bold text-gray-900">{formatCurrency(data.summary.discount_details.profit_impact.profit_before_discount)}</p>
                     </div>
                     <div className="bg-green-50 rounded-lg border border-green-200 p-3">
-                      <p className="text-xs text-gray-600 mb-1">Profit After Discount:</p>
+                      <p className="text-xs text-gray-600 mb-1">Negotiable Margin:</p>
                       <p className={`text-lg font-bold ${data.summary.discount_details.profit_impact.profit_after_discount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {formatCurrency(data.summary.discount_details.profit_impact.profit_after_discount)}
                       </p>
@@ -908,9 +908,32 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   ? 'bg-green-50 border-green-400'
                   : 'bg-red-50 border-red-400'
               }`}>
+                <style>{`
+                  @keyframes float {
+                    0%, 100% { transform: translateY(0px); }
+                    50% { transform: translateY(-10px); }
+                  }
+                  @keyframes glow {
+                    0%, 100% { box-shadow: 0 0 5px currentColor, 0 0 10px currentColor, 0 0 15px currentColor; }
+                    50% { box-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor; }
+                  }
+                  @keyframes pulse-glow {
+                    0%, 100% { text-shadow: 0 0 10px currentColor; }
+                    50% { text-shadow: 0 0 20px currentColor, 0 0 30px currentColor; }
+                  }
+                  .float-animation {
+                    animation: float 3s ease-in-out infinite;
+                  }
+                  .glow-animation {
+                    animation: glow 2s ease-in-out infinite;
+                  }
+                  .pulse-glow-animation {
+                    animation: pulse-glow 2s ease-in-out infinite;
+                  }
+                `}</style>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-2xl ${
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-2xl shadow-lg ${
                       (data.summary.total_actual_profit || 0) >= 0 ? 'bg-green-600' : 'bg-red-600'
                     }`}>
                       {(data.summary.total_actual_profit || 0) >= 0 ? '✓' : '✗'}
@@ -925,10 +948,14 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-gray-600 font-semibold mb-1 uppercase">
+                    <p className={`text-xs font-semibold mb-1 uppercase px-3 py-1 rounded-full inline-block ${
+                      data.summary.status === 'under_budget' ? 'bg-green-100 text-green-700' :
+                      data.summary.status === 'on_budget' ? 'bg-blue-100 text-blue-700' :
+                      'bg-red-100 text-red-700'
+                    }`}>
                       {data.summary.status === 'on_budget' ? 'ON BUDGET' : data.summary.status === 'under_budget' ? 'UNDER BUDGET' : 'OVER BUDGET'}
                     </p>
-                    <div className="flex items-center justify-end gap-3">
+                    <div className="flex items-center justify-end gap-3 mt-2">
                       <p className={`text-3xl font-bold ${
                         (data.summary.total_actual_profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'
                       }`}>
@@ -936,10 +963,14 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       </p>
                       <button
                         onClick={() => setShowProfitCalculationModal(true)}
-                        className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                        className="relative group"
                         title="View Calculation Details"
                       >
-                        <Calculator className="w-6 h-6 text-gray-600" />
+                        <div className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg hover:shadow-xl transition-all float-animation glow-animation ${
+                          (data.summary.total_actual_profit || 0) >= 0 ? 'bg-blue-500 hover:bg-blue-600' : 'bg-orange-500 hover:bg-orange-600'
+                        }`}>
+                          <Calculator className="w-7 h-7 text-white" />
+                        </div>
                       </button>
                     </div>
                   </div>
@@ -1232,7 +1263,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   </div>
                   <div className="flex items-center justify-between py-3 border-t-2 border-green-400 pt-3">
                     <span className="text-green-900 font-bold flex items-center gap-2">
-                      <span className="text-xl">=</span> Final Profit:
+                      <span className="text-xl">=</span> Negotiable Margin:
                     </span>
                     <span className={`font-bold text-2xl ${
                       (data.summary.total_actual_profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'
