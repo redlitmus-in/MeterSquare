@@ -100,6 +100,17 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
     }
   };
 
+  const handleViewAsUser = (role: RoleGroup, userItem: any) => {
+    setRoleView(role.roleName, role.roleId, `${role.displayName} (${userItem.full_name})`, userItem.user_id);
+    toast.success(`Now viewing as ${userItem.full_name} (${role.displayName})`);
+    setIsExpanded(false);
+
+    // Navigate to dashboard to refresh the view with new role context
+    if (role.dashboardPath) {
+      navigate(role.dashboardPath);
+    }
+  };
+
   const handleResetView = () => {
     resetToAdminView();
     navigate('/admin/dashboard');
@@ -215,17 +226,18 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
                               View All {roleGroup.displayName}s
                             </button>
 
-                            {/* Individual Users (first 5) */}
+                            {/* Individual Users (first 5) - Clickable to view as specific user */}
                             {roleGroup.users.slice(0, 5).map((userItem) => (
-                              <div
+                              <button
                                 key={userItem.user_id}
-                                className="px-4 py-2 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-b-0"
+                                onClick={() => handleViewAsUser(roleGroup, userItem)}
+                                className="w-full px-4 py-2 text-left hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-b-0"
                               >
                                 <div className="text-xs">
                                   <p className="font-medium text-gray-900">{userItem.full_name}</p>
                                   <p className="text-gray-500 truncate">{userItem.email}</p>
                                 </div>
-                              </div>
+                              </button>
                             ))}
 
                             {roleGroup.users.length > 5 && (

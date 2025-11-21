@@ -53,10 +53,15 @@ apiClient.interceptors.request.use(
         const viewState = JSON.parse(adminViewStore);
         const viewingAsRole = viewState?.state?.viewingAsRole;
         const viewingAsRoleId = viewState?.state?.viewingAsRoleId;
+        const viewingAsUserId = viewState?.state?.viewingAsUserId;
 
         if (viewingAsRole && viewingAsRole !== 'admin') {
           config.headers['X-Viewing-As-Role'] = viewingAsRole;
           config.headers['X-Viewing-As-Role-Id'] = viewingAsRoleId;
+          // Send specific user ID if viewing as a specific user
+          if (viewingAsUserId) {
+            config.headers['X-Viewing-As-User-Id'] = viewingAsUserId;
+          }
         }
       } catch (e) {
         // Ignore parsing errors

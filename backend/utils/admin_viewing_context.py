@@ -21,6 +21,7 @@ def get_effective_user_context():
     if user_role == 'admin':
         viewing_as_role = request.headers.get('X-Viewing-As-Role')
         viewing_as_role_id = request.headers.get('X-Viewing-As-Role-Id')
+        viewing_as_user_id = request.headers.get('X-Viewing-As-User-Id')
 
         if viewing_as_role and viewing_as_role != 'admin':
             # Admin is viewing as another role
@@ -30,6 +31,7 @@ def get_effective_user_context():
                 'actual_user_id': user_id,
                 'effective_role': viewing_as_role.lower(),
                 'effective_role_id': int(viewing_as_role_id) if viewing_as_role_id else None,
+                'effective_user_id': int(viewing_as_user_id) if viewing_as_user_id else None,
                 'is_admin_viewing': True
             }
 
@@ -39,6 +41,7 @@ def get_effective_user_context():
         'actual_user_id': user_id,
         'effective_role': user_role,
         'effective_role_id': current_user.get('role_id'),
+        'effective_user_id': user_id,
         'is_admin_viewing': False
     }
 

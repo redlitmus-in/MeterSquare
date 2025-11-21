@@ -12,9 +12,10 @@ interface AdminViewState {
   viewingAsRole: string | null; // e.g., 'estimator', 'projectManager', 'buyer'
   viewingAsRoleId: number | null;
   viewingAsRoleName: string | null; // Display name
+  viewingAsUserId: number | null; // Specific user's ID when viewing as that user
 
   // Set role view context
-  setRoleView: (role: string, roleId: number, roleName: string) => void;
+  setRoleView: (role: string, roleId: number, roleName: string, userId?: number) => void;
 
   // Reset to default admin view
   resetToAdminView: () => void;
@@ -29,12 +30,14 @@ export const useAdminViewStore = create<AdminViewState>()(
       viewingAsRole: null,
       viewingAsRoleId: null,
       viewingAsRoleName: null,
+      viewingAsUserId: null,
 
-      setRoleView: (role: string, roleId: number, roleName: string) => {
+      setRoleView: (role: string, roleId: number, roleName: string, userId?: number) => {
         set({
           viewingAsRole: role,
           viewingAsRoleId: roleId,
-          viewingAsRoleName: roleName
+          viewingAsRoleName: roleName,
+          viewingAsUserId: userId || null
         });
       },
 
@@ -42,7 +45,8 @@ export const useAdminViewStore = create<AdminViewState>()(
         set({
           viewingAsRole: null,
           viewingAsRoleId: null,
-          viewingAsRoleName: null
+          viewingAsRoleName: null,
+          viewingAsUserId: null
         });
       },
 
@@ -56,7 +60,8 @@ export const useAdminViewStore = create<AdminViewState>()(
       partialize: (state) => ({
         viewingAsRole: state.viewingAsRole,
         viewingAsRoleId: state.viewingAsRoleId,
-        viewingAsRoleName: state.viewingAsRoleName
+        viewingAsRoleName: state.viewingAsRoleName,
+        viewingAsUserId: state.viewingAsUserId
       }),
     }
   )

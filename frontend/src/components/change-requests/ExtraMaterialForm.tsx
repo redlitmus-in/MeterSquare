@@ -9,7 +9,9 @@ import {
 } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import axios from 'axios';
+import { apiClient } from '@/api/config';
 import { useAuthStore } from '@/store/authStore';
+import { useAdminViewStore } from '@/store/adminViewStore';
 
 interface Project {
   project_id: number;
@@ -236,11 +238,33 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const submissionInProgressRef = React.useRef(false);
   const [projects, setProjects] = useState<Project[]>([]);
 
-  // Check if user is Site Engineer or Site Supervisor
-  const isSiteEngineer = useMemo(() => {
-    const role = (user as any)?.role?.toLowerCase().replace(/[_\s]/g, '') || '';
-    return role === 'siteengineer' || role === 'sitesupervisor';
+  // Get admin viewing context
+  const { viewingAsRole } = useAdminViewStore();
+
+  // Check actual user role
+  const actualUserRole = useMemo(() => {
+    return (user as any)?.role?.toLowerCase().replace(/[_\s]/g, '') || '';
   }, [user]);
+
+  // Check if admin is viewing as another role
+  const isAdminViewingAs = useMemo(() => {
+    return actualUserRole === 'admin' && viewingAsRole !== null;
+  }, [actualUserRole, viewingAsRole]);
+
+  // Check if user is Site Engineer or Site Supervisor (including admin viewing as SE)
+  const isSiteEngineer = useMemo(() => {
+    // Check if admin is viewing as SE
+    if (actualUserRole === 'admin' && viewingAsRole) {
+      const effectiveRole = viewingAsRole.toLowerCase().replace(/[_\s]/g, '');
+      return effectiveRole === 'siteengineer' || effectiveRole === 'sitesupervisor';
+    }
+    return actualUserRole === 'siteengineer' || actualUserRole === 'sitesupervisor';
+  }, [actualUserRole, viewingAsRole]);
+
+  // Check if this is an ACTUAL SE (not admin viewing as SE) - for item restrictions
+  const isActualSiteEngineer = useMemo(() => {
+    return actualUserRole === 'siteengineer' || actualUserRole === 'sitesupervisor';
+  }, [actualUserRole]);
 
   // Dynamic field states
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -393,18 +417,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       // Debug log removed
 
       // For Site Engineers, use sitesupervisor_boq endpoint to get projects with item assignments
+      // Use apiClient to include admin viewing context headers
       const endpoint = isSiteEngineer
-        ? `${API_URL}/sitesupervisor_boq`
-        : `${API_URL}/projects/assigned-to-me`;
+        ? `/sitesupervisor_boq`
+        : `/projects/assigned-to-me`;
 
-      // Debug log removed
-
-      const response = await axios.get(endpoint, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await apiClient.get(endpoint);
 
       // Debug log removed
 
@@ -485,10 +503,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     try {
       setLoadingRequests(true);
       // Fetch ALL change requests for this BOQ (not filtered by user)
-      const response = await axios.get(
-        `${API_URL}/change-requests`,
-        { headers }
-      );
+      const response = await apiClient.get(`/change-requests`);
 
       const allRequests = response.data.data || response.data || [];
 
@@ -625,8 +640,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   };
 
   // Helper function to get assigned items for Site Engineers
+  // Only applies to ACTUAL SE users, not admin viewing as SE
   const getAssignedItemsForBoq = (boqId: number): any[] | null => {
-    if (!isSiteEngineer || !selectedProject?.boqs_with_items) {
+    if (!isActualSiteEngineer || !selectedProject?.boqs_with_items) {
       return null;
     }
 
@@ -715,10 +731,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       materials: transformMaterialsForPayload(materials)
     };
 
-    const response = await axios.put(
-      `${API_URL}/change-request/${crId}`,
-      updatePayload,
-      { headers }
+    const response = await apiClient.put(
+      `/change-request/${crId}`,
+      updatePayload
     );
 
     if (response.data.success || response.data.data) {
@@ -739,10 +754,9 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       materials: transformMaterialsForPayload(materials)
     };
 
-    const response = await axios.post(
-      `${API_URL}/boq/change-request`,
-      changeRequestPayload,
-      { headers }
+    const response = await apiClient.post(
+      `/boq/change-request`,
+      changeRequestPayload
     );
 
     if (response.data.success) {
@@ -818,8 +832,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       return; // Exit early, skip API fetch
     }
 
-    // Site Engineer with no assigned items
-    if (isSiteEngineer) {
+    // ACTUAL Site Engineer with no assigned items (not admin viewing as SE)
+    if (isActualSiteEngineer) {
       console.log('⚠️ No assigned items found for this BOQ');
       toast.warning('No items assigned to you for this BOQ');
       setSelectedBoq({ ...boq, items: [] });
@@ -832,7 +846,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         setLoading(true);
 
         // Fetch the full BOQ details with items
-        const response = await axios.get(`${API_URL}/boq/${boqId}`, { headers });
+        const response = await apiClient.get(`/boq/${boqId}`);
         const boqDetails = response.data;
 
         // Extract items from existing_purchase and new_purchase sections

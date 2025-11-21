@@ -86,37 +86,65 @@ def get_all_sitesupervisor_boqs():
 
         # Get effective user context (handles admin viewing as other roles)
         context = get_effective_user_context()
+        effective_role = context.get('effective_role', user_role)
+        is_admin_viewing = context.get('is_admin_viewing', False)
+        effective_user_id = context.get('effective_user_id')  # Specific user ID when viewing as a user
 
         # NEW FLOW: Query pm_assign_ss first to get all item assignments
-        if user_role == 'admin' or not should_apply_role_filter(context):
-            # Admin sees all assignments
+        if effective_role == 'admin' and not is_admin_viewing:
+            # Pure admin (not viewing as SE) - sees all assignments
             item_assignments = PMAssignSS.query.filter(
                 PMAssignSS.is_deleted == False
             ).all()
+            log.info(f"=== Admin viewing all assignments ===")
+        elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor'] and effective_user_id:
+            # Admin viewing as specific SE user - sees only that SE's assignments
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.assigned_to_se_id == effective_user_id,
+                PMAssignSS.is_deleted == False
+            ).all()
+            log.info(f"=== Admin viewing as SE user {effective_user_id} - filtering by that SE ===")
+        elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor']:
+            # Admin viewing as SE role (no specific user) - sees all SE assignments
+            item_assignments = PMAssignSS.query.filter(
+                PMAssignSS.is_deleted == False
+            ).all()
+            log.info(f"=== Admin viewing as SE role (all SEs) ===")
         else:
-            # SE sees only their assignments
+            # Regular SE sees only their assignments
             item_assignments = PMAssignSS.query.filter(
                 PMAssignSS.assigned_to_se_id == user_id,
                 PMAssignSS.is_deleted == False
             ).all()
 
-        log.info(f"=== Found {len(item_assignments)} item assignments for SE {user_id} ===")
+        log.info(f"=== Found {len(item_assignments)} item assignments for SE {effective_user_id if is_admin_viewing else user_id} ===")
 
         # Get unique project IDs from assignments
         project_ids_from_assignments = list(set([a.project_id for a in item_assignments if a.project_id]))
 
         # Also include projects where SE is assigned at project level
-        if user_role != 'admin' and should_apply_role_filter(context):
+        if effective_role == 'admin' and not is_admin_viewing:
+            # Pure admin - don't add project-level filter
+            all_project_ids = project_ids_from_assignments
+        elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor'] and effective_user_id:
+            # Admin viewing as specific SE user - include that SE's project-level assignments
+            projects_from_project_table = Project.query.filter(
+                Project.site_supervisor_id == effective_user_id,
+                Project.is_deleted == False
+            ).all()
+            project_ids_from_project_level = [p.project_id for p in projects_from_project_table]
+            all_project_ids = list(set(project_ids_from_assignments + project_ids_from_project_level))
+        elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor']:
+            # Admin viewing as SE role (no specific user) - show all SE projects
+            all_project_ids = project_ids_from_assignments
+        else:
+            # Regular SE - include their project-level assignments
             projects_from_project_table = Project.query.filter(
                 Project.site_supervisor_id == user_id,
                 Project.is_deleted == False
             ).all()
             project_ids_from_project_level = [p.project_id for p in projects_from_project_table]
-
-            # Combine project IDs
             all_project_ids = list(set(project_ids_from_assignments + project_ids_from_project_level))
-        else:
-            all_project_ids = project_ids_from_assignments
 
         log.info(f"=== Total unique project IDs: {len(all_project_ids)} - {all_project_ids} ===")
 

@@ -459,13 +459,24 @@ def get_assigned_projects():
         if effective_role in ['siteengineer', 'sitesupervisor']:
             # Site Engineer / Site Supervisor projects
             if is_admin_viewing:
-                # Admin viewing as SE: Show ALL SE projects (no user filter)
-                projects = Project.query.options(*eager_load_options).filter(
-                    Project.site_supervisor_id.isnot(None),
-                    Project.is_deleted == False,
-                    Project.status != 'completed'
-                ).all()
-                log.info(f"Admin viewing as SE: Fetched {len(projects)} total SE projects")
+                # Admin viewing as specific SE: Show only THAT SE's projects
+                effective_user_id = context.get('effective_user_id')
+                if effective_user_id:
+                    # Specific user selected - filter by that user
+                    projects = Project.query.options(*eager_load_options).filter(
+                        Project.site_supervisor_id == effective_user_id,
+                        Project.is_deleted == False,
+                        Project.status != 'completed'
+                    ).all()
+                    log.info(f"Admin viewing as SE user {effective_user_id}: Fetched {len(projects)} projects for that SE")
+                else:
+                    # No specific user, show all SE projects
+                    projects = Project.query.options(*eager_load_options).filter(
+                        Project.site_supervisor_id.isnot(None),
+                        Project.is_deleted == False,
+                        Project.status != 'completed'
+                    ).all()
+                    log.info(f"Admin viewing as SE role: Fetched {len(projects)} total SE projects")
             else:
                 # Regular SE: Show only THEIR projects
                 projects = Project.query.options(*eager_load_options).filter(
