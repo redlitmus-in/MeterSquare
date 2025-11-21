@@ -1,173 +1,142 @@
-import React, { useState } from 'react';
-import { Plus, Search, Send, FileText, Package, CheckCircle, X, TruckIcon, Calendar } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Send, FileText, Package, CheckCircle, TruckIcon, Calendar, RefreshCw, AlertCircle, X, AlertTriangle, BoxIcon } from 'lucide-react';
+import { inventoryService, InternalMaterialRequest, InventoryMaterial } from '../services/inventoryService';
+import { toast } from 'sonner';
 
-// Dispatch status types
-type DispatchStatus = 'draft' | 'pending' | 'dispatched' | 'delivered' | 'cancelled';
-
-interface DispatchItem {
-  id: string;
-  materialCode: string;
-  materialName: string;
-  unit: string;
-  requestedQty: number;
-  dispatchedQty: number;
-  availableStock: number;
-  binLocation: string;
+interface AvailabilityInfo {
+  available: boolean;
+  current_stock: number;
+  requested_quantity: number;
+  material_code?: string;
+  material_name?: string;
+  unit?: string;
+  shortage?: number;
 }
-
-interface Dispatch {
-  id: string;
-  dispatchNumber: string;
-  requisitionNumber?: string;
-  requestedBy: string;
-  projectName: string;
-  siteLocation: string;
-  dispatchDate: string;
-  deliveryDate?: string;
-  status: DispatchStatus;
-  items: DispatchItem[];
-  vehicleNumber?: string;
-  driverName?: string;
-  remarks: string;
-}
-
-// Mock dispatch data
-const mockDispatches: Dispatch[] = [
-  {
-    id: '1',
-    dispatchNumber: 'DSP-2025-001',
-    requisitionNumber: 'REQ-2025-034',
-    requestedBy: 'Site Engineer - Tower A',
-    projectName: 'Skyline Residency',
-    siteLocation: 'Tower A - Floor 12',
-    dispatchDate: '2025-01-15',
-    deliveryDate: '2025-01-15',
-    status: 'delivered',
-    items: [
-      {
-        id: '1',
-        materialCode: 'MAT-001',
-        materialName: 'Portland Cement (50kg)',
-        unit: 'Bags',
-        requestedQty: 100,
-        dispatchedQty: 100,
-        availableStock: 450,
-        binLocation: 'A-01-01'
-      },
-      {
-        id: '2',
-        materialCode: 'MAT-003',
-        materialName: 'Sand (M-Sand)',
-        unit: 'CFT',
-        requestedQty: 50,
-        dispatchedQty: 50,
-        availableStock: 45,
-        binLocation: 'C-01-01'
-      }
-    ],
-    vehicleNumber: 'KA-01-AB-1234',
-    driverName: 'Ravi Kumar',
-    remarks: 'Delivered successfully'
-  },
-  {
-    id: '2',
-    dispatchNumber: 'DSP-2025-002',
-    requisitionNumber: 'REQ-2025-035',
-    requestedBy: 'Site Supervisor - Tower B',
-    projectName: 'Green Valley Villas',
-    siteLocation: 'Tower B - Ground Floor',
-    dispatchDate: '2025-01-14',
-    status: 'dispatched',
-    items: [
-      {
-        id: '3',
-        materialCode: 'MAT-002',
-        materialName: 'TMT Steel 12mm',
-        unit: 'Tons',
-        requestedQty: 2,
-        dispatchedQty: 2,
-        availableStock: 8.5,
-        binLocation: 'B-02-03'
-      }
-    ],
-    vehicleNumber: 'KA-02-CD-5678',
-    driverName: 'Suresh Babu',
-    remarks: 'In transit to site'
-  },
-  {
-    id: '3',
-    dispatchNumber: 'DSP-2025-003',
-    requestedBy: 'Buyer - Procurement',
-    projectName: 'Office Complex - Phase 2',
-    siteLocation: 'Main Building',
-    dispatchDate: '2025-01-13',
-    status: 'pending',
-    items: [
-      {
-        id: '4',
-        materialCode: 'MAT-005',
-        materialName: 'Concrete Blocks (6")',
-        unit: 'Nos',
-        requestedQty: 500,
-        dispatchedQty: 0,
-        availableStock: 2500,
-        binLocation: 'E-01-01'
-      },
-      {
-        id: '5',
-        materialCode: 'MAT-006',
-        materialName: 'PVC Pipes 4"',
-        unit: 'Mtr',
-        requestedQty: 50,
-        dispatchedQty: 0,
-        availableStock: 85,
-        binLocation: 'F-02-01'
-      }
-    ],
-    remarks: 'Awaiting vehicle assignment'
-  }
-];
 
 const DispatchMaterials: React.FC = () => {
-  const [dispatches, setDispatches] = useState<Dispatch[]>(mockDispatches);
+  const [allRequests, setAllRequests] = useState<InternalMaterialRequest[]>([]);
+  const [materials, setMaterials] = useState<InventoryMaterial[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<DispatchStatus | 'all'>('all');
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [dispatching, setDispatching] = useState<number | null>(null);
 
-  // Filter dispatches
-  const filteredDispatches = dispatches.filter(dispatch => {
-    const matchesSearch =
-      dispatch.dispatchNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      dispatch.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      dispatch.requestedBy.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (dispatch.requisitionNumber?.toLowerCase().includes(searchTerm.toLowerCase()) || false);
+  // Approval Modal State
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<InternalMaterialRequest | null>(null);
+  const [availabilityInfo, setAvailabilityInfo] = useState<AvailabilityInfo | null>(null);
+  const [checkingAvailability, setCheckingAvailability] = useState(false);
+  const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
 
-    const matchesStatus = statusFilter === 'all' || dispatch.status === statusFilter;
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-    return matchesSearch && matchesStatus;
-  });
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [requestsData, materialsData] = await Promise.all([
+        inventoryService.getAllInternalRequests(),
+        inventoryService.getAllInventoryItems()
+      ]);
+      setAllRequests(requestsData || []);
+      setMaterials(materialsData || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      toast.error('Failed to fetch data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Find matching material in inventory
+  const findMatchingMaterial = (request: InternalMaterialRequest): InventoryMaterial | undefined => {
+    // First try by inventory_material_id if set
+    if (request.inventory_material_id) {
+      return materials.find(m => m.inventory_material_id === request.inventory_material_id);
+    }
+
+    // Try exact match by name, brand, size
+    const exactMatch = materials.find(m =>
+      m.material_name?.toLowerCase() === request.material_name?.toLowerCase() &&
+      (!request.brand || m.brand?.toLowerCase() === request.brand?.toLowerCase()) &&
+      (!request.size || m.size?.toLowerCase() === request.size?.toLowerCase())
+    );
+    if (exactMatch) return exactMatch;
+
+    // Fallback to name-only match
+    return materials.find(m =>
+      m.material_name?.toLowerCase() === request.material_name?.toLowerCase()
+    );
+  };
+
+  // Get availability status for a request
+  const getAvailabilityStatus = (request: InternalMaterialRequest) => {
+    const material = findMatchingMaterial(request);
+    if (!material) {
+      return { status: 'not-found', text: 'Not in inventory', class: 'text-gray-500 bg-gray-100' };
+    }
+
+    const currentStock = material.current_stock || 0;
+    const requestedQty = request.quantity || 0;
+
+    if (currentStock >= requestedQty) {
+      return {
+        status: 'available',
+        text: `In Stock: ${currentStock} ${material.unit}`,
+        class: 'text-green-700 bg-green-100',
+        material
+      };
+    } else if (currentStock > 0) {
+      return {
+        status: 'partial',
+        text: `Partial: ${currentStock}/${requestedQty} ${material.unit}`,
+        class: 'text-orange-700 bg-orange-100',
+        material
+      };
+    } else {
+      return {
+        status: 'out-of-stock',
+        text: 'Out of Stock',
+        class: 'text-red-700 bg-red-100',
+        material
+      };
+    }
+  };
 
   // Get status counts
   const statusCounts = {
-    all: dispatches.length,
-    draft: dispatches.filter(d => d.status === 'draft').length,
-    pending: dispatches.filter(d => d.status === 'pending').length,
-    dispatched: dispatches.filter(d => d.status === 'dispatched').length,
-    delivered: dispatches.filter(d => d.status === 'delivered').length,
-    cancelled: dispatches.filter(d => d.status === 'cancelled').length
+    all: allRequests.length,
+    PENDING: allRequests.filter(r => r.status === 'PENDING').length,
+    APPROVED: allRequests.filter(r => r.status === 'APPROVED').length,
+    DISPATCHED: allRequests.filter(r => r.status === 'DISPATCHED').length,
+    FULFILLED: allRequests.filter(r => r.status === 'FULFILLED').length,
+    REJECTED: allRequests.filter(r => r.status === 'REJECTED').length
   };
 
+  // Filter requests
+  const filteredRequests = (statusFilter === 'all' ? allRequests : allRequests.filter(r => r.status === statusFilter))
+    .filter(req => {
+      const materialName = req.material_name || '';
+      const requestNumber = req.request_number?.toString() || '';
+      return (
+        materialName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        requestNumber.includes(searchTerm)
+      );
+    });
+
   // Get status badge
-  const getStatusBadge = (status: DispatchStatus) => {
-    const badges = {
-      'draft': { text: 'Draft', class: 'bg-gray-100 text-gray-800 border-gray-200' },
-      'pending': { text: 'Pending', class: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
-      'dispatched': { text: 'Dispatched', class: 'bg-blue-100 text-blue-800 border-blue-200' },
-      'delivered': { text: 'Delivered', class: 'bg-green-100 text-green-800 border-green-200' },
-      'cancelled': { text: 'Cancelled', class: 'bg-red-100 text-red-800 border-red-200' }
+  const getStatusBadge = (status?: string) => {
+    const badges: Record<string, { text: string; class: string }> = {
+      'PENDING': { text: 'Pending', class: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
+      'APPROVED': { text: 'Approved', class: 'bg-blue-100 text-blue-800 border-blue-200' },
+      'DISPATCHED': { text: 'Dispatched', class: 'bg-purple-100 text-purple-800 border-purple-200' },
+      'FULFILLED': { text: 'Fulfilled', class: 'bg-green-100 text-green-800 border-green-200' },
+      'REJECTED': { text: 'Rejected', class: 'bg-red-100 text-red-800 border-red-200' },
+      'PROCUREMENT_INITIATED': { text: 'Procurement', class: 'bg-orange-100 text-orange-800 border-orange-200' }
     };
 
-    const badge = badges[status];
+    const badge = badges[status || 'PENDING'] || badges['PENDING'];
 
     return (
       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${badge.class}`}>
@@ -175,6 +144,130 @@ const DispatchMaterials: React.FC = () => {
       </span>
     );
   };
+
+  // Open approval modal and check availability
+  const openApprovalModal = async (request: InternalMaterialRequest) => {
+    setSelectedRequest(request);
+    setShowApprovalModal(true);
+    setCheckingAvailability(true);
+    setAvailabilityInfo(null);
+
+    try {
+      // Check availability via API
+      const availability = await inventoryService.checkAvailability(request.request_id!);
+      setAvailabilityInfo(availability);
+      if (availability.inventory_material_id) {
+        setSelectedMaterialId(availability.inventory_material_id);
+      }
+    } catch (error) {
+      // Fallback to local check
+      const material = findMatchingMaterial(request);
+      if (material) {
+        const currentStock = material.current_stock || 0;
+        const requestedQty = request.quantity || 0;
+        setAvailabilityInfo({
+          available: currentStock >= requestedQty,
+          current_stock: currentStock,
+          requested_quantity: requestedQty,
+          material_code: material.material_code,
+          material_name: material.material_name,
+          unit: material.unit,
+          shortage: currentStock < requestedQty ? requestedQty - currentStock : 0
+        });
+        setSelectedMaterialId(material.inventory_material_id || null);
+      } else {
+        setAvailabilityInfo({
+          available: false,
+          current_stock: 0,
+          requested_quantity: request.quantity || 0,
+          material_name: request.material_name,
+          shortage: request.quantity || 0
+        });
+      }
+    } finally {
+      setCheckingAvailability(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!selectedRequest) return;
+
+    setDispatching(selectedRequest.request_id!);
+    try {
+      await inventoryService.approveInternalRequest(selectedRequest.request_id!, {
+        inventory_material_id: selectedMaterialId
+      });
+      toast.success('Request approved successfully! Stock has been allocated.');
+      setShowApprovalModal(false);
+      setSelectedRequest(null);
+      fetchData();
+    } catch (error: any) {
+      console.error('Error approving request:', error);
+      toast.error(error.message || 'Failed to approve request');
+    } finally {
+      setDispatching(null);
+    }
+  };
+
+  const handleDispatch = async (requestId: number) => {
+    if (!confirm('Are you sure you want to dispatch this material?')) return;
+
+    setDispatching(requestId);
+    try {
+      await inventoryService.dispatchMaterial(requestId);
+      toast.success('Material dispatched successfully!');
+      fetchData();
+    } catch (error: any) {
+      console.error('Error dispatching material:', error);
+      toast.error(error.message || 'Failed to dispatch material');
+    } finally {
+      setDispatching(null);
+    }
+  };
+
+  const handleFulfill = async (requestId: number) => {
+    if (!confirm('Confirm that the material has been delivered and received?')) return;
+
+    setDispatching(requestId);
+    try {
+      await inventoryService.issueMaterial(requestId);
+      toast.success('Material delivery confirmed!');
+      fetchData();
+    } catch (error: any) {
+      console.error('Error fulfilling request:', error);
+      toast.error(error.message || 'Failed to confirm delivery');
+    } finally {
+      setDispatching(null);
+    }
+  };
+
+  const handleReject = async (requestId: number) => {
+    const reason = prompt('Enter rejection reason:');
+    if (!reason) return;
+
+    setDispatching(requestId);
+    try {
+      await inventoryService.rejectInternalRequest(requestId, reason);
+      toast.success('Request rejected');
+      fetchData();
+    } catch (error: any) {
+      console.error('Error rejecting request:', error);
+      toast.error(error.message || 'Failed to reject request');
+    } finally {
+      setDispatching(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading dispatch requests...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -185,15 +278,15 @@ const DispatchMaterials: React.FC = () => {
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Material Dispatch</h1>
               <p className="mt-1 text-sm text-gray-500">
-                Issue and track materials to projects and sites
+                Process and track material dispatch requests from projects
               </p>
             </div>
             <button
-              onClick={() => setShowCreateModal(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
+              onClick={fetchData}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
             >
-              <Plus className="w-5 h-5" />
-              Create Dispatch
+              <RefreshCw className="w-4 h-4" />
+              Refresh
             </button>
           </div>
         </div>
@@ -201,69 +294,71 @@ const DispatchMaterials: React.FC = () => {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Summary Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Total Dispatches</p>
-                <p className="mt-2 text-3xl font-bold text-gray-900">{statusCounts.all}</p>
+                <p className="text-xs font-medium text-gray-500 uppercase">Total</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900">{statusCounts.all}</p>
               </div>
-              <div className="p-3 bg-purple-100 rounded-full">
-                <FileText className="w-6 h-6 text-purple-600" />
-              </div>
+              <FileText className="w-8 h-8 text-gray-400" />
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Pending</p>
-                <p className="mt-2 text-3xl font-bold text-gray-900">{statusCounts.pending}</p>
+                <p className="text-xs font-medium text-yellow-600 uppercase">Pending</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900">{statusCounts.PENDING}</p>
               </div>
-              <div className="p-3 bg-yellow-100 rounded-full">
-                <Package className="w-6 h-6 text-yellow-600" />
-              </div>
+              <AlertCircle className="w-8 h-8 text-yellow-500" />
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">In Transit</p>
-                <p className="mt-2 text-3xl font-bold text-gray-900">{statusCounts.dispatched}</p>
+                <p className="text-xs font-medium text-blue-600 uppercase">Approved</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900">{statusCounts.APPROVED}</p>
               </div>
-              <div className="p-3 bg-blue-100 rounded-full">
-                <TruckIcon className="w-6 h-6 text-blue-600" />
-              </div>
+              <CheckCircle className="w-8 h-8 text-blue-500" />
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Delivered</p>
-                <p className="mt-2 text-3xl font-bold text-gray-900">{statusCounts.delivered}</p>
+                <p className="text-xs font-medium text-purple-600 uppercase">Dispatched</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900">{statusCounts.DISPATCHED}</p>
               </div>
-              <div className="p-3 bg-green-100 rounded-full">
-                <CheckCircle className="w-6 h-6 text-green-600" />
+              <TruckIcon className="w-8 h-8 text-purple-500" />
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-green-600 uppercase">Fulfilled</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900">{statusCounts.FULFILLED}</p>
               </div>
+              <Package className="w-8 h-8 text-green-500" />
             </div>
           </div>
         </div>
 
         {/* Status Filter Tabs */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-1 mb-6 flex gap-1">
-          {(['all', 'pending', 'dispatched', 'delivered', 'draft', 'cancelled'] as const).map((status) => (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-1 mb-6 flex flex-wrap gap-1">
+          {(['all', 'PENDING', 'APPROVED', 'DISPATCHED', 'FULFILLED', 'REJECTED'] as const).map((status) => (
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
-              className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`flex-1 min-w-[100px] px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 statusFilter === status
                   ? 'bg-purple-100 text-purple-800'
                   : 'text-gray-600 hover:bg-gray-50'
               }`}
             >
-              {status.charAt(0).toUpperCase() + status.slice(1)}
+              {status === 'all' ? 'All' : status.charAt(0) + status.slice(1).toLowerCase()}
               {status !== 'all' && ` (${statusCounts[status]})`}
             </button>
           ))}
@@ -275,7 +370,7 @@ const DispatchMaterials: React.FC = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by dispatch number, project, requisition, or requester..."
+              placeholder="Search by material name or request number..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
@@ -283,381 +378,326 @@ const DispatchMaterials: React.FC = () => {
           </div>
         </div>
 
-        {/* Dispatch List */}
+        {/* Request List */}
         <div className="space-y-4">
-          {filteredDispatches.map((dispatch) => (
-            <div key={dispatch.id} className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-              {/* Dispatch Header */}
-              <div className="p-6 border-b border-gray-100">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-lg font-semibold text-gray-900">{dispatch.dispatchNumber}</h3>
-                      {getStatusBadge(dispatch.status)}
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-gray-500">Project</p>
-                        <p className="font-medium text-gray-900">{dispatch.projectName}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">Site Location</p>
-                        <p className="font-medium text-gray-900">{dispatch.siteLocation}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">Requested By</p>
-                        <p className="font-medium text-gray-900">{dispatch.requestedBy}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">Dispatch Date</p>
-                        <div className="flex items-center gap-1 font-medium text-gray-900">
-                          <Calendar className="w-4 h-4" />
-                          {dispatch.dispatchDate}
+          {filteredRequests.length > 0 ? (
+            filteredRequests.map((request) => {
+              const availability = getAvailabilityStatus(request);
+
+              return (
+                <div key={request.request_id} className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+                  <div className="p-6">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className="text-lg font-semibold text-gray-900">
+                            Request #{request.request_number || request.request_id}
+                          </h3>
+                          {getStatusBadge(request.status)}
+                          {request.status === 'PENDING' && (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${availability.class}`}>
+                              <BoxIcon className="w-3 h-3 mr-1" />
+                              {availability.text}
+                            </span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+                          <div>
+                            <p className="text-gray-500">Material</p>
+                            <p className="font-medium text-gray-900">{request.material_name}</p>
+                            {request.brand && <p className="text-xs text-gray-500">Brand: {request.brand}</p>}
+                            {request.size && <p className="text-xs text-gray-500">Size: {request.size}</p>}
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Requested Qty</p>
+                            <p className="font-bold text-lg text-gray-900">{request.quantity}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Request Date</p>
+                            <div className="flex items-center gap-1 font-medium text-gray-900">
+                              <Calendar className="w-4 h-4" />
+                              {request.created_at ? new Date(request.created_at).toLocaleDateString() : '-'}
+                            </div>
+                          </div>
+                          {availability.material && (
+                            <div>
+                              <p className="text-gray-500">Available Stock</p>
+                              <p className={`font-bold text-lg ${
+                                availability.status === 'available' ? 'text-green-600' :
+                                availability.status === 'partial' ? 'text-orange-600' : 'text-red-600'
+                              }`}>
+                                {availability.material.current_stock} {availability.material.unit}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
-                  </div>
-                  {dispatch.vehicleNumber && (
-                    <div className="text-right border-l border-gray-200 pl-4">
-                      <p className="text-sm text-gray-500">Vehicle</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <TruckIcon className="w-5 h-5 text-purple-600" />
-                        <div className="text-left">
-                          <p className="text-sm font-semibold text-gray-900">{dispatch.vehicleNumber}</p>
-                          <p className="text-xs text-gray-600">{dispatch.driverName}</p>
-                        </div>
+
+                    {/* Notes */}
+                    {request.notes && (
+                      <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                        <p className="text-sm text-gray-600">
+                          <span className="font-medium">Notes:</span> {request.notes}
+                        </p>
                       </div>
+                    )}
+
+                    {/* Rejection reason */}
+                    {request.status === 'REJECTED' && request.rejection_reason && (
+                      <div className="mb-4 p-3 bg-red-50 rounded-lg border border-red-100">
+                        <p className="text-sm text-red-700">
+                          <span className="font-medium">Rejection Reason:</span> {request.rejection_reason}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-100">
+                      {request.status === 'PENDING' && (
+                        <>
+                          <button
+                            onClick={() => handleReject(request.request_id!)}
+                            disabled={dispatching === request.request_id}
+                            className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            Reject
+                          </button>
+                          <button
+                            onClick={() => openApprovalModal(request)}
+                            disabled={dispatching === request.request_id}
+                            className="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                            Review & Approve
+                          </button>
+                        </>
+                      )}
+
+                      {request.status === 'APPROVED' && (
+                        <button
+                          onClick={() => handleDispatch(request.request_id!)}
+                          disabled={dispatching === request.request_id}
+                          className="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {dispatching === request.request_id ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Send className="w-4 h-4" />
+                          )}
+                          Dispatch Material
+                        </button>
+                      )}
+
+                      {request.status === 'DISPATCHED' && (
+                        <>
+                          <span className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-purple-700 bg-purple-50 rounded-lg">
+                            <TruckIcon className="w-4 h-4" />
+                            In Transit
+                          </span>
+                          <button
+                            onClick={() => handleFulfill(request.request_id!)}
+                            disabled={dispatching === request.request_id}
+                            className="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            {dispatching === request.request_id ? (
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <CheckCircle className="w-4 h-4" />
+                            )}
+                            Confirm Delivery
+                          </button>
+                        </>
+                      )}
+
+                      {request.status === 'FULFILLED' && (
+                        <span className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-green-700 bg-green-50 rounded-lg">
+                          <CheckCircle className="w-4 h-4" />
+                          Completed
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
-
-                {dispatch.requisitionNumber && (
-                  <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
-                    <FileText className="w-3 h-3" />
-                    Requisition: {dispatch.requisitionNumber}
-                  </div>
-                )}
-              </div>
-
-              {/* Dispatch Items */}
-              <div className="p-6">
-                <h4 className="text-sm font-semibold text-gray-700 mb-3">Dispatched Items</h4>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
-                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Requested</th>
-                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Dispatched</th>
-                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Available</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-100">
-                      {dispatch.items.map((item) => {
-                        const isPartialDispatch = item.dispatchedQty < item.requestedQty && item.dispatchedQty > 0;
-                        const isFullDispatch = item.dispatchedQty === item.requestedQty;
-                        const isPending = item.dispatchedQty === 0;
-
-                        return (
-                          <tr key={item.id}>
-                            <td className="px-4 py-3 text-sm text-gray-900">{item.materialName}</td>
-                            <td className="px-4 py-3 text-sm font-medium text-gray-600">{item.materialCode}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{item.binLocation}</td>
-                            <td className="px-4 py-3 text-sm text-right text-gray-900">
-                              {item.requestedQty} {item.unit}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-right">
-                              <span className={`font-semibold ${
-                                isPending ? 'text-gray-500' :
-                                isPartialDispatch ? 'text-yellow-600' :
-                                isFullDispatch ? 'text-green-600' :
-                                'text-gray-900'
-                              }`}>
-                                {item.dispatchedQty} {item.unit}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-sm text-right">
-                              <span className={`${
-                                item.availableStock < item.requestedQty ? 'text-red-600 font-semibold' : 'text-gray-600'
-                              }`}>
-                                {item.availableStock} {item.unit}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Dispatch Footer */}
-              <div className="px-6 py-4 bg-gray-50 border-t border-gray-100">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm">
-                    {dispatch.remarks && (
-                      <div>
-                        <span className="text-gray-500">Remarks: </span>
-                        <span className="text-gray-900">{dispatch.remarks}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button className="px-4 py-2 text-sm font-medium text-purple-600 hover:bg-purple-50 rounded-lg transition-colors">
-                      View Details
-                    </button>
-                    {dispatch.status === 'pending' && (
-                      <button className="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors">
-                        <Send className="w-4 h-4" />
-                        Process Dispatch
-                      </button>
-                    )}
-                    {dispatch.status === 'dispatched' && (
-                      <button className="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors">
-                        <CheckCircle className="w-4 h-4" />
-                        Mark Delivered
-                      </button>
-                    )}
                   </div>
                 </div>
-              </div>
+              );
+            })
+          ) : (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+              <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-1">No requests found</h3>
+              <p className="text-sm text-gray-500">
+                {searchTerm || statusFilter !== 'all'
+                  ? 'Try adjusting your search or filters'
+                  : 'No material dispatch requests available'}
+              </p>
             </div>
-          ))}
+          )}
         </div>
 
-        {/* Empty State */}
-        {filteredDispatches.length === 0 && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
-            <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-1">No dispatches found</h3>
-            <p className="text-sm text-gray-500">
-              {searchTerm || statusFilter !== 'all'
-                ? 'Try adjusting your search or filters'
-                : 'Create your first dispatch to start issuing materials'}
-            </p>
-          </div>
-        )}
-
         {/* Results Count */}
-        {filteredDispatches.length > 0 && (
+        {filteredRequests.length > 0 && (
           <div className="mt-6 text-sm text-gray-600 text-center">
-            Showing {filteredDispatches.length} of {dispatches.length} dispatches
+            Showing {filteredRequests.length} of {allRequests.length} requests
           </div>
         )}
       </div>
 
-      {/* Create Dispatch Modal - Placeholder */}
-      {showCreateModal && (
+      {/* Approval Modal */}
+      {showApprovalModal && selectedRequest && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">Create New Dispatch</h2>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900">Review & Approve Request</h2>
+                <button
+                  onClick={() => {
+                    setShowApprovalModal(false);
+                    setSelectedRequest(null);
+                    setAvailabilityInfo(null);
+                  }}
+                  className="p-2 hover:bg-gray-100 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
-            <div className="space-y-6">
-              {/* Dispatch Header */}
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Dispatch Information</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-6 space-y-6">
+              {/* Request Details */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h3 className="font-semibold text-gray-900 mb-3">Request Details</h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Project <span className="text-red-500">*</span>
-                    </label>
-                    <select className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                      <option value="">Select Project</option>
-                      <option value="1">Skyline Residency</option>
-                      <option value="2">Green Valley Villas</option>
-                      <option value="3">Office Complex - Phase 2</option>
-                    </select>
+                    <p className="text-gray-500">Request #</p>
+                    <p className="font-medium">{selectedRequest.request_number || selectedRequest.request_id}</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Site Location <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                      placeholder="e.g., Tower A - Floor 12"
-                    />
+                    <p className="text-gray-500">Material</p>
+                    <p className="font-medium">{selectedRequest.material_name}</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Requested By <span className="text-red-500">*</span>
-                    </label>
-                    <select className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                      <option value="">Select Requester</option>
-                      <option value="se">Site Engineer - Tower A</option>
-                      <option value="ss">Site Supervisor - Tower B</option>
-                      <option value="buyer">Buyer - Procurement</option>
-                    </select>
+                    <p className="text-gray-500">Requested Quantity</p>
+                    <p className="font-bold text-lg">{selectedRequest.quantity}</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Dispatch Date <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="date"
-                      defaultValue={new Date().toISOString().split('T')[0]}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Requisition Number
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g., REQ-2025-036"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Expected Delivery Date
-                    </label>
-                    <input
-                      type="date"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                    />
+                    <p className="text-gray-500">Brand / Size</p>
+                    <p className="font-medium">
+                      {selectedRequest.brand || '-'} / {selectedRequest.size || '-'}
+                    </p>
                   </div>
                 </div>
               </div>
 
-              {/* Materials to Dispatch */}
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Materials to Dispatch</h3>
-                  <button className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors">
-                    <Plus className="w-4 h-4" />
-                    Add Material
-                  </button>
-                </div>
+              {/* Availability Check */}
+              <div className={`rounded-lg p-4 border-2 ${
+                checkingAvailability ? 'bg-gray-50 border-gray-200' :
+                availabilityInfo?.available ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'
+              }`}>
+                <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <Package className="w-5 h-5" />
+                  Stock Availability
+                </h3>
 
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200 text-sm">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Material</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Unit</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Bin Location</th>
-                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Available Stock</th>
-                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Dispatch Qty</th>
-                        <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600">Status</th>
-                        <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-100">
-                      <tr>
-                        <td className="px-3 py-2">
-                          <select className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-purple-500">
-                            <option>Portland Cement (50kg)</option>
-                            <option>TMT Steel 12mm</option>
-                            <option>Concrete Blocks (6")</option>
-                          </select>
-                        </td>
-                        <td className="px-3 py-2">
-                          <input type="text" value="Bags" disabled className="w-20 px-2 py-1 border border-gray-300 rounded text-sm bg-gray-50" />
-                        </td>
-                        <td className="px-3 py-2">
-                          <input type="text" value="A-01-01" disabled className="w-24 px-2 py-1 border border-gray-300 rounded text-sm bg-gray-50" />
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <span className="text-sm font-semibold text-green-600">450 Bags</span>
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <input type="number" placeholder="0" min="0" max="450" className="w-24 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:ring-2 focus:ring-purple-500" />
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                            ✓ Available
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <button className="p-1 text-red-600 hover:bg-red-50 rounded">
-                            <X className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                {checkingAvailability ? (
+                  <div className="flex items-center gap-3">
+                    <RefreshCw className="w-5 h-5 animate-spin text-gray-500" />
+                    <span className="text-gray-600">Checking inventory...</span>
+                  </div>
+                ) : availabilityInfo ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-gray-500">Current Stock</p>
+                        <p className={`font-bold text-xl ${availabilityInfo.available ? 'text-green-600' : 'text-orange-600'}`}>
+                          {availabilityInfo.current_stock} {availabilityInfo.unit || ''}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500">After Approval</p>
+                        <p className="font-bold text-xl text-gray-900">
+                          {Math.max(0, availabilityInfo.current_stock - availabilityInfo.requested_quantity)} {availabilityInfo.unit || ''}
+                        </p>
+                      </div>
+                    </div>
+
+                    {availabilityInfo.available ? (
+                      <div className="flex items-center gap-2 text-green-700 bg-green-100 px-3 py-2 rounded-lg">
+                        <CheckCircle className="w-5 h-5" />
+                        <span className="font-medium">Sufficient stock available</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-orange-700 bg-orange-100 px-3 py-2 rounded-lg">
+                        <AlertTriangle className="w-5 h-5" />
+                        <span className="font-medium">
+                          Shortage of {availabilityInfo.shortage} units
+                        </span>
+                      </div>
+                    )}
+
+                    {availabilityInfo.material_code && (
+                      <p className="text-xs text-gray-500">
+                        Linked to: {availabilityInfo.material_code} - {availabilityInfo.material_name}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-red-700">
+                    <AlertCircle className="w-5 h-5" />
+                    <span>Material not found in inventory</span>
+                  </div>
+                )}
               </div>
 
-              {/* Vehicle & Driver Assignment */}
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Vehicle & Driver Details</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number</label>
-                    <input
-                      type="text"
-                      placeholder="e.g., KA-01-AB-1234"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
-                    <input
-                      type="text"
-                      placeholder="Driver name"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Driver Contact</label>
-                    <input
-                      type="tel"
-                      placeholder="Mobile number"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Transport Type</label>
-                    <select className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                      <option>Company Vehicle</option>
-                      <option>Third Party</option>
-                      <option>Courier</option>
-                    </select>
+              {/* Warning for insufficient stock */}
+              {availabilityInfo && !availabilityInfo.available && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <div className="flex gap-3">
+                    <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-yellow-800">Insufficient Stock Warning</h4>
+                      <p className="text-sm text-yellow-700 mt-1">
+                        Approving this request will result in negative stock or partial fulfillment.
+                        Consider rejecting or initiating procurement first.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
+            </div>
 
-              {/* Remarks */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Dispatch Remarks</label>
-                <textarea
-                  rows={3}
-                  placeholder="Any special instructions or notes..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                />
-              </div>
-
-              {/* Footer Actions */}
-              <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                <div className="text-sm text-gray-600">
-                  <p className="font-semibold">Total Items: <span className="text-purple-600">1</span></p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setShowCreateModal(false)}
-                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
-                    <Send className="w-4 h-4" />
-                    Create Dispatch
-                  </button>
-                </div>
-              </div>
+            <div className="p-6 border-t border-gray-200 flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowApprovalModal(false);
+                  setSelectedRequest(null);
+                }}
+                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleReject(selectedRequest.request_id!)}
+                disabled={dispatching === selectedRequest.request_id}
+                className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              >
+                Reject
+              </button>
+              <button
+                onClick={handleApprove}
+                disabled={dispatching === selectedRequest.request_id || checkingAvailability}
+                className={`inline-flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 ${
+                  availabilityInfo?.available
+                    ? 'bg-green-600 hover:bg-green-700 text-white'
+                    : 'bg-orange-600 hover:bg-orange-700 text-white'
+                }`}
+              >
+                {dispatching === selectedRequest.request_id ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCircle className="w-4 h-4" />
+                )}
+                {availabilityInfo?.available ? 'Approve & Allocate Stock' : 'Approve Anyway'}
+              </button>
             </div>
           </div>
         </div>

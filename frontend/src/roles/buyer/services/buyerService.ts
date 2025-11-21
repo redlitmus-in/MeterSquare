@@ -42,6 +42,11 @@ export interface Purchase {
   vendor_contact_person?: string | null;
   vendor_selection_pending_td_approval?: boolean;
   vendor_email_sent?: boolean;
+  has_store_requests?: boolean;
+  store_request_count?: number;
+  all_store_requests_approved?: boolean;
+  any_store_request_rejected?: boolean;
+  store_requests_pending?: boolean;
   overhead_analysis?: {
     original_allocated: number;
     overhead_percentage: number;
@@ -472,6 +477,84 @@ class BuyerService {
       throw new Error(error.response?.data?.error || error.response?.data?.message || 'Failed to upload files');
     }
   }
+
+  // Check store availability for a purchase
+  async checkStoreAvailability(crId: number): Promise<StoreAvailabilityResponse> {
+    try {
+      const response = await axios.get<StoreAvailabilityResponse>(
+        `${API_URL}/buyer/purchase/${crId}/check-store-availability`,
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to check store availability');
+    } catch (error: any) {
+      console.error('Error checking store availability:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to check store availability');
+    }
+  }
+
+  // Complete purchase from M2 Store
+  async completeFromStore(crId: number, notes?: string): Promise<CompleteFromStoreResponse> {
+    try {
+      const response = await axios.post<CompleteFromStoreResponse>(
+        `${API_URL}/buyer/purchase/${crId}/complete-from-store`,
+        { notes: notes || '' },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to complete from store');
+    } catch (error: any) {
+      console.error('Error completing from store:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response?.data?.error || 'Some materials are not available in store');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to complete from store');
+    }
+  }
+}
+
+export interface StoreAvailabilityMaterial {
+  material_name: string;
+  required_quantity: number;
+  available_quantity: number;
+  is_available: boolean;
+  inventory_material_id?: number;
+}
+
+export interface StoreAvailabilityResponse {
+  success: boolean;
+  cr_id: number;
+  all_available_in_store: boolean;
+  can_complete_from_store: boolean;
+  available_materials: StoreAvailabilityMaterial[];
+  unavailable_materials: StoreAvailabilityMaterial[];
+  error?: string;
+}
+
+export interface CompleteFromStoreResponse {
+  success: boolean;
+  message: string;
+  cr_id?: number;
+  requests_created?: number;
+  error?: string;
 }
 
 export const buyerService = new BuyerService();

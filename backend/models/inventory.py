@@ -85,6 +85,7 @@ class InternalMaterialRequest(db.Model):
     request_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     request_number = db.Column(db.Integer, nullable=True)  # Sequential request number (1, 2, 3...)
     project_id = db.Column(db.Integer, nullable=False)
+    cr_id = db.Column(db.Integer, nullable=True)  # Change Request ID
     request_buyer_id = db.Column(db.Integer, nullable=False)
     material_name = db.Column(db.Text, nullable=False)
     quantity = db.Column(db.Float, nullable=False)
@@ -116,6 +117,7 @@ class InternalMaterialRequest(db.Model):
             'request_id': self.request_id,
             'request_number': self.request_number,
             'project_id': self.project_id,
+            'cr_id': self.cr_id,
             'request_buyer_id': self.request_buyer_id,
             'material_name': self.material_name,
             'quantity': self.quantity,

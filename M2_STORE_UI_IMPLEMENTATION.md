@@ -643,7 +643,26 @@ ELSE IF M2 has 0% materials:
 
 ---
 
+## ⚠️ Production Manager M2 Store Features Status
+
+**Updated:** 2025-11-21
+
+### Currently Active:
+- ✅ **Materials Master** - Active and available for use
+
+### Temporarily Disabled for Production:
+The following features are commented out and will be enabled in future releases:
+- ⏸️ **Receive Stock (GRN)** - Temporarily disabled
+- ⏸️ **Dispatch Materials** - Temporarily disabled
+- ⏸️ **Stock Take** - Temporarily disabled
+- ⏸️ **Reports & Analytics** - Temporarily disabled
+
+**Note:** These features are fully implemented in the codebase but have been temporarily disabled in the navigation menu (`ModernSidebar.tsx`) for production deployment. They can be re-enabled by uncommenting the respective navigation items when ready for production use.
+
+---
+
 **Generated:** 2025-11-15
+**Last Updated:** 2025-11-21
 **Status:** UI Only - Backend Pending
 **Mock Data:** Yes
-**Production Ready:** No (needs backend integration)
+**Production Ready:** Partial (Materials Master only)

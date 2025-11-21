@@ -1,1058 +1,1184 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Filter, Package, AlertTriangle, CheckCircle, X, Save, Info } from 'lucide-react';
+import { Plus, Search, Filter, Package, AlertTriangle, CheckCircle, X, Save, Info, RefreshCw, Edit2, Trash2, Bell, ClipboardList, Check, XCircle } from 'lucide-react';
+import { inventoryService, InventoryMaterial, InternalMaterialRequest } from '../services/inventoryService';
+import { toast } from 'sonner';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { formatCurrency } from '@/utils/formatters';
+
+type ViewTab = 'materials' | 'requests';
 
 // Stock status types
 type StockStatus = 'healthy' | 'warning' | 'critical' | 'out-of-stock';
 
-interface Material {
-  id: string;
-  code: string;
-  name: string;
-  category: string;
-  unit: string;
-  currentStock: number;
-  reorderPoint: number;
-  maxStock: number;
-  unitPrice: number;
-  binLocation: string;
-  supplier?: string;
-  sku?: string;
-  description?: string;
-  status: StockStatus;
-  lastUpdated: string;
-}
-
-// Mock materials data
-const mockMaterials: Material[] = [
-  {
-    id: '1',
-    code: 'MAT-001',
-    name: 'Portland Cement (50kg)',
-    category: 'Cement',
-    unit: 'Bags',
-    currentStock: 450,
-    reorderPoint: 200,
-    maxStock: 1000,
-    unitPrice: 350,
-    binLocation: 'A-01-01',
-    supplier: 'UltraTech Cement Ltd.',
-    sku: 'UTC-OPC-50KG',
-    description: 'OPC Grade 53 cement for structural concrete works',
-    status: 'healthy',
-    lastUpdated: '2025-01-15'
-  },
-  {
-    id: '2',
-    code: 'MAT-002',
-    name: 'TMT Steel 12mm',
-    category: 'Steel',
-    unit: 'Tons',
-    currentStock: 8.5,
-    reorderPoint: 10,
-    maxStock: 50,
-    unitPrice: 65000,
-    binLocation: 'B-02-03',
-    supplier: 'Tata Steel',
-    sku: 'TS-TMT-12MM-FE500D',
-    description: 'Fe 500D grade TMT bars for RCC construction',
-    status: 'warning',
-    lastUpdated: '2025-01-14'
-  },
-  {
-    id: '3',
-    code: 'MAT-003',
-    name: 'Sand (M-Sand)',
-    category: 'Aggregates',
-    unit: 'CFT',
-    currentStock: 45,
-    reorderPoint: 100,
-    maxStock: 500,
-    unitPrice: 45,
-    binLocation: 'C-01-01',
-    status: 'critical',
-    lastUpdated: '2025-01-15'
-  },
-  {
-    id: '4',
-    code: 'MAT-004',
-    name: 'Paint - Asian Paints (White)',
-    category: 'Paint',
-    unit: 'Ltr',
-    currentStock: 0,
-    reorderPoint: 50,
-    maxStock: 200,
-    unitPrice: 450,
-    binLocation: 'D-03-02',
-    status: 'out-of-stock',
-    lastUpdated: '2025-01-10'
-  },
-  {
-    id: '5',
-    code: 'MAT-005',
-    name: 'Concrete Blocks (6")',
-    category: 'Blocks',
-    unit: 'Nos',
-    currentStock: 2500,
-    reorderPoint: 1000,
-    maxStock: 5000,
-    unitPrice: 35,
-    binLocation: 'E-01-01',
-    status: 'healthy',
-    lastUpdated: '2025-01-15'
-  },
-  {
-    id: '6',
-    code: 'MAT-006',
-    name: 'PVC Pipes 4"',
-    category: 'Plumbing',
-    unit: 'Mtr',
-    currentStock: 85,
-    reorderPoint: 100,
-    maxStock: 500,
-    unitPrice: 120,
-    binLocation: 'F-02-01',
-    status: 'warning',
-    lastUpdated: '2025-01-13'
-  }
-];
+// Helper function to determine stock status
+const getStockStatus = (current: number, min: number): StockStatus => {
+  if (current === 0) return 'out-of-stock';
+  if (current <= min * 0.5) return 'critical';
+  if (current <= min) return 'warning';
+  return 'healthy';
+};
 
 const MaterialsManagement: React.FC = () => {
-  const [materials, setMaterials] = useState<Material[]>(mockMaterials);
+  const [materials, setMaterials] = useState<InventoryMaterial[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StockStatus | 'all'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'low_stock'>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [selectedMaterial, setSelectedMaterial] = useState<Material | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedMaterial, setSelectedMaterial] = useState<InventoryMaterial | null>(null);
+  const [categories, setCategories] = useState<string[]>([]);
+
+  // Request management state
+  const [activeTab, setActiveTab] = useState<ViewTab>('materials');
+  const [requests, setRequests] = useState<InternalMaterialRequest[]>([]);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<InternalMaterialRequest | null>(null);
+  const [remarks, setRemarks] = useState('');
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // Info banner state
-  const [showInfoBanner, setShowInfoBanner] = useState(false);
-
-  // Form state for adding new material
-  const [newMaterial, setNewMaterial] = useState({
-    code: '',
-    name: '',
+  // Form state for adding/editing material
+  const [formData, setFormData] = useState({
+    material_name: '',
+    brand: '',
+    size: '',
     category: '',
     unit: '',
-    currentStock: 0,
-    reorderPoint: 0,
-    maxStock: 0,
-    unitPrice: 0,
-    binLocation: '',
-    supplier: '',
-    sku: '',
-    description: ''
+    current_stock: 0,
+    min_stock_level: 0,
+    unit_price: 0,
+    description: '',
+    is_active: true
   });
 
-  // Open material details modal
-  const handleViewDetails = (material: Material) => {
-    setSelectedMaterial(material);
-    setShowDetailsModal(true);
+  // Fetch materials on component mount
+  useEffect(() => {
+    fetchMaterials();
+    fetchPendingRequests();
+  }, [statusFilter, categoryFilter]);
+
+  // Fetch requests when tab changes
+  useEffect(() => {
+    if (activeTab === 'requests') {
+      fetchRequests();
+    }
+  }, [activeTab]);
+
+  // Fetch pending requests count for notification badge
+  const fetchPendingRequests = async () => {
+    try {
+      const response = await inventoryService.getSentInternalRequests();
+      // Handle both array response and {requests: []} response format
+      const allRequests = Array.isArray(response) ? response : (response?.requests || []);
+      const pending = allRequests.filter((r: InternalMaterialRequest) =>
+        r.status === 'PENDING' || r.status === 'send_request' || r.status === 'pending'
+      );
+      setPendingRequestsCount(pending.length);
+    } catch (error) {
+      console.error('Error fetching pending requests count:', error);
+    }
+  };
+
+  // Fetch all sent requests (for requests tab)
+  const fetchRequests = async () => {
+    setRequestsLoading(true);
+    try {
+      const response = await inventoryService.getSentInternalRequests();
+      // Handle both array response and {requests: []} response format
+      const requestsArray = Array.isArray(response) ? response : (response?.requests || []);
+      setRequests(requestsArray);
+      const pending = requestsArray.filter((r: InternalMaterialRequest) =>
+        r.status === 'PENDING' || r.status === 'send_request' || r.status === 'pending'
+      );
+      setPendingRequestsCount(pending.length);
+    } catch (error) {
+      console.error('Error fetching requests:', error);
+      setRequests([]);
+    } finally {
+      setRequestsLoading(false);
+    }
+  };
+
+  // Fetch all materials
+  const fetchMaterials = async () => {
+    setLoading(true);
+    try {
+      const params: any = {};
+      if (categoryFilter !== 'all') params.category = categoryFilter;
+      if (statusFilter === 'low_stock') params.low_stock = true;
+
+      const materials = await inventoryService.getAllInventoryItems();
+      setMaterials(materials);
+
+      // Extract unique categories
+      const uniqueCategories = [...new Set(materials
+        .map(m => m.category)
+        .filter(Boolean))] as string[];
+      setCategories(uniqueCategories);
+
+    } catch (error) {
+      console.error('Error fetching materials:', error);
+      toast.error('Failed to fetch materials');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Handle form input changes
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setNewMaterial(prev => ({
+    const { name, value, type } = e.target;
+    setFormData(prev => ({
       ...prev,
-      [name]: name === 'code' || name === 'name' || name === 'category' || name === 'unit' || name === 'binLocation' || name === 'supplier' || name === 'sku' || name === 'description'
-        ? value
-        : parseFloat(value) || 0
+      [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked :
+              ['current_stock', 'min_stock_level', 'unit_price'].includes(name) ?
+              parseFloat(value) || 0 : value
     }));
   };
 
-  // Handle form submission
-  const handleAddMaterial = (e: React.FormEvent) => {
+  // Handle form submission for creating material
+  const handleCreateMaterial = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Calculate stock status
-    let status: StockStatus;
-    if (newMaterial.currentStock === 0) {
-      status = 'out-of-stock';
-    } else if (newMaterial.currentStock <= newMaterial.reorderPoint * 0.5) {
-      status = 'critical';
-    } else if (newMaterial.currentStock <= newMaterial.reorderPoint) {
-      status = 'warning';
-    } else {
-      status = 'healthy';
+    try {
+      const material = await inventoryService.createInventoryItem(formData);
+      toast.success(`Material ${material.material_code} created successfully`);
+      setShowCreateModal(false);
+      resetForm();
+      fetchMaterials();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create material');
+    }
+  };
+
+  // Handle updating material
+  const handleUpdateMaterial = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!selectedMaterial?.inventory_material_id) return;
+
+    try {
+      const updated = await inventoryService.updateInventoryItem(
+        selectedMaterial.inventory_material_id,
+        formData
+      );
+      toast.success(`Material ${updated.material_code} updated successfully`);
+      setShowEditModal(false);
+      resetForm();
+      fetchMaterials();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update material');
+    }
+  };
+
+  // Handle deleting material
+  const handleDeleteMaterial = async (material: InventoryMaterial) => {
+    if (!material.inventory_material_id) return;
+
+    if (!confirm(`Are you sure you want to delete ${material.material_name}?`)) {
+      return;
     }
 
-    // Create new material object
-    const materialToAdd: Material = {
-      id: `${materials.length + 1}`,
-      code: newMaterial.code,
-      name: newMaterial.name,
-      category: newMaterial.category,
-      unit: newMaterial.unit,
-      currentStock: newMaterial.currentStock,
-      reorderPoint: newMaterial.reorderPoint,
-      maxStock: newMaterial.maxStock,
-      unitPrice: newMaterial.unitPrice,
-      binLocation: newMaterial.binLocation,
-      supplier: newMaterial.supplier || undefined,
-      sku: newMaterial.sku || undefined,
-      description: newMaterial.description || undefined,
-      status,
-      lastUpdated: new Date().toISOString().split('T')[0]
-    };
+    try {
+      await inventoryService.deleteInventoryItem(material.inventory_material_id);
+      toast.success('Material deleted successfully');
+      fetchMaterials();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete material');
+    }
+  };
 
-    // Add material to the list
-    setMaterials(prev => [...prev, materialToAdd]);
+  // Open edit modal with material data
+  const handleEditClick = (material: InventoryMaterial) => {
+    setSelectedMaterial(material);
+    setFormData({
+      material_name: material.material_name,
+      brand: material.brand || '',
+      size: material.size || '',
+      category: material.category || '',
+      unit: material.unit,
+      current_stock: material.current_stock,
+      min_stock_level: material.min_stock_level || 0,
+      unit_price: material.unit_price,
+      description: material.description || '',
+      is_active: material.is_active !== false
+    });
+    setShowEditModal(true);
+  };
 
-    // Reset form
-    setNewMaterial({
-      code: '',
-      name: '',
+  // Reset form
+  const resetForm = () => {
+    setFormData({
+      material_name: '',
+      brand: '',
+      size: '',
       category: '',
       unit: '',
-      currentStock: 0,
-      reorderPoint: 0,
-      maxStock: 0,
-      unitPrice: 0,
-      binLocation: '',
-      supplier: '',
-      sku: '',
-      description: ''
+      current_stock: 0,
+      min_stock_level: 0,
+      unit_price: 0,
+      description: '',
+      is_active: true
     });
-
-    // Close modal
-    setShowCreateModal(false);
+    setSelectedMaterial(null);
   };
 
-  // Get stock status badge
-  const getStatusBadge = (status: StockStatus) => {
-    const badges = {
-      'healthy': {
-        icon: CheckCircle,
-        text: 'In Stock',
-        bgClass: 'bg-green-50',
-        textClass: 'text-green-700',
-        iconClass: 'text-green-600',
-        borderClass: 'border-green-200'
-      },
-      'warning': {
-        icon: AlertTriangle,
-        text: 'Low Stock',
-        bgClass: 'bg-yellow-50',
-        textClass: 'text-yellow-700',
-        iconClass: 'text-yellow-600',
-        borderClass: 'border-yellow-200'
-      },
-      'critical': {
-        icon: AlertTriangle,
-        text: 'Critical',
-        bgClass: 'bg-red-50',
-        textClass: 'text-red-700',
-        iconClass: 'text-red-600',
-        borderClass: 'border-red-200'
-      },
-      'out-of-stock': {
-        icon: Package,
-        text: 'Out of Stock',
-        bgClass: 'bg-gray-50',
-        textClass: 'text-gray-700',
-        iconClass: 'text-gray-600',
-        borderClass: 'border-gray-200'
-      }
-    };
+  // Handle approve request
+  const handleApproveRequest = async () => {
+    if (!selectedRequest?.request_id) return;
 
-    const badge = badges[status];
-    const Icon = badge.icon;
+    if (!remarks.trim()) {
+      toast.error('Please provide remarks for approval');
+      return;
+    }
 
-    return (
-      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium border ${badge.bgClass} ${badge.textClass} ${badge.borderClass}`}>
-        <Icon className={`w-3 h-3 ${badge.iconClass}`} />
-        {badge.text}
-      </span>
-    );
+    try {
+      await inventoryService.approveInternalRequest(selectedRequest.request_id, { remarks });
+      toast.success('Request approved successfully');
+      setShowApproveModal(false);
+      setSelectedRequest(null);
+      setRemarks('');
+      fetchRequests();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to approve request');
+    }
   };
 
-  // Filter materials
+  // Handle reject request
+  const handleRejectRequest = async () => {
+    if (!selectedRequest?.request_id) return;
+
+    if (!remarks.trim()) {
+      toast.error('Please provide a reason for rejection');
+      return;
+    }
+
+    try {
+      await inventoryService.rejectInternalRequest(selectedRequest.request_id, remarks);
+      toast.success('Request rejected');
+      setShowRejectModal(false);
+      setSelectedRequest(null);
+      setRemarks('');
+      fetchRequests();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to reject request');
+    }
+  };
+
+  // Get request status badge color
+  const getRequestStatusColor = (status: string) => {
+    switch(status) {
+      case 'PENDING':
+      case 'pending':
+      case 'send_request': return 'bg-yellow-100 text-yellow-800';
+      case 'APPROVED':
+      case 'approved': return 'bg-green-100 text-green-800';
+      case 'REJECTED':
+      case 'rejected': return 'bg-red-100 text-red-800';
+      case 'DISPATCHED': return 'bg-blue-100 text-blue-800';
+      case 'FULFILLED': return 'bg-purple-100 text-purple-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  // Format status for display
+  const formatStatus = (status: string) => {
+    switch(status) {
+      case 'send_request':
+      case 'pending': return 'PENDING';
+      case 'approved': return 'APPROVED';
+      case 'rejected': return 'REJECTED';
+      default: return status || 'PENDING';
+    }
+  };
+
+  // Filter materials based on search
   const filteredMaterials = materials.filter(material => {
-    const matchesSearch =
-      material.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      material.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      material.category.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = searchTerm === '' ||
+      material.material_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      material.material_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      material.brand?.toLowerCase().includes(searchTerm.toLowerCase());
 
-    const matchesStatus = statusFilter === 'all' || material.status === statusFilter;
-
-    return matchesSearch && matchesStatus;
+    return matchesSearch;
   });
 
-  // Pagination logic
+  // Pagination
   const totalPages = Math.ceil(filteredMaterials.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const paginatedMaterials = filteredMaterials.slice(startIndex, endIndex);
+  const paginatedMaterials = filteredMaterials.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter]);
+  // Get status badge color
+  const getStatusColor = (material: InventoryMaterial) => {
+    const status = getStockStatus(material.current_stock, material.min_stock_level || 0);
+    switch(status) {
+      case 'healthy': return 'bg-green-100 text-green-800';
+      case 'warning': return 'bg-yellow-100 text-yellow-800';
+      case 'critical': return 'bg-orange-100 text-orange-800';
+      case 'out-of-stock': return 'bg-red-100 text-red-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
 
-  // Get status counts
-  const statusCounts = {
-    all: materials.length,
-    healthy: materials.filter(m => m.status === 'healthy').length,
-    warning: materials.filter(m => m.status === 'warning').length,
-    critical: materials.filter(m => m.status === 'critical').length,
-    'out-of-stock': materials.filter(m => m.status === 'out-of-stock').length
+  // Get status text
+  const getStatusText = (material: InventoryMaterial) => {
+    const status = getStockStatus(material.current_stock, material.min_stock_level || 0);
+    switch(status) {
+      case 'healthy': return 'Healthy';
+      case 'warning': return 'Low Stock';
+      case 'critical': return 'Critical';
+      case 'out-of-stock': return 'Out of Stock';
+      default: return 'Unknown';
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="p-6">
       {/* Header */}
-      <div className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Materials Master</h1>
-              <p className="mt-0.5 text-xs text-gray-500">
-                Manage material catalog and monitor stock levels
-              </p>
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-gray-900">Materials Master</h1>
+        <p className="text-gray-600 mt-2">Manage your inventory materials and stock levels</p>
+      </div>
+
+      {/* Tab Switcher */}
+      <div className="mb-6 bg-white rounded-lg shadow-sm p-1 inline-flex">
+        <button
+          onClick={() => setActiveTab('materials')}
+          className={`px-4 py-2 rounded-md flex items-center gap-2 transition-colors ${
+            activeTab === 'materials'
+              ? 'bg-blue-600 text-white'
+              : 'text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          <Package className="h-4 w-4" />
+          Materials
+        </button>
+        <button
+          onClick={() => setActiveTab('requests')}
+          className={`px-4 py-2 rounded-md flex items-center gap-2 transition-colors relative ${
+            activeTab === 'requests'
+              ? 'bg-blue-600 text-white'
+              : 'text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          <ClipboardList className="h-4 w-4" />
+          Procurement Requests
+          {pendingRequestsCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center animate-pulse">
+              {pendingRequestsCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === 'materials' && (
+        <>
+      {/* Filters and Search */}
+      <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
+        <div className="flex flex-col lg:flex-row gap-4">
+          <div className="flex-1">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by material name, code, or brand..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
             </div>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              Add Material
-            </button>
           </div>
+
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All Categories</option>
+            {categories.map(cat => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as any)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All Status</option>
+            <option value="low_stock">Low Stock Only</option>
+          </select>
+
+          <button
+            onClick={fetchMaterials}
+            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </button>
+
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Add Material
+          </button>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        {/* Collapsible Info Banner */}
-        {showInfoBanner && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-            <div className="flex items-start gap-3">
-              <Info className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
-                <h4 className="text-xs font-semibold text-blue-900 mb-1">Stock Control System</h4>
-                <p className="text-xs text-blue-800 leading-relaxed">
-                  <strong>Stock quantities cannot be edited directly.</strong> Stock increases through <strong>Receive Stock (GRN)</strong> when materials arrive,
-                  and decreases through <strong>Dispatch</strong> when issued to projects. Use <strong>Stock Take</strong> for physical vs system reconciliation.
-                  Material details (price, location, reorder points) can be updated via Details button.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowInfoBanner(false)}
-                className="text-blue-600 hover:text-blue-800"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* Materials Table */}
+      <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="flex justify-center items-center h-64">
+            <ModernLoadingSpinners size="lg" />
           </div>
-        )}
-
-        {/* Search and Filters */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 mb-4">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowInfoBanner(!showInfoBanner)}
-              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="Stock Control Information"
-            >
-              <Info className="w-4 h-4" />
-            </button>
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by name, code, or category..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-              />
-            </div>
-            <button className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-              <Filter className="w-4 h-4 text-gray-600" />
-              More Filters
-            </button>
-          </div>
-        </div>
-
-        {/* Materials Table - Compact Design with Grid Lines */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-            <table className="min-w-full border-collapse">
-              <thead className="sticky top-0 z-10">
-                <tr className="bg-blue-50 border-b border-blue-200">
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-blue-900 uppercase tracking-wider border-r border-blue-100">Code</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-blue-900 uppercase tracking-wider border-r border-blue-100">Material Name</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-blue-900 uppercase tracking-wider border-r border-blue-100">Category</th>
-                  <th className="px-3 py-2.5 text-right text-xs font-semibold text-blue-900 uppercase tracking-wider border-r border-blue-100">Current Stock</th>
-                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-blue-900 uppercase tracking-wider border-r border-blue-100">Status</th>
-                  <th className="px-3 py-2.5 text-right text-xs font-semibold text-blue-900 uppercase tracking-wider border-r border-blue-100">Unit Price</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-blue-900 uppercase tracking-wider border-r border-blue-100">Location</th>
-                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-blue-900 uppercase tracking-wider">Action</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white">
-                {paginatedMaterials.map((material) => (
-                    <tr key={material.id} className="hover:bg-gray-50 transition-colors border-b border-gray-200">
-                      <td className="px-3 py-2 whitespace-nowrap border-r border-gray-200">
-                        <span className="text-xs font-semibold text-gray-900">{material.code}</span>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Material Code
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Name
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Category
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Stock
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Unit Price
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {paginatedMaterials.map((material) => (
+                    <tr key={material.inventory_material_id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {material.material_code}
                       </td>
-                      <td className="px-3 py-2 border-r border-gray-200">
-                        <div className="text-xs font-medium text-gray-900">{material.name}</div>
-                        <div className="text-xs text-gray-500">Unit: {material.unit}</div>
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap border-r border-gray-200">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
-                          {material.category}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap text-right border-r border-gray-200">
-                        <div className="text-xs font-bold text-gray-900">
-                          {material.currentStock} {material.unit}
-                        </div>
-                        <div className="text-xs text-gray-400">
-                          Min: {material.reorderPoint} | Max: {material.maxStock}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <div>
+                          <div className="font-medium">{material.material_name}</div>
+                          {material.brand && (
+                            <div className="text-gray-500 text-xs">{material.brand}</div>
+                          )}
                         </div>
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap text-center border-r border-gray-200">
-                        {getStatusBadge(material.status)}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {material.category || '-'}
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap text-right border-r border-gray-200">
-                        <span className="text-xs font-semibold text-gray-900">
-                          ₹{material.unitPrice.toLocaleString()}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <div>
+                          <div className="font-medium">{material.current_stock} {material.unit}</div>
+                          <div className="text-gray-500 text-xs">
+                            Min: {material.min_stock_level || 0}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {formatCurrency(material.unit_price)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(material)}`}>
+                          {getStatusText(material)}
                         </span>
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap border-r border-gray-200">
-                        <span className="text-xs font-medium text-gray-700 bg-gray-50 px-2 py-0.5 rounded border border-gray-200">
-                          {material.binLocation}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap text-center">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <button
-                          onClick={() => handleViewDetails(material)}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 rounded transition-colors border border-teal-200"
-                          title="View material details"
+                          onClick={() => handleEditClick(material)}
+                          className="text-indigo-600 hover:text-indigo-900 mr-3"
                         >
-                          <Package className="w-3 h-3" />
-                          Details
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMaterial(material)}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </td>
                     </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Empty State */}
-          {filteredMaterials.length === 0 && (
-            <div className="text-center py-8">
-              <Package className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-              <h3 className="text-sm font-medium text-gray-900 mb-1">No materials found</h3>
-              <p className="text-xs text-gray-500">
-                {searchTerm || statusFilter !== 'all'
-                  ? 'Try adjusting your search or filters'
-                  : 'Get started by adding your first material'}
-              </p>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
-        </div>
 
-        {/* Pagination Controls */}
-        {filteredMaterials.length > 0 && (
-          <div className="bg-white border-t border-gray-200 px-4 py-3 flex items-center justify-between rounded-b-lg">
-            <div className="flex-1 flex justify-between sm:hidden">
-              <button
-                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="relative inline-flex items-center px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                className="ml-3 relative inline-flex items-center px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Next
-              </button>
-            </div>
-            <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs text-gray-700">
-                  Showing <span className="font-medium">{startIndex + 1}</span> to{' '}
-                  <span className="font-medium">{Math.min(endIndex, filteredMaterials.length)}</span> of{' '}
-                  <span className="font-medium">{filteredMaterials.length}</span> materials
-                </p>
-              </div>
-              <div>
-                <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+                <div className="flex-1 flex justify-between sm:hidden">
                   <button
                     onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                     disabled={currentPage === 1}
-                    className="relative inline-flex items-center px-2 py-1.5 rounded-l-md border border-gray-300 bg-white text-xs font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                   >
-                    <span className="sr-only">Previous</span>
-                    <svg className="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                      <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
+                    Previous
                   </button>
-
-                  {/* Page numbers */}
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
-                    // Show first page, last page, current page, and pages around current
-                    if (
-                      page === 1 ||
-                      page === totalPages ||
-                      (page >= currentPage - 1 && page <= currentPage + 1)
-                    ) {
-                      return (
-                        <button
-                          key={page}
-                          onClick={() => setCurrentPage(page)}
-                          className={`relative inline-flex items-center px-3 py-1.5 border text-xs font-medium ${
-                            currentPage === page
-                              ? 'z-10 bg-teal-50 border-teal-500 text-teal-600'
-                              : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
-                          }`}
-                        >
-                          {page}
-                        </button>
-                      );
-                    } else if (page === currentPage - 2 || page === currentPage + 2) {
-                      return (
-                        <span
-                          key={page}
-                          className="relative inline-flex items-center px-3 py-1.5 border border-gray-300 bg-white text-xs font-medium text-gray-700"
-                        >
-                          ...
-                        </span>
-                      );
-                    }
-                    return null;
-                  })}
-
                   <button
                     onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                     disabled={currentPage === totalPages}
-                    className="relative inline-flex items-center px-2 py-1.5 rounded-r-md border border-gray-300 bg-white text-xs font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                   >
-                    <span className="sr-only">Next</span>
-                    <svg className="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                      <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                    </svg>
+                    Next
                   </button>
-                </nav>
+                </div>
+                <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm text-gray-700">
+                      Showing{' '}
+                      <span className="font-medium">{(currentPage - 1) * itemsPerPage + 1}</span>
+                      {' '}to{' '}
+                      <span className="font-medium">
+                        {Math.min(currentPage * itemsPerPage, filteredMaterials.length)}
+                      </span>
+                      {' '}of{' '}
+                      <span className="font-medium">{filteredMaterials.length}</span>
+                      {' '}results
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`px-3 py-1 rounded ${
+                          currentPage === page
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            )}
+          </>
         )}
       </div>
+        </>
+      )}
+
+      {/* Requests Tab */}
+      {activeTab === 'requests' && (
+        <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+          <div className="p-4 border-b flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-gray-900">Procurement Requests</h2>
+            <button
+              onClick={fetchRequests}
+              className="px-3 py-1 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Refresh
+            </button>
+          </div>
+
+          {requestsLoading ? (
+            <div className="flex justify-center items-center h-64">
+              <ModernLoadingSpinners size="lg" />
+            </div>
+          ) : !Array.isArray(requests) || requests.length === 0 ? (
+            <div className="text-center py-12">
+              <ClipboardList className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-500">No procurement requests found</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Request #</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Material</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {Array.isArray(requests) && requests.map((request) => (
+                    <tr key={request.request_id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        #{request.request_number || request.request_id}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <div>
+                          <div className="font-medium">{request.material_name}</div>
+                          {request.brand && <div className="text-gray-500 text-xs">{request.brand}</div>}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {request.quantity}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        Project #{request.project_id}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getRequestStatusColor(request.status || 'PENDING')}`}>
+                          {formatStatus(request.status || 'PENDING')}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {request.created_at ? new Date(request.created_at).toLocaleDateString() : '-'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        {(request.status === 'PENDING' || request.status === 'send_request' || request.status === 'pending') && (
+                          <div className="flex gap-3">
+                            <button
+                              onClick={() => {
+                                setSelectedRequest(request);
+                                setRemarks('');
+                                setShowApproveModal(true);
+                              }}
+                              className="p-2 bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-900 rounded-lg transition-colors flex items-center gap-1"
+                              title="Approve"
+                            >
+                              <Check className="h-6 w-6" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedRequest(request);
+                                setRemarks('');
+                                setShowRejectModal(true);
+                              }}
+                              className="p-2 bg-red-100 text-red-600 hover:bg-red-200 hover:text-red-900 rounded-lg transition-colors flex items-center gap-1"
+                              title="Reject"
+                            >
+                              <XCircle className="h-6 w-6" />
+                            </button>
+                          </div>
+                        )}
+                        {request.status === 'REJECTED' && request.rejection_reason && (
+                          <span className="text-xs text-red-600">Reason: {request.rejection_reason}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Create Material Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-gray-900">Add New Material</h2>
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  <X className="w-5 h-5 text-gray-500" />
-                </button>
-              </div>
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
+          <div className="relative mx-auto p-5 border w-96 shadow-lg rounded-md bg-white max-h-[85vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-900">Add New Material</h3>
+              <button
+                onClick={() => {
+                  setShowCreateModal(false);
+                  resetForm();
+                }}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-6">
-              <form onSubmit={handleAddMaterial} className="space-y-6">
-                {/* Basic Information */}
+            <form onSubmit={handleCreateMaterial}>
+              <div className="space-y-4">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Basic Information</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Material Code <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="code"
-                        value={newMaterial.code}
-                        onChange={handleInputChange}
-                        required
-                        placeholder="e.g., MAT-007"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Material Name <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="name"
-                        value={newMaterial.name}
-                        onChange={handleInputChange}
-                        required
-                        placeholder="e.g., Portland Cement"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Category <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        name="category"
-                        value={newMaterial.category}
-                        onChange={handleInputChange}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      >
-                        <option value="">Select Category</option>
-                        <option value="Cement">Cement</option>
-                        <option value="Steel">Steel</option>
-                        <option value="Aggregates">Aggregates</option>
-                        <option value="Paint">Paint</option>
-                        <option value="Blocks">Blocks</option>
-                        <option value="Plumbing">Plumbing</option>
-                        <option value="Electrical">Electrical</option>
-                        <option value="Adhesives">Adhesives</option>
-                        <option value="Hardware">Hardware</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Unit of Measurement <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        name="unit"
-                        value={newMaterial.unit}
-                        onChange={handleInputChange}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      >
-                        <option value="">Select Unit</option>
-                        <option value="Bags">Bags</option>
-                        <option value="Tons">Tons</option>
-                        <option value="Kg">Kg</option>
-                        <option value="CFT">CFT (Cubic Feet)</option>
-                        <option value="Ltr">Ltr (Liters)</option>
-                        <option value="Nos">Nos (Numbers)</option>
-                        <option value="Mtr">Mtr (Meters)</option>
-                        <option value="Sqft">Sqft (Square Feet)</option>
-                        <option value="Box">Box</option>
-                        <option value="Pcs">Pcs (Pieces)</option>
-                      </select>
-                    </div>
-                  </div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Material Name *
+                  </label>
+                  <input
+                    type="text"
+                    name="material_name"
+                    value={formData.material_name}
+                    onChange={handleInputChange}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
                 </div>
 
-                {/* Stock Information */}
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Stock Information</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Current Stock <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        name="currentStock"
-                        value={newMaterial.currentStock}
-                        onChange={handleInputChange}
-                        required
-                        min="0"
-                        step="0.01"
-                        placeholder="0"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Reorder Point <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        name="reorderPoint"
-                        value={newMaterial.reorderPoint}
-                        onChange={handleInputChange}
-                        required
-                        min="0"
-                        step="0.01"
-                        placeholder="Minimum stock level"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">Alert when stock reaches this level</p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Max Stock <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        name="maxStock"
-                        value={newMaterial.maxStock}
-                        onChange={handleInputChange}
-                        required
-                        min="0"
-                        step="0.01"
-                        placeholder="Maximum capacity"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Pricing & Location */}
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Pricing & Location</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Unit Price (₹) <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        name="unitPrice"
-                        value={newMaterial.unitPrice}
-                        onChange={handleInputChange}
-                        required
-                        min="0"
-                        step="0.01"
-                        placeholder="0.00"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Bin Location <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="binLocation"
-                        value={newMaterial.binLocation}
-                        onChange={handleInputChange}
-                        required
-                        placeholder="e.g., A-01-01"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">Warehouse location identifier</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Additional Details */}
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Additional Details</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Supplier/Vendor
-                      </label>
-                      <input
-                        type="text"
-                        name="supplier"
-                        value={newMaterial.supplier}
-                        onChange={handleInputChange}
-                        placeholder="Primary supplier name"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        SKU / Item Code
-                      </label>
-                      <input
-                        type="text"
-                        name="sku"
-                        value={newMaterial.sku}
-                        onChange={handleInputChange}
-                        placeholder="Supplier SKU"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Description
+                      Brand
                     </label>
-                    <textarea
-                      name="description"
-                      value={newMaterial.description}
+                    <input
+                      type="text"
+                      name="brand"
+                      value={formData.brand}
                       onChange={handleInputChange}
-                      rows={3}
-                      placeholder="Additional notes or specifications..."
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Size
+                    </label>
+                    <input
+                      type="text"
+                      name="size"
+                      value={formData.size}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
                 </div>
-              </form>
-            </div>
 
-            {/* Modal Footer */}
-            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4">
-              <div className="flex items-center justify-end gap-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Category
+                    </label>
+                    <input
+                      type="text"
+                      name="category"
+                      value={formData.category}
+                      onChange={handleInputChange}
+                      placeholder="e.g., Cement, Steel"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Unit *
+                    </label>
+                    <input
+                      type="text"
+                      name="unit"
+                      value={formData.unit}
+                      onChange={handleInputChange}
+                      required
+                      placeholder="e.g., Bags, Tons, CFT"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Current Stock
+                    </label>
+                    <input
+                      type="number"
+                      name="current_stock"
+                      value={formData.current_stock}
+                      onChange={handleInputChange}
+                      min="0"
+                      step="0.01"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Min Stock Level
+                    </label>
+                    <input
+                      type="number"
+                      name="min_stock_level"
+                      value={formData.min_stock_level}
+                      onChange={handleInputChange}
+                      min="0"
+                      step="0.01"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Unit Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    name="unit_price"
+                    value={formData.unit_price}
+                    onChange={handleInputChange}
+                    min="0"
+                    step="0.01"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    name="description"
+                    value={formData.description}
+                    onChange={handleInputChange}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    name="is_active"
+                    checked={formData.is_active}
+                    onChange={handleInputChange}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label className="ml-2 block text-sm text-gray-900">
+                    Active
+                  </label>
+                </div>
+              </div>
+
+              <div className="mt-6 flex gap-3 justify-end">
                 <button
                   type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    resetForm();
+                  }}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center gap-2"
                 >
-                  <Save className="w-4 h-4" />
-                  Add Material
+                  <Save className="h-4 w-4" />
+                  Create Material
                 </button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Material Modal */}
+      {showEditModal && selectedMaterial && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-900">
+                Edit Material - {selectedMaterial.material_code}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  resetForm();
+                }}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateMaterial}>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Material Name *
+                  </label>
+                  <input
+                    type="text"
+                    name="material_name"
+                    value={formData.material_name}
+                    onChange={handleInputChange}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Brand
+                    </label>
+                    <input
+                      type="text"
+                      name="brand"
+                      value={formData.brand}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Size
+                    </label>
+                    <input
+                      type="text"
+                      name="size"
+                      value={formData.size}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Category
+                    </label>
+                    <input
+                      type="text"
+                      name="category"
+                      value={formData.category}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Unit *
+                    </label>
+                    <input
+                      type="text"
+                      name="unit"
+                      value={formData.unit}
+                      onChange={handleInputChange}
+                      required
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Current Stock
+                    </label>
+                    <input
+                      type="number"
+                      name="current_stock"
+                      value={formData.current_stock}
+                      onChange={handleInputChange}
+                      min="0"
+                      step="0.01"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Min Stock Level
+                    </label>
+                    <input
+                      type="number"
+                      name="min_stock_level"
+                      value={formData.min_stock_level}
+                      onChange={handleInputChange}
+                      min="0"
+                      step="0.01"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Unit Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    name="unit_price"
+                    value={formData.unit_price}
+                    onChange={handleInputChange}
+                    min="0"
+                    step="0.01"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    name="description"
+                    value={formData.description}
+                    onChange={handleInputChange}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    name="is_active"
+                    checked={formData.is_active}
+                    onChange={handleInputChange}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label className="ml-2 block text-sm text-gray-900">
+                    Active
+                  </label>
+                </div>
+              </div>
+
+              <div className="mt-6 flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    resetForm();
+                  }}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center gap-2"
+                >
+                  <Save className="h-4 w-4" />
+                  Update Material
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Approve Request Modal */}
+      {showApproveModal && selectedRequest && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
+          <div className="relative mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-900">Approve Request</h3>
+              <button
+                onClick={() => {
+                  setShowApproveModal(false);
+                  setSelectedRequest(null);
+                  setRemarks('');
+                }}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+              <p className="text-sm text-gray-600">Material: <span className="font-medium text-gray-900">{selectedRequest.material_name}</span></p>
+              <p className="text-sm text-gray-600">Quantity: <span className="font-medium text-gray-900">{selectedRequest.quantity}</span></p>
+              <p className="text-sm text-gray-600">Project: <span className="font-medium text-gray-900">#{selectedRequest.project_id}</span></p>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Remarks *
+              </label>
+              <textarea
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                rows={3}
+                placeholder="Please provide remarks for approval..."
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-green-500 focus:border-green-500"
+              />
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowApproveModal(false);
+                  setSelectedRequest(null);
+                  setRemarks('');
+                }}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApproveRequest}
+                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-2"
+              >
+                <Check className="h-4 w-4" />
+                Approve
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Material Details Modal */}
-      {showDetailsModal && selectedMaterial && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Material Details</h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    View and edit material master data (stock quantities are managed via GRN/Dispatch)
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    setShowDetailsModal(false);
-                    setSelectedMaterial(null);
-                  }}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  <X className="w-5 h-5 text-gray-500" />
-                </button>
-              </div>
+      {/* Reject Request Modal */}
+      {showRejectModal && selectedRequest && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
+          <div className="relative mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-900">Reject Request</h3>
+              <button
+                onClick={() => {
+                  setShowRejectModal(false);
+                  setSelectedRequest(null);
+                  setRemarks('');
+                }}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-6">
-              <form className="space-y-6">
-                {/* Read-Only Information */}
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Material Information (Read-Only)</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">Material Code</label>
-                      <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-semibold text-gray-900">
-                        {selectedMaterial.code}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">Material Name</label>
-                      <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-900">
-                        {selectedMaterial.name}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">Category</label>
-                      <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
-                          {selectedMaterial.category}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">Unit of Measurement</label>
-                      <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-900">
-                        {selectedMaterial.unit}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">Current Stock</label>
-                      <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-900">
-                        {selectedMaterial.currentStock} {selectedMaterial.unit}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">Stock Status</label>
-                      <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg">
-                        {getStatusBadge(selectedMaterial.status)}
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2">
-                    <strong>Note:</strong> Stock quantities cannot be edited here. Use <strong>Receive Stock</strong> to increase stock or <strong>Dispatch</strong> to decrease.
-                  </p>
-                </div>
-
-                {/* Editable Stock Parameters */}
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Stock Parameters (Editable)</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Reorder Point <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min="0"
-                        step="0.01"
-                        defaultValue={selectedMaterial.reorderPoint}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">Alert when stock reaches this level</p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Max Stock <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min="0"
-                        step="0.01"
-                        defaultValue={selectedMaterial.maxStock}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">Maximum storage capacity</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Editable Pricing & Location */}
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Pricing & Location (Editable)</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Unit Price (₹) <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min="0"
-                        step="0.01"
-                        defaultValue={selectedMaterial.unitPrice}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Bin Location <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        defaultValue={selectedMaterial.binLocation}
-                        placeholder="e.g., A-01-01"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">Warehouse location identifier</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Editable Additional Details */}
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Additional Details (Editable)</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Supplier/Vendor
-                      </label>
-                      <input
-                        type="text"
-                        defaultValue={selectedMaterial.supplier || ''}
-                        placeholder="Primary supplier name"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        SKU / Item Code
-                      </label>
-                      <input
-                        type="text"
-                        defaultValue={selectedMaterial.sku || ''}
-                        placeholder="Supplier SKU"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Description
-                    </label>
-                    <textarea
-                      rows={3}
-                      defaultValue={selectedMaterial.description || ''}
-                      placeholder="Additional notes or specifications..."
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                    />
-                  </div>
-                </div>
-
-                {/* Last Updated Info */}
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <p className="text-xs text-blue-800">
-                    <strong>Last Updated:</strong> {new Date(selectedMaterial.lastUpdated).toLocaleDateString('en-IN', {
-                      day: '2-digit',
-                      month: 'short',
-                      year: 'numeric'
-                    })}
-                  </p>
-                </div>
-              </form>
+            <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+              <p className="text-sm text-gray-600">Material: <span className="font-medium text-gray-900">{selectedRequest.material_name}</span></p>
+              <p className="text-sm text-gray-600">Quantity: <span className="font-medium text-gray-900">{selectedRequest.quantity}</span></p>
+              <p className="text-sm text-gray-600">Project: <span className="font-medium text-gray-900">#{selectedRequest.project_id}</span></p>
             </div>
 
-            {/* Modal Footer */}
-            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4">
-              <div className="flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowDetailsModal(false);
-                    setSelectedMaterial(null);
-                  }}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
-                >
-                  <Save className="w-4 h-4" />
-                  Save Changes
-                </button>
-              </div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Rejection Reason *
+              </label>
+              <textarea
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                rows={3}
+                placeholder="Please provide a reason for rejection..."
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-red-500 focus:border-red-500"
+              />
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowRejectModal(false);
+                  setSelectedRequest(null);
+                  setRemarks('');
+                }}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRejectRequest}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center gap-2"
+              >
+                <XCircle className="h-4 w-4" />
+                Reject
+              </button>
             </div>
           </div>
         </div>
@@ -1061,4 +1187,4 @@ const MaterialsManagement: React.FC = () => {
   );
 };
 
-export default React.memo(MaterialsManagement);
+export default MaterialsManagement;

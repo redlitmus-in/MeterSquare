@@ -29,7 +29,7 @@ import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { useAutoSync } from '@/hooks/useAutoSync';
-import { buyerService, Purchase, PurchaseListResponse } from '../services/buyerService';
+import { buyerService, Purchase, PurchaseListResponse, StoreAvailabilityResponse } from '../services/buyerService';
 import PurchaseDetailsModal from '../components/PurchaseDetailsModal';
 import VendorSelectionModal from '../components/VendorSelectionModal';
 import VendorEmailModal from '../components/VendorEmailModal';
@@ -43,6 +43,10 @@ const PurchaseOrders: React.FC = () => {
   const [isVendorSelectionModalOpen, setIsVendorSelectionModalOpen] = useState(false);
   const [isVendorEmailModalOpen, setIsVendorEmailModalOpen] = useState(false);
   const [completingPurchaseId, setCompletingPurchaseId] = useState<number | null>(null);
+  const [isStoreModalOpen, setIsStoreModalOpen] = useState(false);
+  const [storeAvailability, setStoreAvailability] = useState<StoreAvailabilityResponse | null>(null);
+  const [checkingStoreAvailability, setCheckingStoreAvailability] = useState(false);
+  const [completingFromStore, setCompletingFromStore] = useState(false);
 
   // ✅ OPTIMIZED: Fetch pending purchases - Real-time updates via Supabase (NO POLLING)
   // BEFORE: Polling every 2 seconds = 30 requests/minute per user
@@ -159,12 +163,49 @@ const PurchaseOrders: React.FC = () => {
     }
   };
 
+  const handleGetFromStore = async (purchase: Purchase) => {
+    try {
+      setSelectedPurchase(purchase);
+      setCheckingStoreAvailability(true);
+      setIsStoreModalOpen(true);
+
+      const availability = await buyerService.checkStoreAvailability(purchase.cr_id);
+      setStoreAvailability(availability);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to check store availability');
+      setIsStoreModalOpen(false);
+    } finally {
+      setCheckingStoreAvailability(false);
+    }
+  };
+
+  const handleConfirmGetFromStore = async () => {
+    if (!selectedPurchase) return;
+
+    try {
+      setCompletingFromStore(true);
+      const result = await buyerService.completeFromStore(selectedPurchase.cr_id);
+
+      toast.success(result.message || 'Material requests sent to M2 Store!');
+      setIsStoreModalOpen(false);
+      setStoreAvailability(null);
+      setSelectedPurchase(null);
+
+      // Refetch pending list (purchase stays in pending until manually completed)
+      refetchPending();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to request from store');
+    } finally {
+      setCompletingFromStore(false);
+    }
+  };
+
   const isLoading = isPendingLoading || isCompletedLoading;
 
   if (isLoading && currentPurchases.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <ModernLoadingSpinners variant="pulse-wave" color="blue" />
+        <ModernLoadingSpinners variant="pulse-wave" />
       </div>
     );
   }
@@ -453,15 +494,87 @@ const PurchaseOrders: React.FC = () => {
                         </div>
                       )}
 
-                      {/* First Row: Select Vendor - Only show if no vendor selected and not pending approval */}
-                      {purchase.status === 'pending' && !purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (
+                      {/* Store Request Status - Pending Approval */}
+                      {purchase.status === 'pending' && purchase.has_store_requests && !purchase.any_store_request_rejected && !purchase.vendor_id && purchase.store_requests_pending && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-1">
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-amber-600" />
+                            <div>
+                              <div className="text-xs font-semibold text-amber-900">Requested from M2 Store</div>
+                              <div className="text-xs text-amber-700">Waiting for approval ({purchase.store_request_count} request(s))</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Store Request Status - All Approved */}
+                      {purchase.status === 'pending' && purchase.has_store_requests && purchase.all_store_requests_approved && !purchase.vendor_id && (
+                        <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-1">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4 text-green-600" />
+                            <div>
+                              <div className="text-xs font-semibold text-green-900">Store Request Approved</div>
+                              <div className="text-xs text-green-700">{purchase.store_request_count} request(s) approved</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Store Request Status - Rejected (show warning) */}
+                      {purchase.status === 'pending' && purchase.has_store_requests && purchase.any_store_request_rejected && !purchase.vendor_id && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-1">
+                          <div className="flex items-center gap-2">
+                            <XCircleIcon className="w-4 h-4 text-red-600" />
+                            <div>
+                              <div className="text-xs font-semibold text-red-900">Store Request Rejected</div>
+                              <div className="text-xs text-red-700">Please select a vendor or try again</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* First Row: Select Vendor OR Get from Store - Show if no vendor, no pending approval, AND (no store requests OR store request rejected) */}
+                      {purchase.status === 'pending' && !purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (!purchase.has_store_requests || purchase.any_store_request_rejected) && (
+                        <div className="flex gap-1.5">
+                          <Button
+                            onClick={() => handleSelectVendor(purchase)}
+                            size="sm"
+                            className="flex-1 h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1"
+                          >
+                            <Store className="w-3 h-3 mr-1" />
+                            Select Vendor
+                          </Button>
+                          <Button
+                            onClick={() => handleGetFromStore(purchase)}
+                            size="sm"
+                            className="flex-1 h-7 text-xs bg-purple-500 hover:bg-purple-600 text-white px-2 py-1"
+                            title="Get materials directly from M2 Store"
+                          >
+                            <Package className="w-3 h-3 mr-1" />
+                            Get from Store
+                          </Button>
+                        </div>
+                      )}
+
+                      {/* Complete button - Show ONLY when ALL store requests are approved */}
+                      {purchase.status === 'pending' && purchase.has_store_requests && purchase.all_store_requests_approved && !purchase.vendor_id && (
                         <Button
-                          onClick={() => handleSelectVendor(purchase)}
+                          onClick={() => handleMarkAsComplete(purchase.cr_id)}
+                          disabled={completingPurchaseId === purchase.cr_id}
                           size="sm"
-                          className="w-full h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1"
+                          className="w-full h-7 text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1"
                         >
-                          <Store className="w-3 h-3 mr-1" />
-                          Select Vendor
+                          {completingPurchaseId === purchase.cr_id ? (
+                            <>
+                              <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              Completing...
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3 h-3 mr-1" />
+                              Mark as Complete
+                            </>
+                          )}
                         </Button>
                       )}
 
@@ -601,6 +714,62 @@ const PurchaseOrders: React.FC = () => {
                               <span className="hidden sm:inline">View</span>
                             </Button>
 
+                            {/* Get from Store - Show if no vendor, no pending approval, AND (no store requests OR store request rejected) */}
+                            {purchase.status === 'pending' && !purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (!purchase.has_store_requests || purchase.any_store_request_rejected) && (
+                              <Button
+                                onClick={() => handleGetFromStore(purchase)}
+                                size="sm"
+                                className="px-2 py-1 h-auto text-xs bg-purple-500 hover:bg-purple-600 text-white"
+                                title="Get from M2 Store"
+                              >
+                                <Package className="w-3 h-3 sm:mr-1" />
+                                <span className="hidden lg:inline">Store</span>
+                              </Button>
+                            )}
+
+                            {/* Store Request Pending indicator */}
+                            {purchase.status === 'pending' && purchase.has_store_requests && !purchase.any_store_request_rejected && !purchase.vendor_id && purchase.store_requests_pending && (
+                              <div className="px-2 py-1 h-auto bg-amber-50 border border-amber-200 rounded text-xs font-medium text-amber-700 flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                <span className="hidden lg:inline">Pending</span>
+                              </div>
+                            )}
+
+                            {/* Store Request Approved indicator */}
+                            {purchase.status === 'pending' && purchase.has_store_requests && purchase.all_store_requests_approved && !purchase.vendor_id && (
+                              <div className="px-2 py-1 h-auto bg-green-50 border border-green-200 rounded text-xs font-medium text-green-700 flex items-center gap-1">
+                                <CheckCircle className="w-3 h-3" />
+                                <span className="hidden lg:inline">Approved</span>
+                              </div>
+                            )}
+
+                            {/* Store Request Rejected indicator */}
+                            {purchase.status === 'pending' && purchase.has_store_requests && purchase.any_store_request_rejected && !purchase.vendor_id && (
+                              <div className="px-2 py-1 h-auto bg-red-50 border border-red-200 rounded text-xs font-medium text-red-700 flex items-center gap-1">
+                                <XCircleIcon className="w-3 h-3" />
+                                <span className="hidden lg:inline">Rejected</span>
+                              </div>
+                            )}
+
+                            {/* Complete button - ONLY when ALL store requests are approved */}
+                            {purchase.status === 'pending' && purchase.has_store_requests && purchase.all_store_requests_approved && !purchase.vendor_id && (
+                              <Button
+                                onClick={() => handleMarkAsComplete(purchase.cr_id)}
+                                disabled={completingPurchaseId === purchase.cr_id}
+                                size="sm"
+                                className="px-2 py-1 h-auto text-xs bg-green-600 hover:bg-green-700 text-white"
+                              >
+                                {completingPurchaseId === purchase.cr_id ? (
+                                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <>
+                                    <Check className="w-3 h-3 sm:mr-1" />
+                                    <span className="hidden sm:inline">Complete</span>
+                                  </>
+                                )}
+                              </Button>
+                            )}
+
                             {/* Send Email to Vendor - Show if vendor is approved and not completed */}
                             {purchase.status === 'pending' && purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (
                               purchase.vendor_email_sent ? (
@@ -697,6 +866,167 @@ const PurchaseOrders: React.FC = () => {
           }}
         />
       )}
+
+      {/* Store Availability Modal */}
+      <AnimatePresence>
+        {isStoreModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => {
+              if (!completingFromStore) {
+                setIsStoreModalOpen(false);
+                setStoreAvailability(null);
+              }
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="bg-red-100 px-6 py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-red-200 rounded-lg">
+                      <Package className="w-5 h-5 text-red-700" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-red-800">Get from M2 Store</h2>
+                      <p className="text-sm text-red-600">CR-{selectedPurchase?.cr_id}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (!completingFromStore) {
+                        setIsStoreModalOpen(false);
+                        setStoreAvailability(null);
+                      }
+                    }}
+                    className="p-1 hover:bg-red-200 rounded-lg transition-colors"
+                    disabled={completingFromStore}
+                  >
+                    <X className="w-5 h-5 text-red-700" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 overflow-y-auto max-h-[50vh]">
+                {checkingStoreAvailability ? (
+                  <div className="flex flex-col items-center justify-center py-8">
+                    <ModernLoadingSpinners variant="pulse-wave" />
+                    <p className="mt-4 text-gray-600">Checking store availability...</p>
+                  </div>
+                ) : storeAvailability ? (
+                  <div className="space-y-4">
+                    {/* Status Summary */}
+                    <div className={`p-4 rounded-lg border ${
+                      storeAvailability.can_complete_from_store
+                        ? 'bg-green-50 border-green-200'
+                        : 'bg-red-50 border-red-200'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        {storeAvailability.can_complete_from_store ? (
+                          <>
+                            <CheckCircle className="w-5 h-5 text-green-600" />
+                            <span className="font-semibold text-green-800">All materials available in store!</span>
+                          </>
+                        ) : (
+                          <>
+                            <XCircleIcon className="w-5 h-5 text-red-600" />
+                            <span className="font-semibold text-red-800">Some materials not available</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Available Materials */}
+                    {storeAvailability.available_materials.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                          <CheckCircle className="w-4 h-4 text-green-600" />
+                          Available ({storeAvailability.available_materials.length})
+                        </h3>
+                        <div className="space-y-2">
+                          {storeAvailability.available_materials.map((mat, idx) => (
+                            <div key={idx} className="bg-green-50 border border-green-200 rounded-lg p-3">
+                              <div className="font-medium text-gray-900 text-sm">{mat.material_name}</div>
+                              <div className="text-xs text-gray-600 mt-1">
+                                Required: {mat.required_quantity} | In Store: {mat.available_quantity}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Unavailable Materials */}
+                    {storeAvailability.unavailable_materials.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                          <XCircleIcon className="w-4 h-4 text-red-600" />
+                          Not Available ({storeAvailability.unavailable_materials.length})
+                        </h3>
+                        <div className="space-y-2">
+                          {storeAvailability.unavailable_materials.map((mat, idx) => (
+                            <div key={idx} className="bg-red-50 border border-red-200 rounded-lg p-3">
+                              <div className="font-medium text-gray-900 text-sm">{mat.material_name}</div>
+                              <div className="text-xs text-gray-600 mt-1">
+                                Required: {mat.required_quantity} | In Store: {mat.available_quantity}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+                <div className="flex items-center justify-end gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIsStoreModalOpen(false);
+                      setStoreAvailability(null);
+                    }}
+                    disabled={completingFromStore}
+                  >
+                    Cancel
+                  </Button>
+                  {storeAvailability?.can_complete_from_store && (
+                    <Button
+                      onClick={handleConfirmGetFromStore}
+                      disabled={completingFromStore}
+                      className="bg-purple-500 hover:bg-purple-600 text-white"
+                    >
+                      {completingFromStore ? (
+                        <>
+                          <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Sending Request...
+                        </>
+                      ) : (
+                        <>
+                          <Package className="w-4 h-4 mr-2" />
+                          Request from Store
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

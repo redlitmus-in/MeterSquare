@@ -7,6 +7,7 @@ from models.change_request import ChangeRequest
 from models.user import User
 from models.role import Role
 from models.vendor import Vendor
+from models.inventory import InventoryMaterial, InternalMaterialRequest
 from config.logging import get_logger
 from datetime import datetime
 import os
@@ -562,6 +563,24 @@ def get_buyer_pending_purchases():
                         vendor_phone = vendor.phone
                     vendor_contact_person = vendor.contact_person_name
 
+            # Check if materials have been requested from store
+            store_requests = InternalMaterialRequest.query.filter_by(cr_id=cr.cr_id).all()
+            has_store_requests = len(store_requests) > 0
+
+            # Check store request statuses
+            all_store_requests_approved = False
+            any_store_request_rejected = False
+            store_requests_pending = False
+
+            if has_store_requests:
+                approved_count = sum(1 for r in store_requests if r.status == 'approved')
+                rejected_count = sum(1 for r in store_requests if r.status == 'rejected')
+                pending_count = sum(1 for r in store_requests if r.status in ['PENDING', 'send_request'])
+
+                all_store_requests_approved = approved_count == len(store_requests)
+                any_store_request_rejected = rejected_count > 0
+                store_requests_pending = pending_count > 0
+
             pending_purchases.append({
                 "cr_id": cr.cr_id,
                 "project_id": project.project_id,
@@ -586,7 +605,12 @@ def get_buyer_pending_purchases():
                 "vendor_phone": vendor_phone,
                 "vendor_contact_person": vendor_contact_person,
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
-                "vendor_email_sent": cr.vendor_email_sent or False
+                "vendor_email_sent": cr.vendor_email_sent or False,
+                "has_store_requests": has_store_requests,
+                "store_request_count": len(store_requests),
+                "all_store_requests_approved": all_store_requests_approved,
+                "any_store_request_rejected": any_store_request_rejected,
+                "store_requests_pending": store_requests_pending
             })
         return jsonify({
             "success": True,
@@ -2769,3 +2793,351 @@ def send_se_boq_vendor_email(assignment_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to send vendor email: {str(e)}"}), 500
+
+
+# Store Management Functions
+def get_store_items():
+    """Get all available store items from inventory"""
+    try:
+        # Query real inventory data from InventoryMaterial table
+        materials = InventoryMaterial.query.filter_by(is_active=True).all()
+
+        store_items = []
+        for material in materials:
+            store_items.append({
+                'id': material.inventory_material_id,
+                'name': material.material_name,
+                'description': material.description or f'{material.material_name} - {material.brand or ""}',
+                'category': material.category or 'General',
+                'price': material.unit_price or 0,
+                'unit': material.unit,
+                'available_quantity': material.current_stock or 0,
+                'supplier_name': 'M2 Store',
+                'supplier_location': 'Warehouse',
+                'delivery_time_days': 1,
+                'rating': 4.5,
+                'specifications': {
+                    'material_code': material.material_code,
+                    'brand': material.brand or 'N/A',
+                    'size': material.size or 'N/A'
+                }
+            })
+
+        log.info(f"Retrieved {len(store_items)} store items from inventory")
+        return jsonify(store_items), 200
+
+    except Exception as e:
+        log.error(f"Error getting store items: {str(e)}")
+        return jsonify({"error": f"Failed to get store items: {str(e)}"}), 500
+
+
+def get_store_item_details(item_id):
+    """Get details of a specific store item"""
+    try:
+        # Query real inventory data
+        material = InventoryMaterial.query.get(item_id)
+
+        if not material:
+            return jsonify({"error": "Item not found"}), 404
+
+        item = {
+            'id': material.inventory_material_id,
+            'name': material.material_name,
+            'description': material.description or f'{material.material_name} - {material.brand or ""}',
+            'category': material.category or 'General',
+            'price': material.unit_price or 0,
+            'unit': material.unit,
+            'available_quantity': material.current_stock or 0,
+            'supplier_name': 'M2 Store',
+            'supplier_location': 'Warehouse',
+            'delivery_time_days': 1,
+            'rating': 4.5,
+            'specifications': {
+                'material_code': material.material_code,
+                'brand': material.brand or 'N/A',
+                'size': material.size or 'N/A'
+            },
+            'images': [],
+            'certifications': []
+        }
+
+        log.info(f"Retrieved details for store item {item_id}")
+        return jsonify(item), 200
+
+    except Exception as e:
+        log.error(f"Error getting store item details: {str(e)}")
+        return jsonify({"error": f"Failed to get item details: {str(e)}"}), 500
+
+
+def get_store_categories():
+    """Get all store categories from inventory"""
+    try:
+        # Query unique categories from inventory with item counts
+        from sqlalchemy import func
+        category_counts = db.session.query(
+            InventoryMaterial.category,
+            func.count(InventoryMaterial.inventory_material_id).label('items_count')
+        ).filter(
+            InventoryMaterial.is_active == True,
+            InventoryMaterial.category.isnot(None)
+        ).group_by(InventoryMaterial.category).all()
+
+        categories = []
+        for idx, (category, count) in enumerate(category_counts):
+            categories.append({
+                'id': idx + 1,
+                'name': category or 'General',
+                'items_count': count
+            })
+
+        log.info(f"Retrieved {len(categories)} store categories from inventory")
+        return jsonify(categories), 200
+
+    except Exception as e:
+        log.error(f"Error getting store categories: {str(e)}")
+        return jsonify({"error": f"Failed to get categories: {str(e)}"}), 500
+
+
+def get_projects_by_material(material_id):
+    """Get projects with pending Change Requests containing this material, including CR details"""
+    try:
+        # Get the material name from inventory
+        material = InventoryMaterial.query.get(material_id)
+        if not material:
+            return jsonify([]), 200
+
+        material_name = material.material_name.lower()
+
+        # Completed statuses for Change Requests
+        completed_statuses = ['completed', 'purchase_completed', 'rejected']
+
+        # Get Change Requests that contain this material and are not completed
+        from sqlalchemy import cast, String
+        change_requests = ChangeRequest.query.filter(
+            ChangeRequest.status.notin_(completed_statuses),
+            db.or_(
+                cast(ChangeRequest.materials_data, String).ilike(f'%{material.material_name}%'),
+                cast(ChangeRequest.sub_items_data, String).ilike(f'%{material.material_name}%')
+            )
+        ).all()
+
+        if not change_requests:
+            log.info(f"No pending CRs found for material '{material.material_name}'")
+            return jsonify([]), 200
+
+        # Get CRs that already have active requests for this material
+        existing_requests = InternalMaterialRequest.query.filter(
+            InternalMaterialRequest.inventory_material_id == material_id,
+            InternalMaterialRequest.cr_id.isnot(None),
+            InternalMaterialRequest.status.in_(['PENDING', 'send_request', 'approved'])
+        ).all()
+        # Map cr_id to request status
+        crs_with_active_requests = {req.cr_id: req.status for req in existing_requests}
+
+        # Build project list with CR details
+        projects_list = []
+        for cr in change_requests:
+            # Get project info
+            project = Project.query.get(cr.project_id)
+            if not project or project.is_deleted:
+                continue
+
+            # Check if this CR already has an active request
+            has_active_request = cr.cr_id in crs_with_active_requests
+            active_request_status = crs_with_active_requests.get(cr.cr_id)
+
+            # Extract quantity and unit from materials_data
+            quantity = 0
+            unit = material.unit or 'nos'
+
+            # Check materials_data
+            materials = cr.materials_data or cr.sub_items_data or []
+            if isinstance(materials, list):
+                for mat in materials:
+                    mat_name = (mat.get('material_name') or mat.get('name') or '').lower()
+                    if material_name in mat_name or mat_name in material_name:
+                        quantity = mat.get('quantity', 0)
+                        unit = mat.get('unit', unit)
+                        break
+
+            projects_list.append({
+                'project_id': project.project_id,
+                'project_name': project.project_name,
+                'cr_id': cr.cr_id,
+                'quantity': quantity,
+                'unit': unit,
+                'cr_status': cr.status,
+                'has_active_request': has_active_request,
+                'active_request_status': active_request_status
+            })
+
+        log.info(f"Found {len(projects_list)} projects with pending CRs for material '{material.material_name}'")
+        return jsonify(projects_list), 200
+
+    except Exception as e:
+        log.error(f"Error getting projects: {str(e)}")
+        return jsonify({"error": f"Failed to get projects: {str(e)}"}), 500
+
+
+def check_store_availability(cr_id):
+    """Check if materials in a CR are available in the M2 Store inventory"""
+    try:
+        cr = ChangeRequest.query.get(cr_id)
+        if not cr:
+            return jsonify({"error": "Change request not found"}), 404
+
+        # Get materials from CR
+        materials = cr.materials_data or cr.sub_items_data or []
+        if not isinstance(materials, list):
+            materials = []
+
+        available_materials = []
+        unavailable_materials = []
+
+        for mat in materials:
+            mat_name = mat.get('material_name') or mat.get('name') or ''
+            mat_qty = mat.get('quantity', 0)
+
+            # Search in inventory by name
+            inventory_item = InventoryMaterial.query.filter(
+                InventoryMaterial.is_active == True,
+                InventoryMaterial.material_name.ilike(f'%{mat_name}%')
+            ).first()
+
+            if inventory_item and inventory_item.current_stock >= mat_qty:
+                available_materials.append({
+                    'material_name': mat_name,
+                    'required_quantity': mat_qty,
+                    'available_quantity': inventory_item.current_stock,
+                    'is_available': True,
+                    'inventory_material_id': inventory_item.inventory_material_id
+                })
+            else:
+                unavailable_materials.append({
+                    'material_name': mat_name,
+                    'required_quantity': mat_qty,
+                    'available_quantity': inventory_item.current_stock if inventory_item else 0,
+                    'is_available': False,
+                    'inventory_material_id': inventory_item.inventory_material_id if inventory_item else None
+                })
+
+        all_available = len(unavailable_materials) == 0 and len(available_materials) > 0
+
+        return jsonify({
+            'success': True,
+            'cr_id': cr_id,
+            'all_available_in_store': all_available,
+            'available_materials': available_materials,
+            'unavailable_materials': unavailable_materials,
+            'can_complete_from_store': all_available
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error checking store availability: {str(e)}")
+        return jsonify({"error": f"Failed to check store availability: {str(e)}"}), 500
+
+
+def complete_from_store(cr_id):
+    """Request materials from M2 Store - creates internal requests without completing the purchase"""
+    try:
+        current_user = g.user
+        cr = ChangeRequest.query.get(cr_id)
+        if not cr:
+            return jsonify({"error": "Change request not found"}), 404
+
+        # Check if already requested from store
+        existing_requests = InternalMaterialRequest.query.filter_by(cr_id=cr_id).count()
+        if existing_requests > 0:
+            return jsonify({"error": "Materials already requested from store for this CR"}), 400
+
+        # Get materials from CR
+        materials = cr.materials_data or cr.sub_items_data or []
+        if not isinstance(materials, list):
+            return jsonify({"error": "No materials found in this CR"}), 400
+
+        requests_created = 0
+        # Check availability and create internal requests
+        for mat in materials:
+            mat_name = mat.get('material_name') or mat.get('name') or ''
+            mat_qty = mat.get('quantity', 0)
+
+            # Find in inventory
+            inventory_item = InventoryMaterial.query.filter(
+                InventoryMaterial.is_active == True,
+                InventoryMaterial.material_name.ilike(f'%{mat_name}%')
+            ).first()
+
+            if not inventory_item:
+                return jsonify({"error": f"Material '{mat_name}' not found in store"}), 400
+
+            if inventory_item.current_stock < mat_qty:
+                return jsonify({"error": f"Insufficient stock for '{mat_name}'. Need {mat_qty}, have {inventory_item.current_stock}"}), 400
+
+            # Create internal material request
+            new_request = InternalMaterialRequest(
+                project_id=cr.project_id,
+                cr_id=cr_id,
+                material_name=mat_name,
+                inventory_material_id=inventory_item.inventory_material_id,
+                quantity=float(mat_qty),
+                notes=f"Requested from CR-{cr_id}",
+                request_send=True,
+                status='send_request',
+                created_by=current_user.get('email', 'system'),
+                request_buyer_id=current_user.get('user_id'),
+                last_modified_by=current_user.get('email', 'system')
+            )
+            db.session.add(new_request)
+            requests_created += 1
+
+        # Update CR notes to indicate store request was made (DON'T mark as completed yet)
+        cr.purchase_notes = f"Requested from M2 Store by {current_user.get('full_name', current_user.get('email'))} on {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+
+        db.session.commit()
+
+        log.info(f"CR-{cr_id} materials requested from store by user {current_user.get('user_id')}")
+        return jsonify({
+            "success": True,
+            "message": f"Material requests sent to M2 Store. {requests_created} request(s) created.",
+            "cr_id": cr_id,
+            "requests_created": requests_created
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error requesting from store: {str(e)}")
+        return jsonify({"error": f"Failed to request from store: {str(e)}"}), 500
+
+
+def get_store_request_status(cr_id):
+    """Get the status of store requests for a CR"""
+    try:
+        requests = InternalMaterialRequest.query.filter_by(cr_id=cr_id).all()
+
+        if not requests:
+            return jsonify({
+                "success": True,
+                "has_store_requests": False,
+                "requests": []
+            }), 200
+
+        request_list = []
+        for req in requests:
+            request_list.append({
+                "request_id": req.request_id,
+                "material_name": req.material_name,
+                "quantity": req.quantity,
+                "status": req.status,
+                "created_at": req.created_at.isoformat() if req.created_at else None
+            })
+
+        return jsonify({
+            "success": True,
+            "has_store_requests": True,
+            "total_requests": len(requests),
+            "requests": request_list
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error getting store request status: {str(e)}")
+        return jsonify({"error": f"Failed to get store request status: {str(e)}"}), 500

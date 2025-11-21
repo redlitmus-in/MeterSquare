@@ -81,6 +81,13 @@ def get_summary_route():
     return get_inventory_summary()
 
 
+@inventory_routes.route('/inventory/dashboard', methods=['GET'])
+@jwt_required
+def get_dashboard_route():
+    """Get comprehensive inventory dashboard data"""
+    return get_inventory_dashboard()
+
+
 # ==================== INTERNAL MATERIAL REQUEST ROUTES ====================
 #create a new request in procurement
 @inventory_routes.route('/internal_material_request', methods=['POST'])

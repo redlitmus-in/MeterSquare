@@ -295,3 +295,74 @@ def delete_files_route(cr_id):
 def delete_all_files_route(cr_id):
     return buyer_delete_all_files(cr_id)
 
+
+# Store Management Routes
+@buyer_routes.route('/store/items', methods=['GET'])
+@jwt_required
+def get_store_items_route():
+    """Get all available store items (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_store_items()
+
+
+@buyer_routes.route('/store/items/<int:item_id>', methods=['GET'])
+@jwt_required
+def get_store_item_details_route(item_id):
+    """Get details of a specific store item (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_store_item_details(item_id)
+
+
+@buyer_routes.route('/store/categories', methods=['GET'])
+@jwt_required
+def get_store_categories_route():
+    """Get all store categories (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_store_categories()
+
+
+@buyer_routes.route('/store/projects-by-material/<int:material_id>', methods=['GET'])
+@jwt_required
+def get_projects_by_material_route(material_id):
+    """Get projects that have this material in their BOQ (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_projects_by_material(material_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/check-store-availability', methods=['GET'])
+@jwt_required
+def check_store_availability_route(cr_id):
+    """Check if CR materials are available in M2 Store (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return check_store_availability(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/complete-from-store', methods=['POST'])
+@jwt_required
+def complete_from_store_route(cr_id):
+    """Request materials from M2 Store (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return complete_from_store(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/store-request-status', methods=['GET'])
+@jwt_required
+def get_store_request_status_route(cr_id):
+    """Get store request status for a CR (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_store_request_status(cr_id)
+

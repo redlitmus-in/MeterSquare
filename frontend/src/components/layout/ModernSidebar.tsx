@@ -463,6 +463,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: UsersIcon,
         iconSolid: UsersSolid,
         color: 'text-purple-600'
+      },
+      {
+        name: 'Store',
+        href: buildPath('/store'),
+        icon: BuildingOfficeIcon,
+        iconSolid: BuildingOfficeSolid,
+        color: 'text-blue-600'
       }
     ];
 
@@ -482,34 +489,35 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             iconSolid: CubeSolid,
             color: 'text-teal-600'
           },
-          {
-            name: 'Receive Stock (GRN)',
-            href: buildPath('/m2-store/receive'),
-            icon: DocumentPlusIcon,
-            iconSolid: DocumentPlusSolid,
-            color: 'text-green-600'
-          },
-          {
-            name: 'Dispatch Materials',
-            href: buildPath('/m2-store/dispatch'),
-            icon: ShoppingCartIcon,
-            iconSolid: ShoppingSolid,
-            color: 'text-purple-600'
-          },
-          {
-            name: 'Stock Take',
-            href: buildPath('/m2-store/stock-take'),
-            icon: ClipboardDocumentCheckIcon,
-            iconSolid: ClipboardDocumentCheckSolid,
-            color: 'text-orange-600'
-          },
-          {
-            name: 'Reports & Analytics',
-            href: buildPath('/m2-store/reports'),
-            icon: DocumentTextIcon,
-            iconSolid: DocumentTextSolid,
-            color: 'text-indigo-600'
-          }
+          // NOTE: Below sections are temporarily commented out for production - will be enabled in future releases
+          // {
+          //   name: 'Receive Stock (GRN)',
+          //   href: buildPath('/m2-store/receive'),
+          //   icon: DocumentPlusIcon,
+          //   iconSolid: DocumentPlusSolid,
+          //   color: 'text-green-600'
+          // },
+          // {
+          //   name: 'Dispatch Materials',
+          //   href: buildPath('/m2-store/dispatch'),
+          //   icon: ShoppingCartIcon,
+          //   iconSolid: ShoppingSolid,
+          //   color: 'text-purple-600'
+          // },
+          // {
+          //   name: 'Stock Take',
+          //   href: buildPath('/m2-store/stock-take'),
+          //   icon: ClipboardDocumentCheckIcon,
+          //   iconSolid: ClipboardDocumentCheckSolid,
+          //   color: 'text-orange-600'
+          // },
+          // {
+          //   name: 'Reports & Analytics',
+          //   href: buildPath('/m2-store/reports'),
+          //   icon: DocumentTextIcon,
+          //   iconSolid: DocumentTextSolid,
+          //   color: 'text-indigo-600'
+          // }
         ]
       }
     ];

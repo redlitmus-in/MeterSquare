@@ -64,9 +64,11 @@ const MaterialsToPurchase = lazy(() => import('@/roles/buyer/pages/MaterialsToPu
 const PurchaseOrders = lazy(() => import('@/roles/buyer/pages/PurchaseOrders'));
 const VendorManagement = lazy(() => import('@/roles/buyer/pages/VendorManagement'));
 const VendorDetails = lazy(() => import('@/roles/buyer/pages/VendorDetails'));
+const BuyerStore = lazy(() => import('@/roles/buyer/pages/Store'));
 
 // Production Manager Pages - M2 Store Management
 const M2StoreDashboard = lazy(() => import('@/roles/production-manager/pages/M2StoreDashboard'));
+const M2StoreLanding = lazy(() => import('@/roles/production-manager/pages/M2StoreLanding'));
 const MaterialsManagement = lazy(() => import('@/roles/production-manager/pages/MaterialsManagement'));
 const ReceiveStock = lazy(() => import('@/roles/production-manager/pages/ReceiveStock'));
 const DispatchMaterials = lazy(() => import('@/roles/production-manager/pages/DispatchMaterials'));
@@ -401,6 +403,44 @@ const RoleSpecificPurchaseOrders: React.FC = () => {
         <h3 className="text-lg font-semibold text-gray-900 mb-2">Access Denied</h3>
         <p className="text-gray-600">
           Your role does not have access to purchase orders.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// Role-specific Store Component
+const RoleSpecificStore: React.FC = () => {
+  const { user } = useAuthStore();
+  const { viewingAsRole } = useAdminViewStore();
+
+  let userRole = (user as any)?.role || '';
+  const isAdmin = userRole?.toLowerCase() === 'admin' || user?.role_id === 5;
+  if (isAdmin && viewingAsRole && viewingAsRole !== 'admin') {
+    userRole = viewingAsRole;
+  }
+
+  const userRoleLower = userRole.toLowerCase();
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  const isBuyer = roleId === 'buyer' || roleIdLower === 'buyer' || userRoleLower === 'buyer' || roleId === 8;
+
+  if (isBuyer || isAdmin) {
+    return <BuyerStore />;
+  }
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gray-50">
+      <div className="text-center p-8 bg-white rounded-lg shadow-md max-w-md">
+        <div className="mb-4">
+          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Access Denied</h3>
+        <p className="text-gray-600">
+          Your role does not have access to the store.
         </p>
       </div>
     </div>
@@ -835,6 +875,7 @@ function App() {
             {/* Buyer & Technical Director Routes - Role-specific access */}
             <Route path="materials" element={<RoleSpecificMaterials />} />
             <Route path="purchase-orders" element={<RoleSpecificPurchaseOrders />} />
+            <Route path="store" element={<RoleSpecificStore />} />
 
             {/* Vendor Management Routes - Role-specific vendor hub */}
             <Route path="vendors" element={<RoleSpecificVendorHub />} />
@@ -945,7 +986,7 @@ function App() {
             {/* Production Manager Routes - M2 Store Management */}
             <Route path="m2-store" element={
               <ProductionManagerRoute>
-                <M2StoreDashboard />
+                <M2StoreLanding />
               </ProductionManagerRoute>
             } />
             <Route path="m2-store/materials" element={

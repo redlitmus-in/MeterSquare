@@ -440,6 +440,113 @@ def get_inventory_summary():
         return jsonify({'error': str(e)}), 500
 
 
+def get_inventory_dashboard():
+    """Get comprehensive inventory dashboard data in a single API call"""
+    try:
+        # Get all active materials
+        materials = InventoryMaterial.query.filter_by(is_active=True).all()
+
+        # Calculate stock health metrics
+        total_items = len(materials)
+        healthy_items = 0
+        low_stock_items = 0
+        critical_items = 0
+        out_of_stock_items = 0
+        stock_alerts = []
+
+        for mat in materials:
+            if mat.current_stock <= 0:
+                out_of_stock_items += 1
+                stock_alerts.append({
+                    'name': mat.material_name,
+                    'stock': mat.current_stock,
+                    'unit': mat.unit,
+                    'status': 'out-of-stock',
+                    'material_code': mat.material_code
+                })
+            elif mat.min_stock_level and mat.current_stock <= mat.min_stock_level * 0.5:
+                critical_items += 1
+                stock_alerts.append({
+                    'name': mat.material_name,
+                    'stock': mat.current_stock,
+                    'unit': mat.unit,
+                    'status': 'critical',
+                    'material_code': mat.material_code
+                })
+            elif mat.min_stock_level and mat.current_stock <= mat.min_stock_level:
+                low_stock_items += 1
+                stock_alerts.append({
+                    'name': mat.material_name,
+                    'stock': mat.current_stock,
+                    'unit': mat.unit,
+                    'status': 'low',
+                    'material_code': mat.material_code
+                })
+            else:
+                healthy_items += 1
+
+        # Calculate total inventory value
+        total_value = sum(mat.current_stock * mat.unit_price for mat in materials)
+
+        # Get category distribution
+        category_map = {}
+        for mat in materials:
+            cat = mat.category or 'Uncategorized'
+            if cat not in category_map:
+                category_map[cat] = {'count': 0, 'value': 0}
+            category_map[cat]['count'] += 1
+            category_map[cat]['value'] += mat.current_stock * mat.unit_price
+
+        categories = [
+            {'name': k, 'count': v['count'], 'value': round(v['value'], 2)}
+            for k, v in category_map.items()
+        ]
+
+        # Get transaction data
+        transactions = InventoryTransaction.query.order_by(
+            InventoryTransaction.created_at.desc()
+        ).limit(10).all()
+
+        recent_transactions = []
+        for txn in transactions:
+            txn_data = txn.to_dict()
+            if txn.material:
+                txn_data['material_name'] = txn.material.material_name
+                txn_data['material_code'] = txn.material.material_code
+            recent_transactions.append(txn_data)
+
+        total_transactions = InventoryTransaction.query.count()
+
+        # Get internal request data
+        pending_requests = InternalMaterialRequest.query.filter(
+            InternalMaterialRequest.status.in_(['PENDING', 'send_request'])
+        ).count()
+
+        approved_requests = InternalMaterialRequest.query.filter_by(status='approved').count()
+        rejected_requests = InternalMaterialRequest.query.filter_by(status='rejected').count()
+
+        return jsonify({
+            'dashboard': {
+                'totalItems': total_items,
+                'totalValue': round(total_value, 2),
+                'healthyStockItems': healthy_items,
+                'lowStockItems': low_stock_items,
+                'criticalItems': critical_items,
+                'outOfStockItems': out_of_stock_items,
+                'stockAlerts': stock_alerts[:10],  # Limit to 10 alerts
+                'categories': categories,
+                'totalTransactions': total_transactions,
+                'recentTransactions': recent_transactions,
+                'pendingRequests': pending_requests,
+                'approvedRequests': approved_requests,
+                'rejectedRequests': rejected_requests
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ==================== INTERNAL MATERIAL REQUEST APIs ====================
 
 def internal_inventory_material_request():
@@ -459,6 +566,21 @@ def internal_inventory_material_request():
         if not project:
             return jsonify({'error': 'Project not found'}), 404
 
+        # Check for existing active request for the same material and CR
+        cr_id = data.get('cr_id')
+        if cr_id:
+            existing_request = InternalMaterialRequest.query.filter(
+                InternalMaterialRequest.inventory_material_id == data['inventory_material_id'],
+                InternalMaterialRequest.cr_id == cr_id,
+                InternalMaterialRequest.status.in_(['PENDING', 'send_request', 'approved'])
+            ).first()
+
+            if existing_request:
+                status_text = 'pending approval' if existing_request.status in ['PENDING', 'send_request'] else 'already approved'
+                return jsonify({
+                    'error': f'A request for this material from CR-{cr_id} is {status_text}. Request ID: #{existing_request.request_id}'
+                }), 400
+
         # Generate sequential request number
         # last_request = InternalMaterialRequest.query.order_by(
         #     InternalMaterialRequest.request_number.desc()
@@ -467,16 +589,21 @@ def internal_inventory_material_request():
         # request_number = 1 if not last_request else last_request.request_number + 1
 
         # Create new request
+        # Automatically mark as sent if from buyer request
+        is_buyer_request = data.get('request_type') == 'buyer_request'
+
         new_request = InternalMaterialRequest(
             # request_number=request_number,
             project_id=data['project_id'],
+            cr_id=data.get('cr_id'),
             material_name=data['material_name'],
             inventory_material_id=data['inventory_material_id'],
             quantity=float(data['quantity']),
             brand=data.get('brand'),  # Handles null
             size=data.get('size'),    # Handles null
             notes=data.get('notes'),
-            request_send=False,  # Default to not sent
+            request_send=True if is_buyer_request else data.get('request_send', False),
+            status='send_request' if is_buyer_request else 'PENDING',
             created_by=current_user,
             request_buyer_id=g.user.get('user_id'),
             last_modified_by=current_user
@@ -936,7 +1063,7 @@ def approve_internal_request(request_id):
         if not internal_req:
             return jsonify({'error': 'Internal request not found'}), 404
 
-        if internal_req.status != 'send_request':
+        if internal_req.status not in ['pending', 'PENDING', 'send_request']:
             return jsonify({'error': f'Request is already {internal_req.status}'}), 400
 
         # Validate that inventory_material_id exists
@@ -1012,7 +1139,7 @@ def reject_internal_request(request_id):
         if not internal_req:
             return jsonify({'error': 'Internal request not found'}), 404
 
-        if internal_req.status != 'pending':
+        if internal_req.status not in ['pending', 'PENDING', 'send_request']:
             return jsonify({'error': f'Request is already {internal_req.status}'}), 400
 
         data = request.get_json()
