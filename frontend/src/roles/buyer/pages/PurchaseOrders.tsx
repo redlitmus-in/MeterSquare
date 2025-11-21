@@ -23,7 +23,8 @@ import {
   TruckIcon,
   XCircleIcon,
   Phone,
-  X
+  X,
+  MessageSquare
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -47,6 +48,7 @@ const PurchaseOrders: React.FC = () => {
   const [storeAvailability, setStoreAvailability] = useState<StoreAvailabilityResponse | null>(null);
   const [checkingStoreAvailability, setCheckingStoreAvailability] = useState(false);
   const [completingFromStore, setCompletingFromStore] = useState(false);
+  const [sendingWhatsAppId, setSendingWhatsAppId] = useState<number | null>(null);
 
   // ✅ OPTIMIZED: Fetch pending purchases - Real-time updates via Supabase (NO POLLING)
   // BEFORE: Polling every 2 seconds = 30 requests/minute per user
@@ -144,6 +146,24 @@ const PurchaseOrders: React.FC = () => {
   const handleSendEmailToVendor = (purchase: Purchase) => {
     setSelectedPurchase(purchase);
     setIsVendorEmailModalOpen(true);
+  };
+
+  const handleSendWhatsApp = async (purchase: Purchase) => {
+    if (!purchase.vendor_phone) {
+      toast.error('Vendor phone number not available');
+      return;
+    }
+
+    try {
+      setSendingWhatsAppId(purchase.cr_id);
+      await buyerService.sendVendorWhatsApp(purchase.cr_id, purchase.vendor_phone);
+      toast.success('Purchase order sent via WhatsApp!');
+      refetchPending();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to send WhatsApp');
+    } finally {
+      setSendingWhatsAppId(null);
+    }
   };
 
   const handleMarkAsComplete = async (crId: number) => {
@@ -578,7 +598,7 @@ const PurchaseOrders: React.FC = () => {
                         </Button>
                       )}
 
-                      {/* Send Email to Vendor - Only show if vendor is approved by TD */}
+                      {/* Send to Vendor - Only show if vendor is approved by TD */}
                       {purchase.status === 'pending' && purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (
                         purchase.vendor_email_sent ? (
                           <div className="w-full h-7 bg-green-50 border border-green-200 rounded flex items-center justify-center text-xs font-medium text-green-700 px-2 py-1">
@@ -586,14 +606,30 @@ const PurchaseOrders: React.FC = () => {
                             Sent to Vendor
                           </div>
                         ) : (
-                          <Button
-                            onClick={() => handleSendEmailToVendor(purchase)}
-                            size="sm"
-                            className="w-full h-7 text-xs bg-[#243d8a] hover:bg-[#1e3270] text-white px-2 py-1"
-                          >
-                            <Mail className="w-3 h-3 mr-1" />
-                            Send Email to Vendor
-                          </Button>
+                          <div className="flex gap-1.5 w-full">
+                            <Button
+                              onClick={() => handleSendEmailToVendor(purchase)}
+                              size="sm"
+                              className="flex-1 h-7 text-xs bg-[#243d8a] hover:bg-[#1e3270] text-white px-2 py-1"
+                            >
+                              <Mail className="w-3 h-3 mr-1" />
+                              Email
+                            </Button>
+                            <Button
+                              onClick={() => handleSendWhatsApp(purchase)}
+                              disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
+                              size="sm"
+                              className="flex-1 h-7 text-xs bg-green-500 hover:bg-green-600 text-white px-2 py-1"
+                              title={!purchase.vendor_phone ? 'Vendor phone not available' : 'Send via WhatsApp'}
+                            >
+                              {sendingWhatsAppId === purchase.cr_id ? (
+                                <div className="w-3 h-3 mr-1 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <MessageSquare className="w-3 h-3 mr-1" />
+                              )}
+                              WhatsApp
+                            </Button>
+                          </div>
                         )
                       )}
 
@@ -770,7 +806,7 @@ const PurchaseOrders: React.FC = () => {
                               </Button>
                             )}
 
-                            {/* Send Email to Vendor - Show if vendor is approved and not completed */}
+                            {/* Send to Vendor - Show if vendor is approved and not completed */}
                             {purchase.status === 'pending' && purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (
                               purchase.vendor_email_sent ? (
                                 <div className="px-2 py-1 h-auto bg-green-50 border border-green-200 rounded text-xs font-medium text-green-700 flex items-center gap-1">
@@ -778,14 +814,30 @@ const PurchaseOrders: React.FC = () => {
                                   <span className="hidden lg:inline">Sent</span>
                                 </div>
                               ) : (
-                                <Button
-                                  onClick={() => handleSendEmailToVendor(purchase)}
-                                  size="sm"
-                                  className="px-2 py-1 h-auto text-xs bg-[#243d8a] hover:bg-[#1e3270] text-white"
-                                >
-                                  <Mail className="w-3 h-3 sm:mr-1" />
-                                  <span className="hidden lg:inline">Send</span>
-                                </Button>
+                                <>
+                                  <Button
+                                    onClick={() => handleSendEmailToVendor(purchase)}
+                                    size="sm"
+                                    className="px-2 py-1 h-auto text-xs bg-[#243d8a] hover:bg-[#1e3270] text-white"
+                                  >
+                                    <Mail className="w-3 h-3 sm:mr-1" />
+                                    <span className="hidden lg:inline">Email</span>
+                                  </Button>
+                                  <Button
+                                    onClick={() => handleSendWhatsApp(purchase)}
+                                    disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
+                                    size="sm"
+                                    className="px-2 py-1 h-auto text-xs bg-green-500 hover:bg-green-600 text-white"
+                                    title={!purchase.vendor_phone ? 'No phone' : 'WhatsApp'}
+                                  >
+                                    {sendingWhatsAppId === purchase.cr_id ? (
+                                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    ) : (
+                                      <MessageSquare className="w-3 h-3 sm:mr-1" />
+                                    )}
+                                    <span className="hidden lg:inline">WA</span>
+                                  </Button>
+                                </>
                               )
                             )}
 

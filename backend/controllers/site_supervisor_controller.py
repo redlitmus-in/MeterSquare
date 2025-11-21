@@ -11,6 +11,7 @@ from models.user import User
 from models.role import Role
 from datetime import datetime
 from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
+from utils.comprehensive_notification_service import notification_service
 import copy
 
 log = get_logger()
@@ -1140,6 +1141,19 @@ def request_project_completion(project_id):
         # boq_history.boq_status = "completed"  # REMOVED - premature completion
 
         db.session.commit()
+
+        # Send notification to PM about completion request
+        try:
+            if pm_ids and len(pm_ids) > 0:
+                notification_service.notify_se_completion_request(
+                    boq_id=boq.boq_id,
+                    project_name=project.project_name,
+                    se_id=user_id,
+                    se_name=se_name,
+                    pm_user_id=pm_ids[0]
+                )
+        except Exception as notif_error:
+            log.error(f"Failed to send completion request notification: {notif_error}")
 
         log.info(f"Site Engineer {user_id} requested completion for project {project_id}")
 

@@ -210,6 +210,16 @@ def send_vendor_email_route(cr_id):
     return send_vendor_email(cr_id)
 
 
+@buyer_routes.route('/purchase/<int:cr_id>/send-vendor-whatsapp', methods=['POST'])
+@jwt_required
+def send_vendor_whatsapp_route(cr_id):
+    """Send PO via WhatsApp to vendor (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return send_vendor_whatsapp(cr_id)
+
+
 # SE BOQ Assignment routes
 @buyer_routes.route('/se-boq-assignments', methods=['GET'])
 @jwt_required

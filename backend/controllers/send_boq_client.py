@@ -30,6 +30,7 @@ def send_boq_to_client():
         message = data.get('message', 'Please review the attached BOQ for your project.')
         formats = data.get('formats', ['excel', 'pdf'])
         custom_email_body = data.get('custom_email_body')  # Custom email template from frontend
+        cover_page = data.get('cover_page')  # Cover page data for PDF
 
         if not boq_id or not client_emails_raw:
             return jsonify({"success": False, "error": "boq_id and client_email are required"}), 400
@@ -167,8 +168,8 @@ def send_boq_to_client():
         if 'pdf' in formats:
             try:
                 pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
-                # Generate PDF WITH images and selected terms from database
-                pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, selected_terms=selected_terms, include_images=True)
+                # Generate PDF WITH images, selected terms, and cover page
+                pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, selected_terms=selected_terms, include_images=True, cover_page=cover_page)
                 pdf_file = (pdf_filename, pdf_data)
             except Exception as pdf_err:
                 log.error(f"Error generating PDF: {str(pdf_err)}")
@@ -279,6 +280,26 @@ def send_boq_to_client():
                 db.session.add(new_history)
 
             db.session.commit()
+
+            # Send notification to TD about BOQ sent to client
+            try:
+                from utils.comprehensive_notification_service import notification_service
+                from models.user import User, Role
+                td_role = Role.query.filter_by(role_name='Technical Director').first()
+                if td_role:
+                    td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                    td_user_ids = [td.user_id for td in td_users]
+                    if td_user_ids:
+                        notification_service.notify_boq_sent_to_client(
+                            boq_id=boq_id,
+                            project_name=project.project_name,
+                            estimator_id=estimator_id,
+                            estimator_name=estimator_name,
+                            td_user_ids=td_user_ids,
+                            client_email=', '.join(successful_sends)
+                        )
+            except Exception as notif_error:
+                log.error(f"Failed to send BOQ to client notification: {notif_error}")
 
             # Prepare response message
             response_message = f"BOQ sent successfully to {len(successful_sends)} recipient(s): {recipients_str}"
@@ -748,7 +769,7 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
     return excel_buffer.read()
 
 
-def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, selected_terms=None, include_images=True):
+def generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, selected_terms=None, include_images=True, cover_page=None):
     """
     Generate Client PDF - MODERN PROFESSIONAL CORPORATE FORMAT
     Uses unified ModernBOQPDFGenerator
@@ -756,9 +777,10 @@ def generate_client_pdf(project, items, total_material_cost, total_labour_cost, 
     Args:
         selected_terms: List of selected terms from database. Each dict should have {'terms_text': '...'}
         include_images: If True, include images (slower). Default False for email speed.
+        cover_page: Optional dict with cover page data for quotation letter
     """
     if boq_json is None:
         boq_json = {}
 
     generator = ModernBOQPDFGenerator()
-    return generator.generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text=None, selected_terms=selected_terms, include_images=include_images)
+    return generator.generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, terms_text=None, selected_terms=selected_terms, include_images=include_images, cover_page=cover_page)

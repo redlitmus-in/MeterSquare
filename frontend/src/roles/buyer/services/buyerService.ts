@@ -407,6 +407,37 @@ class BuyerService {
     }
   }
 
+  // Send WhatsApp message to vendor
+  async sendVendorWhatsApp(crId: number, vendorPhone: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await axios.post<{ success: boolean; message: string }>(
+        `${API_URL}/buyer/purchase/${crId}/send-vendor-whatsapp`,
+        { vendor_phone: vendorPhone },
+        { headers: this.getAuthHeaders() }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.message || 'Failed to send WhatsApp to vendor');
+    } catch (error: any) {
+      console.error('Error sending vendor WhatsApp:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      if (error.response?.status === 403) {
+        throw new Error('You do not have permission to send WhatsApp');
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response?.data?.error || 'Invalid request - phone number required');
+      }
+      throw new Error(error.response?.data?.error || error.response?.data?.message || 'Failed to send WhatsApp to vendor');
+    }
+  }
+
   // Send email to vendor for SE BOQ assignment
   async sendSeBoqVendorEmail(assignmentId: number, vendorEmail: string): Promise<SendVendorEmailResponse> {
     try {

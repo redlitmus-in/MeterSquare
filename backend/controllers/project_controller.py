@@ -14,6 +14,7 @@ from models.user import User
 from controllers.auth_controller import jwt_required
 from config.logging import get_logger
 from sqlalchemy.orm.attributes import flag_modified
+from utils.comprehensive_notification_service import notification_service
 
 log = get_logger()
 
@@ -846,6 +847,21 @@ def request_day_extension(boq_id):
         db.session.add(boq_history)
         db.session.commit()
 
+        # Send notification to TD about day extension request
+        try:
+            if user:
+                notification_service.notify_day_extension_requested(
+                    boq_id=boq_id,
+                    project_name=project.project_name,
+                    pm_id=user_id,
+                    pm_name=user_name,
+                    td_user_id=user.user_id,
+                    days_requested=additional_days,
+                    reason=reason
+                )
+        except Exception as notif_error:
+            log.error(f"Failed to send day extension request notification: {notif_error}")
+
         return jsonify({
             "success": True,
             "message": f"Day extension request sent to Technical Director for approval",
@@ -1058,6 +1074,22 @@ def approve_day_extension(boq_id):
 
         db.session.commit()
 
+        # Send notification to PM about day extension approval
+        try:
+            # Get PM from project
+            pm_ids = project.user_id if isinstance(project.user_id, list) else ([project.user_id] if project.user_id else [])
+            if pm_ids and len(pm_ids) > 0:
+                notification_service.notify_day_extension_approved(
+                    boq_id=boq_id,
+                    project_name=project.project_name,
+                    td_id=user_id,
+                    td_name=user_name,
+                    pm_user_id=pm_ids[0],
+                    days_approved=approved_days
+                )
+        except Exception as notif_error:
+            log.error(f"Failed to send day extension approval notification: {notif_error}")
+
         return jsonify({
             "success": True,
             "message": f"Day extension approved: +{approved_days} days",
@@ -1178,6 +1210,22 @@ def reject_day_extension(boq_id):
             db.session.add(history)
 
         db.session.commit()
+
+        # Send notification to PM about day extension rejection
+        try:
+            # Get PM from project
+            pm_ids = project.user_id if isinstance(project.user_id, list) else ([project.user_id] if project.user_id else [])
+            if pm_ids and len(pm_ids) > 0:
+                notification_service.notify_day_extension_rejected(
+                    boq_id=boq_id,
+                    project_name=project.project_name,
+                    td_id=user_id,
+                    td_name=user_name,
+                    pm_user_id=pm_ids[0],
+                    rejection_reason=rejection_reason
+                )
+        except Exception as notif_error:
+            log.error(f"Failed to send day extension rejection notification: {notif_error}")
 
         return jsonify({
             "success": True,

@@ -94,11 +94,8 @@ export const useInactivityDetection = ({
   // Set up event listeners
   useEffect(() => {
     if (!enabled) {
-      console.log('❌ Inactivity detection disabled');
       return;
     }
-
-    console.log(`✅ Inactivity detection enabled - timeout: ${timeout / 1000} seconds`);
 
     // Initialize timer
     resetTimer();

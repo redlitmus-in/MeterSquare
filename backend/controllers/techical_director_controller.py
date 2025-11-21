@@ -10,6 +10,7 @@ from datetime import datetime  # For datetime.min in sorting
 from utils.boq_email_service import BOQEmailService
 from models.user import User
 from models.role import Role
+from utils.comprehensive_notification_service import notification_service
 
 log = get_logger()
 
@@ -533,6 +534,26 @@ def td_mail_send():
 
         db.session.commit()
         log.info(f"BOQ {boq_id} - Database committed successfully")
+
+        # Send notification about TD's decision
+        try:
+            # Get estimator user_id for notification
+            estimator_user_id = None
+            if estimator and hasattr(estimator, 'user_id'):
+                estimator_user_id = estimator.user_id
+
+            if estimator_user_id:
+                notification_service.notify_td_boq_decision(
+                    boq_id=boq_id,
+                    project_name=project.project_name,
+                    td_id=td_user_id,
+                    td_name=td_name,
+                    recipient_user_ids=[estimator_user_id],
+                    approved=(technical_director_status.lower() == 'approved'),
+                    rejection_reason=rejection_reason if technical_director_status.lower() == 'rejected' else None
+                )
+        except Exception as notif_error:
+            log.error(f"Failed to send TD decision notification: {notif_error}")
 
         log.info(f"BOQ {boq_id} {new_status.lower()} by TD, email sent to {recipient_email}")
 

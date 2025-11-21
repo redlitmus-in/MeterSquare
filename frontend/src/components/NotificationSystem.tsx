@@ -68,11 +68,10 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   } = useNotificationStore();
 
   const [showPanel, setShowPanel] = useState(false);
-  const [activeTab, setActiveTab] = useState<'all' | 'unread' | 'pr' | 'system'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPriority, setSelectedPriority] = useState<string>('all');
   const [toastNotifications, setToastNotifications] = useState<NotificationData[]>([]);
-  const [expandedView, setExpandedView] = useState(false);
   
   // Refs for click outside detection
   const panelRef = useRef<HTMLDivElement>(null);
@@ -365,50 +364,39 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.95 }}
             className={cn(
-              "absolute right-0 top-full mt-2 bg-white rounded-lg shadow-2xl border z-[9999] overflow-hidden transition-all duration-300",
-              expandedView ? "w-[600px] max-h-[700px]" : "w-[420px] max-h-[600px]"
+              "absolute right-0 top-full mt-2 bg-white rounded-lg shadow-xl border z-[9999] overflow-hidden",
+              "w-[380px] max-h-[480px]"
             )}
           >
-            {/* Enhanced Header */}
-            <div className="bg-gradient-to-r from-red-500 to-red-600 text-white p-4">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-                    <Bell className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Notification Center</h3>
-                    <p className="text-sm text-white/80 mt-0.5">
-                      {counts.unread} unread • {counts.pr} PR • {counts.urgent} urgent
-                    </p>
-                  </div>
-                </div>
                 <div className="flex items-center gap-2">
+                  <Bell className="w-4 h-4" />
+                  <h3 className="font-semibold text-sm">Notifications</h3>
+                  {counts.unread > 0 && (
+                    <Badge className="bg-white/20 text-white text-xs px-1.5 py-0">
+                      {counts.unread}
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
                   {!isPermissionGranted && (
                     <Button
                       size="sm"
-                      variant="secondary"
+                      variant="ghost"
                       onClick={requestPermission}
-                      className="bg-white/20 hover:bg-white/30 text-white border-white/30"
+                      className="text-white hover:bg-white/10 h-7 px-2 text-xs"
+                      title="Enable desktop notifications"
                     >
-                      <BellRing className="w-4 h-4 mr-1" />
-                      Enable
+                      <BellRing className="w-3.5 h-3.5" />
                     </Button>
                   )}
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setExpandedView(!expandedView)}
-                    className="text-white hover:bg-white/20"
-                    title={expandedView ? "Compact View" : "Expanded View"}
-                  >
-                    {expandedView ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
                     onClick={() => setShowPanel(false)}
-                    className="text-white hover:bg-white/20"
+                    className="text-white hover:bg-white/10 h-7 w-7 p-0"
                   >
                     <X className="w-4 h-4" />
                   </Button>
@@ -416,69 +404,22 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
               </div>
             </div>
 
-            {/* Search and Filters */}
-            <div className="p-3 border-b bg-gray-50">
-              <div className="flex flex-col sm:flex-row gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    placeholder="Search notifications..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 h-9"
-                  />
-                </div>
-                <Select value={selectedPriority} onValueChange={setSelectedPriority}>
-                  <SelectTrigger className="w-[140px] h-9">
-                    <SelectValue placeholder="Priority" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Priorities</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="low">Low</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Tabs for PR and System notifications */}
+            {/* Tabs - Simplified */}
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
-              <TabsList className="w-full rounded-none border-b bg-white grid grid-cols-4">
-                <TabsTrigger value="all" className="data-[state=active]:bg-red-50">
-                  All
-                  {counts.all > 0 && (
-                    <Badge variant="secondary" className="ml-1 h-5 px-1">
-                      {counts.all}
-                    </Badge>
-                  )}
+              <TabsList className="w-full rounded-none border-b bg-gray-50 grid grid-cols-2 h-9">
+                <TabsTrigger value="all" className="data-[state=active]:bg-white data-[state=active]:text-blue-600 text-xs">
+                  All {counts.all > 0 && `(${counts.all})`}
                 </TabsTrigger>
-                <TabsTrigger value="unread" className="data-[state=active]:bg-red-50">
+                <TabsTrigger value="unread" className="data-[state=active]:bg-white data-[state=active]:text-blue-600 text-xs">
                   Unread
                   {counts.unread > 0 && (
-                    <Badge className="bg-red-500 text-white ml-1 h-5 px-1">
+                    <Badge className="bg-red-500 text-white ml-1 h-4 px-1.5 text-xs">
                       {counts.unread}
                     </Badge>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="pr" className="data-[state=active]:bg-red-50">
-                  PR
-                  {counts.pr > 0 && (
-                    <Badge variant="secondary" className="ml-1 h-5 px-1">
-                      {counts.pr}
-                    </Badge>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger value="system" className="data-[state=active]:bg-red-50">
-                  System
-                  {counts.system > 0 && (
-                    <Badge variant="secondary" className="ml-1 h-5 px-1">
-                      {counts.system}
-                    </Badge>
-                  )}
-                </TabsTrigger>
               </TabsList>
+              {/* Removed PR and System tabs for simplicity */}
 
               <TabsContent value={activeTab} className="mt-0">
                 {/* Notifications List */}

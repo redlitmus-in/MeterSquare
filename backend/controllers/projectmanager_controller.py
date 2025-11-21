@@ -28,6 +28,7 @@ from models.boq import *
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils.boq_email_service import BOQEmailService
+from utils.comprehensive_notification_service import notification_service
 from models.user import User
 from models.role import Role
 from datetime import datetime
@@ -73,6 +74,26 @@ def create_pm():
                     assigned_count += 1
 
             db.session.commit()
+
+            # Send notification to newly created PM about project assignments
+            try:
+                if assigned_count > 0:
+                    current_user = g.get("user")
+                    assigner_id = current_user.get('user_id') if current_user else None
+                    assigner_name = current_user.get('full_name') or current_user.get('username') or 'Admin'
+
+                    for proj_id in project_ids:
+                        project = Project.query.filter_by(project_id=proj_id, is_deleted=False).first()
+                        if project:
+                            notification_service.notify_pm_assigned_to_project(
+                                project_id=proj_id,
+                                project_name=project.project_name,
+                                td_id=assigner_id,
+                                td_name=assigner_name,
+                                pm_user_ids=[new_user_id]
+                            )
+            except Exception as notif_error:
+                log.error(f"Failed to send PM creation assignment notifications: {notif_error}")
 
         return jsonify({
             "message": "Project Manager created successfully",
@@ -545,6 +566,26 @@ def update_pm(user_id):
 
         db.session.commit()
 
+        # Send notification to PM about new project assignments
+        try:
+            if "assigned_projects" in data and data["assigned_projects"]:
+                current_user = g.get("user")
+                assigner_id = current_user.get('user_id') if current_user else None
+                assigner_name = current_user.get('full_name') or current_user.get('username') or 'Admin'
+
+                for project_id in data["assigned_projects"]:
+                    project = Project.query.filter_by(project_id=project_id, is_deleted=False).first()
+                    if project:
+                        notification_service.notify_pm_assigned_to_project(
+                            project_id=project_id,
+                            project_name=project.project_name,
+                            td_id=assigner_id,
+                            td_name=assigner_name,
+                            pm_user_ids=[user_id]
+                        )
+        except Exception as notif_error:
+            log.error(f"Failed to send PM update assignment notifications: {notif_error}")
+
         # Build response with updated project assignments
         updated_projects = Project.query.filter_by(user_id=user_id).all()
         projects_list = [
@@ -784,6 +825,19 @@ def assign_projects():
 
         db.session.commit()
         log.info(f"Successfully assigned PM to {len(assigned_projects)} projects and updated {boq_histories_updated} BOQ histories")
+
+        # Send notification to assigned PM(s) about project assignments
+        try:
+            for proj_data in assigned_projects:
+                notification_service.notify_pm_assigned_to_project(
+                    project_id=proj_data['project_id'],
+                    project_name=proj_data['project_name'],
+                    td_id=td_id,
+                    td_name=td_name,
+                    pm_user_ids=pm_ids  # All PMs assigned to this project
+                )
+        except Exception as notif_error:
+            log.error(f"Failed to send PM assignment notifications: {notif_error}")
 
         # Send email notification to Project Manager
         email_sent = False
@@ -1085,6 +1139,19 @@ def assign_items_to_se():
         db.session.commit()
 
         log.info(f"{role_name} {pm_name} assigned {len(assigned_items)} items to SE {se_name} for BOQ {boq_id}")
+
+        # Send notification to SE about item assignment
+        try:
+            notification_service.notify_se_items_assigned(
+                boq_id=boq_id,
+                project_name=project.project_name,
+                pm_id=pm_user_id,
+                pm_name=pm_name,
+                se_user_id=se_user_id,
+                items_count=len(assigned_items)
+            )
+        except Exception as notif_error:
+            log.error(f"Failed to send item assignment notification: {notif_error}")
 
         return jsonify({
             "success": True,
@@ -1614,6 +1681,20 @@ def send_boq_to_estimator():
 
         db.session.commit()
 
+        # Send notification to Estimator about PM's decision
+        try:
+            notification_service.notify_pm_boq_decision(
+                boq_id=boq_id,
+                project_name=project.project_name,
+                pm_id=current_user_id,
+                pm_name=current_user_name,
+                estimator_user_id=estimator.user_id,
+                approved=(boq_status == 'approved'),
+                rejection_reason=rejection_reason if boq_status == 'rejected' else None
+            )
+        except Exception as notif_error:
+            log.error(f"Failed to send PM decision notification: {notif_error}")
+
         return jsonify({
             "success": True,
             "message": f"BOQ {boq_status} and sent to Estimator {estimator.full_name}",
@@ -1805,6 +1886,20 @@ def confirm_se_completion():
         se_name = se_user.full_name if se_user else "Site Engineer"
 
         log.info(f"PM {pm_user_id} confirmed SE {se_user_id} completion for project {project_id}. Status: {confirmed_pairs}/{total_pairs}")
+
+        # Send notification to SE about completion confirmation
+        try:
+            boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
+            if boq:
+                notification_service.notify_pm_confirms_completion(
+                    boq_id=boq.boq_id,
+                    project_name=project.project_name,
+                    pm_id=pm_user_id,
+                    pm_name=pm_name,
+                    se_user_id=se_user_id
+                )
+        except Exception as notif_error:
+            log.error(f"Failed to send completion confirmation notification: {notif_error}")
 
         return jsonify({
             "success": True,

@@ -130,6 +130,10 @@ class ChangeRequest(db.Model):
     vendor_email_sent_date = db.Column(db.DateTime, nullable=True)
     vendor_email_sent_by_user_id = db.Column(db.Integer, nullable=True)
 
+    # WhatsApp tracking
+    vendor_whatsapp_sent = db.Column(db.Boolean, default=False)  # Track if PO WhatsApp sent to vendor
+    vendor_whatsapp_sent_at = db.Column(db.DateTime, nullable=True)
+
     # Rejection
     rejection_reason = db.Column(db.Text, nullable=True)
     rejected_by_user_id = db.Column(db.Integer, nullable=True)

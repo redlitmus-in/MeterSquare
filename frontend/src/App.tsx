@@ -19,6 +19,7 @@ import { LoginPage } from '@/pages/auth/LoginPage';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import RoleBasedRedirect from '@/components/routing/RoleBasedRedirect';
+import NotificationSystem from '@/components/NotificationSystem';
 
 // Lazy load all non-critical pages
 const TasksPage = lazy(() => import('@/pages/common/TasksPage'));
@@ -820,6 +821,8 @@ function App() {
             }
           }}
         />
+        {/* Global Notification System - available on all authenticated pages */}
+        {isAuthenticated && <NotificationSystem />}
         <Suspense fallback={<PageLoader />}>
           <Routes>
         {/* Public Routes */}

@@ -8,6 +8,7 @@ from config.logging import get_logger
 from models.boq import *
 from config.db import db
 from flask import g
+from utils.comprehensive_notification_service import notification_service
 
 log = get_logger()
 
@@ -116,6 +117,35 @@ def confirm_client_approval(boq_id):
 
         db.session.commit()
 
+        # Send notification to TD about client approval
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            # Get TD users
+            td_role = Role.query.filter_by(role_name='Technical Director').first()
+            if td_role:
+                td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                for td_user in td_users:
+                    notification = NotificationManager.create_notification(
+                        user_id=td_user.user_id,
+                        type='success',
+                        title='Client Approved BOQ',
+                        message=f'Client approved BOQ for {project.project_name if project else "project"}. Confirmed by {estimator_name}',
+                        priority='high',
+                        category='boq',
+                        action_url=f'/technical-director/boq/{boq_id}',
+                        action_label='View BOQ',
+                        metadata={'boq_id': boq_id},
+                        sender_id=estimator_id,
+                        sender_name=estimator_name
+                    )
+                    # Send via Socket.IO
+                    send_notification_to_user(td_user.user_id, notification.to_dict())
+                    log.info(f"Sent client approval notification to TD {td_user.user_id}")
+        except Exception as notif_error:
+            log.error(f"Failed to send client approval notification: {notif_error}")
+
         return jsonify({
             "success": True,
             "message": "Client approval confirmed successfully",
@@ -158,10 +188,41 @@ def reject_client_approval(boq_id):
         boq.last_modified_at = datetime.utcnow()
 
         current_user = getattr(g, 'user', None)
+        estimator_id = current_user.get('user_id') if current_user else None
+        estimator_name = current_user.get('full_name', 'Estimator') if current_user else 'Estimator'
         if current_user:
             boq.last_modified_by = current_user.get('email', 'Unknown')
 
+        project = boq.project
+
         db.session.commit()
+
+        # Send notification to TD about client rejection
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            td_role = Role.query.filter_by(role_name='Technical Director').first()
+            if td_role:
+                td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                for td_user in td_users:
+                    notification = NotificationManager.create_notification(
+                        user_id=td_user.user_id,
+                        type='rejection',
+                        title='Client Rejected BOQ',
+                        message=f'Client rejected BOQ for {project.project_name if project else "project"}. Reason: {rejection_reason}',
+                        priority='high',
+                        category='boq',
+                        action_url=f'/technical-director/boq/{boq_id}',
+                        action_label='View BOQ',
+                        metadata={'boq_id': boq_id, 'rejection_reason': rejection_reason},
+                        sender_id=estimator_id,
+                        sender_name=estimator_name
+                    )
+                    send_notification_to_user(td_user.user_id, notification.to_dict())
+                    log.info(f"Sent client rejection notification to TD {td_user.user_id}")
+        except Exception as notif_error:
+            log.error(f"Failed to send client rejection notification: {notif_error}")
 
         return jsonify({
             "success": True,
@@ -203,10 +264,41 @@ def cancel_boq(boq_id):
         boq.last_modified_at = datetime.utcnow()
 
         current_user = getattr(g, 'user', None)
+        estimator_id = current_user.get('user_id') if current_user else None
+        estimator_name = current_user.get('full_name', 'Estimator') if current_user else 'Estimator'
         if current_user:
             boq.last_modified_by = current_user.get('email', 'Unknown')
 
+        project = boq.project
+
         db.session.commit()
+
+        # Send notification to TD about BOQ cancellation
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            td_role = Role.query.filter_by(role_name='Technical Director').first()
+            if td_role:
+                td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                for td_user in td_users:
+                    notification = NotificationManager.create_notification(
+                        user_id=td_user.user_id,
+                        type='warning',
+                        title='BOQ Cancelled',
+                        message=f'BOQ for {project.project_name if project else "project"} has been cancelled. Reason: {cancellation_reason}',
+                        priority='high',
+                        category='boq',
+                        action_url=f'/technical-director/boq/{boq_id}',
+                        action_label='View BOQ',
+                        metadata={'boq_id': boq_id, 'cancellation_reason': cancellation_reason},
+                        sender_id=estimator_id,
+                        sender_name=estimator_name
+                    )
+                    send_notification_to_user(td_user.user_id, notification.to_dict())
+                    log.info(f"Sent BOQ cancellation notification to TD {td_user.user_id}")
+        except Exception as notif_error:
+            log.error(f"Failed to send BOQ cancellation notification: {notif_error}")
 
         return jsonify({
             "success": True,
@@ -556,6 +648,18 @@ def send_boq_to_project_manager():
 
         db.session.commit()
 
+        # Send notification to PM about BOQ requiring approval
+        try:
+            notification_service.notify_boq_sent_to_pm(
+                boq_id=boq_id,
+                project_name=project.project_name,
+                estimator_id=current_user_id,
+                estimator_name=current_user_name,
+                pm_user_id=pm_id
+            )
+        except Exception as notif_error:
+            log.error(f"Failed to send BOQ to PM notification: {notif_error}")
+
         return jsonify({
             "success": True,
             "message": f"BOQ sent successfully to Project Manager {pm.full_name}",
@@ -783,6 +887,27 @@ def send_boq_to_technical_director():
                 db.session.add(boq_history)
 
             db.session.commit()
+
+            # Send notification to TD about BOQ requiring final approval
+            try:
+                log.info(f"=== SENDING NOTIFICATION TO TD ===")
+                log.info(f"BOQ ID: {boq_id}, Project: {project.project_name}")
+                log.info(f"From Estimator: {current_user_name} (ID: {current_user_id})")
+                log.info(f"To TD: {td.full_name} (ID: {td.user_id})")
+
+                notification_service.notify_boq_sent_to_td(
+                    boq_id=boq_id,
+                    project_name=project.project_name,
+                    estimator_id=current_user_id,
+                    estimator_name=current_user_name,
+                    td_user_id=td.user_id
+                )
+                log.info(f"=== NOTIFICATION SENT SUCCESSFULLY ===")
+            except Exception as notif_error:
+                log.error(f"=== NOTIFICATION FAILED ===")
+                log.error(f"Failed to send BOQ to TD notification: {notif_error}")
+                import traceback
+                log.error(traceback.format_exc())
 
             return jsonify({
                 "success": True,

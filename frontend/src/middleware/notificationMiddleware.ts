@@ -119,12 +119,9 @@ class NotificationMiddleware {
       return;
     }
 
-    // Check user role permissions
-    const userRole = this.getCurrentUserRole();
-    if (!this.canSendNotification(userRole, data.type)) {
-      console.warn(`User role ${userRole} cannot send ${data.type} notifications`);
-      return;
-    }
+    // NOTE: Removed role permission check here
+    // Incoming notifications from backend should always be displayed
+    // The backend already validates who should receive notifications
 
     // Sanitize and validate notification data
     const sanitizedData = this.sanitizeNotificationData(data);

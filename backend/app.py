@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from config.routes import initialize_routes
 from config.db import initialize_db as initialize_sqlalchemy, db
 from config.logging import get_logger
+from socketio_server import init_socketio
+from controllers.notification_controller import notification_bp
 import os
 
 # Load environment variables from .env file
@@ -155,7 +157,27 @@ def create_app():
     # with app.app_context():
     #     db.create_all()
 
+    # WhatsApp Webhook endpoint for Echt.im
+    @app.route('/api/whatsapp/webhook', methods=['GET', 'POST'])
+    def whatsapp_webhook():
+        """Webhook endpoint for Echt.im WhatsApp callbacks"""
+        if request.method == 'GET':
+            # Verification request
+            return jsonify({"status": "ok", "message": "Webhook verified"}), 200
+
+        # POST - Incoming message or status update
+        data = request.get_json() or {}
+        logger.info(f"WhatsApp webhook received: {data}")
+        return jsonify({"status": "ok"}), 200
+
     initialize_routes(app)  # Register routes
+
+    # Register notification routes
+    app.register_blueprint(notification_bp, url_prefix='/api')
+
+    # Initialize Socket.IO for real-time notifications
+    socketio = init_socketio(app)
+    app.socketio = socketio  # Make socketio accessible to other modules
 
     return app
 
@@ -164,4 +186,14 @@ if __name__ == "__main__":
     environment = os.getenv("ENVIRONMENT", "development")
     port = int(os.getenv("PORT", 5000))
     debug = environment != "production"
-    app.run(host="0.0.0.0", port=port, debug=debug)
+
+    # Use socketio.run instead of app.run for WebSocket support
+    print(f"🚀 Starting MeterSquare ERP Server")
+    print(f"   Environment: {environment}")
+    print(f"   Port: {port}")
+    print(f"   Debug: {debug}")
+    print(f"   Socket.IO: Enabled")
+    print(f"   Real-time notifications: Active")
+    print("=" * 60)
+
+    app.socketio.run(app, host="0.0.0.0", port=port, debug=debug, allow_unsafe_werkzeug=True)

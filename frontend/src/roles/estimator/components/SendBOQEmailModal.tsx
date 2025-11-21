@@ -51,6 +51,27 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
   const [showPDFPreview, setShowPDFPreview] = useState(false);
   const [previewPDFUrl, setPreviewPDFUrl] = useState<string | null>(null);
 
+  // Cover page state
+  const [showCoverPageEditor, setShowCoverPageEditor] = useState(false);
+  const [coverPageData, setCoverPageData] = useState({
+    reference_number: '',
+    date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+    recipient_name: 'The Tenders and Contracts Department',
+    client_company: '',
+    city: 'Dubai',
+    country: 'United Arab Emirates',
+    subject: '',
+    tender_reference: '',
+    body_text: '',
+    enclosed_documents: ['Bill of Quantities derived for the works', 'Summary'],
+    contact_person: 'Mr. Hamid Hussain',
+    contact_title: 'Manager- Sales & Projects',
+    contact_phone: '055 354 7727',
+    contact_email: 'sales@metersquare.com',
+    signatory_name: 'Amjath K Aboobacker',
+    signatory_title: 'Managing Director'
+  });
+
   const isClientMode = mode === 'client';
 
   // Default email template
@@ -81,6 +102,26 @@ MeterSquare Interiors LLC`;
       setEmailTemplate(getDefaultTemplate());
     }
   }, [isOpen, isClientMode]);
+
+  // Initialize cover page data when BOQ data is loaded
+  React.useEffect(() => {
+    if (isOpen && isClientMode && boqData) {
+      const today = new Date();
+      const formattedDate = today.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const year = today.getFullYear();
+
+      setCoverPageData(prev => ({
+        ...prev,
+        reference_number: `MS/${boqData.clientName?.toUpperCase().replace(/\s+/g, '-') || 'CLIENT'}/${boqId}`,
+        date: formattedDate,
+        client_company: boqData.clientName || '',
+        city: boqData.location || 'Dubai',
+        subject: `Submission of Quotation for Fitout works in ${projectName}`,
+        tender_reference: '',
+        body_text: `We are referring to your request for quotation for ${projectName}. In this regard, we are herewith submitting the detailed quotation for your perusal and approval. Enclosed herewith are following documents:`
+      }));
+    }
+  }, [isOpen, isClientMode, boqData, boqId, projectName]);
 
   // Fetch BOQ data when modal opens in client mode
   React.useEffect(() => {
@@ -223,7 +264,9 @@ MeterSquare Interiors LLC`;
           client_email: recipientEmail.trim() || undefined,
           message: comments.trim() || undefined,
           formats: selectedFormats,
-          custom_email_body: emailTemplate.trim() || undefined
+          custom_email_body: emailTemplate.trim() || undefined,
+          // Include cover page data if any field is filled
+          cover_page: (coverPageData.reference_number || coverPageData.subject) ? coverPageData : undefined
         });
 
         // Track sent/failed counts from response
@@ -281,6 +324,26 @@ MeterSquare Interiors LLC`;
     // Reset template editor
     setShowTemplateEditor(false);
     setEmailTemplate('');
+    // Reset cover page editor
+    setShowCoverPageEditor(false);
+    setCoverPageData({
+      reference_number: '',
+      date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+      recipient_name: 'The Tenders and Contracts Department',
+      client_company: '',
+      city: 'Dubai',
+      country: 'United Arab Emirates',
+      subject: '',
+      tender_reference: '',
+      body_text: '',
+      enclosed_documents: ['Bill of Quantities derived for the works', 'Summary'],
+      contact_person: 'Mr. Hamid Hussain',
+      contact_title: 'Manager- Sales & Projects',
+      contact_phone: '055 354 7727',
+      contact_email: 'sales@metersquare.com',
+      signatory_name: 'Amjath K Aboobacker',
+      signatory_title: 'Managing Director'
+    });
     onClose();
   };
 
@@ -567,6 +630,228 @@ MeterSquare Interiors LLC`;
                               </div>
                             )}
                           </div>
+
+                          {/* PDF Cover Page Section */}
+                          <div className="bg-white rounded-lg p-4 border border-green-200 mt-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                                <FileCheck className="w-4 h-4 text-green-600" />
+                                PDF Cover Page
+                                <span className="text-xs text-gray-500 font-normal">(Quotation Letter)</span>
+                              </h4>
+                              <button
+                                type="button"
+                                onClick={() => setShowCoverPageEditor(!showCoverPageEditor)}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors border border-green-300"
+                                disabled={isSending}
+                              >
+                                {showCoverPageEditor ? (
+                                  <>
+                                    <EyeOff className="w-3 h-3" />
+                                    Hide
+                                  </>
+                                ) : (
+                                  <>
+                                    <Edit3 className="w-3 h-3" />
+                                    Edit
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            {showCoverPageEditor ? (
+                              <div className="space-y-4">
+                                {/* Reference & Date Row */}
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <Label className="text-xs text-gray-600">Reference Number</Label>
+                                    <Input
+                                      value={coverPageData.reference_number}
+                                      onChange={(e) => setCoverPageData(prev => ({ ...prev, reference_number: e.target.value }))}
+                                      placeholder="MS/CLIENT/0001"
+                                      className="text-sm"
+                                      disabled={isSending}
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs text-gray-600">Date</Label>
+                                    <Input
+                                      value={coverPageData.date}
+                                      onChange={(e) => setCoverPageData(prev => ({ ...prev, date: e.target.value }))}
+                                      placeholder="21-Nov-2025"
+                                      className="text-sm"
+                                      disabled={isSending}
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* Recipient Section */}
+                                <div className="border-t pt-3">
+                                  <Label className="text-xs text-gray-600 font-semibold">To (Recipient)</Label>
+                                  <div className="grid grid-cols-2 gap-3 mt-2">
+                                    <div>
+                                      <Label className="text-xs text-gray-500">Department/Name</Label>
+                                      <Input
+                                        value={coverPageData.recipient_name}
+                                        onChange={(e) => setCoverPageData(prev => ({ ...prev, recipient_name: e.target.value }))}
+                                        placeholder="The Tenders and Contracts Department"
+                                        className="text-sm"
+                                        disabled={isSending}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs text-gray-500">Company Name</Label>
+                                      <Input
+                                        value={coverPageData.client_company}
+                                        onChange={(e) => setCoverPageData(prev => ({ ...prev, client_company: e.target.value }))}
+                                        placeholder="Client Company Name"
+                                        className="text-sm"
+                                        disabled={isSending}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs text-gray-500">City</Label>
+                                      <Input
+                                        value={coverPageData.city}
+                                        onChange={(e) => setCoverPageData(prev => ({ ...prev, city: e.target.value }))}
+                                        placeholder="Dubai"
+                                        className="text-sm"
+                                        disabled={isSending}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs text-gray-500">Country</Label>
+                                      <Input
+                                        value={coverPageData.country}
+                                        onChange={(e) => setCoverPageData(prev => ({ ...prev, country: e.target.value }))}
+                                        placeholder="United Arab Emirates"
+                                        className="text-sm"
+                                        disabled={isSending}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Subject & Body */}
+                                <div className="border-t pt-3">
+                                  <Label className="text-xs text-gray-600">Subject Line</Label>
+                                  <Input
+                                    value={coverPageData.subject}
+                                    onChange={(e) => setCoverPageData(prev => ({ ...prev, subject: e.target.value }))}
+                                    placeholder="Submission of Quotation for Fitout works in..."
+                                    className="text-sm"
+                                    disabled={isSending}
+                                  />
+                                </div>
+
+                                <div>
+                                  <Label className="text-xs text-gray-600">Tender/Project Reference (Optional)</Label>
+                                  <Input
+                                    value={coverPageData.tender_reference}
+                                    onChange={(e) => setCoverPageData(prev => ({ ...prev, tender_reference: e.target.value }))}
+                                    placeholder="Tender No. 3000000750"
+                                    className="text-sm"
+                                    disabled={isSending}
+                                  />
+                                </div>
+
+                                <div>
+                                  <Label className="text-xs text-gray-600">Letter Body Text</Label>
+                                  <Textarea
+                                    value={coverPageData.body_text}
+                                    onChange={(e) => setCoverPageData(prev => ({ ...prev, body_text: e.target.value }))}
+                                    placeholder="We are referring to your request for quotation..."
+                                    className="text-sm resize-none"
+                                    rows={3}
+                                    disabled={isSending}
+                                  />
+                                </div>
+
+                                {/* Contact Person Section */}
+                                <div className="border-t pt-3">
+                                  <Label className="text-xs text-gray-600 font-semibold">Contact Person</Label>
+                                  <div className="grid grid-cols-2 gap-3 mt-2">
+                                    <div>
+                                      <Label className="text-xs text-gray-500">Name</Label>
+                                      <Input
+                                        value={coverPageData.contact_person}
+                                        onChange={(e) => setCoverPageData(prev => ({ ...prev, contact_person: e.target.value }))}
+                                        placeholder="Mr. Hamid Hussain"
+                                        className="text-sm"
+                                        disabled={isSending}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs text-gray-500">Title</Label>
+                                      <Input
+                                        value={coverPageData.contact_title}
+                                        onChange={(e) => setCoverPageData(prev => ({ ...prev, contact_title: e.target.value }))}
+                                        placeholder="Manager- Sales & Projects"
+                                        className="text-sm"
+                                        disabled={isSending}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs text-gray-500">Phone</Label>
+                                      <Input
+                                        value={coverPageData.contact_phone}
+                                        onChange={(e) => setCoverPageData(prev => ({ ...prev, contact_phone: e.target.value }))}
+                                        placeholder="055 354 7727"
+                                        className="text-sm"
+                                        disabled={isSending}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs text-gray-500">Email</Label>
+                                      <Input
+                                        value={coverPageData.contact_email}
+                                        onChange={(e) => setCoverPageData(prev => ({ ...prev, contact_email: e.target.value }))}
+                                        placeholder="sales@metersquare.com"
+                                        className="text-sm"
+                                        disabled={isSending}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Signatory Section */}
+                                <div className="border-t pt-3">
+                                  <Label className="text-xs text-gray-600 font-semibold">Signatory</Label>
+                                  <div className="grid grid-cols-2 gap-3 mt-2">
+                                    <div>
+                                      <Label className="text-xs text-gray-500">Name</Label>
+                                      <Input
+                                        value={coverPageData.signatory_name}
+                                        onChange={(e) => setCoverPageData(prev => ({ ...prev, signatory_name: e.target.value }))}
+                                        placeholder="Amjath K Aboobacker"
+                                        className="text-sm"
+                                        disabled={isSending}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs text-gray-500">Title</Label>
+                                      <Input
+                                        value={coverPageData.signatory_title}
+                                        onChange={(e) => setCoverPageData(prev => ({ ...prev, signatory_title: e.target.value }))}
+                                        placeholder="Managing Director"
+                                        className="text-sm"
+                                        disabled={isSending}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="bg-gray-50 rounded p-3 border border-gray-200">
+                                <div className="text-xs text-gray-600 space-y-1">
+                                  <p><strong>Ref:</strong> {coverPageData.reference_number || 'Not set'}</p>
+                                  <p><strong>To:</strong> {coverPageData.recipient_name}, {coverPageData.client_company || 'Client'}</p>
+                                  <p><strong>Subject:</strong> {coverPageData.subject || 'Not set'}</p>
+                                </div>
+                                <p className="text-xs text-green-600 mt-2">Click "Edit" to customize cover page details</p>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -664,7 +949,7 @@ MeterSquare Interiors LLC`;
                                 onClick={async () => {
                                   try {
                                     toast.loading('Generating PDF preview...');
-                                    const pdfUrl = await previewClientBOQPDF(boqId);
+                                    const pdfUrl = await previewClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined);
                                     setPreviewPDFUrl(pdfUrl);
                                     setShowPDFPreview(true);
                                     toast.dismiss();

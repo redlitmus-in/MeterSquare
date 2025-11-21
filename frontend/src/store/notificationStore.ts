@@ -1,11 +1,7 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 import { NotificationData, notificationService } from '@/services/notificationService';
-import {
-  filterOldNotifications,
-  sanitizeNotificationData,
-  getDebugLogger
-} from '@/utils/notificationSecurity';
+import { filterOldNotifications, sanitizeNotificationData } from '@/utils/notificationSecurity';
 
 interface NotificationStore {
   notifications: NotificationData[];
@@ -38,36 +34,21 @@ export const useNotificationStore = create<NotificationStore>()(
       isPermissionGranted: false,
 
       addNotification: (notification: NotificationData) => {
-        const debug = getDebugLogger();
-
         set((state) => {
-          // Sanitize notification first
           const sanitizedNotification = sanitizeNotificationData(notification);
 
           // Check if notification already exists (prevent duplicates)
           const exists = state.notifications.find(n => n.id === sanitizedNotification.id);
           if (exists) {
-            debug.warn(`Notification ${sanitizedNotification.id} already exists`);
             return state;
           }
 
-          debug.info('Adding new notification', {
-            id: sanitizedNotification.id,
-            type: sanitizedNotification.type
-          });
-
           // Add new notification and apply storage limits
           let newNotifications = [sanitizedNotification, ...state.notifications];
-
-          // Apply storage limits and filter old notifications
           newNotifications = filterOldNotifications(newNotifications);
 
           const newUnreadCount = newNotifications.filter(n => !n.read).length;
-
-          // Update browser tab title
           notificationService.updateTabTitle(newUnreadCount);
-
-          debug.info(`Notification stats: Total=${newNotifications.length}, Unread=${newUnreadCount}`);
 
           return {
             notifications: newNotifications,
@@ -196,14 +177,8 @@ export const initializeNotificationService = async () => {
 
 // IndexedDB setup for notification persistence
 async function setupIndexedDBPersistence() {
-  const debug = getDebugLogger();
-
   try {
-    // Check if IndexedDB is supported
-    if (!('indexedDB' in window)) {
-      debug.warn('IndexedDB not supported');
-      return;
-    }
+    if (!('indexedDB' in window)) return;
 
     const DB_NAME = 'MeterSquareNotifications';
     const DB_VERSION = 2;
@@ -211,57 +186,42 @@ async function setupIndexedDBPersistence() {
 
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onerror = () => {
-      debug.error('Failed to open IndexedDB:', request.error);
-    };
-
     request.onsuccess = () => {
-      debug.info('IndexedDB initialized for notifications');
-      const db = request.result;
-
-      // Load existing notifications from IndexedDB
-      loadNotificationsFromIndexedDB(db);
+      loadNotificationsFromIndexedDB(request.result);
     };
 
     request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
       const db = (event.target as IDBOpenDBRequest).result;
       const oldVersion = event.oldVersion;
 
-      let store: IDBObjectStore;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
         store.createIndex('read', 'read', { unique: false });
         store.createIndex('targetRole', 'targetRole', { unique: false });
         store.createIndex('category', 'category', { unique: false });
         store.createIndex('synced', 'synced', { unique: false });
-        debug.info('IndexedDB store created for notifications');
       } else if (oldVersion < 2) {
-        // Upgrade existing store to add synced index
         const transaction = (event.target as IDBOpenDBRequest).transaction;
         if (transaction) {
-          store = transaction.objectStore(STORE_NAME);
+          const store = transaction.objectStore(STORE_NAME);
           if (!store.indexNames.contains('synced')) {
             store.createIndex('synced', 'synced', { unique: false });
-            debug.info('Added synced index to existing store');
           }
         }
       }
     };
 
-    // Subscribe to store changes to persist to IndexedDB
     useNotificationStore.subscribe((state) => {
       saveNotificationsToIndexedDB(state.notifications);
     });
-  } catch (error) {
-    debug.error('Error setting up IndexedDB:', error);
+  } catch {
+    // Silent fail
   }
 }
 
 // Load notifications from IndexedDB
 async function loadNotificationsFromIndexedDB(db: IDBDatabase) {
-  const debug = getDebugLogger();
-
   try {
     const tx = db.transaction('notifications', 'readonly');
     const store = tx.objectStore('notifications');
@@ -269,44 +229,30 @@ async function loadNotificationsFromIndexedDB(db: IDBDatabase) {
 
     request.onsuccess = () => {
       const notifications = request.result || [];
-
       if (notifications.length > 0) {
-        debug.info(`Loading ${notifications.length} notifications from IndexedDB`);
-
-        // Filter old notifications
         const filteredNotifications = filterOldNotifications(notifications);
-
-        // Update store with persisted notifications
         const currentNotifications = useNotificationStore.getState().notifications;
         const mergedNotifications = [...filteredNotifications];
 
-        // Merge with current notifications (avoid duplicates)
         currentNotifications.forEach(current => {
           if (!mergedNotifications.find(n => n.id === current.id)) {
             mergedNotifications.unshift(current);
           }
         });
 
-        // Update store
         useNotificationStore.setState({
           notifications: mergedNotifications,
           unreadCount: mergedNotifications.filter(n => !n.read).length
         });
       }
     };
-
-    request.onerror = () => {
-      debug.error('Failed to load notifications from IndexedDB:', request.error);
-    };
-  } catch (error) {
-    debug.error('Error loading notifications from IndexedDB:', error);
+  } catch {
+    // Silent fail
   }
 }
 
 // Save notifications to IndexedDB
 async function saveNotificationsToIndexedDB(notifications: NotificationData[]) {
-  const debug = getDebugLogger();
-
   try {
     const DB_NAME = 'MeterSquareNotifications';
     const request = indexedDB.open(DB_NAME);
@@ -315,34 +261,19 @@ async function saveNotificationsToIndexedDB(notifications: NotificationData[]) {
       const db = request.result;
       const tx = db.transaction('notifications', 'readwrite');
       const store = tx.objectStore('notifications');
-
-      // Clear existing notifications
       store.clear();
 
-      // Save current notifications (limited to recent ones)
-      const recentNotifications = notifications.slice(0, 100); // Keep latest 100
+      const recentNotifications = notifications.slice(0, 100);
       recentNotifications.forEach(notification => {
         store.put(notification);
       });
-
-      tx.oncomplete = () => {
-        debug.info(`Saved ${recentNotifications.length} notifications to IndexedDB`);
-      };
-
-      tx.onerror = () => {
-        debug.error('Failed to save notifications to IndexedDB:', tx.error);
-      };
     };
-  } catch (error) {
-    debug.error('Error saving notifications to IndexedDB:', error);
+  } catch {
+    // Silent fail
   }
 }
 
 // Auto-initialize when store is first accessed
 if (typeof window !== 'undefined') {
   initializeNotificationService();
-
-  // REMOVED: Auto-clear for production use
-  // Notifications should persist across sessions
-  // To manually clear for testing, use: useNotificationStore.getState().clearAll()
 }

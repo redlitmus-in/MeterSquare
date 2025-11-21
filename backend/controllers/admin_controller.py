@@ -14,6 +14,8 @@ from models.boq import BOQ
 from controllers.auth_controller import jwt_required
 from config.logging import get_logger
 from config.roles_config import ROLE_HIERARCHY
+from utils.purchase_notifications import notify_project_action
+from utils.comprehensive_notification_service import notification_service
 
 log = get_logger()
 
@@ -514,6 +516,20 @@ def assign_project_manager(project_id):
         project.last_modified_at = datetime.utcnow()
         project.last_modified_by = current_user.get('email')
         db.session.commit()
+
+        # Send notification to assigned PM
+        try:
+            admin_id = current_user.get('user_id')
+            admin_name = current_user.get('full_name') or current_user.get('username') or 'Admin'
+            notification_service.notify_pm_assigned_to_project(
+                project_id=project_id,
+                project_name=project.project_name,
+                td_id=admin_id,
+                td_name=admin_name,
+                pm_user_ids=[pm_user_id]
+            )
+        except Exception as notif_error:
+            log.error(f"Failed to send PM assignment notification: {notif_error}")
 
         return jsonify({
             "message": "Project Manager assigned successfully",

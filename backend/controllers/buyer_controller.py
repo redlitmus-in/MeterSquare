@@ -12,6 +12,7 @@ from config.logging import get_logger
 from datetime import datetime
 import os
 from supabase import create_client, Client
+from utils.comprehensive_notification_service import notification_service
 
 log = get_logger()
 
@@ -927,6 +928,20 @@ def complete_purchase():
 
         db.session.commit()
 
+        # Send notification to CR creator about purchase completion
+        try:
+            if cr.requested_by_user_id:
+                project_name = cr.project.project_name if cr.project else 'Unknown Project'
+                notification_service.notify_cr_purchase_completed(
+                    cr_id=cr_id,
+                    project_name=project_name,
+                    buyer_id=buyer_id,
+                    buyer_name=buyer_name,
+                    requester_user_id=cr.requested_by_user_id
+                )
+        except Exception as notif_error:
+            log.error(f"Failed to send CR purchase completion notification: {notif_error}")
+
         if new_materials_added:
             log.info(f"Purchase CR-{cr_id} completed. Added {len(new_materials_added)} new materials: {', '.join(new_materials_added)}")
         else:
@@ -1285,6 +1300,30 @@ def select_vendor_for_purchase(cr_id):
             db.session.add(boq_history)
 
         db.session.commit()
+
+        # Send notification when buyer selects vendor (needs TD approval)
+        try:
+            if not is_td:  # Only notify TD when buyer selects vendor
+                # Get TD users
+                td_role = Role.query.filter_by(role_name='Technical Director').first()
+                if not td_role:
+                    td_role = Role.query.filter(Role.role.ilike('%technical%director%')).first()
+
+                if td_role:
+                    tds = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                    if tds:
+                        td_user_id = tds[0].user_id
+                        project_name = cr.project.project_name if cr.project else 'Unknown Project'
+                        notification_service.notify_vendor_selected_for_cr(
+                            cr_id=cr_id,
+                            project_name=project_name,
+                            buyer_id=user_id,
+                            buyer_name=user_name,
+                            td_user_id=td_user_id,
+                            vendor_name=vendor.company_name
+                        )
+        except Exception as notif_error:
+            log.error(f"Failed to send vendor selection notification: {notif_error}")
 
         # Log and return response based on user role
         if is_td:
@@ -2072,6 +2111,121 @@ def send_vendor_email(cr_id):
         import traceback
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Failed to send vendor email: {str(e)}"}), 500
+
+
+def send_vendor_whatsapp(cr_id):
+    """Send purchase order via WhatsApp to vendor"""
+    try:
+        from utils.whatsapp_service import WhatsAppService
+        from datetime import datetime
+
+        current_user = g.user
+        buyer_id = current_user['user_id']
+
+        data = request.get_json()
+        vendor_phone = data.get('vendor_phone')
+
+        if not vendor_phone:
+            return jsonify({"error": "Vendor phone number is required"}), 400
+
+        # Get the change request
+        cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
+        if not cr:
+            return jsonify({"error": "Purchase order not found"}), 404
+
+        if not cr.selected_vendor_id:
+            return jsonify({"error": "No vendor selected for this purchase"}), 400
+
+        if cr.vendor_selection_status != 'approved':
+            return jsonify({"error": "Vendor selection must be approved by TD before sending WhatsApp"}), 400
+
+        # Get vendor details
+        from models.vendor import Vendor
+        vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
+        if not vendor:
+            return jsonify({"error": "Vendor not found"}), 404
+
+        # Get buyer details
+        buyer = User.query.filter_by(user_id=buyer_id).first()
+        if not buyer:
+            return jsonify({"error": "Buyer not found"}), 404
+
+        # Get project details
+        project = Project.query.filter_by(project_id=cr.project_id, is_deleted=False).first()
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        # Get materials for this change request (stored as JSON)
+        sub_items_data = cr.sub_items_data or cr.materials_data or []
+        materials_list = []
+        for sub_item in sub_items_data:
+            materials = sub_item.get('materials', [])
+            for m in materials:
+                materials_list.append({
+                    'material_name': m.get('material_name', 'N/A'),
+                    'brand': m.get('brand', ''),
+                    'specification': m.get('specification', ''),
+                    'quantity': m.get('quantity', 0),
+                    'unit': m.get('unit', '')
+                })
+
+        # Prepare data for message generation
+        vendor_data = {
+            'company_name': vendor.company_name or 'N/A',
+            'contact_person_name': vendor.contact_person_name or '',
+            'phone': vendor_phone
+        }
+
+        purchase_data = {
+            'cr_id': cr_id,
+            'date': datetime.utcnow().strftime('%d/%m/%Y'),
+            'materials': materials_list
+        }
+
+        buyer_data = {
+            'name': buyer.full_name or buyer.username or 'Buyer',
+            'email': buyer.email or '',
+            'phone': buyer.phone or ''
+        }
+
+        project_data = {
+            'project_name': project.project_name,
+            'location': project.location or ''
+        }
+
+        # Send WhatsApp message with interactive buttons
+        whatsapp_service = WhatsAppService()
+        result = whatsapp_service.send_purchase_order(
+            phone_number=vendor_phone,
+            vendor_data=vendor_data,
+            purchase_data=purchase_data,
+            buyer_data=buyer_data,
+            project_data=project_data
+        )
+
+        if result.get('success'):
+            # Update the change request to mark WhatsApp as sent
+            cr.vendor_whatsapp_sent = True
+            cr.vendor_whatsapp_sent_at = datetime.utcnow()
+            cr.updated_at = datetime.utcnow()
+            db.session.commit()
+
+            log.info(f"Purchase order WhatsApp sent to vendor {vendor_phone} for CR-{cr_id}")
+            return jsonify({
+                "success": True,
+                "message": "Purchase order sent via WhatsApp successfully"
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": result.get('message', 'Failed to send WhatsApp message')
+            }), 500
+
+    except Exception as e:
+        log.error(f"Error sending vendor WhatsApp: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to send vendor WhatsApp: {str(e)}"}), 500
 
 
 def get_se_boq_assignments():

@@ -4054,6 +4054,25 @@ def send_boq_email(boq_id):
 
             db.session.commit()
 
+            # Send notification to TD
+            try:
+                from utils.comprehensive_notification_service import notification_service
+                from models.user import User as UserModel
+                # Find TD user by email
+                td_user = UserModel.query.filter_by(email=td_email).first()
+                if td_user:
+                    log.info(f"[send_boq_email] Sending notification to TD {td_user.user_id}")
+                    notification_service.notify_boq_sent_to_td(
+                        boq_id=boq_id,
+                        project_name=project.project_name,
+                        estimator_id=user_id,
+                        estimator_name=user_name,
+                        td_user_id=td_user.user_id
+                    )
+                    log.info(f"[send_boq_email] Notification sent successfully")
+            except Exception as notif_err:
+                log.error(f"[send_boq_email] Failed to send notification: {notif_err}")
+
             return jsonify({
                 "success": True,
                 "message": "BOQ review email sent successfully to Technical Director",
@@ -4198,6 +4217,21 @@ def send_boq_email(boq_id):
                 db.session.add(boq_history)
 
             db.session.commit()
+
+            # Send notification to TD (auto-detected)
+            try:
+                from utils.comprehensive_notification_service import notification_service
+                log.info(f"[send_boq_email] Sending notification to auto-detected TD {technical_director.user_id}")
+                notification_service.notify_boq_sent_to_td(
+                    boq_id=boq_id,
+                    project_name=project.project_name,
+                    estimator_id=user_id,
+                    estimator_name=user_name,
+                    td_user_id=technical_director.user_id
+                )
+                log.info(f"[send_boq_email] Notification sent successfully to TD")
+            except Exception as notif_err:
+                log.error(f"[send_boq_email] Failed to send notification to TD: {notif_err}")
 
             return jsonify({
                 "success": True,

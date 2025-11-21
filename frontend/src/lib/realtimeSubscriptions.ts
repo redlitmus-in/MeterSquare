@@ -392,7 +392,7 @@ const subscribeToBOQs = () => {
               toast.error('Real-time updates unavailable. Please refresh manually.');
             }
           } else if (status === 'SUBSCRIBED') {
-            console.log('✅ BOQ real-time subscription active');
+            // Removed verbose log - was causing console spam
             retryCount = 0; // Reset retry count on success
           }
         });
@@ -535,7 +535,7 @@ const subscribeToBOQInternalRevisions = () => {
               console.error('3. Run this SQL: ALTER TABLE boq_internal_revisions DISABLE ROW LEVEL SECURITY;');
             }
           } else if (status === 'SUBSCRIBED') {
-            console.log('✅ Internal Revisions real-time subscription active');
+            // Removed verbose log - was causing console spam
             retryCount = 0;
           }
         });

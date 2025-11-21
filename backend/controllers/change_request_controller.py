@@ -15,6 +15,7 @@ from datetime import datetime
 from sqlalchemy.orm.attributes import flag_modified
 from utils.boq_email_service import BOQEmailService
 from utils.admin_viewing_context import get_effective_user_context
+from utils.comprehensive_notification_service import notification_service
 
 log = get_logger()
 
@@ -713,6 +714,22 @@ def send_for_review(cr_id):
         db.session.commit()
         log.info(f"Change request {cr_id} sent for review to {next_approver} ({next_role})")
 
+        # Send notification to next approver
+        try:
+            if next_approver_id:
+                project_name = change_request.project.project_name if change_request.project else 'Unknown Project'
+                notification_service.notify_cr_created(
+                    cr_id=cr_id,
+                    project_name=project_name,
+                    creator_id=user_id,
+                    creator_name=current_user.get('full_name') or current_user.get('username') or 'User',
+                    creator_role=user_role,
+                    recipient_user_ids=[next_approver_id],
+                    recipient_role=next_role
+                )
+        except Exception as notif_error:
+            log.error(f"Failed to send CR created notification: {notif_error}")
+
         return jsonify({
             "success": True,
             "message": f"Change request sent to {next_approver} for review",
@@ -1372,6 +1389,22 @@ def approve_change_request(cr_id):
 
             db.session.commit()
 
+            # Send notification to next approver
+            try:
+                if next_approver_id:
+                    project_name = change_request.project.project_name if change_request.project else 'Unknown Project'
+                    notification_service.notify_cr_approved(
+                        cr_id=cr_id,
+                        project_name=project_name,
+                        approver_id=approver_id,
+                        approver_name=approver_name,
+                        approver_role='project_manager',
+                        next_user_ids=[next_approver_id],
+                        next_role=next_role
+                    )
+            except Exception as notif_error:
+                log.error(f"Failed to send CR approval notification: {notif_error}")
+
             return jsonify({
                 "success": True,
                 "message": f"Approved by PM. Automatically forwarded to {next_approver} for review",
@@ -1458,6 +1491,22 @@ def approve_change_request(cr_id):
             db.session.commit()
 
             log.info(f"TD gave final approval for CR {cr_id}")
+
+            # Send notification to CR creator about final approval
+            try:
+                if change_request.requested_by_user_id:
+                    project_name = change_request.project.project_name if change_request.project else 'Unknown Project'
+                    notification_service.notify_cr_approved(
+                        cr_id=cr_id,
+                        project_name=project_name,
+                        approver_id=approver_id,
+                        approver_name=approver_name,
+                        approver_role='technical_director',
+                        next_user_ids=[change_request.requested_by_user_id],
+                        next_role='creator'
+                    )
+            except Exception as notif_error:
+                log.error(f"Failed to send CR final approval notification: {notif_error}")
 
             return jsonify({
                 "success": True,
@@ -1594,6 +1643,22 @@ def approve_change_request(cr_id):
             db.session.commit()
 
             log.info(f"Estimator approved CR {cr_id}, assigned to Buyer for purchase")
+
+            # Send notification to assigned Buyer
+            try:
+                if change_request.assigned_to_buyer_user_id:
+                    project_name = change_request.project.project_name if change_request.project else 'Unknown Project'
+                    notification_service.notify_cr_approved(
+                        cr_id=cr_id,
+                        project_name=project_name,
+                        approver_id=approver_id,
+                        approver_name=approver_name,
+                        approver_role='estimator',
+                        next_user_ids=[change_request.assigned_to_buyer_user_id],
+                        next_role='buyer'
+                    )
+            except Exception as notif_error:
+                log.error(f"Failed to send CR approval to Buyer notification: {notif_error}")
 
             return jsonify({
                 "success": True,
@@ -2469,6 +2534,22 @@ def reject_change_request(cr_id):
         db.session.commit()
 
         log.info(f"Change request {cr_id} rejected by {approver_name}")
+
+        # Send notification to CR creator about rejection
+        try:
+            if change_request.requested_by_user_id:
+                project_name = change_request.project.project_name if change_request.project else 'Unknown Project'
+                notification_service.notify_cr_rejected(
+                    cr_id=cr_id,
+                    project_name=project_name,
+                    rejector_id=approver_id,
+                    rejector_name=approver_name,
+                    rejector_role=history_role,
+                    creator_user_id=change_request.requested_by_user_id,
+                    rejection_reason=rejection_reason
+                )
+        except Exception as notif_error:
+            log.error(f"Failed to send CR rejection notification: {notif_error}")
 
         return jsonify({
             "success": True,

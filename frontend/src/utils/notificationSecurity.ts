@@ -55,7 +55,7 @@ export const notificationRateLimit = new NotificationRateLimit();
 /**
  * Securely parse and validate user data from localStorage
  */
-export function getSecureUserData(): { role: string; id?: string; name?: string } | null {
+export function getSecureUserData(): { role: string; id?: string; userId?: string; name?: string } | null {
   try {
     const userData = localStorage.getItem('user');
     if (!userData) return null;
@@ -73,9 +73,12 @@ export function getSecureUserData(): { role: string; id?: string; name?: string 
     }
 
     // Return sanitized data
+    // Support both 'id' and 'user_id' field names
+    const userId = user.id || user.user_id || user.userId;
     return {
       role: sanitizeText(role.toLowerCase()),
-      id: user.id ? sanitizeText(String(user.id)) : undefined,
+      id: userId ? sanitizeText(String(userId)) : undefined,
+      userId: userId ? sanitizeText(String(userId)) : undefined,  // Also include userId for compatibility
       name: user.full_name || user.name ? sanitizeText(user.full_name || user.name) : undefined
     };
   } catch (error) {

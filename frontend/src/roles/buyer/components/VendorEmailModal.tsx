@@ -14,7 +14,9 @@ import {
   Paperclip,
   Upload,
   FileIcon,
-  Trash2
+  Trash2,
+  MessageSquare,
+  Phone
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,6 +44,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const [vendorName, setVendorName] = useState('');
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
 
   // Editable fields
@@ -221,6 +224,35 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       toast.error(error.message || 'Failed to send email to vendor');
     } finally {
       setIsSendingEmail(false);
+    }
+  };
+
+  const handleSendWhatsApp = async () => {
+    try {
+      // Check if vendor phone is available
+      const phoneToSend = editedVendorPhone || purchase.vendor_phone;
+
+      if (!phoneToSend) {
+        toast.error('Vendor phone number is required for WhatsApp');
+        return;
+      }
+
+      setIsSendingWhatsApp(true);
+
+      await buyerService.sendVendorWhatsApp(purchase.cr_id, phoneToSend);
+
+      toast.success('Purchase order sent via WhatsApp successfully!');
+
+      // Close modal and refresh
+      setTimeout(() => {
+        onEmailSent?.();
+        handleClose();
+      }, 1500);
+    } catch (error: any) {
+      console.error('Error sending WhatsApp:', error);
+      toast.error(error.message || 'Failed to send WhatsApp message');
+    } finally {
+      setIsSendingWhatsApp(false);
     }
   };
 
@@ -879,29 +911,47 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
                     <div className="text-sm text-gray-600">
                       Step 2 of 2: Review & Send
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex gap-2 flex-wrap">
                       <Button
                         onClick={handleBack}
                         variant="outline"
-                        className="px-6"
-                        disabled={isSendingEmail}
+                        className="px-4"
+                        disabled={isSendingEmail || isSendingWhatsApp}
                       >
                         Back
                       </Button>
                       <Button
+                        onClick={handleSendWhatsApp}
+                        disabled={isSendingWhatsApp || isSendingEmail || !(editedVendorPhone || purchase.vendor_phone)}
+                        className="px-4 bg-green-500 hover:bg-green-600 text-white"
+                        title={!(editedVendorPhone || purchase.vendor_phone) ? 'Vendor phone number required' : 'Send via WhatsApp'}
+                      >
+                        {isSendingWhatsApp ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Sending...
+                          </>
+                        ) : (
+                          <>
+                            <MessageSquare className="w-4 h-4 mr-2" />
+                            WhatsApp
+                          </>
+                        )}
+                      </Button>
+                      <Button
                         onClick={handleSendEmail}
-                        disabled={isSendingEmail}
-                        className="px-6 bg-green-600 hover:bg-green-700 text-white"
+                        disabled={isSendingEmail || isSendingWhatsApp}
+                        className="px-4 bg-blue-600 hover:bg-blue-700 text-white"
                       >
                         {isSendingEmail ? (
                           <>
                             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            {attachedFiles.length > 0 ? 'Uploading & Sending...' : 'Sending...'}
+                            {attachedFiles.length > 0 ? 'Uploading...' : 'Sending...'}
                           </>
                         ) : (
                           <>
-                            <Send className="w-4 h-4 mr-2" />
-                            Send to Vendor
+                            <Mail className="w-4 h-4 mr-2" />
+                            Email
                           </>
                         )}
                       </Button>

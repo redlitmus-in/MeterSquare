@@ -11,6 +11,12 @@ from models.user import User
 from models.role import Role
 from utils.boq_email_service import BOQEmailService
 from utils.admin_viewing_context import get_effective_user_context
+from utils.purchase_notifications import (
+    notify_purchase_created,
+    notify_purchase_approved,
+    notify_purchase_rejected,
+    notify_purchase_forwarded
+)
 
 
 log = get_logger()
@@ -307,6 +313,19 @@ def add_new_purchase():
 
         db.session.commit()
         log.info(f"Successfully added {len(new_boq_items)} new items to BOQ {boq_id}")
+
+        # Send notification to estimators about new purchase
+        try:
+            project_name = project.project_name if project else f"Project {boq.project_id}"
+            notify_purchase_created(
+                boq_id=boq_id,
+                project_name=project_name,
+                created_by_id=user_id,
+                created_by_name=created_by
+            )
+        except Exception as notif_error:
+            log.error(f"Failed to send notification: {notif_error}")
+            # Don't fail the request if notification fails
 
         return jsonify({
             "success": True,
@@ -996,6 +1015,42 @@ def process_new_purchase_decision(boq_id):
         except Exception as history_error:
             log.error(f"Error storing decision in BOQ history: {history_error}")
             db.session.rollback()
+
+        # Send real-time notifications
+        try:
+            if status == 'approved':
+                # Notify PM that their purchase was approved
+                if pm_id:
+                    notify_purchase_approved(
+                        boq_id=boq_id,
+                        project_name=project.project_name,
+                        approved_by_id=estimator_id,
+                        approved_by_name=estimator_name,
+                        target_user_id=pm_id
+                    )
+                # Notify buyer that purchase is assigned to them
+                notify_purchase_forwarded(
+                    boq_id=boq_id,
+                    project_name=project.project_name,
+                    forwarded_by_id=estimator_id,
+                    forwarded_by_name=estimator_name,
+                    target_role='buyer',
+                    additional_info=f'New purchase request assigned for purchasing. Total: ${round(total_amount, 2)}'
+                )
+            else:  # rejected
+                # Notify PM that their purchase was rejected
+                if pm_id:
+                    notify_purchase_rejected(
+                        boq_id=boq_id,
+                        project_name=project.project_name,
+                        rejected_by_id=estimator_id,
+                        rejected_by_name=estimator_name,
+                        target_user_id=pm_id,
+                        rejection_reason=rejection_reason
+                    )
+        except Exception as notif_error:
+            log.error(f"Failed to send notification: {notif_error}")
+            # Don't fail the request if notification fails
 
         if status == 'approved':
             response_data = {

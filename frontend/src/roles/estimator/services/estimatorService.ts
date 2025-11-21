@@ -866,8 +866,8 @@ class EstimatorService {
   // Send BOQ to Client (after TD approval)
   async sendBOQToClient(
     boqId: number,
-    params: { client_email?: string; message?: string; formats?: string[]; custom_email_body?: string; terms_text?: string }
-  ): Promise<{ success: boolean; message: string }> {
+    params: { client_email?: string; message?: string; formats?: string[]; custom_email_body?: string; terms_text?: string; cover_page?: any }
+  ): Promise<{ success: boolean; message: string; total_sent?: number; total_failed?: number }> {
     try {
       // Extended timeout for image processing (2 minutes to allow backend to fetch images)
       const response = await apiClient.post('/send_boq_to_client', {
@@ -876,13 +876,16 @@ class EstimatorService {
         message: params.message,
         formats: params.formats || ['excel', 'pdf'],
         custom_email_body: params.custom_email_body,
-        terms_text: params.terms_text
+        terms_text: params.terms_text,
+        cover_page: params.cover_page  // Include cover page data for PDF
       }, {
         timeout: 120000  // 2 minutes (120 seconds) timeout for email with images
       });
       return {
         success: response.data.success !== false,
-        message: response.data.message || 'BOQ sent successfully to client'
+        message: response.data.message || 'BOQ sent successfully to client',
+        total_sent: response.data.total_sent,
+        total_failed: response.data.total_failed
       };
     } catch (error: any) {
       console.error('Error sending BOQ to client:', error.response?.data || error.message);

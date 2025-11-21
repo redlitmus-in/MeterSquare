@@ -115,9 +115,31 @@ export const downloadClientBOQPDF = async (boqId: number, termsText?: string): P
  * Preview Client BOQ PDF in modal/new tab (with custom terms)
  * Returns blob URL for display in iframe or new tab
  */
-export const previewClientBOQPDF = async (boqId: number, termsText?: string): Promise<string> => {
+export const previewClientBOQPDF = async (boqId: number, termsText?: string, coverPage?: any): Promise<string> => {
   try {
     const token = localStorage.getItem('access_token');
+
+    // If coverPage is provided, use POST request
+    if (coverPage) {
+      const response = await axios.post(
+        `${API_URL}/boq/preview/client/${boqId}`,
+        {
+          cover_page: coverPage,
+          terms_text: termsText
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          responseType: 'blob',
+        }
+      );
+
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const blobUrl = window.URL.createObjectURL(blob);
+      return blobUrl;
+    }
 
     // Build URL with optional terms_text query parameter
     let url = `${API_URL}/boq/download/client/${boqId}`;

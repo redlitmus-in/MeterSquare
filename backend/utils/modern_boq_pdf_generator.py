@@ -54,7 +54,7 @@ class ModernBOQPDFGenerator:
             except:
                 pass
 
-    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, selected_terms=None, include_images=True):
+    def generate_client_pdf(self, project, items, total_material_cost, total_labour_cost, grand_total, boq_json=None, terms_text=None, selected_terms=None, include_images=True, cover_page=None):
         """Generate clean CLIENT quotation PDF
 
         Args:
@@ -63,12 +63,18 @@ class ModernBOQPDFGenerator:
             selected_terms: List of selected terms from database (preferred).
                            Each dict should have {'terms_text': '...'}
             include_images: If False, skip image loading for faster generation
+            cover_page: Optional dict with cover page data for quotation letter
         """
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4,
                               topMargin=30, bottomMargin=30,
                               leftMargin=30, rightMargin=30)
         elements = []
+
+        # Cover Page (if provided)
+        if cover_page:
+            elements.extend(self._generate_cover_page(cover_page, project))
+            elements.append(PageBreak())
 
         # Header
         elements.extend(self._client_header(project, boq_json))
@@ -117,6 +123,217 @@ class ModernBOQPDFGenerator:
         doc.build(elements, onFirstPage=self._add_watermark, onLaterPages=self._add_watermark)
         buffer.seek(0)
         return buffer.read()
+
+    def _generate_cover_page(self, cover_page, project):
+        """Generate professional quotation cover page / letter
+
+        Modern design with:
+        - Clean header with logo and company info
+        - Thin separator line with brand colors
+        - Soft gray background header section
+        - Well-aligned content with professional typography
+        """
+        elements = []
+        logo_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'logo.png')
+        stamp_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'company_stamp.png')
+
+        # Modern color palette
+        primary_color = colors.HexColor('#1a365d')  # Dark blue
+        accent_color = colors.HexColor('#c62828')   # Red accent
+        light_gray = colors.HexColor('#f7f8fa')     # Very light background
+        medium_gray = colors.HexColor('#6c757d')    # Text gray
+        text_color = colors.HexColor('#2d3748')     # Dark text
+
+        # === MODERN HEADER WITH SOFT BACKGROUND ===
+        # Logo
+        if os.path.exists(logo_path):
+            try:
+                logo = Image(logo_path, width=2.0*inch, height=0.7*inch, kind='proportional')
+            except:
+                logo = Paragraph('<font color="#1a365d"><b>METER SQUARE</b></font><br/><font size="7" color="#666666">INTERIORS LLC</font>',
+                                ParagraphStyle('Logo', fontSize=12, fontName='Helvetica-Bold'))
+        else:
+            logo = Paragraph('<font color="#1a365d"><b>METER SQUARE</b></font><br/><font size="7" color="#666666">INTERIORS LLC</font>',
+                            ParagraphStyle('Logo', fontSize=12, fontName='Helvetica-Bold'))
+
+        # Company info on right - clean modern style
+        company_info_style = ParagraphStyle('CompanyInfo', fontSize=8, alignment=TA_RIGHT,
+                                           textColor=medium_gray, leading=11)
+        company_info = Paragraph(
+            '<font color="#1a365d"><b>METERSQUARE INTERIORS LLC</b></font><br/>'
+            'Business Bay, Dubai, UAE',
+            company_info_style
+        )
+
+        # Header table with soft background
+        header_table = Table([[logo, company_info]], colWidths=[3.2*inch, 3.3*inch])
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+            ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+            ('BACKGROUND', (0, 0), (-1, -1), light_gray),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        ]))
+        elements.append(header_table)
+
+        # Modern thin gradient-style line (two-color bar)
+        line_table = Table([['', '']], colWidths=[4.2*inch, 2.3*inch], rowHeights=[2])
+        line_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, 0), accent_color),
+            ('BACKGROUND', (1, 0), (1, 0), primary_color),
+        ]))
+        elements.append(line_table)
+
+        # Contact bar - minimal and modern
+        contact_style = ParagraphStyle('Contact', fontSize=7, alignment=TA_CENTER,
+                                       textColor=medium_gray, spaceBefore=4, spaceAfter=4)
+        contact_bar = Paragraph(
+            '<font color="#c62828"><b>Sharjah</b></font> P.O. Box 66015 | Tel: 06 5398189 &nbsp; <font color="#999999">|</font> &nbsp; '
+            '<font color="#1565c0"><b>Dubai</b></font> P.O. Box 89381 | Tel: 04 2596772',
+            contact_style
+        )
+        elements.append(contact_bar)
+        elements.append(Spacer(1, 18))
+
+        # === REFERENCE AND DATE - Clean two column layout ===
+        ref_number = cover_page.get('reference_number', '')
+        date_str = cover_page.get('date', '')
+
+        ref_style = ParagraphStyle('Ref', fontSize=10, fontName='Helvetica-Bold', textColor=primary_color)
+        date_style = ParagraphStyle('Date', fontSize=10, alignment=TA_RIGHT, textColor=medium_gray)
+
+        ref_date_table = Table([
+            [Paragraph(f'<b>{ref_number}</b>', ref_style), Paragraph(date_str, date_style)]
+        ], colWidths=[3.5*inch, 3*inch])
+        ref_date_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+        elements.append(ref_date_table)
+        elements.append(Spacer(1, 18))
+
+        # === RECIPIENT SECTION ===
+        recipient_name = cover_page.get('recipient_name', '')
+        client_company = cover_page.get('client_company', '')
+        city = cover_page.get('city', '')
+        country = cover_page.get('country', '')
+
+        addr_style = ParagraphStyle('Addr', fontSize=10, leading=14, textColor=text_color)
+        addr_bold = ParagraphStyle('AddrBold', fontSize=10, fontName='Helvetica-Bold', textColor=primary_color)
+
+        elements.append(Paragraph('<b>To,</b>', addr_bold))
+        elements.append(Spacer(1, 2))
+        if recipient_name:
+            elements.append(Paragraph(recipient_name, addr_style))
+        if client_company:
+            elements.append(Paragraph(f'<b>{client_company}</b>', addr_style))
+        if city:
+            elements.append(Paragraph(city, addr_style))
+        if country:
+            elements.append(Paragraph(country, addr_style))
+
+        elements.append(Spacer(1, 16))
+
+        # === SALUTATION ===
+        elements.append(Paragraph('Dear Sir/Madam,', addr_style))
+        elements.append(Spacer(1, 14))
+
+        # === SUBJECT LINE - Modern highlighted box ===
+        subject = cover_page.get('subject', '')
+        if subject:
+            subject_style = ParagraphStyle('Subject', fontSize=10, fontName='Helvetica-Bold',
+                                          alignment=TA_CENTER, textColor=primary_color)
+            subject_table = Table([[Paragraph(f'<b>Sub: {subject}</b>', subject_style)]],
+                                 colWidths=[6.5*inch])
+            subject_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), light_gray),
+                ('TOPPADDING', (0, 0), (-1, -1), 7),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ]))
+            elements.append(subject_table)
+            elements.append(Spacer(1, 16))
+
+        # === BODY TEXT ===
+        body_text = cover_page.get('body_text', '')
+        tender_ref = cover_page.get('tender_reference', '')
+
+        body_style = ParagraphStyle('Body', fontSize=10, alignment=TA_JUSTIFY, leading=15, textColor=text_color)
+
+        if tender_ref:
+            body_text = f"We are referring to your request for quotation for <b>{tender_ref}</b>. " + body_text
+
+        if body_text:
+            elements.append(Paragraph(body_text, body_style))
+            elements.append(Spacer(1, 10))
+
+        # === ENCLOSED DOCUMENTS ===
+        enclosed_docs = cover_page.get('enclosed_documents', ['Bill of Quantities derived for the works', 'Summary'])
+        if enclosed_docs:
+            list_style = ParagraphStyle('List', fontSize=10, leftIndent=22, leading=14, textColor=text_color)
+            for idx, doc in enumerate(enclosed_docs, 1):
+                elements.append(Paragraph(f'{idx}. {doc}', list_style))
+            elements.append(Spacer(1, 16))
+
+        # === THANK YOU AND CONTACT INFO ===
+        contact_person = cover_page.get('contact_person', 'Mr. Hamid Hussain')
+        contact_title = cover_page.get('contact_title', 'Manager- Sales & Projects')
+        contact_phone = cover_page.get('contact_phone', '055 354 7727')
+        contact_email = cover_page.get('contact_email', 'sales@metersquare.com')
+
+        thank_style = ParagraphStyle('Thank', fontSize=10, leading=15, alignment=TA_JUSTIFY, textColor=text_color)
+        thank_text = f"""Once again we thank you for the opportunity to provide our specialist interior solutions for your esteemed organization. If you have any further queries please feel free to contact <b>{contact_person}, {contact_title}</b> on <b>{contact_phone}</b> / <font color="#1565c0"><u>{contact_email}</u></font>."""
+
+        elements.append(Paragraph(thank_text, thank_style))
+        elements.append(Spacer(1, 22))
+
+        # === CLOSING ===
+        closing_style = ParagraphStyle('Closing', fontSize=10, textColor=text_color)
+        elements.append(Paragraph('Thanking you,', closing_style))
+        elements.append(Spacer(1, 32))
+
+        # === SIGNATURE AND STAMP SECTION - Side by side aligned ===
+        signatory_name = cover_page.get('signatory_name', 'Amjath K Aboobacker')
+        signatory_title = cover_page.get('signatory_title', 'Managing Director')
+
+        # Stamp image (if exists)
+        stamp_cell = ''
+        stamp_exists = False
+        if os.path.exists(stamp_path):
+            try:
+                stamp_cell = Image(stamp_path, width=1.2*inch, height=1.2*inch, kind='proportional')
+                stamp_exists = True
+            except:
+                stamp_cell = ''
+
+        sig_name_style = ParagraphStyle('SigName', fontSize=11, fontName='Helvetica-Bold', textColor=primary_color)
+
+        # Create signature text
+        sig_text = Paragraph(f'<b>{signatory_name}</b><br/><font size="9" color="#6c757d">{signatory_title}</font>', sig_name_style)
+
+        if stamp_exists:
+            # Create aligned table with signature on left, stamp on right (same row)
+            sig_table = Table(
+                [[sig_text, stamp_cell]],
+                colWidths=[2.8*inch, 1.5*inch]
+            )
+            sig_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (0, 0), 'BOTTOM'),  # Signature at bottom
+                ('VALIGN', (1, 0), (1, 0), 'MIDDLE'),  # Stamp centered vertically
+                ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+                ('ALIGN', (1, 0), (1, 0), 'LEFT'),
+                ('LEFTPADDING', (1, 0), (1, 0), 15),   # Space between signature and stamp
+            ]))
+            elements.append(sig_table)
+        else:
+            # Just signature without stamp
+            elements.append(sig_text)
+
+        return elements
 
     def _client_header(self, project, boq_json=None):
         """Modern clean client header"""

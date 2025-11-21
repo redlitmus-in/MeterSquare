@@ -235,6 +235,15 @@ def download_client_pdf_route(boq_id):
         return access_check
     return download_client_pdf()
 
+@boq_routes.route('/boq/preview/client/<int:boq_id>', methods=['POST'])
+@jwt_required
+def preview_client_pdf_route(boq_id):
+    """Preview client BOQ PDF with cover page (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return preview_client_pdf()
+
 @boq_routes.route('/boq/download/internal-excel/<int:boq_id>', methods=['GET'])
 @jwt_required
 def download_internal_excel_route(boq_id):
