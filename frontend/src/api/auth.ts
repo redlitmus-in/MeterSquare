@@ -12,6 +12,29 @@ interface LoginResponse {
   otp?: string; // Only in development
 }
 
+// Site Supervisor SMS Login interfaces
+interface SiteSupervisorLoginRequest {
+  phone?: string;
+  email?: string;
+  login_method: 'phone' | 'email';
+}
+
+interface SiteSupervisorLoginResponse {
+  message: string;
+  phone?: string;
+  email?: string;
+  login_method: 'phone' | 'email';
+  otp_expiry: string;
+  otp?: string; // Only in development
+}
+
+interface SiteSupervisorVerifyRequest {
+  otp: string;
+  phone?: string;
+  email?: string;
+  login_method: 'phone' | 'email';
+}
+
 interface VerifyOTPRequest {
   email: string;
   otp: string;
@@ -180,9 +203,70 @@ export const authApi = {
   hasRole: (roles: string | string[]): boolean => {
     const userRole = authApi.getUserRole();
     if (!userRole) return false;
-    
+
     const roleArray = Array.isArray(roles) ? roles : [roles];
     return roleArray.includes(userRole);
+  },
+
+  /**
+   * Site Supervisor SMS/Email Login - Send OTP
+   */
+  sendSiteSupervisorOTP: async (
+    loginMethod: 'phone' | 'email',
+    value: string
+  ): Promise<SiteSupervisorLoginResponse> => {
+    try {
+      const payload: SiteSupervisorLoginRequest = {
+        login_method: loginMethod,
+        ...(loginMethod === 'phone' ? { phone: value } : { email: value })
+      };
+      const response = await apiClient.post<SiteSupervisorLoginResponse>(
+        '/site-supervisor/login',
+        payload
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Site Supervisor OTP error:', error);
+      if (error.response?.status === 404) {
+        throw new Error('No Site Supervisor/Engineer found with this ' +
+          (loginMethod === 'phone' ? 'phone number' : 'email address'));
+      } else if (error.response?.data?.error) {
+        throw new Error(error.response.data.error);
+      }
+      throw new Error('Failed to send OTP. Please try again.');
+    }
+  },
+
+  /**
+   * Site Supervisor SMS/Email Login - Verify OTP
+   */
+  verifySiteSupervisorOTP: async (
+    loginMethod: 'phone' | 'email',
+    value: string,
+    otp: string
+  ): Promise<VerifyOTPResponse> => {
+    try {
+      const payload: SiteSupervisorVerifyRequest = {
+        login_method: loginMethod,
+        otp,
+        ...(loginMethod === 'phone' ? { phone: value } : { email: value })
+      };
+      const response = await apiClient.post<VerifyOTPResponse>(
+        '/site-supervisor/verify-otp',
+        payload
+      );
+
+      // Store token and user data
+      if (response.data.access_token) {
+        localStorage.setItem('access_token', response.data.access_token);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
+
+      return response.data;
+    } catch (error: any) {
+      console.error('Site Supervisor verify OTP error:', error);
+      throw new Error(error.response?.data?.error || 'Invalid OTP');
+    }
   }
 };
 

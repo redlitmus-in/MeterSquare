@@ -15,6 +15,7 @@ from models.role import Role
 from config.logging import get_logger
 from utils.authentication import send_otp
 from utils.async_email import send_otp_async
+from utils.sms_service import send_sms_otp
 import os
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
@@ -331,7 +332,7 @@ def user_status():
         if user:
             user.user_status = status
             db.session.commit()
-        else:   
+        else:
             return jsonify({"error": "User not found"}), 404
 
         return jsonify({
@@ -346,3 +347,238 @@ def user_status():
             "error": f"Failed to user status update: {str(e)}",
             "error_type": type(e).__name__
         }), 500
+
+
+def site_supervisor_login_sms():
+    """
+    SMS OTP-based login for Site Supervisor/Site Engineer
+    Step 1: Send OTP to user's phone number
+    Also supports email fallback
+    """
+    try:
+        data = request.get_json()
+        phone = data.get("phone")
+        email = data.get("email")
+        login_method = data.get("login_method", "phone")  # 'phone' or 'email'
+
+        if login_method == "phone" and not phone:
+            return jsonify({"error": "Phone number is required"}), 400
+        if login_method == "email" and not email:
+            return jsonify({"error": "Email is required"}), 400
+
+        # Build query for site supervisor/site engineer roles only
+        query = db.session.query(User).join(
+            Role, User.role_id == Role.role_id
+        ).filter(
+            User.is_deleted == False,
+            User.is_active == True,
+            db.func.lower(Role.role).in_(['sitesupervisor', 'siteengineer'])
+        )
+
+        # Filter by phone or email based on login method
+        if login_method == "phone":
+            query = query.filter(User.phone == phone)
+        else:
+            query = query.filter(User.email == email)
+
+        user = query.first()
+
+        if not user:
+            if login_method == "phone":
+                return jsonify({"error": "No Site Supervisor/Engineer found with this phone number"}), 404
+            else:
+                return jsonify({"error": "No Site Supervisor/Engineer found with this email"}), 404
+
+        # Send OTP based on login method
+        if login_method == "phone":
+            otp = send_sms_otp(phone)
+            if otp:
+                # Store user_id and role for verification step
+                from utils.authentication import otp_storage
+                storage_key = f"phone:{phone}"
+                if storage_key in otp_storage:
+                    otp_storage[storage_key]['user_id'] = user.user_id
+                    otp_storage[storage_key]['email'] = user.email
+
+                response_data = {
+                    "message": "OTP sent successfully to your phone",
+                    "phone": phone,
+                    "login_method": "phone",
+                    "otp_expiry": "5 minutes"
+                }
+                if ENVIRONMENT != 'production':
+                    response_data["otp"] = otp
+
+                return jsonify(response_data), 200
+            else:
+                return jsonify({"error": "Failed to send SMS OTP. Please try again."}), 500
+        else:
+            # Email fallback
+            otp = send_otp_async(email)
+            if otp:
+                from utils.authentication import otp_storage
+                if email in otp_storage:
+                    otp_storage[email]['user_id'] = user.user_id
+                    otp_storage[email]['role'] = 'siteengineer'
+
+                response_data = {
+                    "message": "OTP sent successfully to your email",
+                    "email": email,
+                    "login_method": "email",
+                    "otp_expiry": "5 minutes"
+                }
+                if ENVIRONMENT != 'production':
+                    response_data["otp"] = otp
+
+                return jsonify(response_data), 200
+            else:
+                return jsonify({"error": "Failed to send OTP. Please try again."}), 500
+
+    except Exception as e:
+        log.error(f"Site supervisor SMS login error: {str(e)}")
+        return jsonify({"error": f"Login failed: {str(e)}"}), 500
+
+
+def verify_sms_otp_login():
+    """
+    SMS OTP-based login - Step 2: Verify OTP and complete login for Site Supervisor
+    Supports both phone and email verification
+    """
+    try:
+        data = request.get_json()
+        otp_input = data.get('otp')
+        phone = data.get('phone')
+        email = data.get('email')
+        login_method = data.get('login_method', 'phone')
+
+        if not otp_input:
+            return jsonify({"error": "OTP is required"}), 400
+
+        if login_method == "phone" and not phone:
+            return jsonify({"error": "Phone number is required"}), 400
+        if login_method == "email" and not email:
+            return jsonify({"error": "Email is required"}), 400
+
+        try:
+            otp_input = int(otp_input)
+        except ValueError:
+            return jsonify({"error": "OTP must be a number"}), 400
+
+        from utils.authentication import otp_storage
+
+        # Get OTP data based on login method
+        if login_method == "phone":
+            storage_key = f"phone:{phone}"
+        else:
+            storage_key = email
+
+        otp_data = otp_storage.get(storage_key)
+        if not otp_data:
+            return jsonify({"error": "OTP not found or expired"}), 400
+
+        stored_otp = otp_data.get("otp")
+        expires_at = datetime.fromtimestamp(otp_data.get("expires_at"))
+
+        # Check OTP expiry
+        current_time = datetime.utcnow()
+        if current_time > expires_at:
+            del otp_storage[storage_key]
+            return jsonify({"error": "OTP expired"}), 400
+
+        # Check if OTP matches
+        if otp_input != stored_otp:
+            return jsonify({"error": "Invalid OTP"}), 400
+
+        # Find user - for phone login, get email from storage or query
+        if login_method == "phone":
+            user_email = otp_data.get('email')
+            if not user_email:
+                # Query user by phone
+                user = User.query.filter_by(phone=phone, is_deleted=False, is_active=True).first()
+                if user:
+                    user_email = user.email
+                else:
+                    del otp_storage[storage_key]
+                    return jsonify({"error": "User not found"}), 404
+        else:
+            user_email = email
+
+        # Get user with role info
+        user = db.session.query(User).join(
+            Role, User.role_id == Role.role_id
+        ).filter(
+            User.email == user_email,
+            User.is_deleted == False,
+            User.is_active == True
+        ).first()
+
+        if not user:
+            del otp_storage[storage_key]
+            return jsonify({"error": "User not found or inactive"}), 404
+
+        # Update last login
+        user.last_login = current_time
+        db.session.commit()
+
+        # Remove OTP from storage
+        del otp_storage[storage_key]
+
+        # Get role information
+        role_permissions = []
+        role_name = "user"
+        if user.role_id:
+            role = Role.query.filter_by(role_id=user.role_id, is_deleted=False).first()
+            if role:
+                role_name = role.role
+                if hasattr(role, 'permissions') and role.permissions:
+                    role_permissions = role.permissions if isinstance(role.permissions, list) else []
+
+        # Create JWT token
+        import os
+        SECRET_KEY = os.getenv('SECRET_KEY')
+        expiration_time = current_time + timedelta(hours=10)
+        payload = {
+            'user_id': user.user_id,
+            'email': user.email,
+            'username': user.email,
+            'role': role_name,
+            'role_id': user.role_id,
+            'permissions': role_permissions,
+            'full_name': user.full_name,
+            'creation_time': current_time.isoformat(),
+            'exp': expiration_time
+        }
+        session_token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+        if isinstance(session_token, bytes):
+            session_token = session_token.decode('utf-8')
+
+        response_data = {
+            "message": "Login successful",
+            "access_token": session_token,
+            "expires_at": expiration_time.isoformat(),
+            "user": {
+                "user_id": user.user_id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "phone": user.phone,
+                "role": role_name,
+                "role_id": user.role_id,
+                "department": user.department,
+                "permissions": role_permissions
+            }
+        }
+
+        response = make_response(jsonify(response_data), 200)
+        response.set_cookie(
+            'access_token',
+            session_token,
+            expires=expiration_time,
+            httponly=True,
+            secure=True,
+            samesite='Lax'
+        )
+        return response
+
+    except Exception as e:
+        log.error(f"SMS OTP verification error: {str(e)}")
+        return jsonify({"error": f"Verification failed: {str(e)}"}), 500

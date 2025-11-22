@@ -119,6 +119,8 @@ class RealtimeNotificationHub {
         this.isConnected = true;
         this.reconnectAttempts = 0;
         this.joinRooms();
+        // Fetch any missed notifications when connecting
+        this.fetchMissedNotifications();
       });
 
       this.socket.on('disconnect', () => {
@@ -391,6 +393,83 @@ class RealtimeNotificationHub {
       userId: this.userId,
       userRole: this.userRole
     };
+  }
+
+  /**
+   * Fetch missed notifications from the backend API
+   * Called when user logs in or reconnects
+   */
+  private async fetchMissedNotifications() {
+    if (!this.authToken) return;
+
+    try {
+      const baseUrl = import.meta.env.VITE_API_BASE_URL;
+      if (!baseUrl) return;
+
+      // Fetch unread notifications from API
+      const response = await fetch(`${baseUrl}/notifications?unread_only=true&limit=50`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.authToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) return;
+
+      const data = await response.json();
+
+      if (data.success && data.notifications && Array.isArray(data.notifications)) {
+        console.log(`Checking for missed notifications... Found ${data.notifications.length} unsynced notifications out of ${data.total || 0} total`);
+
+        // Process each notification
+        for (const notif of data.notifications) {
+          // Convert backend format to frontend format
+          const notification: RealtimeNotification = {
+            id: notif.id,
+            type: notif.type,
+            title: notif.title,
+            message: notif.message,
+            priority: notif.priority || 'medium',
+            timestamp: notif.timestamp || notif.createdAt,
+            userId: notif.userId,
+            targetUserId: notif.userId,
+            targetRole: notif.targetRole,
+            senderId: notif.senderId,
+            senderName: notif.senderName,
+            metadata: {
+              ...notif.metadata,
+              actionUrl: notif.actionUrl,
+              actionLabel: notif.actionLabel
+            }
+          };
+
+          // Add to store silently (no toast for old notifications)
+          if (!this.processedNotificationIds.has(notification.id)) {
+            this.processedNotificationIds.add(notification.id);
+
+            const notificationData = {
+              id: notification.id,
+              type: notification.type || 'info',
+              title: notification.title,
+              message: notification.message,
+              priority: notification.priority || 'medium',
+              timestamp: new Date(notification.timestamp || Date.now()),
+              read: false,
+              metadata: notification.metadata,
+              actionUrl: (notification as any).actionUrl || notification.metadata?.actionUrl,
+              actionLabel: (notification as any).actionLabel || notification.metadata?.actionLabel,
+              senderName: notification.senderName
+            };
+
+            // Add to notification store (shows in notification panel)
+            useNotificationStore.getState().addNotification(notificationData);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch missed notifications:', error);
+    }
   }
 
 }

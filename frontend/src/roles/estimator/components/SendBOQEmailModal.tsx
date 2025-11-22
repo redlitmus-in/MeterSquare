@@ -992,7 +992,7 @@ MeterSquare Interiors LLC`;
                               onClick={async () => {
                                 try {
                                   toast.loading('Generating PDF file...');
-                                  await downloadClientBOQPDF(boqId);
+                                  await downloadClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined);
                                   toast.dismiss();
                                   toast.success('PDF file downloaded successfully');
                                 } catch (error) {
@@ -1222,7 +1222,7 @@ MeterSquare Interiors LLC`;
                   <button
                     onClick={async () => {
                       try {
-                        await downloadClientBOQPDF(boqId);
+                        await downloadClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined);
                         toast.success('PDF downloaded successfully');
                       } catch (error) {
                         toast.error('Failed to download PDF');

@@ -88,7 +88,7 @@ def handle_connect(user_id, role, username):
     join_room(role_room)
     active_connections[sid]['rooms'].append(role_room)
 
-    print(f"✓ User {username} (ID: {user_id}, Role: {role}) connected [SID: {sid}]")
+    print(f"[+] User {username} (ID: {user_id}, Role: {role}) connected [SID: {sid}]")
     print(f"  Joined rooms: {user_room}, {role_room}")
 
     # Send connection success message
@@ -114,7 +114,7 @@ def handle_disconnect():
 
     if sid in active_connections:
         user_info = active_connections[sid]
-        print(f"✗ User {user_info['username']} (ID: {user_info['user_id']}) disconnected [SID: {sid}]")
+        print(f"[-] User {user_info['username']} (ID: {user_info['user_id']}) disconnected [SID: {sid}]")
 
         # Leave all rooms
         for room in user_info['rooms']:
@@ -143,7 +143,7 @@ def handle_join_room(data, user_id, role, username):
         if sid in active_connections:
             active_connections[sid]['rooms'].append(room)
 
-        print(f"✓ User {username} joined room: {room}")
+        print(f"[+] User {username} joined room: {room}")
         emit('joined_room', {'room': room, 'message': f'Joined room {room}'})
 
 
@@ -160,7 +160,7 @@ def handle_leave_room(data, user_id, role, username):
         if sid in active_connections and room in active_connections[sid]['rooms']:
             active_connections[sid]['rooms'].remove(room)
 
-        print(f"✗ User {username} left room: {room}")
+        print(f"[-] User {username} left room: {room}")
         emit('left_room', {'room': room, 'message': f'Left room {room}'})
 
 
@@ -168,6 +168,30 @@ def handle_leave_room(data, user_id, role, username):
 def handle_ping():
     """Handle ping from client"""
     emit('pong', {'timestamp': request.args.get('timestamp', '')})
+
+
+@socketio.on('join:user')
+def handle_join_user(user_id):
+    """Handle join:user event from frontend"""
+    try:
+        room = f'user_{user_id}'
+        join_room(room)
+        print(f"[+] User {user_id} manually joined room: {room}")
+        emit('room_joined', {'room': room, 'type': 'user'})
+    except Exception as e:
+        print(f"[!] Error joining user room: {e}")
+
+
+@socketio.on('join:role')
+def handle_join_role(role):
+    """Handle join:role event from frontend"""
+    try:
+        room = f'role_{role}'
+        join_room(room)
+        print(f"[+] Role {role} manually joined room: {room}")
+        emit('room_joined', {'room': room, 'type': 'role'})
+    except Exception as e:
+        print(f"[!] Error joining role room: {e}")
 
 
 # Notification event handlers
@@ -181,8 +205,25 @@ def send_notification_to_user(user_id, notification_data):
         notification_data: Notification data dictionary
     """
     room = f'user_{user_id}'
+
+    # Check if anyone is in the room
+    active_users = [conn for conn in active_connections.values() if room in conn.get('rooms', [])]
+
+    print(f"\n{'='*60}")
+    print(f">> EMITTING NOTIFICATION TO USER {user_id}")
+    print(f"   Room: {room}")
+    print(f"   Title: {notification_data.get('title', 'N/A')}")
+    print(f"   Type: {notification_data.get('type', 'N/A')}")
+    print(f"   Active connections in room: {len(active_users)}")
+    if active_users:
+        for conn in active_users:
+            print(f"     - User: {conn.get('username')} (SID: {list(active_connections.keys())[list(active_connections.values()).index(conn)]})")
+    else:
+        print(f"   [!] WARNING: No active connections in room {room}")
+    print(f"{'='*60}\n")
+
     socketio.emit('notification', notification_data, room=room)
-    print(f"→ Sent notification to user {user_id} in room {room}")
+    return len(active_users) > 0
 
 
 def send_notification_to_role(role, notification_data):
@@ -194,8 +235,24 @@ def send_notification_to_role(role, notification_data):
         notification_data: Notification data dictionary
     """
     room = f'role_{role}'
+
+    # Check if anyone is in the room
+    active_users = [conn for conn in active_connections.values() if room in conn.get('rooms', [])]
+
+    print(f"\n{'='*60}")
+    print(f">> EMITTING NOTIFICATION TO ROLE {role}")
+    print(f"   Room: {room}")
+    print(f"   Title: {notification_data.get('title', 'N/A')}")
+    print(f"   Active connections in room: {len(active_users)}")
+    if active_users:
+        for conn in active_users:
+            print(f"     - User: {conn.get('username')} (Role: {conn.get('role')})")
+    else:
+        print(f"   [!] WARNING: No active connections in room {room}")
+    print(f"{'='*60}\n")
+
     socketio.emit('notification', notification_data, room=room)
-    print(f"→ Sent notification to role {role} in room {room}")
+    return len(active_users) > 0
 
 
 def send_notification_to_room(room, notification_data):
@@ -393,5 +450,5 @@ def init_socketio(app):
         app: Flask application instance
     """
     socketio.init_app(app)
-    print("✓ Socket.IO server initialized")
+    print("Socket.IO server initialized")
     return socketio

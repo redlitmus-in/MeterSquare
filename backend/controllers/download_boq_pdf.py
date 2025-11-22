@@ -96,10 +96,17 @@ def download_client_pdf():
     """
     Download BOQ as Client PDF (clean view)
     GET /api/boq/download/client/<boq_id>?include_images=true
+    POST /api/boq/download/client/<boq_id> with cover_page in body
     """
     try:
         boq_id = request.view_args.get('boq_id')
         include_images = request.args.get('include_images', 'true').lower() == 'true'  # Default: include images
+
+        # Handle POST request with cover_page
+        cover_page = None
+        if request.method == 'POST':
+            data = request.get_json() or {}
+            cover_page = data.get('cover_page')
 
         if not boq_id:
             return jsonify({"success": False, "error": "boq_id is required"}), 400
@@ -167,11 +174,12 @@ def download_client_pdf():
         except Exception as e:
             log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
 
-        # Generate PDF with selected terms from database
+        # Generate PDF with selected terms from database and optional cover page
         generator = ModernBOQPDFGenerator()
         pdf_data = generator.generate_client_pdf(
             project, items, total_material_cost, total_labour_cost, grand_total, boq_json,
-            terms_text=None, selected_terms=selected_terms, include_images=include_images
+            terms_text=None, selected_terms=selected_terms, include_images=include_images,
+            cover_page=cover_page
         )
 
         # Send file

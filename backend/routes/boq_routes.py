@@ -226,7 +226,7 @@ def download_internal_pdf_route(boq_id):
         return access_check
     return download_internal_pdf()
 
-@boq_routes.route('/boq/download/client/<int:boq_id>', methods=['GET'])
+@boq_routes.route('/boq/download/client/<int:boq_id>', methods=['GET', 'POST'])
 @jwt_required
 def download_client_pdf_route(boq_id):
     """Download client BOQ PDF (Estimator, PM, SE, TD, or Admin)"""

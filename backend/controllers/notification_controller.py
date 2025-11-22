@@ -370,3 +370,52 @@ def get_notification_count(current_user_id, current_user_role):
         return jsonify({'error': 'Failed to fetch notification count'}), 500
 
 
+@notification_bp.route('/notifications/socketio/status', methods=['GET'])
+@token_required
+def get_socketio_status(current_user_id, current_user_role):
+    """Get Socket.IO connection status for debugging"""
+    try:
+        from socketio_server import get_active_users_count, active_connections
+
+        total_connections = get_active_users_count()
+
+        # Get user's specific room info
+        user_room = f'user_{current_user_id}'
+        role_room = f'role_{current_user_role}'
+
+        # Check if current user is connected
+        user_connected = any(
+            user_room in conn.get('rooms', [])
+            for conn in active_connections.values()
+        )
+
+        # Get all active user rooms
+        active_user_ids = set()
+        active_role_rooms = set()
+        for conn in active_connections.values():
+            for room in conn.get('rooms', []):
+                if room.startswith('user_'):
+                    active_user_ids.add(room.replace('user_', ''))
+                elif room.startswith('role_'):
+                    active_role_rooms.add(room.replace('role_', ''))
+
+        return jsonify({
+            'success': True,
+            'socketio_status': {
+                'total_connections': total_connections,
+                'current_user': {
+                    'user_id': current_user_id,
+                    'role': current_user_role,
+                    'connected': user_connected,
+                    'expected_rooms': [user_room, role_room]
+                },
+                'active_user_ids': list(active_user_ids),
+                'active_role_rooms': list(active_role_rooms)
+            }
+        }), 200
+
+    except Exception as e:
+        print(f"Error fetching Socket.IO status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+

@@ -33,7 +33,9 @@ import {
   Truck,
   TrendingUp,
   BarChart3,
-  Building2
+  Building2,
+  Phone,
+  Smartphone
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -79,6 +81,10 @@ const LoginPage: React.FC = () => {
   const [userRole, setUserRole] = useState('');
   const [isSendingOTP, setIsSendingOTP] = useState(false);
   const [isVerifyingOTP, setIsVerifyingOTP] = useState(false);
+  // Site Engineer SMS login states
+  const [loginMethod, setLoginMethod] = useState<'email' | 'phone'>('email');
+  const [userPhone, setUserPhone] = useState('');
+  const isSiteEngineer = userRole === 'siteEngineer';
   
   // Timer for resend OTP
   useEffect(() => {
@@ -102,47 +108,90 @@ const LoginPage: React.FC = () => {
 
   const onSubmit = async (data: LoginFormData) => {
     try {
-      if (!data.email || !data.role) {
-        toast.error('Please fill all fields', {
-          description: 'Email and role are required'
-        });
-        return;
+      // For site engineer with phone login
+      if (data.role === 'siteEngineer' && loginMethod === 'phone') {
+        if (!userPhone) {
+          toast.error('Please fill all fields', {
+            description: 'Phone number is required'
+          });
+          return;
+        }
+      } else {
+        if (!data.email || !data.role) {
+          toast.error('Please fill all fields', {
+            description: 'Email and role are required'
+          });
+          return;
+        }
       }
-      
+
       setIsSendingOTP(true);
-      
+
       // Clear any stale cached data before login
       clearAllCachedData();
 
       setUserEmail(data.email);
       setUserRole(data.role);
-      
-      // Send OTP via backend API
-      const response = await authApi.sendOTP(data.email, data.role);
-      
-      setStep('otp');
-      setResendTimer(30);
-      
-      toast.success('OTP Sent Successfully!', {
-        description: 'Please check your email for the OTP',
-        duration: 5000,
-        icon: <Mail className="w-5 h-5 text-green-500" />
-      });
-      
-      // Only show OTP in development mode
-      if (response.otp && process.env.NODE_ENV === 'development') {
-        console.log('Development OTP:', response.otp);
+
+      // Use SMS API for site engineer with phone login
+      if (data.role === 'siteEngineer' && loginMethod === 'phone') {
+        const response = await authApi.sendSiteSupervisorOTP('phone', userPhone);
+
+        setStep('otp');
+        setResendTimer(30);
+
+        toast.success('OTP Sent Successfully!', {
+          description: 'Please check your phone for the SMS OTP',
+          duration: 5000,
+          icon: <Smartphone className="w-5 h-5 text-green-500" />
+        });
+
+        if (response.otp && process.env.NODE_ENV === 'development') {
+          console.log('Development OTP:', response.otp);
+        }
+      } else if (data.role === 'siteEngineer' && loginMethod === 'email') {
+        // Site engineer with email login
+        const response = await authApi.sendSiteSupervisorOTP('email', data.email);
+
+        setStep('otp');
+        setResendTimer(30);
+
+        toast.success('OTP Sent Successfully!', {
+          description: 'Please check your email for the OTP',
+          duration: 5000,
+          icon: <Mail className="w-5 h-5 text-green-500" />
+        });
+
+        if (response.otp && process.env.NODE_ENV === 'development') {
+          console.log('Development OTP:', response.otp);
+        }
+      } else {
+        // Regular login for other roles
+        const response = await authApi.sendOTP(data.email, data.role);
+
+        setStep('otp');
+        setResendTimer(30);
+
+        toast.success('OTP Sent Successfully!', {
+          description: 'Please check your email for the OTP',
+          duration: 5000,
+          icon: <Mail className="w-5 h-5 text-green-500" />
+        });
+
+        if (response.otp && process.env.NODE_ENV === 'development') {
+          console.log('Development OTP:', response.otp);
+        }
       }
     } catch (error: any) {
       // Check if it's a 404 error (user not found)
       if (error.message?.toLowerCase().includes('not found') || error.message?.toLowerCase().includes('no user')) {
-        toast.error('Email not found', {
-          description: 'Please check your email address and try again.',
-          icon: <Mail className="w-5 h-5 text-red-500" />
+        toast.error(loginMethod === 'phone' ? 'Phone not found' : 'Email not found', {
+          description: `Please check your ${loginMethod === 'phone' ? 'phone number' : 'email address'} and try again.`,
+          icon: loginMethod === 'phone' ? <Phone className="w-5 h-5 text-red-500" /> : <Mail className="w-5 h-5 text-red-500" />
         });
       } else if (error.message?.toLowerCase().includes('invalid role')) {
         toast.error('Invalid role selection', {
-          description: 'The selected role is not assigned to this email.',
+          description: 'The selected role is not assigned to this account.',
           icon: <User className="w-5 h-5 text-red-500" />
         });
       } else {
@@ -157,16 +206,16 @@ const LoginPage: React.FC = () => {
 
   const handleVerifyOTP = async (otpValue?: string) => {
     const otpToVerify = otpValue || otp;
-    
+
     // Prevent duplicate verification attempts
     if (authApi.isAuthenticated()) {
       // Already authenticated, just redirect
-      const userRole = authApi.getUserRole();
-      const dashboardPath = getRoleDashboardPath(userRole || 'user');
+      const currentUserRole = authApi.getUserRole();
+      const dashboardPath = getRoleDashboardPath(currentUserRole || 'user');
       navigate(dashboardPath);
       return;
     }
-    
+
     if (otpToVerify.length !== 6) {
       toast.error('Invalid OTP', {
         description: 'Please enter a 6-digit OTP'
@@ -175,13 +224,24 @@ const LoginPage: React.FC = () => {
     }
 
     setIsVerifyingOTP(true);
-    
+
     try {
-      // Verify OTP via backend API
-      const response = await authApi.verifyOTP(userEmail, otpToVerify);
-      
+      let response;
+
+      // Use Site Supervisor verify API for site engineers
+      if (userRole === 'siteEngineer') {
+        if (loginMethod === 'phone') {
+          response = await authApi.verifySiteSupervisorOTP('phone', userPhone, otpToVerify);
+        } else {
+          response = await authApi.verifySiteSupervisorOTP('email', userEmail, otpToVerify);
+        }
+      } else {
+        // Regular verify for other roles
+        response = await authApi.verifyOTP(userEmail, otpToVerify);
+      }
+
       const roleData = availableRoles.find(r => r.value === userRole);
-      
+
       // Update auth store immediately with the user data we already have
       useAuthStore.setState({
         user: response.user,
@@ -203,12 +263,12 @@ const LoginPage: React.FC = () => {
       const errorMessage = error.message?.toLowerCase() || '';
       if ((errorMessage.includes('not found') || errorMessage.includes('expired')) && authApi.isAuthenticated()) {
         // Already logged in, just redirect
-        const userRole = authApi.getUserRole();
-        const dashboardPath = getRoleDashboardPath(userRole || 'user');
+        const currentUserRole = authApi.getUserRole();
+        const dashboardPath = getRoleDashboardPath(currentUserRole || 'user');
         navigate(dashboardPath);
         return;
       }
-      
+
       toast.error('Invalid OTP', {
         description: error.message || 'Please enter the correct OTP'
       });
@@ -220,16 +280,28 @@ const LoginPage: React.FC = () => {
   const handleResendOTP = async () => {
     if (resendTimer === 0) {
       try {
-        // Resend OTP via backend API
-        const response = await authApi.sendOTP(userEmail, userRole);
-        
+        let response;
+
+        // Use Site Supervisor API for site engineers
+        if (userRole === 'siteEngineer') {
+          if (loginMethod === 'phone') {
+            response = await authApi.sendSiteSupervisorOTP('phone', userPhone);
+          } else {
+            response = await authApi.sendSiteSupervisorOTP('email', userEmail);
+          }
+        } else {
+          response = await authApi.sendOTP(userEmail, userRole);
+        }
+
         setResendTimer(30);
         toast.success('OTP Resent!', {
-          description: 'Please check your email for the new OTP',
+          description: loginMethod === 'phone'
+            ? 'Please check your phone for the new SMS OTP'
+            : 'Please check your email for the new OTP',
           duration: 5000,
           icon: <RefreshCw className="w-5 h-5 text-green-500" />
         });
-        
+
         // Only show OTP in development mode
         if (response.otp && process.env.NODE_ENV === 'development') {
           console.log('Development OTP:', response.otp);
@@ -578,35 +650,7 @@ const LoginPage: React.FC = () => {
                   onSubmit={handleSubmit(onSubmit)}
                   className="space-y-4"
                 >
-                  {/* Email Field */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                      <Mail className="w-4 h-4 text-gray-400" />
-                      Email Address
-                    </label>
-                    <motion.div 
-                      className="relative"
-                      whileFocus={{ scale: 1.01 }}
-                    >
-                      <input
-                        {...register('email')}
-                        type="email"
-                        className="w-full px-4 py-2.5 bg-gray-50/50 border border-gray-200 rounded-xl focus:bg-white focus:border-transparent focus:ring-2 focus:ring-[#243d8a] focus:ring-offset-2 transition-all duration-200 text-gray-700 placeholder-gray-400"
-                        placeholder="user@metersquare.com"
-                      />
-                    </motion.div>
-                    {errors.email && (
-                      <motion.p
-                        initial={{ opacity: 0, y: -5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="text-xs text-red-500 ml-1"
-                      >
-                        {errors.email.message}
-                      </motion.p>
-                    )}
-                  </div>
-
-                  {/* Role Selection Dropdown */}
+                  {/* Role Selection Dropdown - FIRST */}
                   <div className="space-y-2">
                     <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                       <User className="w-4 h-4 text-gray-400" />
@@ -684,6 +728,67 @@ const LoginPage: React.FC = () => {
                     )}
                   </div>
 
+                  {/* Phone/Email Toggle for Site Engineer - TEMPORARILY HIDDEN */}
+                  {/* {isSiteEngineer && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-gray-700">Login Method</label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setLoginMethod('phone')}
+                          className={`flex-1 py-2 px-3 rounded-lg border transition-all flex items-center justify-center gap-2 text-sm font-medium ${
+                            loginMethod === 'phone'
+                              ? 'bg-[#243d8a] text-white border-[#243d8a]'
+                              : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-[#243d8a]/50'
+                          }`}
+                        >
+                          <Phone className="w-4 h-4" />
+                          Phone (SMS)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLoginMethod('email')}
+                          className={`flex-1 py-2 px-3 rounded-lg border transition-all flex items-center justify-center gap-2 text-sm font-medium ${
+                            loginMethod === 'email'
+                              ? 'bg-[#243d8a] text-white border-[#243d8a]'
+                              : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-[#243d8a]/50'
+                          }`}
+                        >
+                          <Mail className="w-4 h-4" />
+                          Email
+                        </button>
+                      </div>
+                    </div>
+                  )} */}
+
+                  {/* Email Field - Phone login TEMPORARILY HIDDEN */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                      <Mail className="w-4 h-4 text-gray-400" />
+                      Email Address
+                    </label>
+                    <motion.div
+                      className="relative"
+                      whileFocus={{ scale: 1.01 }}
+                    >
+                      <input
+                        {...register('email')}
+                        type="email"
+                        className="w-full px-4 py-2.5 bg-gray-50/50 border border-gray-200 rounded-xl focus:bg-white focus:border-transparent focus:ring-2 focus:ring-[#243d8a] focus:ring-offset-2 transition-all duration-200 text-gray-700 placeholder-gray-400"
+                        placeholder="user@metersquare.com"
+                      />
+                    </motion.div>
+                    {errors.email && (
+                      <motion.p
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="text-xs text-red-500 ml-1"
+                      >
+                        {errors.email.message}
+                      </motion.p>
+                    )}
+                  </div>
+
                   {/* Submit Button */}
                   <motion.button
                     type="submit"
@@ -718,7 +823,9 @@ const LoginPage: React.FC = () => {
                       <KeyRound className="w-6 h-6 text-[#243d8a]" />
                     </div>
                     <h3 className="font-semibold text-gray-900">Enter OTP</h3>
-                    <p className="text-sm text-gray-500 mt-1">We've sent a code to {userEmail}</p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      We've sent a code to {userEmail}
+                    </p>
                   </div>
 
                   <OTPInput

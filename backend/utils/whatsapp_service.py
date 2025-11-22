@@ -12,6 +12,7 @@ log = get_logger()
 ECHT_API_URL = os.getenv("ECHT_API_URL", "https://echt.im/api/v1/message")
 ECHT_API_TOKEN = os.getenv("ECHT_API_TOKEN")
 ECHT_SOURCE_NUMBER = os.getenv("ECHT_SOURCE_NUMBER")
+WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID")
 
 
 class WhatsAppService:
@@ -21,16 +22,24 @@ class WhatsAppService:
         self.api_url = ECHT_API_URL
         self.api_token = ECHT_API_TOKEN
         self.source_number = ECHT_SOURCE_NUMBER
+        self.phone_id = WHATSAPP_PHONE_ID
 
     def _clean_phone_number(self, phone_number: str) -> str:
         """Clean and format phone number with country code"""
         # Remove all non-digit characters (spaces, +, -, etc.)
         clean_phone = ''.join(filter(str.isdigit, str(phone_number)))
         log.info(f"Phone number cleaning: '{phone_number}' -> '{clean_phone}'")
+
+        # Remove duplicate country code if present
+        if clean_phone.startswith('9191') and len(clean_phone) == 14:
+            clean_phone = clean_phone[2:]  # Remove first "91"
+            log.info(f"Removed duplicate country code: '{clean_phone}'")
+
         # Ensure phone has country code (assume India if 10 digits)
         if len(clean_phone) == 10:
             clean_phone = '91' + clean_phone
             log.info(f"Added India country code: '{clean_phone}'")
+
         return clean_phone
 
     def send_message(self, phone_number: str, message: str) -> dict:
@@ -68,6 +77,10 @@ class WhatsAppService:
                 'text': message
             }
 
+            # Add phone_id/channel_id if available
+            if self.phone_id:
+                payload['channel_id'] = self.phone_id
+
             log.info(f"=== ECHT.IM WHATSAPP API CALL ===")
             log.info(f"URL: {self.api_url}")
             log.info(f"Message ID: {message_id}")
@@ -86,8 +99,15 @@ class WhatsAppService:
 
             response_data = response.json() if response.text else {}
 
-            # Check for success - Echt.im returns {"id": "...", "code": "ok"}
-            if response.status_code == 200 and response_data.get('code') == 'ok':
+            # Check for success
+            # - Standard API: {"id": "...", "code": "ok"}
+            # - Callback URL: 200 status with empty {} response
+            is_success = (
+                response.status_code == 200 and
+                (response_data.get('code') == 'ok' or not response_data or not response_data.get('error'))
+            )
+
+            if is_success:
                 log.info(f"WhatsApp message sent successfully to {clean_phone}")
                 return {
                     'success': True,
@@ -97,7 +117,19 @@ class WhatsAppService:
             else:
                 error_msg = response_data.get('error') or response_data.get('message') or response.text
                 log.error(f"WhatsApp API error: {error_msg}")
-                return {'success': False, 'message': f'WhatsApp API error: {error_msg}'}
+                return {
+                    'success': False,
+                    'message': f'WhatsApp API error: {error_msg}',
+                    'debug': {
+                        'api_url': self.api_url,
+                        'status_code': response.status_code,
+                        'request_payload': payload,
+                        'response': response_data,
+                        'source_number': self.source_number,
+                        'phone_id': self.phone_id,
+                        'api_token': f"{self.api_token[:10]}..." if self.api_token else None
+                    }
+                }
 
         except requests.exceptions.Timeout:
             log.error("WhatsApp API timeout")

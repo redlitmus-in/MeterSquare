@@ -1,3 +1,4 @@
 {
-    "claudeCode.useTerminal": false
+    "claudeCode.useCtrlEnterToSend": false,
+    "claudeCode.useTerminal": true
 }

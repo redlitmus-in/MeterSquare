@@ -72,6 +72,20 @@ export const useNotificationStore = create<NotificationStore>()(
             unreadCount: newUnreadCount
           };
         });
+
+        // Mark as read on backend
+        const token = localStorage.getItem('access_token');
+        const baseUrl = import.meta.env.VITE_API_BASE_URL;
+        if (token && baseUrl) {
+          fetch(`${baseUrl}/notifications/read`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ notification_ids: [id] })
+          }).catch(err => console.error('Failed to mark notification as read on backend:', err));
+        }
       },
 
       markAllAsRead: () => {
@@ -86,6 +100,19 @@ export const useNotificationStore = create<NotificationStore>()(
             unreadCount: 0
           };
         });
+
+        // Mark all as read on backend
+        const token = localStorage.getItem('access_token');
+        const baseUrl = import.meta.env.VITE_API_BASE_URL;
+        if (token && baseUrl) {
+          fetch(`${baseUrl}/notifications/read-all`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }).catch(err => console.error('Failed to mark all notifications as read on backend:', err));
+        }
       },
 
       deleteNotification: (id: string) => {
@@ -101,9 +128,24 @@ export const useNotificationStore = create<NotificationStore>()(
             unreadCount: newUnreadCount
           };
         });
+
+        // Delete on backend to prevent re-fetching after refresh
+        const token = localStorage.getItem('access_token');
+        const baseUrl = import.meta.env.VITE_API_BASE_URL;
+        if (token && baseUrl) {
+          fetch(`${baseUrl}/notifications/${id}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }).catch(err => console.error('Failed to delete notification on backend:', err));
+        }
       },
 
       clearAll: () => {
+        const currentNotifications = get().notifications;
+
         set({
           notifications: [],
           unreadCount: 0
@@ -111,6 +153,19 @@ export const useNotificationStore = create<NotificationStore>()(
 
         // Update browser tab title
         notificationService.updateTabTitle(0);
+
+        // Delete all notifications on backend to prevent re-fetching after refresh
+        const token = localStorage.getItem('access_token');
+        const baseUrl = import.meta.env.VITE_API_BASE_URL;
+        if (token && baseUrl && currentNotifications.length > 0) {
+          fetch(`${baseUrl}/notifications/delete-all`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }).catch(err => console.error('Failed to delete all notifications on backend:', err));
+        }
       },
 
       requestPermission: async () => {

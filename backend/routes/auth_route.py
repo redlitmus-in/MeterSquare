@@ -77,3 +77,24 @@ def user_status_route():
     return user_status()
 
 # Note: Password-related endpoints removed - using OTP-only authentication
+
+# Site Supervisor SMS OTP Login endpoints
+@auth_routes.route('/site-supervisor/login', methods=['POST'])
+def site_supervisor_login_route():
+    """Site Supervisor login with phone (SMS) or email OTP"""
+    limiter = get_limiter()
+    @limiter.limit("30 per 15 minutes")
+    def _ss_login():
+        from controllers.auth_controller import site_supervisor_login_sms
+        return site_supervisor_login_sms()
+    return _ss_login()
+
+@auth_routes.route('/site-supervisor/verify-otp', methods=['POST'])
+def site_supervisor_verify_otp_route():
+    """Verify SMS/Email OTP for Site Supervisor login"""
+    limiter = get_limiter()
+    @limiter.limit("30 per 15 minutes")
+    def _ss_verify():
+        from controllers.auth_controller import verify_sms_otp_login
+        return verify_sms_otp_login()
+    return _ss_verify()

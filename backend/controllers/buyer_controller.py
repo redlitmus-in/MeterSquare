@@ -2218,7 +2218,8 @@ def send_vendor_whatsapp(cr_id):
         else:
             return jsonify({
                 "success": False,
-                "message": result.get('message', 'Failed to send WhatsApp message')
+                "message": result.get('message', 'Failed to send WhatsApp message'),
+                "debug": result.get('debug', {})
             }), 500
 
     except Exception as e:

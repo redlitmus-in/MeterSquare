@@ -60,22 +60,42 @@ export const downloadInternalBOQPDF = async (boqId: number): Promise<void> => {
  * Download Client BOQ PDF (clean view)
  * For client presentation - shows only items, sub-items, and final prices
  */
-export const downloadClientBOQPDF = async (boqId: number, termsText?: string): Promise<void> => {
+export const downloadClientBOQPDF = async (boqId: number, termsText?: string, coverPage?: any): Promise<void> => {
   try {
     const token = localStorage.getItem('access_token');
 
-    // Build URL with optional terms_text query parameter
-    let url = `${API_URL}/boq/download/client/${boqId}`;
-    if (termsText) {
-      url += `?terms_text=${encodeURIComponent(termsText)}`;
-    }
+    let response;
 
-    const response = await axios.get(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-      responseType: 'blob',
-    });
+    // If coverPage is provided, use POST request
+    if (coverPage) {
+      response = await axios.post(
+        `${API_URL}/boq/download/client/${boqId}`,
+        {
+          cover_page: coverPage,
+          terms_text: termsText
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          responseType: 'blob',
+        }
+      );
+    } else {
+      // Build URL with optional terms_text query parameter
+      let url = `${API_URL}/boq/download/client/${boqId}`;
+      if (termsText) {
+        url += `?terms_text=${encodeURIComponent(termsText)}`;
+      }
+
+      response = await axios.get(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        responseType: 'blob',
+      });
+    }
 
     // Create download link
     const blob = new Blob([response.data], { type: 'application/pdf' });

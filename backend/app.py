@@ -188,7 +188,7 @@ if __name__ == "__main__":
     debug = environment != "production"
 
     # Use socketio.run instead of app.run for WebSocket support
-    print(f"🚀 Starting MeterSquare ERP Server")
+    print(f">> Starting MeterSquare ERP Server")
     print(f"   Environment: {environment}")
     print(f"   Port: {port}")
     print(f"   Debug: {debug}")
