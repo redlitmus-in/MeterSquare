@@ -22,6 +22,7 @@ interface MaterialItem {
   size?: string;
   specification?: string;
   quantity: number;
+  original_boq_quantity?: number;  // Original BOQ quantity for validation
   unit: string;
   unit_price: number;
   total_price: number;
@@ -45,6 +46,14 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                          user?.role?.toLowerCase() === 'site engineer' ||
                          user?.role_id === 3;
 
+  // Check if user is Project Manager or Estimator - allow quantity editing
+  const isProjectManagerOrEstimator =
+    user?.role?.toLowerCase() === 'project manager' ||
+    user?.role?.toLowerCase() === 'project_manager' ||
+    user?.role?.toLowerCase() === 'projectmanager' ||
+    user?.role?.toLowerCase() === 'estimator' ||
+    user?.role?.toLowerCase() === 'estimation';
+
   // Initialize form data when modal opens
   useEffect(() => {
     if (changeRequest && isOpen) {
@@ -54,20 +63,24 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
       const existingMaterials = changeRequest.sub_items_data || changeRequest.materials_data || [];
 
       if (existingMaterials.length > 0) {
-        const loadedMaterials: MaterialItem[] = existingMaterials.map((item: any, index: number) => ({
-          id: `existing-${index}`,
-          material_name: item.material_name || item.sub_item_name || '',
-          sub_item_name: item.sub_item_name || item.material_name || '',
-          brand: item.brand || '',
-          size: item.size || item.dimensions || item.size_dimension || '',
-          specification: item.specification || item.spec || '',
-          quantity: parseFloat(item.quantity || item.qty || 0),
-          unit: item.unit || 'nos',
-          unit_price: parseFloat(item.unit_price || item.unit_rate || 0),
-          total_price: parseFloat(item.total_price || (item.quantity * item.unit_price) || 0),
-          reason: item.reason || '',
-          master_material_id: item.master_material_id || null
-        }));
+        const loadedMaterials: MaterialItem[] = existingMaterials.map((item: any, index: number) => {
+          const boqQty = item.original_boq_quantity || item.boq_quantity;
+          return {
+            id: `existing-${index}`,
+            material_name: item.material_name || item.sub_item_name || '',
+            sub_item_name: item.sub_item_name || item.material_name || '',
+            brand: item.brand || '',
+            size: item.size || item.dimensions || item.size_dimension || '',
+            specification: item.specification || item.spec || '',
+            quantity: parseFloat(item.quantity || item.qty || 0),
+            original_boq_quantity: boqQty != null ? parseFloat(boqQty) : undefined,
+            unit: item.unit || 'nos',
+            unit_price: parseFloat(item.unit_price || item.unit_rate || 0),
+            total_price: parseFloat(item.total_price || (item.quantity * item.unit_price) || 0),
+            reason: item.reason || '',
+            master_material_id: item.master_material_id || null
+          };
+        });
         setMaterials(loadedMaterials);
       } else {
         // Fallback - create one empty material
@@ -133,15 +146,27 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
       return;
     }
 
-    const invalidMaterial = materials.find(m =>
-      !m.material_name.trim() ||
-      m.quantity <= 0 ||
-      m.unit_price <= 0 ||
-      !m.reason.trim()
-    );
+    // Validate materials - unit price is now optional
+    const invalidMaterial = materials.find(m => {
+      // Basic validation for all materials
+      if (!m.material_name.trim() || m.quantity <= 0 || !m.reason.trim()) {
+        return true;
+      }
+      return false;
+    });
 
     if (invalidMaterial) {
-      toast.error('Please fill all material fields correctly (name, quantity > 0, unit price > 0, reason)');
+      toast.error('Please fill all material fields correctly (name, quantity > 0, reason)');
+      return;
+    }
+
+    // Validate that existing materials don't exceed BOQ quantity
+    const exceedingMaterial = materials.find(m =>
+      m.master_material_id && m.original_boq_quantity && m.quantity > m.original_boq_quantity
+    );
+
+    if (exceedingMaterial) {
+      toast.error(`Material "${exceedingMaterial.material_name}" quantity (${exceedingMaterial.quantity}) exceeds BOQ allocated quantity (${exceedingMaterial.original_boq_quantity} ${exceedingMaterial.unit})`);
       return;
     }
 
@@ -159,7 +184,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
         unit_price: m.unit_price,
         total_price: m.total_price,
         reason: m.reason,
-        master_material_id: m.master_material_id || null
+        master_material_id: m.master_material_id ? parseInt(m.master_material_id) : undefined
       }));
 
       const response = await changeRequestService.updateChangeRequest(changeRequest.cr_id, {
@@ -283,8 +308,8 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Negotiable Price Summary - Hidden for Site Engineers */}
-                  {!isSiteEngineer && (
+                  {/* Negotiable Price Summary - Hidden for Site Engineers and when all materials are existing BOQ materials */}
+                  {!isSiteEngineer && materials.some(m => !m.master_material_id) && (
                     <div className="mb-6 p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200">
                       <h4 className="text-sm font-semibold text-purple-900 mb-3">Negotiable Price Summary</h4>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -431,20 +456,45 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                             <div>
                               <label className="block text-xs font-medium text-gray-600 mb-1">
                                 Quantity <span className="text-red-500">*</span>
+                                {material.master_material_id && material.original_boq_quantity && (
+                                  <span className="text-xs text-gray-500 font-normal ml-1">
+                                    (Max: {material.original_boq_quantity} {material.unit})
+                                  </span>
+                                )}
                               </label>
                               <input
                                 type="number"
                                 min="0.01"
                                 step="0.01"
                                 value={material.quantity || ''}
-                                onChange={(e) => handleMaterialChange(material.id, 'quantity', parseFloat(e.target.value) || 0)}
+                                onChange={(e) => {
+                                  const newQty = parseFloat(e.target.value) || 0;
+                                  // Validate against BOQ quantity for existing materials
+                                  if (material.master_material_id && material.original_boq_quantity && newQty > material.original_boq_quantity) {
+                                    toast.error(`Quantity cannot exceed BOQ allocated quantity of ${material.original_boq_quantity} ${material.unit}`);
+                                    return;
+                                  }
+                                  handleMaterialChange(material.id, 'quantity', newQty);
+                                }}
                                 className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
-                                  (material.master_material_id !== null && material.master_material_id !== undefined) ? 'bg-gray-50 cursor-not-allowed' : ''
+                                  (!isProjectManagerOrEstimator && material.master_material_id !== null && material.master_material_id !== undefined) ? 'bg-gray-50 cursor-not-allowed' :
+                                  (material.master_material_id && material.original_boq_quantity && material.quantity > material.original_boq_quantity) ? 'border-red-500 bg-red-50' : ''
                                 }`}
                                 placeholder="0.00"
                                 required
-                                disabled={loading || (material.master_material_id !== null && material.master_material_id !== undefined)}
+                                max={material.master_material_id && material.original_boq_quantity ? material.original_boq_quantity : undefined}
+                                disabled={loading || (!isProjectManagerOrEstimator && material.master_material_id !== null && material.master_material_id !== undefined)}
                               />
+                              {material.master_material_id && material.original_boq_quantity && material.quantity > material.original_boq_quantity && (
+                                <p className="text-xs text-red-600 mt-1">
+                                  ⚠️ Exceeds BOQ limit of {material.original_boq_quantity} {material.unit}
+                                </p>
+                              )}
+                              {material.master_material_id && material.original_boq_quantity && material.quantity > 0 && material.quantity <= material.original_boq_quantity && (
+                                <p className="text-xs text-green-600 mt-1">
+                                  ✓ Within BOQ limit ({material.quantity}/{material.original_boq_quantity} {material.unit})
+                                </p>
+                              )}
                             </div>
 
                             {/* Unit */}
@@ -468,7 +518,8 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                             {!isSiteEngineer && (
                               <div>
                                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                                  Unit Price (AED) <span className="text-red-500">*</span>
+                                  Unit Price (AED)
+                                  {material.master_material_id && <span className="text-xs text-gray-500 font-normal ml-1">(BOQ Price)</span>}
                                 </label>
                                 <input
                                   type="number"
@@ -476,11 +527,18 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                                   step="0.01"
                                   value={material.unit_price || ''}
                                   onChange={(e) => handleMaterialChange(material.id, 'unit_price', parseFloat(e.target.value) || 0)}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                                  placeholder="0.00"
-                                  required
-                                  disabled={loading}
+                                  className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                                    material.master_material_id ? 'bg-gray-50 cursor-not-allowed' : ''
+                                  }`}
+                                  placeholder={material.master_material_id ? "BOQ Price" : "0.00"}
+                                  disabled={loading || (material.master_material_id !== null && material.master_material_id !== undefined)}
+                                  readOnly={material.master_material_id !== null && material.master_material_id !== undefined}
                                 />
+                                {material.master_material_id && (
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    BOQ unit price is fixed and cannot be changed
+                                  </p>
+                                )}
                               </div>
                             )}
 
@@ -545,7 +603,9 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                         <ul className="text-xs text-yellow-800 mt-2 space-y-1 list-disc list-inside">
                           <li>Changes will reset the approval workflow based on the new miscellaneous percentage</li>
                           <li>Unit field is fixed and cannot be changed</li>
+                          <li>Unit price from BOQ is fixed and cannot be changed for existing materials</li>
                           <li>Total amount is automatically calculated from quantity × unit price</li>
+                          {isProjectManagerOrEstimator && <li>As a Project Manager or Estimator, you can edit quantities even for materials from the master list</li>}
                           <li>All approvers will need to review the updated request</li>
                         </ul>
                       </div>

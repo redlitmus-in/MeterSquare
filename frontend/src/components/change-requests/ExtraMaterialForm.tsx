@@ -67,6 +67,7 @@ interface MaterialItem {
   materialId?: string;  // The actual material ID like "Bubble Wrap"
   materialName: string;  // The actual material name like "Bubble Wrap"
   quantity: number;
+  originalBoqQuantity?: number;  // Original BOQ quantity (for validation)
   unit: string;
   unitRate: number;
   reasonForNew?: string;
@@ -379,6 +380,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                 materialId: mat.master_material_id,
                 materialName: mat.material_name,
                 quantity: mat.quantity || 0,
+                originalBoqQuantity: mat.original_boq_quantity || mat.boq_quantity || undefined,  // Store original BOQ qty if available
                 unit: mat.unit || 'nos',
                 unitRate: mat.unit_price || 0,
                 reasonForNew: mat.reason || '',
@@ -695,6 +697,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
       if (material.quantity <= 0) {
         toast.error(`Material "${material.materialName}" must have positive quantity`);
+        return false;
+      }
+
+      // Validate that existing materials don't exceed BOQ quantity
+      if (!material.isNew && material.originalBoqQuantity && material.quantity > material.originalBoqQuantity) {
+        toast.error(`Material "${material.materialName}" quantity (${material.quantity}) exceeds BOQ allocated quantity (${material.originalBoqQuantity} ${material.unit})`);
         return false;
       }
     }
@@ -1421,7 +1429,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                               // Use material_id OR material_name as fallback (backend sometimes doesn't return material_id)
                               materialId: material.material_id || material.material_name,
                               materialName: material.material_name,
-                              quantity: material.quantity || 0,
+                              quantity: 0,  // Start with 0, user must enter requested quantity
+                              originalBoqQuantity: material.quantity || 0,  // Store BOQ quantity for validation
                               unit: material.unit,
                               unitRate: material.unit_price || 0,
                               justification: ''
@@ -1603,11 +1612,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         </div>
                       ) : (
                         <div className="mb-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
-                          <p className="text-[10px] font-medium text-blue-900 mb-0.5">Selected Material (View Only)</p>
+                          <p className="text-[10px] font-medium text-blue-900 mb-0.5">Selected Material</p>
                           <p className="text-xs font-semibold text-blue-900">{material.materialName}</p>
                           <div className="mt-1 grid grid-cols-2 gap-2 text-[10px] text-blue-700">
                             <div>
-                              <span className="font-medium">Quantity:</span> {material.quantity} {material.unit}
+                              <span className="font-medium">BOQ Qty:</span> {material.originalBoqQuantity || 0} {material.unit}
                             </div>
                             {!isSiteEngineer && (
                               <div>
@@ -1615,30 +1624,72 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                               </div>
                             )}
                           </div>
+                          {(() => {
+                            // Calculate already purchased quantity from existing requests
+                            const alreadyPurchased = existingRequests
+                              .filter(req => req.status !== 'rejected')
+                              .reduce((total, req) => {
+                                const matchingMaterial = (req.materials_data || []).find(
+                                  (m: any) => (m.material_name === material.materialName || m.master_material_id === material.materialId) &&
+                                              m.sub_item_id === material.subItemId
+                                );
+                                return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
+                              }, 0);
+
+                            return alreadyPurchased > 0 ? (
+                              <div className="mt-2 pt-2 border-t border-blue-300">
+                                <div className="flex items-center gap-1.5">
+                                  <InformationCircleIcon className="w-3.5 h-3.5 text-orange-600" />
+                                  <div>
+                                    <p className="text-[10px] font-medium text-orange-700">Already Purchased</p>
+                                    <p className="text-xs font-bold text-orange-900">{alreadyPurchased} {material.unit}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                       )}
 
-                      {/* Quantity and Unit - Editable for new materials, view-only for existing */}
-                      {material.isNew ? (
-                        <div className="grid grid-cols-2 gap-2 mt-2">
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">
-                              Quantity <span className="text-red-500">*</span>
-                            </label>
-                            <input
-                              type="number"
-                              value={material.quantity}
-                              onChange={(e) => updateMaterial(material.id, { quantity: parseFloat(e.target.value) || 0 })}
-                              className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
-                              min="0.01"
-                              step="0.01"
-                              placeholder="Qty"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">
-                              Unit <span className="text-red-500">*</span>
-                            </label>
+                      {/* Quantity and Unit - Now Editable for ALL materials (both new and existing) */}
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Request Quantity <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            value={material.quantity}
+                            onChange={(e) => {
+                              const newQty = parseFloat(e.target.value) || 0;
+                              // For existing materials, validate against BOQ quantity
+                              if (!material.isNew && material.originalBoqQuantity && newQty > material.originalBoqQuantity) {
+                                toast.error(`Quantity cannot exceed BOQ allocated quantity of ${material.originalBoqQuantity} ${material.unit}`);
+                                return;
+                              }
+                              updateMaterial(material.id, { quantity: newQty });
+                            }}
+                            className={`w-full px-2 py-1.5 text-xs border rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] ${
+                              !material.isNew && material.originalBoqQuantity && material.quantity > material.originalBoqQuantity
+                                ? 'border-red-500 bg-red-50'
+                                : 'border-gray-300'
+                            }`}
+                            min="0.01"
+                            max={!material.isNew && material.originalBoqQuantity ? material.originalBoqQuantity : undefined}
+                            step="0.01"
+                            placeholder="Qty"
+                          />
+                          {!material.isNew && material.originalBoqQuantity && material.quantity > material.originalBoqQuantity && (
+                            <p className="text-[10px] text-red-600 mt-0.5">
+                              Exceeds BOQ limit of {material.originalBoqQuantity} {material.unit}
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Unit <span className="text-red-500">*</span>
+                          </label>
+                          {material.isNew ? (
                             <div className="space-y-1">
                               <select
                                 value={material.unit === 'Custom (Type below)' || !COMMON_UNITS.includes(material.unit) ? 'Custom (Type below)' : material.unit}
@@ -1670,9 +1721,17 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                                 />
                               )}
                             </div>
-                          </div>
+                          ) : (
+                            <input
+                              type="text"
+                              value={material.unit}
+                              className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+                              readOnly
+                              disabled
+                            />
+                          )}
                         </div>
-                      ) : null}
+                      </div>
                     </div>
                   ))
                 )}
