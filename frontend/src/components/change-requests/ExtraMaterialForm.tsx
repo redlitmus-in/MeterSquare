@@ -545,6 +545,25 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     setMaterials(materials.filter(m => m.id !== id));
   };
 
+  // Material type validation - Check if materials are mixed
+  const materialTypeInfo = useMemo(() => {
+    const hasNewMaterials = materials.some(m => m.isNew);
+    const hasExistingMaterials = materials.some(m => !m.isNew);
+    const isMixed = hasNewMaterials && hasExistingMaterials;
+
+    // Determine current material type
+    let currentType: 'new' | 'existing' | null = null;
+    if (hasNewMaterials && !hasExistingMaterials) currentType = 'new';
+    if (hasExistingMaterials && !hasNewMaterials) currentType = 'existing';
+
+    return {
+      hasNewMaterials,
+      hasExistingMaterials,
+      isMixed,
+      currentType
+    };
+  }, [materials]);
+
   // Computed fields - Dynamic routing based on material types
   const calculations = useMemo(() => {
     // Check if request contains any new (custom) materials
@@ -1277,6 +1296,43 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             <h3 className="text-sm font-medium text-gray-900">Materials Purchase Request</h3>
           </div>
 
+          {/* Warning banner for material type restriction */}
+          {materialTypeInfo.currentType && (
+            <div className={`p-3 rounded-lg border ${
+              materialTypeInfo.currentType === 'existing'
+                ? 'bg-blue-50 border-blue-200'
+                : 'bg-green-50 border-green-200'
+            }`}>
+              <div className="flex items-start gap-2">
+                <InformationCircleIcon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                  materialTypeInfo.currentType === 'existing'
+                    ? 'text-blue-600'
+                    : 'text-green-600'
+                }`} />
+                <div className="text-sm">
+                  <p className={`font-medium ${
+                    materialTypeInfo.currentType === 'existing'
+                      ? 'text-blue-900'
+                      : 'text-green-900'
+                  }`}>
+                    {materialTypeInfo.currentType === 'existing'
+                      ? 'Existing Materials Selected'
+                      : 'New Materials Selected'}
+                  </p>
+                  <p className={`text-xs mt-1 ${
+                    materialTypeInfo.currentType === 'existing'
+                      ? 'text-blue-700'
+                      : 'text-green-700'
+                  }`}>
+                    {materialTypeInfo.currentType === 'existing'
+                      ? 'You can only add existing BOQ materials in this request. To add new materials, create a separate request.'
+                      : 'You can only add new materials in this request. To add existing BOQ materials, create a separate request.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Material selection for each selected sub-item */}
           {selectedSubItems.map(subItem => (
             <div key={subItem.sub_item_id} className="border border-blue-200 rounded-lg p-4 bg-blue-50/30">
@@ -1294,6 +1350,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
                           // Guard: Ignore empty selection
                           if (!selectedValue || selectedValue === "") {
+                            return;
+                          }
+
+                          // Prevent adding existing materials if new materials already exist
+                          if (materialTypeInfo.currentType === 'new') {
+                            toast.error('Cannot mix existing and new materials. Please create separate requests for each type.');
+                            e.target.value = ""; // Reset dropdown
                             return;
                           }
 
@@ -1371,8 +1434,14 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           // Reset dropdown to default
                           e.target.value = "";
                         }}
-                        className="pl-3 pr-10 py-2 text-xs border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a]"
+                        disabled={materialTypeInfo.currentType === 'new'}
+                        className={`pl-3 pr-10 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] ${
+                          materialTypeInfo.currentType === 'new'
+                            ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed'
+                            : 'bg-white border-gray-300'
+                        }`}
                         defaultValue=""
+                        title={materialTypeInfo.currentType === 'new' ? 'Cannot add existing materials when new materials are selected' : ''}
                       >
                         <option value="">Select Material</option>
                         {subItem.materials.map(material => {
@@ -1409,6 +1478,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                   <button
                     type="button"
                     onClick={() => {
+                      // Prevent adding new materials if existing materials already exist
+                      if (materialTypeInfo.currentType === 'existing') {
+                        toast.error('Cannot mix existing and new materials. Please create separate requests for each type.');
+                        return;
+                      }
+
                       // Add new material for this specific sub-item
                       console.log('🟡 Creating new material for sub-item:', {
                         sub_item_id: subItem.sub_item_id,
@@ -1432,7 +1507,13 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                       // Use functional update to avoid stale state
                       setMaterials(prevMaterials => [...prevMaterials, newMaterial]);
                     }}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] text-white rounded-lg hover:from-[#1e3270] hover:to-[#3d4f8a] shadow-md transition-all"
+                    disabled={materialTypeInfo.currentType === 'existing'}
+                    className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg shadow-md transition-all ${
+                      materialTypeInfo.currentType === 'existing'
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] text-white hover:from-[#1e3270] hover:to-[#3d4f8a]'
+                    }`}
+                    title={materialTypeInfo.currentType === 'existing' ? 'Cannot add new materials when existing materials are selected' : ''}
                   >
                     <PlusIcon className="w-3.5 h-3.5" />
                     Add New
