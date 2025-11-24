@@ -1683,15 +1683,32 @@ def send_boq_to_estimator():
 
         # Send notification to Estimator about PM's decision
         try:
-            notification_service.notify_pm_boq_decision(
-                boq_id=boq_id,
-                project_name=project.project_name,
-                pm_id=current_user_id,
-                pm_name=current_user_name,
-                estimator_user_id=estimator.user_id,
-                approved=(boq_status == 'approved'),
-                rejection_reason=rejection_reason if boq_status == 'rejected' else None
-            )
+            # Get estimator user_id from BOQHistory actions
+            # This ensures we notify the CORRECT estimator who sent the BOQ to PM
+            estimator_user_id = None
+
+            # Find the latest "sent_to_pm" action to get the estimator's user_id
+            if existing_history and existing_history.action:
+                actions = existing_history.action if isinstance(existing_history.action, list) else [existing_history.action]
+                for action in reversed(actions):  # Check from most recent
+                    if action.get('sender_role') == 'estimator' and action.get('decided_by_user_id'):
+                        estimator_user_id = action.get('decided_by_user_id')
+                        break
+
+            # Fallback: Try to get from estimator object (for backwards compatibility)
+            if not estimator_user_id and estimator and hasattr(estimator, 'user_id'):
+                estimator_user_id = estimator.user_id
+
+            if estimator_user_id:
+                notification_service.notify_pm_boq_decision(
+                    boq_id=boq_id,
+                    project_name=project.project_name,
+                    pm_id=current_user_id,
+                    pm_name=current_user_name,
+                    estimator_user_id=estimator_user_id,
+                    approved=(boq_status == 'approved'),
+                    rejection_reason=rejection_reason if boq_status == 'rejected' else None
+                )
         except Exception as notif_error:
             log.error(f"Failed to send PM decision notification: {notif_error}")
 

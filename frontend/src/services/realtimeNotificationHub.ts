@@ -403,9 +403,10 @@ class RealtimeNotificationHub {
 
   /**
    * Fetch missed notifications from the backend API
-   * Called when user logs in or reconnects
+   * Called when user logs in, reconnects, or app mounts
+   * PUBLIC method so it can be called from App.tsx on mount
    */
-  private async fetchMissedNotifications() {
+  async fetchMissedNotifications() {
     if (!this.authToken) return;
 
     try {
@@ -426,7 +427,9 @@ class RealtimeNotificationHub {
       const data = await response.json();
 
       if (data.success && data.notifications && Array.isArray(data.notifications)) {
-        console.log(`Checking for missed notifications... Found ${data.notifications.length} unsynced notifications out of ${data.total || 0} total`);
+        if (import.meta.env.DEV) {
+          console.log(`[NotificationHub] Found ${data.notifications.length} unsynced notifications out of ${data.total || 0} total`);
+        }
 
         // Process each notification
         for (const notif of data.notifications) {
@@ -474,7 +477,9 @@ class RealtimeNotificationHub {
         }
       }
     } catch (error) {
-      console.error('Failed to fetch missed notifications:', error);
+      if (import.meta.env.DEV) {
+        console.error('[NotificationHub] Failed to fetch missed notifications:', error);
+      }
     }
   }
 

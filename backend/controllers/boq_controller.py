@@ -4087,7 +4087,7 @@ def send_boq_email(boq_id):
             #         "error": "Email service failed"
             #     }), 500
         else:
-            # Send to the Technical Director (auto-detect)
+            # Send to ALL Technical Directors (support multiple TDs)
             td_role = Role.query.filter_by(role='technicalDirector').first()
 
             if not td_role:
@@ -4096,17 +4096,21 @@ def send_boq_email(boq_id):
                     "message": "Technical Director role not configured in the system"
                 }), 404
 
-            technical_director = User.query.filter_by(
+            # Get ALL active TDs instead of just first()
+            technical_directors = User.query.filter_by(
                 role_id=td_role.role_id,
                 is_active=True,
                 is_deleted=False
-            ).first()
+            ).all()
 
-            if not technical_director:
+            if not technical_directors:
                 return jsonify({
                     "error": "No Technical Director found",
                     "message": "No active Technical Director found in the system"
                 }), 404
+
+            # Use first TD for compatibility with single-TD logic below
+            technical_director = technical_directors[0]
 
             if not technical_director.email:
                 return jsonify({
@@ -4218,20 +4222,24 @@ def send_boq_email(boq_id):
 
             db.session.commit()
 
-            # Send notification to TD (auto-detected)
+            # Send notification to ALL TDs
             try:
                 from utils.comprehensive_notification_service import notification_service
-                log.info(f"[send_boq_email] Sending notification to auto-detected TD {technical_director.user_id}")
-                notification_service.notify_boq_sent_to_td(
-                    boq_id=boq_id,
-                    project_name=project.project_name,
-                    estimator_id=user_id,
-                    estimator_name=user_name,
-                    td_user_id=technical_director.user_id
-                )
-                log.info(f"[send_boq_email] Notification sent successfully to TD")
+                log.info(f"[send_boq_email] Sending notification to {len(technical_directors)} Technical Director(s)")
+                for td in technical_directors:
+                    try:
+                        notification_service.notify_boq_sent_to_td(
+                            boq_id=boq_id,
+                            project_name=project.project_name,
+                            estimator_id=user_id,
+                            estimator_name=user_name,
+                            td_user_id=td.user_id
+                        )
+                        log.info(f"[send_boq_email] Notification sent successfully to TD {td.user_id} ({td.full_name})")
+                    except Exception as td_notif_err:
+                        log.error(f"[send_boq_email] Failed to send notification to TD {td.user_id}: {td_notif_err}")
             except Exception as notif_err:
-                log.error(f"[send_boq_email] Failed to send notification to TD: {notif_err}")
+                log.error(f"[send_boq_email] Failed to send notifications to TDs: {notif_err}")
 
             return jsonify({
                 "success": True,

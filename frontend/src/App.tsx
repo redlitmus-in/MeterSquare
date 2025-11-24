@@ -712,12 +712,20 @@ function App() {
       // Reconnect real-time hub with new credentials
       realtimeNotificationHub.reconnect();
 
+      // Fetch missed notifications on app mount/login
+      // This ensures notifications show even if user was offline when they were sent
+      setTimeout(() => {
+        realtimeNotificationHub.fetchMissedNotifications();
+      }, 1000); // Small delay to ensure Socket.IO is connected first
+
       // ONLY cleanup on actual logout (isAuthenticated changes to false)
       return () => {
         // Don't cleanup if user is still authenticated (prevents killing subscriptions on page navigation)
         const stillAuthenticated = localStorage.getItem('access_token');
         if (!stillAuthenticated) {
-          console.log('🔌 User logged out - cleaning up subscriptions');
+          if (import.meta.env.DEV) {
+            console.log('🔌 User logged out - cleaning up subscriptions');
+          }
           currentSubs();
           backgroundNotificationService.updateCredentials(null, null, null);
           realtimeNotificationHub.disconnect();
@@ -738,7 +746,9 @@ function App() {
     initializeNotificationService();
 
     // Initialize background notification service
-    console.log('Initializing background notification service...');
+    if (import.meta.env.DEV) {
+      console.log('Initializing background notification service...');
+    }
 
     // Quick initialization - don't block on environment validation
     const initialize = async () => {
@@ -757,7 +767,9 @@ function App() {
           if (token && !isAuthenticated) {
             // Fire and forget - don't await
             getCurrentUser().catch(() => {
-              console.log('Token validation failed, cleaning up...');
+              if (import.meta.env.DEV) {
+                console.log('Token validation failed, cleaning up...');
+              }
               logout();
             });
           }

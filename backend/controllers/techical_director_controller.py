@@ -537,9 +537,19 @@ def td_mail_send():
 
         # Send notification about TD's decision
         try:
-            # Get estimator user_id for notification
+            # Get estimator user_id for notification from BOQHistory actions
+            # This ensures we notify the CORRECT estimator who sent the BOQ to TD
             estimator_user_id = None
-            if estimator and hasattr(estimator, 'user_id'):
+
+            # Find the latest "sent_to_td" action to get the estimator's user_id
+            if current_actions:
+                for action in reversed(current_actions):  # Check from most recent
+                    if action.get('type') == 'sent_to_td' and action.get('decided_by_user_id'):
+                        estimator_user_id = action.get('decided_by_user_id')
+                        break
+
+            # Fallback: Try to get from estimator object (old logic for backwards compatibility)
+            if not estimator_user_id and estimator and hasattr(estimator, 'user_id'):
                 estimator_user_id = estimator.user_id
 
             if estimator_user_id:
