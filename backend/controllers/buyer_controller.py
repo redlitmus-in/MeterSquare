@@ -1582,6 +1582,35 @@ def td_approve_vendor(cr_id):
 
         log.info(f"Vendor selection for CR-{cr_id} approved by TD {td_id}")
 
+        # Send notification to buyer about vendor approval
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            if cr.created_by:
+                notification = NotificationManager.create_notification(
+                    user_id=cr.created_by,
+                    type='approval',
+                    title='Vendor Selection Approved',
+                    message=f'TD approved vendor "{cr.selected_vendor_name}" for CR: {cr.item_name or "Change Request"}',
+                    priority='high',
+                    category='vendor',
+                    action_url=f'/buyer/change-requests/{cr_id}',
+                    action_label='Proceed with Purchase',
+                    metadata={
+                        'cr_id': str(cr_id),
+                        'vendor_name': cr.selected_vendor_name,
+                        'vendor_id': str(cr.selected_vendor_id) if cr.selected_vendor_id else None,
+                        'item_name': cr.item_name
+                    },
+                    sender_id=td_id,
+                    sender_name=td_name
+                )
+                send_notification_to_user(cr.created_by, notification.to_dict())
+                log.info(f"Sent vendor approval notification to buyer {cr.created_by}")
+        except Exception as notif_error:
+            log.error(f"Failed to send vendor approval notification: {notif_error}")
+
         return jsonify({
             "success": True,
             "message": "Vendor selection approved successfully",
@@ -1647,6 +1676,35 @@ def td_reject_vendor(cr_id):
         db.session.commit()
 
         log.info(f"Vendor selection for CR-{cr_id} rejected by TD {td_id}: {reason}")
+
+        # Send notification to buyer about vendor rejection
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            if cr.created_by:
+                notification = NotificationManager.create_notification(
+                    user_id=cr.created_by,
+                    type='rejection',
+                    title='Vendor Selection Rejected',
+                    message=f'TD rejected vendor selection for CR: {cr.item_name or "Change Request"}. Reason: {reason}',
+                    priority='high',
+                    category='vendor',
+                    action_required=True,
+                    action_url=f'/buyer/change-requests/{cr_id}',
+                    action_label='Select New Vendor',
+                    metadata={
+                        'cr_id': str(cr_id),
+                        'rejection_reason': reason,
+                        'item_name': cr.item_name
+                    },
+                    sender_id=td_id,
+                    sender_name=td_name
+                )
+                send_notification_to_user(cr.created_by, notification.to_dict())
+                log.info(f"Sent vendor rejection notification to buyer {cr.created_by}")
+        except Exception as notif_error:
+            log.error(f"Failed to send vendor rejection notification: {notif_error}")
 
         return jsonify({
             "success": True,
@@ -2576,6 +2634,58 @@ def td_approve_vendor_for_se_boq(assignment_id):
 
         log.info(f"TD {td_id} approved vendor for SE BOQ assignment {assignment_id}")
 
+        # Send notifications to buyer and site engineer about vendor approval
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            # Notify buyer
+            if assignment.assigned_to_buyer_id:
+                buyer_notification = NotificationManager.create_notification(
+                    user_id=assignment.assigned_to_buyer_id,
+                    type='approval',
+                    title='SE BOQ Vendor Approved',
+                    message=f'TD approved vendor "{assignment.selected_vendor_name}" for SE BOQ materials',
+                    priority='high',
+                    category='vendor',
+                    action_url=f'/buyer/se-boq-assignments/{assignment_id}',
+                    action_label='Proceed with Purchase',
+                    metadata={
+                        'assignment_id': str(assignment_id),
+                        'vendor_name': assignment.selected_vendor_name,
+                        'boq_id': str(assignment.boq_id) if assignment.boq_id else None
+                    },
+                    sender_id=td_id,
+                    sender_name=td_name
+                )
+                send_notification_to_user(assignment.assigned_to_buyer_id, buyer_notification.to_dict())
+                log.info(f"Sent SE BOQ vendor approval notification to buyer {assignment.assigned_to_buyer_id}")
+
+            # Notify site engineer
+            if assignment.site_engineer_id:
+                se_notification = NotificationManager.create_notification(
+                    user_id=assignment.site_engineer_id,
+                    type='info',
+                    title='BOQ Vendor Approved',
+                    message=f'TD approved vendor "{assignment.selected_vendor_name}" for your BOQ materials',
+                    priority='medium',
+                    category='vendor',
+                    action_url=f'/site-engineer/boq/{assignment.boq_id}',
+                    action_label='View BOQ',
+                    metadata={
+                        'assignment_id': str(assignment_id),
+                        'vendor_name': assignment.selected_vendor_name,
+                        'boq_id': str(assignment.boq_id) if assignment.boq_id else None
+                    },
+                    sender_id=td_id,
+                    sender_name=td_name
+                )
+                send_notification_to_user(assignment.site_engineer_id, se_notification.to_dict())
+                log.info(f"Sent SE BOQ vendor approval notification to site engineer {assignment.site_engineer_id}")
+
+        except Exception as notif_error:
+            log.error(f"Failed to send SE BOQ vendor approval notification: {notif_error}")
+
         return jsonify({
             "success": True,
             "message": "Vendor selection approved successfully"
@@ -2689,6 +2799,61 @@ def td_reject_vendor_for_se_boq(assignment_id):
         db.session.commit()
 
         log.info(f"TD {td_id} rejected vendor for SE BOQ assignment {assignment_id}")
+
+        # Send notifications to buyer and site engineer about vendor rejection
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            # Notify buyer
+            if assignment.assigned_to_buyer_id:
+                buyer_notification = NotificationManager.create_notification(
+                    user_id=assignment.assigned_to_buyer_id,
+                    type='rejection',
+                    title='SE BOQ Vendor Rejected',
+                    message=f'TD rejected vendor "{rejected_vendor_name}" for SE BOQ materials. Reason: {rejection_reason}',
+                    priority='high',
+                    category='vendor',
+                    action_required=True,
+                    action_url=f'/buyer/se-boq-assignments/{assignment_id}',
+                    action_label='Select New Vendor',
+                    metadata={
+                        'assignment_id': str(assignment_id),
+                        'rejected_vendor_name': rejected_vendor_name,
+                        'rejection_reason': rejection_reason,
+                        'boq_id': str(assignment.boq_id) if assignment.boq_id else None
+                    },
+                    sender_id=td_id,
+                    sender_name=td_name
+                )
+                send_notification_to_user(assignment.assigned_to_buyer_id, buyer_notification.to_dict())
+                log.info(f"Sent SE BOQ vendor rejection notification to buyer {assignment.assigned_to_buyer_id}")
+
+            # Notify site engineer
+            if assignment.site_engineer_id:
+                se_notification = NotificationManager.create_notification(
+                    user_id=assignment.site_engineer_id,
+                    type='info',
+                    title='BOQ Vendor Rejected',
+                    message=f'TD rejected vendor "{rejected_vendor_name}" for your BOQ materials. Buyer will select a new vendor.',
+                    priority='medium',
+                    category='vendor',
+                    action_url=f'/site-engineer/boq/{assignment.boq_id}',
+                    action_label='View BOQ',
+                    metadata={
+                        'assignment_id': str(assignment_id),
+                        'rejected_vendor_name': rejected_vendor_name,
+                        'rejection_reason': rejection_reason,
+                        'boq_id': str(assignment.boq_id) if assignment.boq_id else None
+                    },
+                    sender_id=td_id,
+                    sender_name=td_name
+                )
+                send_notification_to_user(assignment.site_engineer_id, se_notification.to_dict())
+                log.info(f"Sent SE BOQ vendor rejection notification to site engineer {assignment.site_engineer_id}")
+
+        except Exception as notif_error:
+            log.error(f"Failed to send SE BOQ vendor rejection notification: {notif_error}")
 
         return jsonify({
             "success": True,

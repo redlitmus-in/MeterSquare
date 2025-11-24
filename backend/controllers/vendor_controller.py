@@ -54,6 +54,35 @@ def create_vendor():
 
         log.info(f"Vendor created: {new_vendor.vendor_id} by user {current_user['user_id']}")
 
+        # Send notification to Technical Directors about new vendor
+        try:
+            from models.role import Role
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            # Get Technical Directors
+            td_role = Role.query.filter_by(role='Technical Director', is_deleted=False).first()
+            if td_role:
+                td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                for td_user in td_users:
+                    notification = NotificationManager.create_notification(
+                        user_id=td_user.user_id,
+                        type='info',
+                        title='New Vendor Created',
+                        message=f'Buyer created new vendor: {new_vendor.company_name}',
+                        priority='medium',
+                        category='vendor',
+                        action_url=f'/technical-director/vendors/{new_vendor.vendor_id}',
+                        action_label='Review Vendor',
+                        metadata={'vendor_id': str(new_vendor.vendor_id), 'company_name': new_vendor.company_name},
+                        sender_id=current_user['user_id'],
+                        sender_name=current_user.get('full_name', 'Buyer')
+                    )
+                    send_notification_to_user(td_user.user_id, notification.to_dict())
+                    log.info(f"Sent vendor creation notification to TD {td_user.user_id}")
+        except Exception as notif_error:
+            log.error(f"Failed to send vendor creation notification: {notif_error}")
+
         return jsonify({
             "success": True,
             "message": "Vendor created successfully",

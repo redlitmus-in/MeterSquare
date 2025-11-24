@@ -325,8 +325,12 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {materialsData?.map((material: any, idx: number) => {
-                        // A material is NEW only if master_material_id is null/undefined
-                        const isNewMaterial = material.master_material_id === null || material.master_material_id === undefined;
+                        // A material is NEW if master_material_id is null/undefined OR has invalid format
+                        // Valid format should start with "mat_" (e.g., mat_666_1_1_1)
+                        const hasValidMaterialId = material.master_material_id &&
+                                                   (typeof material.master_material_id === 'string') &&
+                                                   material.master_material_id.startsWith('mat_');
+                        const isNewMaterial = !hasValidMaterialId;
                         return (
                           <tr key={idx} className="hover:bg-gray-50">
                             <td className="px-1.5 py-1.5 text-[11px] font-medium text-gray-900 truncate">

@@ -185,8 +185,8 @@ class NotificationService {
     try {
       const options: NotificationOptions = {
         body: sanitizedNotification.message, // Already sanitized
-        icon: '/logo.png', // MeterSquare ERP logo
-        badge: '/logo.png',
+        icon: '/assets/logo.png', // MeterSquare ERP logo
+        badge: '/assets/logofavi.png',
         tag: sanitizedNotification.id,
         data: sanitizedNotification, // Use sanitized data
         requireInteraction: sanitizedNotification.priority === 'urgent' || sanitizedNotification.priority === 'high',
@@ -209,12 +209,12 @@ class NotificationService {
           {
             action: 'view',
             title: sanitizedNotification.actionLabel || 'View',
-            icon: '/logo.png'
+            icon: '/assets/logo.png'
           },
           {
             action: 'dismiss',
             title: 'Dismiss',
-            icon: '/logo.png'
+            icon: '/assets/logo.png'
           }
         ];
       }

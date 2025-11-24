@@ -251,8 +251,8 @@ class RealtimeNotificationHub {
     try {
       const desktopNotif = new Notification(notification.title, {
         body: notification.message,
-        icon: '/logo.png',
-        badge: '/badge.png',
+        icon: '/assets/logo.png',
+        badge: '/assets/logofavi.png',
         tag: notification.id,
         requireInteraction: notification.priority === 'urgent' || notification.priority === 'high',
         silent: false
@@ -271,8 +271,14 @@ class RealtimeNotificationHub {
       if (notification.priority !== 'urgent' && notification.priority !== 'high') {
         setTimeout(() => desktopNotif.close(), 10000);
       }
-    } catch {
-      // Silent fail - desktop notification is optional
+    } catch (error) {
+      console.error('❌ Desktop notification failed:', error);
+      console.error('Notification data:', {
+        title: notification.title,
+        hasMessage: !!notification.message,
+        priority: notification.priority,
+        permission: Notification.permission
+      });
     }
   }
 

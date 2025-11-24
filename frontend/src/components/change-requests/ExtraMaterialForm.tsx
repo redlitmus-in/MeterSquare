@@ -12,6 +12,7 @@ import axios from 'axios';
 import { apiClient } from '@/api/config';
 import { useAuthStore } from '@/store/authStore';
 import { useAdminViewStore } from '@/store/adminViewStore';
+import { changeRequestService } from '@/services/changeRequestService';
 
 interface Project {
   project_id: number;
@@ -504,27 +505,26 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
     try {
       setLoadingRequests(true);
-      // Fetch ALL change requests for this BOQ (not filtered by user)
-      const response = await apiClient.get(`/change-requests`);
+      // Fetch ALL change requests for this BOQ across ALL roles and items
+      // This ensures cross-role visibility for material tracking
+      const response = await changeRequestService.getBOQChangeRequests(selectedBoq.boq_id);
 
-      const allRequests = response.data.data || response.data || [];
+      if (response.success && response.data) {
+        const allBoqRequests = response.data || [];
 
-      // Filter to get ALL requests for this specific BOQ and item
-      // INCLUDING rejected requests (so users can see what was rejected)
-      const itemRequests = allRequests.filter((req: any) =>
-        req.boq_id === selectedBoq.boq_id &&
-        req.item_id === selectedItem.item_id
-        // Don't exclude rejected - show all requests
-      );
+        console.log('Fetched BOQ change requests for cross-role tracking:', {
+          total: allBoqRequests.length,
+          boqId: selectedBoq.boq_id,
+          itemId: selectedItem.item_id,
+          note: 'Including ALL items and roles for material allocation tracking'
+        });
 
-      console.log('Fetched change requests:', {
-        total: allRequests.length,
-        forThisItem: itemRequests.length,
-        boqId: selectedBoq.boq_id,
-        itemId: selectedItem.item_id
-      });
-
-      setExistingRequests(itemRequests);
+        // Store ALL requests for this BOQ (not filtered by item)
+        // This allows SE and PM to see each other's purchases for BOQ materials
+        setExistingRequests(allBoqRequests);
+      } else {
+        setExistingRequests([]);
+      }
     } catch (error) {
       console.error('Error fetching existing requests:', error);
       // Don't show error toast - this is optional information
@@ -1139,7 +1139,14 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
 
       {/* Existing Requests Section */}
-      {selectedItem && existingRequests.length > 0 && (
+      {selectedItem && existingRequests.length > 0 && (() => {
+        // Filter to show only requests for the current item in the display
+        // But we keep ALL BOQ requests in state for material allocation calculations
+        const currentItemRequests = existingRequests.filter(r => r.item_id === selectedItem.item_id);
+
+        if (currentItemRequests.length === 0) return null;
+
+        return (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1149,7 +1156,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             <div className="flex items-center gap-2">
               <InformationCircleIcon className="w-5 h-5 text-blue-600" />
               <h3 className="font-medium text-blue-900">
-                Existing Requests for this Item ({existingRequests.length})
+                Existing Requests for this Item ({currentItemRequests.length})
               </h3>
             </div>
             <button
@@ -1166,26 +1173,26 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
               <div>
                 <p className="text-blue-700 text-xs">Pending</p>
                 <p className="font-semibold text-blue-900">
-                  {existingRequests.filter(r => r.status === 'pending').length}
+                  {currentItemRequests.filter(r => r.status === 'pending').length}
                 </p>
               </div>
               <div>
                 <p className="text-blue-700 text-xs">Under Review</p>
                 <p className="font-semibold text-blue-900">
-                  {existingRequests.filter(r => r.status === 'under_review' || r.status === 'approved_by_pm' || r.status === 'approved_by_td').length}
+                  {currentItemRequests.filter(r => r.status === 'under_review' || r.status === 'approved_by_pm' || r.status === 'approved_by_td').length}
                 </p>
               </div>
               <div>
                 <p className="text-blue-700 text-xs">Rejected</p>
                 <p className="font-semibold text-red-600">
-                  {existingRequests.filter(r => r.status === 'rejected').length}
+                  {currentItemRequests.filter(r => r.status === 'rejected').length}
                 </p>
               </div>
               {!isSiteEngineer && (
                 <div>
                   <p className="text-blue-700 text-xs">Total Cost</p>
                   <p className="font-semibold text-blue-900">
-                    AED {existingRequests.filter(r => r.status !== 'rejected').reduce((sum, r) => {
+                    AED {currentItemRequests.filter(r => r.status !== 'rejected').reduce((sum, r) => {
                       // Calculate cost only for NEW materials (without master_material_id)
                       const allMaterials = [
                         ...(r.materials_data || []),
@@ -1203,7 +1210,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             </div>
           ) : (
             <div className="space-y-2 max-h-60 overflow-y-auto">
-              {existingRequests.map((request) => {
+              {currentItemRequests.map((request) => {
                 // Helper function to format role display
                 const getRoleBadge = (role: string) => {
                   const roleMap: Record<string, { label: string; color: string }> = {
@@ -1247,22 +1254,97 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                       {/* Sub-items list */}
                       <div>
                         <p className="text-gray-600 text-xs mb-1">Items Requested:</p>
-                        <div className="space-y-1">
-                          {(request.materials_data || []).map((material: any, idx: number) => (
-                            <div key={idx} className="flex justify-between items-center text-xs bg-gray-50 px-2 py-1 rounded">
-                              <span className="text-gray-700">
-                                {material.material_name || material.sub_item_name}
-                                <span className="text-gray-500 ml-1">
-                                  ({material.quantity} {material.unit})
-                                </span>
-                              </span>
-                              {!isSiteEngineer && (
-                                <span className="font-medium text-gray-900">
-                                  AED {((material.quantity || 0) * (material.unit_price || 0)).toLocaleString()}
-                                </span>
-                              )}
-                            </div>
-                          ))}
+                        <div className="space-y-2">
+                          {(request.materials_data || []).map((material: any, idx: number) => {
+                            // Check if this is a BOQ material (has valid master_material_id)
+                            const hasValidMaterialId = material.master_material_id &&
+                                                       (typeof material.master_material_id === 'string') &&
+                                                       material.master_material_id.startsWith('mat_');
+                            const isBOQMaterial = hasValidMaterialId && material.original_boq_quantity !== undefined;
+
+                            // If it's a BOQ material, calculate already purchased (excluding this request)
+                            let alreadyPurchased = 0;
+                            if (isBOQMaterial) {
+                              alreadyPurchased = existingRequests
+                                .filter(req => req.status !== 'rejected' && req.cr_id !== request.cr_id)
+                                .reduce((total, req) => {
+                                  const allMaterials = [
+                                    ...(req.materials_data || []),
+                                    ...(req.sub_items_data || [])
+                                  ];
+                                  const matchingMaterial = allMaterials.find(
+                                    (m: any) => m.master_material_id === material.master_material_id
+                                  );
+                                  return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
+                                }, 0);
+                            }
+
+                            return (
+                              <div key={idx} className={`text-xs px-2 py-2 rounded ${
+                                isBOQMaterial ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'
+                              }`}>
+                                <div className="flex justify-between items-center mb-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-gray-700 font-medium">
+                                      {material.material_name || material.sub_item_name}
+                                    </span>
+                                    {isBOQMaterial && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-blue-200 text-blue-800">
+                                        BOQ
+                                      </span>
+                                    )}
+                                    {!hasValidMaterialId && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-green-200 text-green-800">
+                                        NEW
+                                      </span>
+                                    )}
+                                  </div>
+                                  {!isSiteEngineer && (
+                                    <span className="font-medium text-gray-900">
+                                      AED {((material.quantity || 0) * (material.unit_price || 0)).toLocaleString()}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* BOQ Allocation Breakdown for BOQ materials */}
+                                {isBOQMaterial && (
+                                  <div className="mt-1.5 pt-1.5 border-t border-blue-200 space-y-0.5 text-[10px]">
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">BOQ Allocated:</span>
+                                      <span className="font-semibold text-gray-900">{material.original_boq_quantity} {material.unit}</span>
+                                    </div>
+                                    {alreadyPurchased > 0 && (
+                                      <div className="flex justify-between">
+                                        <span className="text-orange-600">Already Purchased:</span>
+                                        <span className="font-semibold text-orange-700">{alreadyPurchased} {material.unit}</span>
+                                      </div>
+                                    )}
+                                    <div className="flex justify-between">
+                                      <span className="text-blue-600">This Request:</span>
+                                      <span className="font-semibold text-blue-700">{material.quantity} {material.unit}</span>
+                                    </div>
+                                    <div className="flex justify-between pt-0.5 border-t border-blue-300">
+                                      <span className="text-gray-700 font-medium">Remaining:</span>
+                                      <span className={`font-bold ${
+                                        ((material.original_boq_quantity || 0) - alreadyPurchased - (material.quantity || 0)) >= 0
+                                          ? 'text-green-600'
+                                          : 'text-red-600'
+                                      }`}>
+                                        {((material.original_boq_quantity || 0) - alreadyPurchased - (material.quantity || 0)).toFixed(2)} {material.unit}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Simple quantity display for non-BOQ materials */}
+                                {!isBOQMaterial && (
+                                  <div className="text-gray-500 text-[10px]">
+                                    Quantity: {material.quantity} {material.unit}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
 
@@ -1301,7 +1383,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             </p>
           </div>
         </motion.div>
-      )}
+        );
+      })()}
 
       {/* Materials Section - Grouped by Sub-Item */}
       {selectedSubItems.length > 0 && (
@@ -1354,68 +1437,110 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           {/* Material selection for each selected sub-item */}
           {selectedSubItems.map(subItem => (
             <div key={subItem.sub_item_id} className="border border-blue-200 rounded-lg p-4 bg-blue-50/30">
-              {/* Show fully consumed materials summary */}
-              {(() => {
-                const fullyConsumedMaterials = (subItem.materials || []).filter(material => {
-                  const materialKey = material.material_id || material.material_name;
-                  const alreadyPurchased = existingRequests
-                    .filter(req => req.status !== 'rejected')
-                    .reduce((total, req) => {
-                      const allMaterials = [
-                        ...(req.materials_data || []),
-                        ...(req.sub_items_data || [])
-                      ];
-                      const matchingMaterial = allMaterials.find(
-                        (m: any) => (m.material_name === material.material_name || m.master_material_id === materialKey) &&
-                                    m.sub_item_id === subItem.sub_item_id
-                      );
-                      return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
-                    }, 0);
-
-                  const boqQuantity = material.quantity || 0;
-                  return alreadyPurchased >= boqQuantity;
-                });
-
-                if (fullyConsumedMaterials.length === 0) return null;
-
-                return (
-                  <div className="mb-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-semibold text-orange-800">⚠️ BOQ Fully Consumed Materials</span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {fullyConsumedMaterials.map(material => {
-                        const materialKey = material.material_id || material.material_name;
-                        const alreadyPurchased = existingRequests
-                          .filter(req => req.status !== 'rejected')
-                          .reduce((total, req) => {
-                            const allMaterials = [
-                              ...(req.materials_data || []),
-                              ...(req.sub_items_data || [])
-                            ];
-                            const matchingMaterial = allMaterials.find(
-                              (m: any) => (m.material_name === material.material_name || m.master_material_id === materialKey) &&
-                                          m.sub_item_id === subItem.sub_item_id
-                            );
-                            return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
-                          }, 0);
-
-                        return (
-                          <div key={materialKey} className="flex justify-between items-center text-[10px] bg-white p-2 rounded border border-orange-100">
-                            <span className="font-medium text-gray-700">{material.material_name}</span>
-                            <span className="text-orange-700 font-semibold">
-                              {alreadyPurchased} / {material.quantity || 0} {material.unit} purchased
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <p className="text-[10px] text-orange-600 mt-2 italic">
-                      These materials are not available in the dropdown. Request as new materials if needed.
-                    </p>
+              {/* Show BOQ Materials Availability Summary - ALWAYS show this for transparency */}
+              {subItem.materials && subItem.materials.length > 0 && (
+                <div className="mb-3 p-3 bg-blue-50 border border-blue-300 rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs font-semibold text-blue-900">📊 BOQ Materials Allocation Status</span>
                   </div>
-                );
-              })()}
+                  <div className="space-y-2">
+                    {subItem.materials.map(material => {
+                      const materialKey = material.material_id || material.material_name;
+
+                      // Debug logging for tracking allocation calculation
+                      console.log('🔍 Calculating allocation for material:', {
+                        materialName: material.material_name,
+                        materialKey,
+                        subItemId: subItem.sub_item_id,
+                        subItemName: subItem.sub_item_name,
+                        totalRequestsAvailable: existingRequests.length
+                      });
+
+                      const alreadyPurchased = existingRequests
+                        .filter(req => req.status !== 'rejected')
+                        .reduce((total, req) => {
+                          const allMaterials = [
+                            ...(req.materials_data || []),
+                            ...(req.sub_items_data || [])
+                          ];
+                          // Match by BOTH material AND sub_item to track per-sub-item allocation
+                          // This ensures SE1's material in SubItem A is separate from SE2's material in SubItem B
+                          // Match by sub_item_name OR sub_item_id to handle cases where IDs differ but names are same
+                          const matchingMaterial = allMaterials.find(
+                            (m: any) => {
+                              const materialMatches = m.material_name === material.material_name || m.master_material_id === materialKey;
+                              const subItemMatches = m.sub_item_id === subItem.sub_item_id || m.sub_item_name === subItem.sub_item_name;
+                              return materialMatches && subItemMatches;
+                            }
+                          );
+
+                          if (matchingMaterial) {
+                            console.log('✅ Found matching material in request:', {
+                              cr_id: req.cr_id,
+                              material: matchingMaterial.material_name,
+                              quantity: matchingMaterial.quantity,
+                              sub_item_id: matchingMaterial.sub_item_id
+                            });
+                          }
+
+                          return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
+                        }, 0);
+
+                      console.log('📊 Already purchased total:', alreadyPurchased);
+
+                      const boqQuantity = material.quantity || 0;
+                      const remaining = boqQuantity - alreadyPurchased;
+                      const isFullyConsumed = remaining <= 0;
+
+                      return (
+                        <div key={materialKey} className={`p-2 rounded border ${
+                          isFullyConsumed ? 'bg-orange-50 border-orange-200' : 'bg-white border-blue-200'
+                        }`}>
+                          <div className="flex justify-between items-start mb-1">
+                            <span className="font-medium text-gray-900 text-xs">{material.material_name}</span>
+                            {isFullyConsumed && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-orange-200 text-orange-800">
+                                Fully Consumed
+                              </span>
+                            )}
+                          </div>
+                          <div className="space-y-0.5 text-[10px]">
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">BOQ Allocated:</span>
+                              <span className="font-semibold text-gray-900">{boqQuantity} {material.unit}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-orange-600">Already Purchased (This Sub-Item):</span>
+                              <span className={`font-semibold ${
+                                alreadyPurchased > 0 ? 'text-orange-700' : 'text-gray-500'
+                              }`}>
+                                {alreadyPurchased} {material.unit}
+                              </span>
+                            </div>
+                            <div className="flex justify-between pt-0.5 border-t border-gray-200">
+                              <span className="text-gray-700 font-medium">Available:</span>
+                              <span className={`font-bold ${
+                                remaining > 0 ? 'text-green-600' : 'text-red-600'
+                              }`}>
+                                {remaining.toFixed(2)} {material.unit}
+                              </span>
+                            </div>
+                          </div>
+                          {!isSiteEngineer && (
+                            <div className="mt-1 pt-1 border-t border-gray-200 text-[10px] text-gray-600">
+                              Rate: AED{material.unit_price}/{material.unit}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-blue-700 mt-2 italic">
+                    ℹ️ This shows real-time allocation for THIS sub-item across all roles (PM, SE, etc.) for transparency.
+                  </p>
+                </div>
+              )}
+
 
               <div className="flex justify-between items-center mb-3">
                 <h4 className="text-sm font-semibold text-blue-900 flex items-center gap-2">
@@ -1434,9 +1559,14 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             ...(req.materials_data || []),
                             ...(req.sub_items_data || [])
                           ];
+                          // Match by BOTH material AND sub_item to track per-sub-item allocation
+                          // Match by sub_item_name OR sub_item_id to handle cases where IDs differ but names are same
                           const matchingMaterial = allMaterials.find(
-                            (m: any) => (m.material_name === material.material_name || m.master_material_id === materialKey) &&
-                                        m.sub_item_id === subItem.sub_item_id
+                            (m: any) => {
+                              const materialMatches = m.material_name === material.material_name || m.master_material_id === materialKey;
+                              const subItemMatches = m.sub_item_id === subItem.sub_item_id || m.sub_item_name === subItem.sub_item_name;
+                              return materialMatches && subItemMatches;
+                            }
                           );
                           return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
                         }, 0);
@@ -1494,13 +1624,23 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             }
 
                             // Create new material item
+                            // Generate master_material_id if not provided by backend
+                            // Format: mat_boq{boq_id}_sub{sub_item_id}_mat{material_name_hash}
+                            const generateMaterialId = () => {
+                              if (material.material_id) return material.material_id;
+                              // If backend doesn't provide material_id, generate one
+                              // This ensures BOQ materials are tracked properly
+                              const hash = material.material_name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                              return `mat_boq${selectedBoq?.boq_id}_sub${subItem.sub_item_id}_${hash}`;
+                            };
+
                             const newMaterialItem: MaterialItem = {
                               id: `material-${Date.now()}-${Math.random()}`,
                               isNew: false,
                               subItemId: subItem.sub_item_id,
                               subItemName: subItem.sub_item_name,
-                              // Use material_id OR material_name as fallback (backend sometimes doesn't return material_id)
-                              materialId: material.material_id || material.material_name,
+                              // Use material_id from backend, or generate a unique identifier
+                              materialId: generateMaterialId(),
                               materialName: material.material_name,
                               quantity: 0,  // Start with 0, user must enter requested quantity
                               originalBoqQuantity: material.quantity || 0,  // Store BOQ quantity for validation
@@ -1536,9 +1676,14 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                                   ...(req.materials_data || []),
                                   ...(req.sub_items_data || [])
                                 ];
+                                // Match by BOTH material AND sub_item to track per-sub-item allocation
+                                // Match by sub_item_name OR sub_item_id to handle cases where IDs differ but names are same
                                 const matchingMaterial = allMaterials.find(
-                                  (m: any) => (m.material_name === material.material_name || m.master_material_id === materialKey) &&
-                                              m.sub_item_id === subItem.sub_item_id
+                                  (m: any) => {
+                                    const materialMatches = m.material_name === material.material_name || m.master_material_id === materialKey;
+                                    const subItemMatches = m.sub_item_id === subItem.sub_item_id || m.sub_item_name === subItem.sub_item_name;
+                                    return materialMatches && subItemMatches;
+                                  }
                                 );
                                 return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
                               }, 0);
@@ -1698,6 +1843,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                       ) : (
                         (() => {
                           // Calculate already purchased quantity from existing requests
+                          // Track per-sub-item allocation - includes ALL roles for same sub-item
                           const alreadyPurchased = existingRequests
                             .filter(req => req.status !== 'rejected')
                             .reduce((total, req) => {
@@ -1706,9 +1852,14 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                                 ...(req.materials_data || []),
                                 ...(req.sub_items_data || [])
                               ];
+                              // Match by BOTH material AND sub_item to track per-sub-item allocation
+                              // Match by sub_item_name OR sub_item_id to handle cases where IDs differ but names are same
                               const matchingMaterial = allMaterials.find(
-                                (m: any) => (m.material_name === material.materialName || m.master_material_id === material.materialId) &&
-                                            m.sub_item_id === material.subItemId
+                                (m: any) => {
+                                  const materialMatches = m.material_name === material.materialName || m.master_material_id === material.materialId;
+                                  const subItemMatches = m.sub_item_id === material.subItemId || m.sub_item_name === material.subItemName;
+                                  return materialMatches && subItemMatches;
+                                }
                               );
                               return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
                             }, 0);

@@ -889,6 +889,37 @@ def assign_projects_sitesupervisor():
         db.session.commit()
         log.info(f"Successfully assigned Site Engineer to {len(assigned_projects)} projects and updated {boq_histories_updated} BOQ histories")
 
+        # Send notification to Site Engineer about project assignment
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            project_names = ", ".join([p.get('project_name', 'Unknown') for p in assigned_projects[:3]])
+            if len(assigned_projects) > 3:
+                project_names += f" and {len(assigned_projects) - 3} more"
+
+            notification = NotificationManager.create_notification(
+                user_id=site_supervisor_id,
+                type='assignment',
+                title='New Projects Assigned',
+                message=f'You have been assigned to {len(assigned_projects)} project(s): {project_names}',
+                priority='high',
+                category='assignment',
+                action_required=True,
+                action_url='/site-engineer/projects',
+                action_label='View Projects',
+                metadata={
+                    'project_ids': project_ids,
+                    'assigned_count': len(assigned_projects)
+                },
+                sender_id=pm_id if pm_id else None,
+                sender_name=pm_name
+            )
+            send_notification_to_user(site_supervisor_id, notification.to_dict())
+            log.info(f"Sent project assignment notification to site engineer {site_supervisor_id}")
+        except Exception as notif_error:
+            log.error(f"Failed to send project assignment notification: {notif_error}")
+
         # Send email notification to Site Engineer
         # se_email_sent = False
         # if user.email and projects_data_for_email:
@@ -1526,6 +1557,37 @@ def assign_boq_to_buyer(boq_id):
             db.session.add(boq_history)
 
         db.session.commit()
+
+        # Send notification to buyer about BOQ assignment
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
+            notification = NotificationManager.create_notification(
+                user_id=buyer_id,
+                type='assignment',
+                title='BOQ Assigned for Purchase',
+                message=f'Site Engineer assigned BOQ "{boq.boq_name}" to you for purchasing ({total_materials} materials)',
+                priority='high',
+                category='assignment',
+                action_required=True,
+                action_url=f'/buyer/boq/{boq_id}',
+                action_label='View BOQ',
+                metadata={
+                    'boq_id': str(boq_id),
+                    'boq_name': boq.boq_name,
+                    'project_id': str(project.project_id) if project.project_id else None,
+                    'project_name': project.project_name,
+                    'materials_count': total_materials,
+                    'assignment_id': str(assignment.assignment_id)
+                },
+                sender_id=se_user_id,
+                sender_name=se_name
+            )
+            send_notification_to_user(buyer_id, notification.to_dict())
+            log.info(f"Sent BOQ assignment notification to buyer {buyer_id}")
+        except Exception as notif_error:
+            log.error(f"Failed to send BOQ assignment notification: {notif_error}")
 
         # Send email notification to buyer
         try:

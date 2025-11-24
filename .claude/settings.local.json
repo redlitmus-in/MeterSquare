@@ -26,7 +26,11 @@
       "Bash(done)",
       "Bash(curl:*)",
       "Bash(pkill:*)",
-      "Bash(/c/Users/admin/AppData/Local/Programs/Python/Python312/python:*)"
+      "Bash(/c/Users/admin/AppData/Local/Programs/Python/Python312/python:*)",
+      "Bash(for func in notify_pm_assigned_to_project notify_se_items_assigned notify_se_completion_request notify_pm_confirms_completion)",
+      "Bash(do echo \"=== $func ===\")",
+      "Bash(for func in notify_cr_created notify_cr_approved notify_cr_rejected notify_vendor_selected_for_cr notify_cr_purchase_completed)",
+      "Bash(for func in notify_day_extension_requested notify_day_extension_approved notify_day_extension_rejected notify_vendor_approved)"
     ],
     "deny": [],
     "ask": []

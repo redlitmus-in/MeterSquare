@@ -147,8 +147,8 @@ export const NotificationConfig = {
 
   // Browser Notification Options
   browserNotification: {
-    badge: '/notification-badge.png',
-    icon: '/favicon-192x192.png',
+    badge: '/assets/logofavi.png',
+    icon: '/assets/logo.png',
     tag: 'metersquare-erp',
     renotify: true,
     requireInteraction: false,

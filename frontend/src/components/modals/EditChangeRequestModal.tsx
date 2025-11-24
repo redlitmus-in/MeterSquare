@@ -94,14 +94,14 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
           const boqQty = item.original_boq_quantity || item.boq_quantity;
 
           // Calculate already purchased quantity for this material
-          // Exclude current request and rejected requests
+          // Include ALL roles (PM, SE, etc.) for safety - exclude only current request and rejected requests
           let alreadyPurchased = 0;
           if (item.master_material_id) {
             alreadyPurchased = allChangeRequests
               .filter((req: any) =>
                 req.status !== 'rejected' &&
-                req.cr_id !== changeRequest.cr_id &&
-                req.item_id === changeRequest.item_id
+                req.cr_id !== changeRequest.cr_id
+                // Removed item_id filter to include ALL purchases across all roles/items for same material
               )
               .reduce((total, req) => {
                 // Check both materials_data and sub_items_data
@@ -363,7 +363,11 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                     <div className="space-y-4">
                       {materials.map((material, index) => {
                         // Determine if this is treated as a new material purchase
-                        const isExistingBOQMaterial = material.master_material_id && material.original_boq_quantity !== undefined;
+                        // Validate master_material_id format: should start with "mat_" (e.g., mat_666_1_1_1)
+                        const hasValidMaterialId = material.master_material_id &&
+                                                   (typeof material.master_material_id === 'string') &&
+                                                   material.master_material_id.startsWith('mat_');
+                        const isExistingBOQMaterial = hasValidMaterialId && material.original_boq_quantity !== undefined;
                         const remainingQty = isExistingBOQMaterial
                           ? material.original_boq_quantity - (material.already_purchased || 0)
                           : 0;
@@ -387,7 +391,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                                   {isTreatedAsNew ? '⚠️ BOQ Fully Consumed - New Purchase' : '✓ From BOQ'}
                                 </span>
                               )}
-                              {!material.master_material_id && (
+                              {!hasValidMaterialId && !isExistingBOQMaterial && (
                                 <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-green-200 text-green-800">
                                   New Material
                                 </span>
