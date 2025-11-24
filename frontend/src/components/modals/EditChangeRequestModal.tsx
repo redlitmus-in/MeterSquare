@@ -23,11 +23,13 @@ interface MaterialItem {
   specification?: string;
   quantity: number;
   original_boq_quantity?: number;  // Original BOQ quantity for validation
+  already_purchased?: number;  // Already purchased in other requests
   unit: string;
   unit_price: number;
   total_price: number;
   reason: string;
   master_material_id?: string | null;
+  sub_item_id?: string;  // For tracking purchases
 }
 
 const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
@@ -40,6 +42,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [justification, setJustification] = useState('');
   const [materials, setMaterials] = useState<MaterialItem[]>([]);
+  const [allChangeRequests, setAllChangeRequests] = useState<any[]>([]);
 
   // Check if user is Site Engineer - hide price fields for SE
   const isSiteEngineer = user?.role?.toLowerCase() === 'siteengineer' ||
@@ -54,18 +57,66 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
     user?.role?.toLowerCase() === 'estimator' ||
     user?.role?.toLowerCase() === 'estimation';
 
+  // Fetch all change requests for this BOQ to calculate already purchased quantities
+  useEffect(() => {
+    const fetchChangeRequests = async () => {
+      if (changeRequest && isOpen && changeRequest.boq_id) {
+        try {
+          const response = await changeRequestService.getBOQChangeRequests(changeRequest.boq_id);
+          if (response.success && response.data) {
+            // Store ALL requests (including current) - we'll filter later for calculations
+            setAllChangeRequests(response.data || []);
+          }
+        } catch (error) {
+          console.error('Error fetching change requests:', error);
+        }
+      }
+    };
+    fetchChangeRequests();
+  }, [changeRequest, isOpen]);
+
   // Initialize form data when modal opens
   useEffect(() => {
-    if (changeRequest && isOpen) {
+    if (changeRequest && isOpen && allChangeRequests.length > 0) {
       setJustification(changeRequest.justification || '');
 
-      // Load existing materials from sub_items_data or materials_data
-      const existingMaterials = changeRequest.sub_items_data || changeRequest.materials_data || [];
+      // Find the current request in allChangeRequests to get enriched data with original_boq_quantity
+      const currentRequestEnriched = allChangeRequests.find(
+        (req: any) => req.cr_id === changeRequest.cr_id
+      );
+
+      // Use enriched data if available, fallback to original
+      const dataSource = currentRequestEnriched || changeRequest;
+      const existingMaterials = dataSource.sub_items_data || dataSource.materials_data || [];
 
       if (existingMaterials.length > 0) {
         const loadedMaterials: MaterialItem[] = existingMaterials.map((item: any, index: number) => {
           const boqQty = item.original_boq_quantity || item.boq_quantity;
-          return {
+
+          // Calculate already purchased quantity for this material
+          // Exclude current request and rejected requests
+          let alreadyPurchased = 0;
+          if (item.master_material_id) {
+            alreadyPurchased = allChangeRequests
+              .filter((req: any) =>
+                req.status !== 'rejected' &&
+                req.cr_id !== changeRequest.cr_id &&
+                req.item_id === changeRequest.item_id
+              )
+              .reduce((total, req) => {
+                // Check both materials_data and sub_items_data
+                const allMaterials = [
+                  ...(req.materials_data || []),
+                  ...(req.sub_items_data || [])
+                ];
+                const matchingMaterial = allMaterials.find(
+                  (m: any) => m.master_material_id === item.master_material_id
+                );
+                return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
+              }, 0);
+          }
+
+          const materialData = {
             id: `existing-${index}`,
             material_name: item.material_name || item.sub_item_name || '',
             sub_item_name: item.sub_item_name || item.material_name || '',
@@ -74,12 +125,16 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
             specification: item.specification || item.spec || '',
             quantity: parseFloat(item.quantity || item.qty || 0),
             original_boq_quantity: boqQty != null ? parseFloat(boqQty) : undefined,
+            already_purchased: alreadyPurchased,
             unit: item.unit || 'nos',
             unit_price: parseFloat(item.unit_price || item.unit_rate || 0),
             total_price: parseFloat(item.total_price || (item.quantity * item.unit_price) || 0),
             reason: item.reason || '',
-            master_material_id: item.master_material_id || null
+            master_material_id: item.master_material_id || null,
+            sub_item_id: item.sub_item_id || null
           };
+
+          return materialData;
         });
         setMaterials(loadedMaterials);
       } else {
@@ -87,7 +142,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
         setMaterials([createEmptyMaterial()]);
       }
     }
-  }, [changeRequest, isOpen]);
+  }, [changeRequest, isOpen, allChangeRequests]);
 
   const createEmptyMaterial = (): MaterialItem => ({
     id: `new-${Date.now()}-${Math.random()}`,
@@ -211,34 +266,6 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
 
   const { totalCost } = calculateTotals();
 
-  // Calculate negotiable price (negotiable margin) info
-  const negotiableMargin = changeRequest.negotiable_margin_analysis || {
-    original_allocated: 0,
-    already_consumed: 0,
-    this_request: 0,
-    remaining_after: 0,
-    consumption_percentage: 0,
-    exceeds_60_percent: false
-  };
-
-  const overheadInfo = {
-    // Original negotiable price allocated for the project
-    originalAllocated: negotiableMargin.original_allocated || 0,
-    // Already consumed before this request (from previous approved CRs)
-    consumed: negotiableMargin.already_consumed || 0,
-    // New request total from current edit
-    newRequest: totalCost,
-    // Calculate total consumption after this edit:
-    // = already_consumed + new_request
-    totalConsumedAfterEdit: (negotiableMargin.already_consumed || 0) + totalCost,
-    // Available after edit: original - already_consumed - new_request
-    available: (negotiableMargin.original_allocated || 0) - (negotiableMargin.already_consumed || 0) - totalCost,
-    // Percentage of negotiable price consumed
-    percentageOfOverhead: ((negotiableMargin.original_allocated || 0) > 0)
-      ? (((negotiableMargin.already_consumed || 0) + totalCost) / (negotiableMargin.original_allocated || 0) * 100)
-      : 0
-  };
-
   return (
     <AnimatePresence>
       {isOpen && (
@@ -308,46 +335,6 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Negotiable Price Summary - Hidden for Site Engineers and when all materials are existing BOQ materials */}
-                  {!isSiteEngineer && materials.some(m => !m.master_material_id) && (
-                    <div className="mb-6 p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200">
-                      <h4 className="text-sm font-semibold text-purple-900 mb-3">Negotiable Price Summary</h4>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                        <div>
-                          <span className="text-purple-700 text-xs">Original Allocated:</span>
-                          <p className="font-bold text-purple-900">{formatCurrency(overheadInfo.originalAllocated)}</p>
-                        </div>
-                        <div>
-                          <span className="text-purple-700 text-xs">Already Consumed:</span>
-                          <p className="font-bold text-orange-600">{formatCurrency(overheadInfo.consumed)}</p>
-                        </div>
-                        <div>
-                          <span className="text-purple-700 text-xs">New Request Total:</span>
-                          <p className="font-bold text-blue-600">{formatCurrency(overheadInfo.newRequest)}</p>
-                        </div>
-                        <div>
-                          <span className="text-purple-700 text-xs">Available After Edit:</span>
-                          <p className={`font-bold ${overheadInfo.available < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            {formatCurrency(overheadInfo.available)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-purple-300">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-purple-700">Total Negotiable Price Consumption:</span>
-                          <span className={`text-lg font-bold ${overheadInfo.percentageOfOverhead > 40 ? 'text-red-600' : 'text-green-600'}`}>
-                            {overheadInfo.percentageOfOverhead.toFixed(1)}%
-                          </span>
-                        </div>
-                        {overheadInfo.percentageOfOverhead > 40 && (
-                          <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3" />
-                            <span>Exceeds 40% threshold - TD approval required</span>
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
 
                   {/* Justification */}
                   <div className="mb-6">
@@ -374,10 +361,38 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                     </div>
 
                     <div className="space-y-4">
-                      {materials.map((material, index) => (
-                        <div key={material.id} className="p-4 border border-gray-200 rounded-lg bg-white shadow-sm">
+                      {materials.map((material, index) => {
+                        // Determine if this is treated as a new material purchase
+                        const isExistingBOQMaterial = material.master_material_id && material.original_boq_quantity !== undefined;
+                        const remainingQty = isExistingBOQMaterial
+                          ? material.original_boq_quantity - (material.already_purchased || 0)
+                          : 0;
+                        const isTreatedAsNew = isExistingBOQMaterial && remainingQty <= 0;
+
+                        return (
+                        <div key={material.id} className={`p-4 border rounded-lg shadow-sm ${
+                          isTreatedAsNew ? 'border-orange-300 bg-orange-50' :
+                          isExistingBOQMaterial ? 'border-blue-300 bg-blue-50' :
+                          'border-gray-200 bg-white'
+                        }`}>
                           <div className="flex items-start justify-between mb-3">
-                            <h5 className="text-sm font-medium text-gray-700">Material #{index + 1}</h5>
+                            <div className="flex items-center gap-2">
+                              <h5 className="text-sm font-medium text-gray-700">Material #{index + 1}</h5>
+                              {isExistingBOQMaterial && (
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                                  isTreatedAsNew
+                                    ? 'bg-orange-200 text-orange-800'
+                                    : 'bg-blue-200 text-blue-800'
+                                }`}>
+                                  {isTreatedAsNew ? '⚠️ BOQ Fully Consumed - New Purchase' : '✓ From BOQ'}
+                                </span>
+                              )}
+                              {!material.master_material_id && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-green-200 text-green-800">
+                                  New Material
+                                </span>
+                              )}
+                            </div>
                             {materials.length > 1 && (
                               <button
                                 type="button"
@@ -485,15 +500,45 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                                 max={material.master_material_id && material.original_boq_quantity ? material.original_boq_quantity : undefined}
                                 disabled={loading || (!isProjectManagerOrEstimator && material.master_material_id !== null && material.master_material_id !== undefined)}
                               />
-                              {material.master_material_id && material.original_boq_quantity && material.quantity > material.original_boq_quantity && (
-                                <p className="text-xs text-red-600 mt-1">
-                                  ⚠️ Exceeds BOQ limit of {material.original_boq_quantity} {material.unit}
-                                </p>
-                              )}
-                              {material.master_material_id && material.original_boq_quantity && material.quantity > 0 && material.quantity <= material.original_boq_quantity && (
-                                <p className="text-xs text-green-600 mt-1">
-                                  ✓ Within BOQ limit ({material.quantity}/{material.original_boq_quantity} {material.unit})
-                                </p>
+                              {/* BOQ Quantity Breakdown for existing materials */}
+                              {material.master_material_id && material.original_boq_quantity !== undefined && (
+                                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                                  <div className="flex items-center gap-1 mb-1">
+                                    <Package className="w-3 h-3 text-blue-600" />
+                                    <p className="text-[10px] font-semibold text-blue-900">BOQ Allocation Breakdown</p>
+                                  </div>
+                                  <div className="space-y-1 text-[10px]">
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">BOQ Allocated:</span>
+                                      <span className="font-semibold text-gray-900">{material.original_boq_quantity} {material.unit}</span>
+                                    </div>
+                                    {material.already_purchased !== undefined && material.already_purchased > 0 && (
+                                      <div className="flex justify-between">
+                                        <span className="text-orange-600">Already Purchased:</span>
+                                        <span className="font-semibold text-orange-700">{material.already_purchased} {material.unit}</span>
+                                      </div>
+                                    )}
+                                    <div className="flex justify-between">
+                                      <span className="text-blue-600">This Request:</span>
+                                      <span className="font-semibold text-blue-700">{material.quantity} {material.unit}</span>
+                                    </div>
+                                    <div className="flex justify-between pt-1 border-t border-blue-300">
+                                      <span className="text-gray-700 font-medium">Remaining:</span>
+                                      <span className={`font-bold ${
+                                        (material.original_boq_quantity - (material.already_purchased || 0) - material.quantity) >= 0
+                                          ? 'text-green-600'
+                                          : 'text-red-600'
+                                      }`}>
+                                        {(material.original_boq_quantity - (material.already_purchased || 0) - material.quantity).toFixed(2)} {material.unit}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {material.quantity > material.original_boq_quantity && (
+                                    <p className="text-[10px] text-red-600 mt-1 font-medium">
+                                      ⚠️ Exceeds BOQ allocated quantity
+                                    </p>
+                                  )}
+                                </div>
                               )}
                             </div>
 
@@ -575,7 +620,8 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                             </div>
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
 

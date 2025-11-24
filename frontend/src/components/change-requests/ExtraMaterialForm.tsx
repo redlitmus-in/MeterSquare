@@ -1185,9 +1185,19 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                 <div>
                   <p className="text-blue-700 text-xs">Total Cost</p>
                   <p className="font-semibold text-blue-900">
-                    AED {existingRequests.filter(r => r.status !== 'rejected').reduce((sum, r) => sum + (r.materials_total_cost || 0), 0).toLocaleString()}
+                    AED {existingRequests.filter(r => r.status !== 'rejected').reduce((sum, r) => {
+                      // Calculate cost only for NEW materials (without master_material_id)
+                      const allMaterials = [
+                        ...(r.materials_data || []),
+                        ...(r.sub_items_data || [])
+                      ];
+                      const newMaterialsCost = allMaterials
+                        .filter(m => !m.master_material_id)
+                        .reduce((total, m) => total + ((m.quantity || 0) * (m.unit_price || 0)), 0);
+                      return sum + newMaterialsCost;
+                    }, 0).toLocaleString()}
                   </p>
-                  <p className="text-xs text-gray-500">(excl. rejected)</p>
+                  <p className="text-xs text-gray-500">(new materials only, excl. rejected)</p>
                 </div>
               )}
             </div>
@@ -1344,13 +1354,100 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
           {/* Material selection for each selected sub-item */}
           {selectedSubItems.map(subItem => (
             <div key={subItem.sub_item_id} className="border border-blue-200 rounded-lg p-4 bg-blue-50/30">
+              {/* Show fully consumed materials summary */}
+              {(() => {
+                const fullyConsumedMaterials = (subItem.materials || []).filter(material => {
+                  const materialKey = material.material_id || material.material_name;
+                  const alreadyPurchased = existingRequests
+                    .filter(req => req.status !== 'rejected')
+                    .reduce((total, req) => {
+                      const allMaterials = [
+                        ...(req.materials_data || []),
+                        ...(req.sub_items_data || [])
+                      ];
+                      const matchingMaterial = allMaterials.find(
+                        (m: any) => (m.material_name === material.material_name || m.master_material_id === materialKey) &&
+                                    m.sub_item_id === subItem.sub_item_id
+                      );
+                      return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
+                    }, 0);
+
+                  const boqQuantity = material.quantity || 0;
+                  return alreadyPurchased >= boqQuantity;
+                });
+
+                if (fullyConsumedMaterials.length === 0) return null;
+
+                return (
+                  <div className="mb-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-semibold text-orange-800">⚠️ BOQ Fully Consumed Materials</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {fullyConsumedMaterials.map(material => {
+                        const materialKey = material.material_id || material.material_name;
+                        const alreadyPurchased = existingRequests
+                          .filter(req => req.status !== 'rejected')
+                          .reduce((total, req) => {
+                            const allMaterials = [
+                              ...(req.materials_data || []),
+                              ...(req.sub_items_data || [])
+                            ];
+                            const matchingMaterial = allMaterials.find(
+                              (m: any) => (m.material_name === material.material_name || m.master_material_id === materialKey) &&
+                                          m.sub_item_id === subItem.sub_item_id
+                            );
+                            return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
+                          }, 0);
+
+                        return (
+                          <div key={materialKey} className="flex justify-between items-center text-[10px] bg-white p-2 rounded border border-orange-100">
+                            <span className="font-medium text-gray-700">{material.material_name}</span>
+                            <span className="text-orange-700 font-semibold">
+                              {alreadyPurchased} / {material.quantity || 0} {material.unit} purchased
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-orange-600 mt-2 italic">
+                      These materials are not available in the dropdown. Request as new materials if needed.
+                    </p>
+                  </div>
+                );
+              })()}
+
               <div className="flex justify-between items-center mb-3">
                 <h4 className="text-sm font-semibold text-blue-900 flex items-center gap-2">
                   <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
                   {subItem.sub_item_name}
                 </h4>
                 <div className="flex gap-2">
-                  {subItem.materials && subItem.materials.length > 0 && (
+                  {subItem.materials && subItem.materials.length > 0 && (() => {
+                    // Check if there are any available materials (not fully consumed)
+                    const availableMaterials = subItem.materials.filter(material => {
+                      const materialKey = material.material_id || material.material_name;
+                      const alreadyPurchased = existingRequests
+                        .filter(req => req.status !== 'rejected')
+                        .reduce((total, req) => {
+                          const allMaterials = [
+                            ...(req.materials_data || []),
+                            ...(req.sub_items_data || [])
+                          ];
+                          const matchingMaterial = allMaterials.find(
+                            (m: any) => (m.material_name === material.material_name || m.master_material_id === materialKey) &&
+                                        m.sub_item_id === subItem.sub_item_id
+                          );
+                          return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
+                        }, 0);
+
+                      const boqQuantity = material.quantity || 0;
+                      return alreadyPurchased < boqQuantity;
+                    });
+
+                    const hasAvailableMaterials = availableMaterials.length > 0;
+
+                    return (
                     <div className="relative">
                       <select
                         onChange={(e) => {
@@ -1368,42 +1465,18 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             return;
                           }
 
-                          // Debug: Log what we're searching for and what's available
-                          console.log('🔍 Material Selection Debug:', {
-                            selectedValue,
-                            availableMaterials: subItem.materials.map(m => ({
-                              material_id: m.material_id,
-                              material_name: m.material_name,
-                              id_type: typeof m.material_id
-                            }))
-                          });
-
                           // Robust find: Try by ID first, fallback to name
                           let material = subItem.materials.find(m => m.material_id === selectedValue);
 
                           // Fallback: If not found by ID, try by name (handles backend mismatch)
                           if (!material) {
                             material = subItem.materials.find(m => m.material_name === selectedValue);
-                            console.log('⚠️ Material found by name fallback:', material ? 'Success' : 'Failed');
                           }
 
                           if (!material) {
-                            console.error('❌ Material not found for value:', selectedValue, {
-                              searchedById: true,
-                              searchedByName: true,
-                              availableIds: subItem.materials.map(m => m.material_id),
-                              availableNames: subItem.materials.map(m => m.material_name)
-                            });
                             toast.error('Material not found. Please try again.');
                             return;
                           }
-
-                          console.log('✅ Material found:', {
-                            sub_item_id: subItem.sub_item_id,
-                            sub_item_name: subItem.sub_item_name,
-                            material_name: material.material_name,
-                            material_id: material.material_id
-                          });
 
                           // Use functional update to check duplicates and add material with current state
                           setMaterials(currentMaterials => {
@@ -1436,16 +1509,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                               justification: ''
                             };
 
-                            // Debug log removed
                             return [...currentMaterials, newMaterialItem];
                           });
 
                           // Reset dropdown to default
                           e.target.value = "";
                         }}
-                        disabled={materialTypeInfo.currentType === 'new'}
+                        disabled={materialTypeInfo.currentType === 'new' || !hasAvailableMaterials}
                         className={`pl-3 pr-10 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] ${
-                          materialTypeInfo.currentType === 'new'
+                          materialTypeInfo.currentType === 'new' || !hasAvailableMaterials
                             ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed'
                             : 'bg-white border-gray-300'
                         }`}
@@ -1453,22 +1525,34 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         title={materialTypeInfo.currentType === 'new' ? 'Cannot add existing materials when new materials are selected' : ''}
                       >
                         <option value="">Select Material</option>
-                        {subItem.materials.map(material => {
+                        {subItem.materials
+                          .filter(material => {
+                            // Calculate already purchased quantity for this material
+                            const materialKey = material.material_id || material.material_name;
+                            const alreadyPurchased = existingRequests
+                              .filter(req => req.status !== 'rejected')
+                              .reduce((total, req) => {
+                                const allMaterials = [
+                                  ...(req.materials_data || []),
+                                  ...(req.sub_items_data || [])
+                                ];
+                                const matchingMaterial = allMaterials.find(
+                                  (m: any) => (m.material_name === material.material_name || m.master_material_id === materialKey) &&
+                                              m.sub_item_id === subItem.sub_item_id
+                                );
+                                return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
+                              }, 0);
+
+                            // Only show materials that still have available quantity
+                            const boqQuantity = material.quantity || 0;
+                            return alreadyPurchased < boqQuantity;
+                          })
+                          .map(material => {
                           // Check if this material is already added using memoized set (fixes closure stale state bug)
                           // Use material_id OR material_name as fallback (backend sometimes doesn't return material_id)
                           const materialKey = material.material_id || material.material_name;
                           const compositeKey = `${materialKey}_${subItem.sub_item_id}`;
                           const isAlreadyAdded = addedMaterialsSet.has(compositeKey);
-
-                          console.log('🔍 Checking material in dropdown:', {
-                            materialName: material.material_name,
-                            materialId: material.material_id,
-                            materialKey,
-                            subItemId: subItem.sub_item_id,
-                            compositeKey,
-                            isAlreadyAdded,
-                            setContents: Array.from(addedMaterialsSet)
-                          });
 
                           return (
                             <option
@@ -1483,7 +1567,8 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                         })}
                       </select>
                     </div>
-                  )}
+                    );
+                  })()}
                   <button
                     type="button"
                     onClick={() => {
@@ -1611,44 +1696,77 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           </div>
                         </div>
                       ) : (
-                        <div className="mb-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
-                          <p className="text-[10px] font-medium text-blue-900 mb-0.5">Selected Material</p>
-                          <p className="text-xs font-semibold text-blue-900">{material.materialName}</p>
-                          <div className="mt-1 grid grid-cols-2 gap-2 text-[10px] text-blue-700">
-                            <div>
-                              <span className="font-medium">BOQ Qty:</span> {material.originalBoqQuantity || 0} {material.unit}
-                            </div>
-                            {!isSiteEngineer && (
-                              <div>
-                                <span className="font-medium">Rate:</span> AED{material.unitRate.toLocaleString()}/{material.unit}
-                              </div>
-                            )}
-                          </div>
-                          {(() => {
-                            // Calculate already purchased quantity from existing requests
-                            const alreadyPurchased = existingRequests
-                              .filter(req => req.status !== 'rejected')
-                              .reduce((total, req) => {
-                                const matchingMaterial = (req.materials_data || []).find(
-                                  (m: any) => (m.material_name === material.materialName || m.master_material_id === material.materialId) &&
-                                              m.sub_item_id === material.subItemId
-                                );
-                                return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
-                              }, 0);
+                        (() => {
+                          // Calculate already purchased quantity from existing requests
+                          const alreadyPurchased = existingRequests
+                            .filter(req => req.status !== 'rejected')
+                            .reduce((total, req) => {
+                              // Check both materials_data and sub_items_data
+                              const allMaterials = [
+                                ...(req.materials_data || []),
+                                ...(req.sub_items_data || [])
+                              ];
+                              const matchingMaterial = allMaterials.find(
+                                (m: any) => (m.material_name === material.materialName || m.master_material_id === material.materialId) &&
+                                            m.sub_item_id === material.subItemId
+                              );
+                              return total + (matchingMaterial ? (matchingMaterial.quantity || 0) : 0);
+                            }, 0);
 
-                            return alreadyPurchased > 0 ? (
-                              <div className="mt-2 pt-2 border-t border-blue-300">
-                                <div className="flex items-center gap-1.5">
-                                  <InformationCircleIcon className="w-3.5 h-3.5 text-orange-600" />
-                                  <div>
-                                    <p className="text-[10px] font-medium text-orange-700">Already Purchased</p>
-                                    <p className="text-xs font-bold text-orange-900">{alreadyPurchased} {material.unit}</p>
+                          const remainingQty = (material.originalBoqQuantity || 0) - alreadyPurchased;
+                          const isTreatedAsNew = remainingQty <= 0;
+
+                          return (
+                            <div className={`mb-2 border rounded-lg p-2 ${
+                              isTreatedAsNew ? 'bg-orange-50 border-orange-300' : 'bg-blue-50 border-blue-200'
+                            }`}>
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="text-[10px] font-medium text-blue-900">Selected Material</p>
+                                {isTreatedAsNew && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-orange-200 text-orange-800">
+                                    ⚠️ BOQ Fully Consumed
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs font-semibold text-blue-900">{material.materialName}</p>
+
+                              {/* BOQ Allocation Breakdown */}
+                              <div className="mt-2 space-y-1 text-[10px]">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600">BOQ Allocated:</span>
+                                  <span className="font-semibold text-gray-900">{material.originalBoqQuantity || 0} {material.unit}</span>
+                                </div>
+                                {alreadyPurchased > 0 && (
+                                  <div className="flex justify-between">
+                                    <span className="text-orange-600">Already Purchased:</span>
+                                    <span className="font-semibold text-orange-700">{alreadyPurchased} {material.unit}</span>
                                   </div>
+                                )}
+                                <div className="flex justify-between">
+                                  <span className="text-blue-600">This Request:</span>
+                                  <span className="font-semibold text-blue-700">{material.quantity || 0} {material.unit}</span>
+                                </div>
+                                <div className="flex justify-between pt-1 border-t border-blue-300">
+                                  <span className="text-gray-700 font-medium">Remaining:</span>
+                                  <span className={`font-bold ${
+                                    ((material.originalBoqQuantity || 0) - alreadyPurchased - (material.quantity || 0)) >= 0
+                                      ? 'text-green-600'
+                                      : 'text-red-600'
+                                  }`}>
+                                    {((material.originalBoqQuantity || 0) - alreadyPurchased - (material.quantity || 0)).toFixed(2)} {material.unit}
+                                  </span>
                                 </div>
                               </div>
-                            ) : null;
-                          })()}
-                        </div>
+
+                              {!isSiteEngineer && (
+                                <div className="mt-2 pt-2 border-t border-blue-300">
+                                  <span className="text-[10px] font-medium text-blue-700">Rate:</span>
+                                  <span className="text-xs font-semibold text-blue-900 ml-1">AED{material.unitRate.toLocaleString()}/{material.unit}</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()
                       )}
 
                       {/* Quantity and Unit - Now Editable for ALL materials (both new and existing) */}
@@ -1659,7 +1777,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           </label>
                           <input
                             type="number"
-                            value={material.quantity}
+                            value={material.quantity || ''}
                             onChange={(e) => {
                               const newQty = parseFloat(e.target.value) || 0;
                               // For existing materials, validate against BOQ quantity
@@ -1677,7 +1795,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             min="0.01"
                             max={!material.isNew && material.originalBoqQuantity ? material.originalBoqQuantity : undefined}
                             step="0.01"
-                            placeholder="Qty"
+                            placeholder="Enter quantity"
                           />
                           {!material.isNew && material.originalBoqQuantity && material.quantity > material.originalBoqQuantity && (
                             <p className="text-[10px] text-red-600 mt-0.5">

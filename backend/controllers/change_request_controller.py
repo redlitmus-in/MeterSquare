@@ -525,7 +525,54 @@ def send_for_review(cr_id):
             #   - Existing BOQ materials (all have master_material_id) → Default to Buyer
 
             # Check if all materials are existing (from BOQ) or if there are new materials
-            has_new_materials = any(mat.get('master_material_id') is None for mat in (change_request.materials_data or []))
+            # Check both materials_data and sub_items_data
+            all_materials = list(change_request.materials_data or []) + list(change_request.sub_items_data or [])
+
+            # Get BOQ details to check allocated quantities
+            boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
+            material_boq_quantities = {}
+            if boq_details and boq_details.boq_details:
+                boq_items = boq_details.boq_details.get('items', [])
+                for item_idx, item in enumerate(boq_items):
+                    for sub_item_idx, sub_item in enumerate(item.get('sub_items', [])):
+                        for mat_idx, boq_material in enumerate(sub_item.get('materials', [])):
+                            material_id = f"mat_{change_request.boq_id}_{item_idx+1}_{sub_item_idx+1}_{mat_idx+1}"
+                            material_boq_quantities[material_id] = boq_material.get('quantity', 0)
+
+            # Get all existing change requests for this BOQ to calculate already purchased
+            existing_requests = ChangeRequest.query.filter(
+                ChangeRequest.boq_id == change_request.boq_id,
+                ChangeRequest.status != 'rejected',
+                ChangeRequest.cr_id != change_request.cr_id,
+                ChangeRequest.item_id == change_request.item_id,
+                ChangeRequest.is_deleted == False
+            ).all()
+
+            # Function to check if a material should be treated as new
+            def is_material_new_or_exceeded(mat):
+                master_id = mat.get('master_material_id')
+
+                # If no master_material_id, it's definitely a new material
+                if master_id is None:
+                    return True
+
+                # Check if BOQ quantity is fully consumed/exceeded
+                boq_qty = material_boq_quantities.get(master_id, 0)
+                if boq_qty == 0:
+                    return True  # No BOQ allocation, treat as new
+
+                # Calculate already purchased quantity
+                already_purchased = 0
+                for req in existing_requests:
+                    req_materials = list(req.materials_data or []) + list(req.sub_items_data or [])
+                    for req_mat in req_materials:
+                        if req_mat.get('master_material_id') == master_id:
+                            already_purchased += req_mat.get('quantity', 0)
+
+                # If already purchased >= BOQ quantity, treat as new purchase
+                return already_purchased >= boq_qty
+
+            has_new_materials = any(is_material_new_or_exceeded(mat) for mat in all_materials)
 
             # Determine routing
             if route_to == 'estimator':
@@ -2233,6 +2280,23 @@ def get_boq_change_requests(boq_id):
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
 
+        # Get BOQ details to access material quantities
+        boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+
+        # Build material lookup map for BOQ quantities
+        material_boq_quantities = {}
+        if boq_details and boq_details.boq_details:
+            boq_items = boq_details.boq_details.get('items', [])
+            for item_idx, item in enumerate(boq_items):
+                for sub_item_idx, sub_item in enumerate(item.get('sub_items', [])):
+                    for mat_idx, boq_material in enumerate(sub_item.get('materials', [])):
+                        # Create material ID
+                        material_id = f"mat_{boq_id}_{item_idx+1}_{sub_item_idx+1}_{mat_idx+1}"
+                        material_boq_quantities[material_id] = {
+                            'quantity': boq_material.get('quantity', 0),
+                            'unit': boq_material.get('unit', 'nos')
+                        }
+
         # Get all change requests for this BOQ
         change_requests = ChangeRequest.query.filter_by(
             boq_id=boq_id,
@@ -2243,6 +2307,26 @@ def get_boq_change_requests(boq_id):
         requests_data = []
         for cr in change_requests:
             request_data = cr.to_dict()
+
+            # Enrich materials_data with BOQ quantities
+            if request_data.get('materials_data'):
+                enriched_materials = []
+                for material in request_data['materials_data']:
+                    material_id = material.get('master_material_id')
+                    if material_id and material_id in material_boq_quantities:
+                        material['original_boq_quantity'] = material_boq_quantities[material_id]['quantity']
+                    enriched_materials.append(material)
+                request_data['materials_data'] = enriched_materials
+
+            # Enrich sub_items_data with BOQ quantities
+            if request_data.get('sub_items_data'):
+                enriched_sub_items = []
+                for sub_item in request_data['sub_items_data']:
+                    material_id = sub_item.get('master_material_id')
+                    if material_id and material_id in material_boq_quantities:
+                        sub_item['original_boq_quantity'] = material_boq_quantities[material_id]['quantity']
+                    enriched_sub_items.append(sub_item)
+                request_data['sub_items_data'] = enriched_sub_items
 
             # Add budget impact
             request_data['budget_impact'] = {
