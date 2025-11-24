@@ -389,7 +389,8 @@ const subscribeToBOQs = () => {
               console.error('1. Check if RLS is enabled on "boq" table - disable it or add SELECT policy');
               console.error('2. Run this SQL: ALTER PUBLICATION supabase_realtime ADD TABLE boq;');
               console.error('3. Check Supabase Dashboard > Database > Replication');
-              toast.error('Real-time updates unavailable. Please refresh manually.');
+              // Don't show error toast - Socket.IO notifications are working
+              // toast.error('Real-time updates unavailable. Please refresh manually.');
             }
           } else if (status === 'SUBSCRIBED') {
             // Removed verbose log - was causing console spam
