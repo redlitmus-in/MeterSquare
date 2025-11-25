@@ -368,6 +368,11 @@ class ComprehensiveNotificationService:
         """
         try:
             for pm_user_id in pm_user_ids:
+                # Check for duplicate notification
+                if check_duplicate_notification(pm_user_id, 'Project Assigned', 'project_id', project_id, minutes=5):
+                    log.info(f"Skipping duplicate PM assignment notification for project {project_id} to user {pm_user_id}")
+                    continue
+
                 notification = NotificationManager.create_notification(
                     user_id=pm_user_id,
                     type='assignment',
@@ -398,6 +403,11 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(se_user_id, 'Items Assigned', 'boq_id', boq_id, minutes=5):
+                log.info(f"Skipping duplicate SE item assignment notification for BOQ {boq_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=se_user_id,
                 type='assignment',
@@ -427,6 +437,11 @@ class ComprehensiveNotificationService:
         Priority: MEDIUM
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(pm_user_id, 'Completion Request', 'boq_id', boq_id, minutes=5):
+                log.info(f"Skipping duplicate completion request notification for BOQ {boq_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=pm_user_id,
                 type='update',
@@ -456,6 +471,11 @@ class ComprehensiveNotificationService:
         Priority: MEDIUM
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(se_user_id, 'Completion Confirmed', 'boq_id', boq_id, minutes=5):
+                log.info(f"Skipping duplicate completion confirmation for BOQ {boq_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=se_user_id,
                 type='success',
@@ -487,6 +507,11 @@ class ComprehensiveNotificationService:
         """
         try:
             for user_id in recipient_user_ids:
+                # Check for duplicate notification
+                if check_duplicate_notification(user_id, 'Change Request', 'cr_id', cr_id, minutes=5):
+                    log.info(f"Skipping duplicate CR created notification for CR {cr_id}")
+                    continue
+
                 notification = NotificationManager.create_notification(
                     user_id=user_id,
                     type='approval',
@@ -518,6 +543,11 @@ class ComprehensiveNotificationService:
         """
         try:
             for user_id in next_user_ids:
+                # Check for duplicate notification
+                if check_duplicate_notification(user_id, 'Request Approved', 'cr_id', cr_id, minutes=5):
+                    log.info(f"Skipping duplicate CR approved notification for CR {cr_id}")
+                    continue
+
                 notification = NotificationManager.create_notification(
                     user_id=user_id,
                     type='approval',
@@ -548,6 +578,11 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(creator_user_id, 'Request Rejected', 'cr_id', cr_id, minutes=5):
+                log.info(f"Skipping duplicate CR rejected notification for CR {cr_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=creator_user_id,
                 type='rejection',
@@ -577,6 +612,11 @@ class ComprehensiveNotificationService:
         Priority: URGENT
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(td_user_id, 'Vendor Selection', 'cr_id', cr_id, minutes=5):
+                log.info(f"Skipping duplicate vendor selection notification for CR {cr_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=td_user_id,
                 type='approval',
@@ -606,6 +646,11 @@ class ComprehensiveNotificationService:
         Priority: MEDIUM
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(requester_user_id, 'Purchase Completed', 'cr_id', cr_id, minutes=5):
+                log.info(f"Skipping duplicate CR purchase completed notification for CR {cr_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=requester_user_id,
                 type='success',
@@ -636,6 +681,11 @@ class ComprehensiveNotificationService:
         Priority: URGENT
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(td_user_id, 'Extension Request', 'boq_id', boq_id, minutes=5):
+                log.info(f"Skipping duplicate day extension request notification for BOQ {boq_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=td_user_id,
                 type='alert',
@@ -665,6 +715,11 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(pm_user_id, 'Extension Approved', 'boq_id', boq_id, minutes=5):
+                log.info(f"Skipping duplicate day extension approved notification for BOQ {boq_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=pm_user_id,
                 type='success',
@@ -693,6 +748,11 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(pm_user_id, 'Extension Rejected', 'boq_id', boq_id, minutes=5):
+                log.info(f"Skipping duplicate day extension rejected notification for BOQ {boq_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=pm_user_id,
                 type='rejection',
@@ -724,6 +784,11 @@ class ComprehensiveNotificationService:
         Priority: MEDIUM
         """
         try:
+            # Check for duplicate notification
+            if check_duplicate_notification(buyer_user_id, 'Vendor Approved', 'vendor_id', vendor_id, minutes=5):
+                log.info(f"Skipping duplicate vendor approved notification for vendor {vendor_id}")
+                return
+
             notification = NotificationManager.create_notification(
                 user_id=buyer_user_id,
                 type='success',
