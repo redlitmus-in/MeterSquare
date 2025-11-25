@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { buyerVendorService, Vendor } from '@/roles/buyer/services/buyerVendorService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface AddVendorModalProps {
   isOpen: boolean;
@@ -274,11 +274,11 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
       if (editVendor && editVendor.vendor_id) {
         // Update existing vendor
         vendor = await buyerVendorService.updateVendor(editVendor.vendor_id, formData);
-        toast.success('Vendor updated successfully');
+        showSuccess('Vendor updated successfully');
       } else {
         // Create new vendor
         vendor = await buyerVendorService.createVendor(formData as Omit<Vendor, 'vendor_id'>);
-        toast.success('Vendor added successfully');
+        showSuccess('Vendor added successfully');
       }
 
       onVendorAdded(vendor);
@@ -286,7 +286,7 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
       resetForm();
     } catch (error: any) {
       console.error('Error saving vendor:', error);
-      toast.error(error.message || 'Failed to save vendor');
+      showError(error.message || 'Failed to save vendor');
       setErrors([error.message || 'Failed to save vendor']);
     } finally {
       setLoading(false);

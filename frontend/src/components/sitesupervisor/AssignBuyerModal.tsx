@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Send, User } from 'lucide-react';
 import { Buyer, getAvailableBuyers, assignBoqToBuyer } from '@/services/boqAssignmentService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface AssignBuyerModalProps {
@@ -53,7 +53,7 @@ const AssignBuyerModal: React.FC<AssignBuyerModalProps> = ({
         setSelectedBuyerId(response[0].user_id);
       }
     } catch (error) {
-      toast.error('Failed to load buyers');
+      showError('Failed to load buyers');
       console.error(error);
     } finally {
       setFetchingBuyers(false);
@@ -62,7 +62,7 @@ const AssignBuyerModal: React.FC<AssignBuyerModalProps> = ({
 
   const handleAssign = async () => {
     if (!selectedBuyerId) {
-      toast.error('Please select a buyer');
+      showError('Please select a buyer');
       return;
     }
 
@@ -70,15 +70,15 @@ const AssignBuyerModal: React.FC<AssignBuyerModalProps> = ({
     try {
       const response = await assignBoqToBuyer(boqId, selectedBuyerId);
       if (response.success) {
-        toast.success(response.message || 'BOQ assigned to buyer successfully');
+        showSuccess(response.message || 'BOQ assigned to buyer successfully');
         onSuccess();
         onClose();
       } else {
-        toast.error(response.message || 'Failed to assign BOQ');
+        showError(response.message || 'Failed to assign BOQ');
       }
     } catch (error: any) {
       const errorMessage = error?.response?.data?.error || 'Failed to assign BOQ to buyer';
-      toast.error(errorMessage);
+      showError(errorMessage);
       console.error(error);
     } finally {
       setLoading(false);

@@ -23,7 +23,7 @@ import {
   Phone,
   Shield
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { adminApi, User, Role, CreateUserData, UpdateUserData } from '@/api/admin';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
@@ -59,7 +59,7 @@ const UserManagement: React.FC = () => {
       setTotalPages(response.pagination.pages);
       setTotalUsers(response.pagination.total);
     } catch (error: any) {
-      toast.error('Failed to fetch users', {
+      showError('Failed to fetch users', {
         description: error.response?.data?.error || error.message
       });
     } finally {
@@ -79,11 +79,11 @@ const UserManagement: React.FC = () => {
   const handleCreateUser = async (userData: CreateUserData) => {
     try {
       await adminApi.createUser(userData);
-      toast.success('User created successfully');
+      showSuccess('User created successfully');
       setShowCreateModal(false);
       fetchUsers();
     } catch (error: any) {
-      toast.error('Failed to create user', {
+      showError('Failed to create user', {
         description: error.response?.data?.error || error.message
       });
     }
@@ -92,12 +92,12 @@ const UserManagement: React.FC = () => {
   const handleUpdateUser = async (userId: number, userData: UpdateUserData) => {
     try {
       await adminApi.updateUser(userId, userData);
-      toast.success('User updated successfully');
+      showSuccess('User updated successfully');
       setShowEditModal(false);
       setSelectedUser(null);
       fetchUsers();
     } catch (error: any) {
-      toast.error('Failed to update user', {
+      showError('Failed to update user', {
         description: error.response?.data?.error || error.message
       });
     }
@@ -106,10 +106,10 @@ const UserManagement: React.FC = () => {
   const handleToggleStatus = async (user: User) => {
     try {
       await adminApi.toggleUserStatus(user.user_id, !user.is_active);
-      toast.success(`User ${!user.is_active ? 'activated' : 'deactivated'} successfully`);
+      showSuccess(`User ${!user.is_active ? 'activated' : 'deactivated'} successfully`);
       fetchUsers();
     } catch (error: any) {
-      toast.error('Failed to update user status', {
+      showError('Failed to update user status', {
         description: error.response?.data?.error || error.message
       });
     }
@@ -122,10 +122,10 @@ const UserManagement: React.FC = () => {
 
     try {
       await adminApi.deleteUser(user.user_id);
-      toast.success('User deleted successfully');
+      showSuccess('User deleted successfully');
       fetchUsers();
     } catch (error: any) {
-      toast.error('Failed to delete user', {
+      showError('Failed to delete user', {
         description: error.response?.data?.error || error.message
       });
     }

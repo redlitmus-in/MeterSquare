@@ -47,7 +47,7 @@ import { getRoleDisplayName, getRoleThemeColor, buildRolePath, getRoleName } fro
 import { clsx } from 'clsx';
 import { siteEngineerService } from '@/roles/site-engineer/services/siteEngineerService';
 import { projectManagerService } from '@/roles/project-manager/services/projectManagerService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import axios from 'axios';
 import { useAdminViewStore } from '@/store/adminViewStore';
 import { adminApi } from '@/api/admin';
@@ -269,7 +269,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     const roleInfo = roleMap[roleName];
     if (roleInfo) {
       setRoleView(roleInfo.role, roleInfo.roleId, roleInfo.displayName);
-      toast.success(`Now viewing as ${roleInfo.displayName}`);
+      showSuccess(`Now viewing as ${roleInfo.displayName}`);
       setSidebarOpen(false); // Close sidebar on mobile
       // Navigate to the role's dashboard
       navigate(`/${roleInfo.slug}/dashboard`);
@@ -312,13 +312,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         });
       }
 
-      toast.success(`You are now ${newStatus}`);
+      showSuccess(`You are now ${newStatus}`);
 
       // Close the dropdown after toggling status
       setUserDropdownOpen(false);
     } catch (error: any) {
       console.error('Error updating status:', error);
-      toast.error('Failed to update status');
+      showError('Failed to update status');
     } finally {
       setUpdatingStatus(false);
     }
@@ -866,7 +866,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                       onClick={() => {
                         resetToAdminView();
                         navigate('/admin/dashboard');
-                        toast.success('Returned to Admin view');
+                        showSuccess('Returned to Admin view');
                         setSidebarOpen(false);
                       }}
                       className={clsx(

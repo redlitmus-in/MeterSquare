@@ -37,7 +37,7 @@ import {
   Phone,
   Smartphone
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 import { useAuthStore } from '@/store/authStore';
 import { LoginRequest } from '@/types';
@@ -111,14 +111,14 @@ const LoginPage: React.FC = () => {
       // For site engineer with phone login
       if (data.role === 'siteEngineer' && loginMethod === 'phone') {
         if (!userPhone) {
-          toast.error('Please fill all fields', {
+          showError('Please fill all fields', {
             description: 'Phone number is required'
           });
           return;
         }
       } else {
         if (!data.email || !data.role) {
-          toast.error('Please fill all fields', {
+          showError('Please fill all fields', {
             description: 'Email and role are required'
           });
           return;
@@ -140,7 +140,7 @@ const LoginPage: React.FC = () => {
         setStep('otp');
         setResendTimer(30);
 
-        toast.success('OTP Sent Successfully!', {
+        showSuccess('OTP Sent Successfully!', {
           description: 'Please check your phone for the SMS OTP',
           duration: 5000,
           icon: <Smartphone className="w-5 h-5 text-green-500" />
@@ -156,7 +156,7 @@ const LoginPage: React.FC = () => {
         setStep('otp');
         setResendTimer(30);
 
-        toast.success('OTP Sent Successfully!', {
+        showSuccess('OTP Sent Successfully!', {
           description: 'Please check your email for the OTP',
           duration: 5000,
           icon: <Mail className="w-5 h-5 text-green-500" />
@@ -172,7 +172,7 @@ const LoginPage: React.FC = () => {
         setStep('otp');
         setResendTimer(30);
 
-        toast.success('OTP Sent Successfully!', {
+        showSuccess('OTP Sent Successfully!', {
           description: 'Please check your email for the OTP',
           duration: 5000,
           icon: <Mail className="w-5 h-5 text-green-500" />
@@ -185,17 +185,17 @@ const LoginPage: React.FC = () => {
     } catch (error: any) {
       // Check if it's a 404 error (user not found)
       if (error.message?.toLowerCase().includes('not found') || error.message?.toLowerCase().includes('no user')) {
-        toast.error(loginMethod === 'phone' ? 'Phone not found' : 'Email not found', {
+        showError(loginMethod === 'phone' ? 'Phone not found' : 'Email not found', {
           description: `Please check your ${loginMethod === 'phone' ? 'phone number' : 'email address'} and try again.`,
           icon: loginMethod === 'phone' ? <Phone className="w-5 h-5 text-red-500" /> : <Mail className="w-5 h-5 text-red-500" />
         });
       } else if (error.message?.toLowerCase().includes('invalid role')) {
-        toast.error('Invalid role selection', {
+        showError('Invalid role selection', {
           description: 'The selected role is not assigned to this account.',
           icon: <User className="w-5 h-5 text-red-500" />
         });
       } else {
-        toast.error('Failed to send OTP', {
+        showError('Failed to send OTP', {
           description: error.message || 'Please check your credentials and try again.'
         });
       }
@@ -217,7 +217,7 @@ const LoginPage: React.FC = () => {
     }
 
     if (otpToVerify.length !== 6) {
-      toast.error('Invalid OTP', {
+      showError('Invalid OTP', {
         description: 'Please enter a 6-digit OTP'
       });
       return;
@@ -250,7 +250,7 @@ const LoginPage: React.FC = () => {
         error: null,
       });
 
-      toast.success('Welcome to MeterSquare ERP', {
+      showSuccess('Welcome to MeterSquare ERP', {
         description: `Logged in as ${response.user.role}`,
         icon: <CheckCircle className="w-5 h-5 text-green-500" />
       });
@@ -269,7 +269,7 @@ const LoginPage: React.FC = () => {
         return;
       }
 
-      toast.error('Invalid OTP', {
+      showError('Invalid OTP', {
         description: error.message || 'Please enter the correct OTP'
       });
     } finally {
@@ -294,7 +294,7 @@ const LoginPage: React.FC = () => {
         }
 
         setResendTimer(30);
-        toast.success('OTP Resent!', {
+        showSuccess('OTP Resent!', {
           description: loginMethod === 'phone'
             ? 'Please check your phone for the new SMS OTP'
             : 'Please check your email for the new OTP',
@@ -307,7 +307,7 @@ const LoginPage: React.FC = () => {
           console.log('Development OTP:', response.otp);
         }
       } catch (error: any) {
-        toast.error('Failed to resend OTP', {
+        showError('Failed to resend OTP', {
           description: error.message || 'Please try again.'
         });
       }

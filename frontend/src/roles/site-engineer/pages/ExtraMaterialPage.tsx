@@ -15,7 +15,7 @@ import {
   CheckBadgeIcon,
   TrashIcon
 } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
@@ -306,13 +306,13 @@ const ExtraMaterialPage: React.FC = () => {
       );
 
       if (response.data.success || response.data.cr_id) {
-        toast.success('Extra material request created successfully. Review and send to PM when ready.');
+        showSuccess('Extra material request created successfully. Review and send to PM when ready.');
         setShowForm(false);
         refetch();
       }
     } catch (error: any) {
       console.error('Error submitting extra material request:', error);
-      toast.error(error.response?.data?.error || 'Failed to submit request');
+      showError(error.response?.data?.error || 'Failed to submit request');
     }
   };
 
@@ -368,11 +368,11 @@ const ExtraMaterialPage: React.FC = () => {
         setSelectedRequest(response.data.data);
         setShowViewModal(true);
       } else {
-        toast.error('Failed to load request details');
+        showError('Failed to load request details');
       }
     } catch (error) {
       console.error('Error fetching request details:', error);
-      toast.error('Failed to load request details');
+      showError('Failed to load request details');
     }
   };
 
@@ -388,11 +388,11 @@ const ExtraMaterialPage: React.FC = () => {
         setSelectedRequest(cr);
         setShowEditModal(true);
       } else {
-        toast.error('Failed to load change request');
+        showError('Failed to load change request');
       }
     } catch (error) {
       console.error('Error loading change request for edit:', error);
-      toast.error('Failed to load change request');
+      showError('Failed to load change request');
     }
   };
 
@@ -401,7 +401,7 @@ const ExtraMaterialPage: React.FC = () => {
     refetch();
     setShowEditModal(false);
     setSelectedRequest(null);
-    toast.success('Change request updated successfully');
+    showSuccess('Change request updated successfully');
   };
 
   const handleSendToPM = async (requestId: number) => {
@@ -418,23 +418,23 @@ const ExtraMaterialPage: React.FC = () => {
       const route = data.route || data.approval_required_from;
 
       if (route === 'buyer' || recipient?.toLowerCase().includes('buyer')) {
-        toast.success('Material request sent to Buyer (existing BOQ materials)', {
+        showSuccess('Material request sent to Buyer (existing BOQ materials)', {
           description: recipient ? `Assigned to: ${recipient}` : undefined,
           duration: 5000,
         });
       } else if (route === 'estimator' || recipient?.toLowerCase().includes('estimator')) {
-        toast.success('Material request sent to Estimator (new materials for pricing)', {
+        showSuccess('Material request sent to Estimator (new materials for pricing)', {
           description: recipient ? `Sent to: ${recipient}` : undefined,
           duration: 5000,
         });
       } else if (route === 'project_manager' || route === 'projectmanager' || recipient?.toLowerCase().includes('project')) {
-        toast.success('Material request sent to Project Manager', {
+        showSuccess('Material request sent to Project Manager', {
           description: recipient ? `Sent to: ${recipient}` : undefined,
           duration: 5000,
         });
       } else {
         // Fallback message
-        toast.success(data.message || 'Material request sent for approval', {
+        showSuccess(data.message || 'Material request sent for approval', {
           description: recipient ? `Sent to: ${recipient}` : undefined,
           duration: 5000,
         });
@@ -443,7 +443,7 @@ const ExtraMaterialPage: React.FC = () => {
       refetch();
     } catch (error: any) {
       console.error('Error sending request:', error);
-      toast.error(error.response?.data?.error || 'Failed to send request');
+      showError(error.response?.data?.error || 'Failed to send request');
     }
   };
 
@@ -461,13 +461,13 @@ const ExtraMaterialPage: React.FC = () => {
         `${API_URL}/change-request/${deleteRequestId}`,
         { headers }
       );
-      toast.success('Request deleted successfully');
+      showSuccess('Request deleted successfully');
       setShowDeleteModal(false);
       setDeleteRequestId(null);
       refetch();
     } catch (error: any) {
       console.error('Error deleting request:', error);
-      toast.error(error.response?.data?.error || 'Failed to delete request');
+      showError(error.response?.data?.error || 'Failed to delete request');
       setShowDeleteModal(false);
       setDeleteRequestId(null);
     }

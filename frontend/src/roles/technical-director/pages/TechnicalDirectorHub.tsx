@@ -7,7 +7,7 @@ import {
   BarChart3
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { technicalDirectorService } from '../services/technicalDirectorService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
@@ -26,11 +26,11 @@ const TechnicalDirectorDashboard: React.FC = () => {
         if (result.success && result.data) {
           setDashboardData(result.data);
         } else {
-          toast.error(result.message || 'Failed to fetch dashboard data');
+          showError(result.message || 'Failed to fetch dashboard data');
         }
       } catch (error: any) {
         console.error('Error fetching dashboard data:', error);
-        toast.error('Failed to load dashboard data');
+        showError('Failed to load dashboard data');
       } finally {
         setLoading(false);
       }

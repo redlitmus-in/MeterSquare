@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, CheckCircle, XCircle, Edit, Send, Clock, User, TrendingUp, TrendingDown, Mail, Calculator } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
@@ -175,7 +175,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       }
     } catch (error) {
       console.error('Error loading BOQs:', error);
-      toast.error('Failed to load BOQs with internal revisions');
+      showError('Failed to load BOQs with internal revisions');
     } finally {
       setIsLoadingBOQs(false);
     }
@@ -221,7 +221,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       }
     } catch (error) {
       console.error('Error loading internal revisions:', error);
-      toast.error('Failed to load internal revision history');
+      showError('Failed to load internal revision history');
     } finally {
       setIsLoadingRevisions(false);
       loadingRevisionsRef.current = null; // Reset ref after loading completes
@@ -247,18 +247,18 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       // Check if response has error field (error response) or boq_id (success response)
       if (data.error) {
         console.error('API returned error:', data.error);
-        toast.error(data.error || 'Failed to load BOQ details');
+        showError(data.error || 'Failed to load BOQ details');
       } else if (data.boq_id) {
         // The data IS the BOQ data itself, no need to unwrap
         setEditingBOQ(data);
         setShowEditModal(true);
       } else {
         console.error('Unexpected response format:', data);
-        toast.error('Unexpected response format');
+        showError('Unexpected response format');
       }
     } catch (error) {
       console.error('Error loading BOQ for editing:', error);
-      toast.error('Failed to load BOQ details: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      showError('Failed to load BOQ details: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
@@ -270,7 +270,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       });
 
       if (result.success) {
-        toast.success('BOQ sent to Technical Director successfully');
+        showSuccess('BOQ sent to Technical Director successfully');
 
         // Reload internal revisions first with the current boq_id
         await loadInternalRevisions(boq.boq_id);
@@ -294,11 +294,11 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           }
         }
       } else {
-        toast.error(result.message || 'Failed to send BOQ to TD');
+        showError(result.message || 'Failed to send BOQ to TD');
       }
     } catch (error) {
       console.error('Error sending BOQ to TD:', error);
-      toast.error('Failed to send BOQ to TD');
+      showError('Failed to send BOQ to TD');
     } finally {
       setIsSendingToTD(false);
     }
@@ -326,7 +326,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       const data = await response.json();
 
       if (response.ok && data.success) {
-        toast.success('BOQ approved successfully');
+        showSuccess('BOQ approved successfully');
         setShowApprovalModal(false);
         setApprovalNotes('');
 
@@ -351,11 +351,11 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           }
         }
       } else {
-        toast.error(data.message || 'Failed to approve BOQ');
+        showError(data.message || 'Failed to approve BOQ');
       }
     } catch (error) {
       console.error('Approval error:', error);
-      toast.error('Failed to approve BOQ');
+      showError('Failed to approve BOQ');
     } finally {
       setIsProcessing(false);
     }
@@ -365,7 +365,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     if (!selectedBoq || isProcessing) return;
 
     if (!rejectionReason || !rejectionReason.trim()) {
-      toast.error('Please provide a rejection reason');
+      showError('Please provide a rejection reason');
       return;
     }
 
@@ -388,7 +388,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       const data = await response.json();
 
       if (response.ok && data.success) {
-        toast.success('BOQ rejected successfully');
+        showSuccess('BOQ rejected successfully');
         setShowRejectionModal(false);
         setRejectionReason('');
 
@@ -413,11 +413,11 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           }
         }
       } else {
-        toast.error(data.message || 'Failed to reject BOQ');
+        showError(data.message || 'Failed to reject BOQ');
       }
     } catch (error) {
       console.error('Rejection error:', error);
-      toast.error('Failed to reject BOQ');
+      showError('Failed to reject BOQ');
     } finally {
       setIsProcessing(false);
     }
@@ -2503,7 +2503,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           existingBoqData={editingBOQ}
           isInternalRevisionMode={true}
           onSubmit={async (boqId) => {
-            toast.success('BOQ updated successfully!');
+            showSuccess('BOQ updated successfully!');
             setShowEditModal(false);
             setEditingBOQ(null);
 
@@ -2676,7 +2676,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   onClick={() => {
                     setShowSendPopupAfterEdit(false);
                     setEditedBOQId(null);
-                    toast.success('BOQ saved! You can send it to TD later.');
+                    showSuccess('BOQ saved! You can send it to TD later.');
                   }}
                   className="w-full px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors"
                 >

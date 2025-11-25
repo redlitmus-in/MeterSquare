@@ -7,7 +7,7 @@ import {
   InformationCircleIcon,
   CalculatorIcon
 } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import axios from 'axios';
 import { apiClient } from '@/api/config';
 import { useAuthStore } from '@/store/authStore';
@@ -464,7 +464,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       setProjects(filteredProjects);
 
       if (!filteredProjects || filteredProjects.length === 0) {
-        toast.info(isSiteEngineer
+        showInfo(isSiteEngineer
           ? 'No active projects available for material requests'
           : 'No projects assigned to you yet'
         );
@@ -475,11 +475,11 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       console.error('Error status:', error.response?.status);
 
       if (error.response?.status === 401) {
-        toast.error('Authentication failed. Please login again.');
+        showError('Authentication failed. Please login again.');
       } else if (error.response?.status === 500) {
-        toast.error('Server error. Please try again later.');
+        showError('Server error. Please try again later.');
       } else {
-        toast.error('Failed to load assigned projects');
+        showError('Failed to load assigned projects');
       }
     } finally {
       setLoading(false);
@@ -678,38 +678,38 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const validateFormInputs = (): boolean => {
     // Check required selections
     if (!selectedProject || !selectedArea || !selectedBoq || !selectedItem) {
-      toast.error('Please select project, area, BOQ, and BOQ item');
+      showError('Please select project, area, BOQ, and BOQ item');
       return false;
     }
 
     // Check materials exist
     if (materials.length === 0) {
-      toast.error('Please add at least one sub-item');
+      showError('Please add at least one sub-item');
       return false;
     }
 
     // Validate each material
     for (const material of materials) {
       if (!material.materialName) {
-        toast.error('All materials must have a name');
+        showError('All materials must have a name');
         return false;
       }
 
       if (material.quantity <= 0) {
-        toast.error(`Material "${material.materialName}" must have positive quantity`);
+        showError(`Material "${material.materialName}" must have positive quantity`);
         return false;
       }
 
       // Validate that existing materials don't exceed BOQ quantity
       if (!material.isNew && material.originalBoqQuantity && material.quantity > material.originalBoqQuantity) {
-        toast.error(`Material "${material.materialName}" quantity (${material.quantity}) exceeds BOQ allocated quantity (${material.originalBoqQuantity} ${material.unit})`);
+        showError(`Material "${material.materialName}" quantity (${material.quantity}) exceeds BOQ allocated quantity (${material.originalBoqQuantity} ${material.unit})`);
         return false;
       }
     }
 
     // Validate justification
     if (!justification || justification.trim().length < 20) {
-      toast.error('Please provide a justification (minimum 20 characters)');
+      showError('Please provide a justification (minimum 20 characters)');
       return false;
     }
 
@@ -764,7 +764,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     );
 
     if (response.data.success || response.data.data) {
-      toast.success('Change request updated successfully');
+      showSuccess('Change request updated successfully');
       if (onSuccess) onSuccess();
       if (onCancel) onCancel();
       if (onClose) onClose();
@@ -787,7 +787,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     );
 
     if (response.data.success) {
-      toast.success('Extra material request created successfully. Click "Send for Review" to submit for approval.');
+      showSuccess('Extra material request created successfully. Click "Send for Review" to submit for approval.');
       if (onSuccess) onSuccess();
       if (onClose) onClose();
     }
@@ -862,7 +862,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
     // ACTUAL Site Engineer with no assigned items (not admin viewing as SE)
     if (isActualSiteEngineer) {
       console.log('⚠️ No assigned items found for this BOQ');
-      toast.warning('No items assigned to you for this BOQ');
+      showWarning('No items assigned to you for this BOQ');
       setSelectedBoq({ ...boq, items: [] });
       return;
     }
@@ -902,7 +902,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
         setSelectedBoq({ ...boq, items: mappedItems });
       } catch (error) {
         console.error('Error fetching BOQ items:', error);
-        toast.error('Failed to load BOQ items');
+        showError('Failed to load BOQ items');
         setSelectedBoq(boq); // Set BOQ anyway, even if items failed to load
       } finally {
         setLoading(false);
@@ -967,7 +967,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
       }
     } catch (error: any) {
       console.error('Error submitting extra material request:', error);
-      toast.error(error.response?.data?.error || 'Failed to submit request');
+      showError(error.response?.data?.error || 'Failed to submit request');
     } finally {
       setLoading(false);
       // Release submission guards
@@ -1590,7 +1590,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
 
                           // Prevent adding existing materials if new materials already exist
                           if (materialTypeInfo.currentType === 'new') {
-                            toast.error('Cannot mix existing and new materials. Please create separate requests for each type.');
+                            showError('Cannot mix existing and new materials. Please create separate requests for each type.');
                             e.target.value = ""; // Reset dropdown
                             return;
                           }
@@ -1604,7 +1604,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           }
 
                           if (!material) {
-                            toast.error('Material not found. Please try again.');
+                            showError('Material not found. Please try again.');
                             return;
                           }
 
@@ -1619,7 +1619,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             );
 
                             if (isDuplicate) {
-                              toast.error(`"${material.material_name}" is already added for this sub-item.`);
+                              showError(`"${material.material_name}" is already added for this sub-item.`);
                               return currentMaterials; // Return unchanged
                             }
 
@@ -1719,7 +1719,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                     onClick={() => {
                       // Prevent adding new materials if existing materials already exist
                       if (materialTypeInfo.currentType === 'existing') {
-                        toast.error('Cannot mix existing and new materials. Please create separate requests for each type.');
+                        showError('Cannot mix existing and new materials. Please create separate requests for each type.');
                         return;
                       }
 
@@ -1933,7 +1933,7 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                               const newQty = parseFloat(e.target.value) || 0;
                               // For existing materials, validate against BOQ quantity
                               if (!material.isNew && material.originalBoqQuantity && newQty > material.originalBoqQuantity) {
-                                toast.error(`Quantity cannot exceed BOQ allocated quantity of ${material.originalBoqQuantity} ${material.unit}`);
+                                showError(`Quantity cannot exceed BOQ allocated quantity of ${material.originalBoqQuantity} ${material.unit}`);
                                 return;
                               }
                               updateMaterial(material.id, { quantity: newQty });

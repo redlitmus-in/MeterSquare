@@ -26,7 +26,7 @@ import {
   Clock
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { adminApi, SystemStats, Activity as ActivityType, User as AdminUser } from '@/api/admin';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
@@ -56,7 +56,7 @@ const AdminDashboard: React.FC = () => {
       setUsersList(usersData.users);
     } catch (error: any) {
       console.error('Error fetching dashboard data:', error);
-      toast.error('Failed to load dashboard data', {
+      showError('Failed to load dashboard data', {
         description: error.response?.data?.error || error.message
       });
     } finally {

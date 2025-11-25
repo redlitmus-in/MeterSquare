@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Save, AlertCircle, Trash2, Package } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { useAuthStore } from '@/store/authStore';
@@ -157,7 +157,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
 
   const handleRemoveMaterial = (id: string) => {
     if (materials.length === 1) {
-      toast.error('At least one material is required');
+      showError('At least one material is required');
       return;
     }
     setMaterials(materials.filter(m => m.id !== id));
@@ -197,7 +197,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
 
     // Validation
     if (!justification.trim()) {
-      toast.error('Please provide justification for the change');
+      showError('Please provide justification for the change');
       return;
     }
 
@@ -211,7 +211,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
     });
 
     if (invalidMaterial) {
-      toast.error('Please fill all material fields correctly (name, quantity > 0, reason)');
+      showError('Please fill all material fields correctly (name, quantity > 0, reason)');
       return;
     }
 
@@ -221,7 +221,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
     );
 
     if (exceedingMaterial) {
-      toast.error(`Material "${exceedingMaterial.material_name}" quantity (${exceedingMaterial.quantity}) exceeds BOQ allocated quantity (${exceedingMaterial.original_boq_quantity} ${exceedingMaterial.unit})`);
+      showError(`Material "${exceedingMaterial.material_name}" quantity (${exceedingMaterial.quantity}) exceeds BOQ allocated quantity (${exceedingMaterial.original_boq_quantity} ${exceedingMaterial.unit})`);
       return;
     }
 
@@ -248,15 +248,15 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
       });
 
       if (response.success) {
-        toast.success('Change request updated successfully');
+        showSuccess('Change request updated successfully');
         if (onSuccess) onSuccess();
         onClose();
       } else {
-        toast.error(response.message || 'Failed to update change request');
+        showError(response.message || 'Failed to update change request');
       }
     } catch (error: any) {
       console.error('Error updating change request:', error);
-      toast.error(error.response?.data?.error || 'Failed to update change request');
+      showError(error.response?.data?.error || 'Failed to update change request');
     } finally {
       setLoading(false);
     }
@@ -490,7 +490,7 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                                   const newQty = parseFloat(e.target.value) || 0;
                                   // Validate against BOQ quantity for existing materials
                                   if (material.master_material_id && material.original_boq_quantity && newQty > material.original_boq_quantity) {
-                                    toast.error(`Quantity cannot exceed BOQ allocated quantity of ${material.original_boq_quantity} ${material.unit}`);
+                                    showError(`Quantity cannot exceed BOQ allocated quantity of ${material.original_boq_quantity} ${material.unit}`);
                                     return;
                                   }
                                   handleMaterialChange(material.id, 'quantity', newQty);

@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { BOQGetResponse } from '@/roles/estimator/types';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface SimplifiedBOQViewProps {
@@ -67,10 +67,10 @@ const SimplifiedBOQView: React.FC<SimplifiedBOQViewProps> = ({
         const expandedIds = items.slice(0, 2).map((_, index) => `item-${index}`);
         setExpandedItems(expandedIds);
       } else {
-        toast.error(result.message || 'Failed to fetch BOQ details');
+        showError(result.message || 'Failed to fetch BOQ details');
       }
     } catch (error) {
-      toast.error('Error loading BOQ details');
+      showError('Error loading BOQ details');
     } finally {
       setIsLoading(false);
     }

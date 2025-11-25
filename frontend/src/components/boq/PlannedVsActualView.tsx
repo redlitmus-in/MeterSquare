@@ -10,7 +10,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { boqTrackingService } from '../../roles/project-manager/services/boqTrackingService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '../ui/ModernLoadingSpinners';
 
 interface PlannedVsActualViewProps {
@@ -36,7 +36,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
       const response = await boqTrackingService.getPlannedVsActual(boqId);
       setData(response);
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to load BOQ comparison');
+      showError(error.response?.data?.error || 'Failed to load BOQ comparison');
       console.error('Error fetching planned vs actual:', error);
     } finally {
       setLoading(false);
@@ -50,24 +50,24 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
 
       // Show success message with routing information
       if (response.route === 'buyer') {
-        toast.success(response.message || 'Purchase request sent to Buyer (existing BOQ materials)', {
+        showSuccess(response.message || 'Purchase request sent to Buyer (existing BOQ materials)', {
           description: `Assigned to: ${response.buyer?.name}`,
           duration: 5000,
         });
       } else if (response.route === 'estimator') {
-        toast.success(response.message || 'Purchase request sent to Estimator (new materials)', {
+        showSuccess(response.message || 'Purchase request sent to Estimator (new materials)', {
           description: `Sent to: ${response.estimator?.name}`,
           duration: 5000,
         });
       } else {
-        toast.success(response.message || 'Purchase request sent successfully');
+        showSuccess(response.message || 'Purchase request sent successfully');
       }
 
       // Refresh data after sending
       await fetchData();
     } catch (error: any) {
       const errorMsg = error.response?.data?.error || error.response?.data?.details || 'Failed to send purchase request';
-      toast.error(errorMsg);
+      showError(errorMsg);
       console.error('Error sending purchase request:', error);
     } finally {
       setSendingRequest(false);

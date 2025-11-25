@@ -18,7 +18,7 @@ import {
   Mail,
   Filter
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useNavigate } from 'react-router-dom';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { adminApi, BOQItem } from '@/api/admin';
@@ -41,7 +41,7 @@ const BOQManagement: React.FC = () => {
       });
       setBOQs(response.boqs);
     } catch (error: any) {
-      toast.error('Failed to fetch BOQs', {
+      showError('Failed to fetch BOQs', {
         description: error.response?.data?.error || error.message
       });
     } finally {
@@ -88,10 +88,10 @@ const BOQManagement: React.FC = () => {
   const handleApproveBOQ = async (boqId: number) => {
     try {
       await adminApi.approveBOQ(boqId, { approved: true });
-      toast.success('BOQ approved successfully');
+      showSuccess('BOQ approved successfully');
       fetchBOQs();
     } catch (error: any) {
-      toast.error('Failed to approve BOQ', {
+      showError('Failed to approve BOQ', {
         description: error.response?.data?.error || error.message
       });
     }
@@ -100,10 +100,10 @@ const BOQManagement: React.FC = () => {
   const handleRejectBOQ = async (boqId: number) => {
     try {
       await adminApi.approveBOQ(boqId, { approved: false });
-      toast.success('BOQ rejected');
+      showSuccess('BOQ rejected');
       fetchBOQs();
     } catch (error: any) {
-      toast.error('Failed to reject BOQ', {
+      showError('Failed to reject BOQ', {
         description: error.response?.data?.error || error.message
       });
     }

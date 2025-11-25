@@ -5,7 +5,7 @@
  */
 
 import axios from 'axios';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo, showLoading, dismissToast } from '@/utils/toastHelper';
 
 // Get API key from environment variable
 const PDFSHIFT_API_KEY = import.meta.env.VITE_PDFSHIFT_API_KEY || '';
@@ -33,12 +33,12 @@ export const generatePDF = async (
     // Validate API key
     if (!PDFSHIFT_API_KEY) {
       console.error('PDFShift API key is not configured');
-      toast.error('PDF service not configured. Please contact administrator.');
+      showError('PDF service not configured. Please contact administrator.');
       return false;
     }
 
     // Show loading toast
-    const loadingToast = toast.loading('Generating professional PDF...');
+    const loadingToast = showLoading('Generating professional PDF...');
 
     // Call PDFShift API
     const response = await axios.post(
@@ -88,8 +88,8 @@ export const generatePDF = async (
     URL.revokeObjectURL(url);
 
     // Success
-    toast.dismiss(loadingToast);
-    toast.success('PDF generated successfully!');
+    dismissToast(loadingToast);
+    showSuccess('PDF generated successfully!');
     return true;
 
   } catch (error: any) {
@@ -97,13 +97,13 @@ export const generatePDF = async (
 
     // Show error message
     if (error.response?.status === 401) {
-      toast.error('PDF service authentication failed. Invalid API key.');
+      showError('PDF service authentication failed. Invalid API key.');
     } else if (error.response?.status === 429) {
-      toast.error('PDF generation limit reached. Please try again later.');
+      showError('PDF generation limit reached. Please try again later.');
     } else if (error.code === 'ECONNABORTED') {
-      toast.error('PDF generation timeout. Please try again.');
+      showError('PDF generation timeout. Please try again.');
     } else {
-      toast.error('Failed to generate PDF. Please try again.');
+      showError('Failed to generate PDF. Please try again.');
     }
 
     return false;

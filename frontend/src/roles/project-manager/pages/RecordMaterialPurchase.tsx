@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { DocumentTextIcon, ShoppingCartIcon } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { boqTrackingService } from '../services/boqTrackingService';
 import PlannedVsActualView from '@/components/boq/PlannedVsActualView';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
@@ -39,7 +39,7 @@ export default function RecordMaterialPurchase() {
       });
 
       if (filteredBOQs.length === 0) {
-        toast.info('No BOQs found');
+        showInfo('No BOQs found');
       }
 
       return filteredBOQs;

@@ -7,7 +7,7 @@ import {
   ChevronDownIcon,
   MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import axios from 'axios';
@@ -53,7 +53,7 @@ const AdminMyProjects: React.FC = () => {
       }
     } catch (error: any) {
       console.error('Error loading project managers:', error);
-      toast.error('Failed to load project managers');
+      showError('Failed to load project managers');
     } finally {
       setLoading(false);
     }

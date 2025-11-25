@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Project, ProjectCreate, ProjectUpdate, ProjectStatus, ProjectProgress } from '@/types';
 import { apiWrapper, API_ENDPOINTS } from '@/api/config';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface ProjectState {
   projects: Project[];
@@ -49,7 +49,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
     }
   },
 
@@ -72,7 +72,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
     }
   },
 
@@ -91,14 +91,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         error: null,
       }));
 
-      toast.success('Project created successfully!');
+      showSuccess('Project created successfully!');
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || 'Failed to create project';
       set({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
       throw error;
     }
   },
@@ -119,14 +119,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         error: null,
       }));
 
-      toast.success('Project updated successfully!');
+      showSuccess('Project updated successfully!');
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || 'Failed to update project';
       set({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
       throw error;
     }
   },
@@ -144,14 +144,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         error: null,
       }));
 
-      toast.success('Project deleted successfully!');
+      showSuccess('Project deleted successfully!');
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || 'Failed to delete project';
       set({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
       throw error;
     }
   },
@@ -162,7 +162,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return progress;
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || 'Failed to fetch project progress';
-      toast.error(errorMessage);
+      showError(errorMessage);
       throw error;
     }
   },
@@ -186,7 +186,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
     }
   },
 

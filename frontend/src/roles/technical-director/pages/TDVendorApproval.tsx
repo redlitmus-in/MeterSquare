@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import axios from 'axios';
 
 interface BOQAssignment {
@@ -98,7 +98,7 @@ const TDVendorApproval: React.FC = () => {
       });
       setAssignments(response.data.assignments || []);
     } catch (error: any) {
-      toast.error('Failed to load SE BOQ vendor requests');
+      showError('Failed to load SE BOQ vendor requests');
       console.error(error);
     } finally {
       setLoading(false);
@@ -114,10 +114,10 @@ const TDVendorApproval: React.FC = () => {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success('Vendor approved successfully');
+      showSuccess('Vendor approved successfully');
       fetchSEBoqAssignments();
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to approve vendor');
+      showError(error.response?.data?.error || 'Failed to approve vendor');
       console.error(error);
     } finally {
       setActionLoading(null);
@@ -126,7 +126,7 @@ const TDVendorApproval: React.FC = () => {
 
   const handleReject = async () => {
     if (!assignmentToReject || !rejectionReason.trim()) {
-      toast.error('Please provide a rejection reason');
+      showError('Please provide a rejection reason');
       return;
     }
 
@@ -138,13 +138,13 @@ const TDVendorApproval: React.FC = () => {
         { rejection_reason: rejectionReason },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success('Vendor rejected successfully');
+      showSuccess('Vendor rejected successfully');
       setShowRejectModal(false);
       setRejectionReason('');
       setAssignmentToReject(null);
       fetchSEBoqAssignments();
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to reject vendor');
+      showError(error.response?.data?.error || 'Failed to reject vendor');
       console.error(error);
     } finally {
       setActionLoading(null);

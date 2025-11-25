@@ -24,7 +24,7 @@ import {
   CheckCircle,
   AlertCircle
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { adminApi, SystemSettings } from '@/api/admin';
 
@@ -118,7 +118,7 @@ const AdminSettings: React.FC = () => {
       const response = await adminApi.getSettings();
       setSettings(response.settings);
     } catch (error: any) {
-      toast.error('Failed to fetch settings', {
+      showError('Failed to fetch settings', {
         description: error.response?.data?.error || error.message
       });
     } finally {
@@ -130,10 +130,10 @@ const AdminSettings: React.FC = () => {
     try {
       setIsSaving(true);
       const response = await adminApi.updateSettings(settings);
-      toast.success('Settings saved successfully');
+      showSuccess('Settings saved successfully');
       setSettings(response.settings); // Update with confirmed data from server
     } catch (error: any) {
-      toast.error('Failed to save settings', {
+      showError('Failed to save settings', {
         description: error.response?.data?.error || error.message
       });
     } finally {

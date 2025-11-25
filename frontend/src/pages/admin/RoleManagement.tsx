@@ -16,7 +16,7 @@ import {
   TrendingUp,
   Award
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { adminApi, Role } from '@/api/admin';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
@@ -34,7 +34,7 @@ const RoleManagement: React.FC = () => {
       const response = await adminApi.getRoles();
       setRoles(response.roles);
     } catch (error: any) {
-      toast.error('Failed to fetch roles', {
+      showError('Failed to fetch roles', {
         description: error.response?.data?.error || error.message
       });
     } finally {

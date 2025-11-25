@@ -36,7 +36,7 @@ import {
   Activity,
   Image as ImageIcon
 } from 'lucide-react';
-import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { showSuccess, showError, showWarning, showInfo, showLoading, dismissToast } from '@/utils/toastHelper';
 import axios from 'axios';
 import { apiClient } from '@/api/config';
 import { formatCurrency } from '@/utils/formatters';
@@ -530,16 +530,6 @@ const ProjectApprovals: React.FC = () => {
     const laborCost = boq.total_labour_cost || 0;
     const materialCost = boq.total_material_cost || 0;
     const itemCount = boq.items_count || 0;
-
-    console.log(`📊 [TD ProjectApprovals] BOQ ${boq.boq_id} - Raw values from backend:`, {
-      boq_name: boq.boq_name || boq.project_name,
-      total_cost: boq.total_cost,
-      selling_price: boq.selling_price,
-      estimatedSellingPrice: boq.estimatedSellingPrice,
-      discount_percentage: boq.discount_percentage,
-      discount_amount: boq.discount_amount
-    });
-    console.log(`💰 [TD ProjectApprovals] BOQ ${boq.boq_id} - Grand Total (Excluding VAT): ${totalValue}`);
 
     const projectCode = boq.project_code || boq.project_details?.project_code || boq.project?.project_code;
 
@@ -1253,7 +1243,7 @@ const ProjectApprovals: React.FC = () => {
       const formatName = format === 'excel' ? 'Excel' : 'PDF';
       const typeName = isInternal ? 'Internal' : 'Client';
 
-      toast.loading(`Generating ${typeName} ${formatName} file...`);
+      showLoading(`Generating ${typeName} ${formatName} file...`);
 
       // Use backend API for both Excel and PDF generation (ensures data consistency)
       if (format === 'excel') {
@@ -1270,11 +1260,11 @@ const ProjectApprovals: React.FC = () => {
         }
       }
 
-      toast.dismiss();
+      dismissToast();
       showSuccess(`${typeName} BOQ downloaded successfully as ${formatName}`);
       setShowFormatModal(false);
     } catch (error) {
-      toast.dismiss();
+      dismissToast();
       showError('Failed to download BOQ');
       console.error('Download error:', error);
     }
@@ -1323,13 +1313,13 @@ const ProjectApprovals: React.FC = () => {
           return;
         }
 
-        toast.loading('Creating Project Manager...');
+        showLoading('Creating Project Manager...');
         const response = await tdService.createPM({
           ...newPMData,
           project_ids: [selectedEstimation.projectId]
         });
 
-        toast.dismiss();
+        dismissToast();
         if (response.success) {
           showSuccess('Project Manager created and assigned successfully');
           setShowAssignPMModal(false);
@@ -1353,17 +1343,17 @@ const ProjectApprovals: React.FC = () => {
         const loadingMessage = pmCount > 1
           ? `Assigning ${pmCount} Project Managers...`
           : 'Assigning Project Manager...';
-        toast.loading(loadingMessage);
+        showLoading(loadingMessage);
 
         const response = await tdService.assignProjectsToPM(selectedPMIds, [selectedEstimation.projectId]);
 
-        toast.dismiss();
+        dismissToast();
         if (response.success) {
           // Assign MEPs if selected (optional)
           if (selectedMEPIds.length > 0) {
-            toast.loading(`Assigning ${selectedMEPIds.length} MEP Supervisor(s)...`);
+            showLoading(`Assigning ${selectedMEPIds.length} MEP Supervisor(s)...`);
             const mepResponse = await tdService.assignMEPsToProjects(selectedMEPIds, [selectedEstimation.projectId]);
-            toast.dismiss();
+            dismissToast();
 
             if (!mepResponse.success) {
               showWarning(`PMs assigned, but MEP assignment failed: ${mepResponse.message}`);
@@ -1397,7 +1387,7 @@ const ProjectApprovals: React.FC = () => {
         }
       }
     } catch (error) {
-      toast.dismiss();
+      dismissToast();
       console.error('Assign PM error:', error);
       showError('Failed to assign Project Manager');
     }
@@ -1409,10 +1399,10 @@ const ProjectApprovals: React.FC = () => {
     if (!confirmed) return;
 
     try {
-      toast.loading('Deleting Project Manager...');
+      showLoading('Deleting Project Manager...');
       const response = await tdService.deletePM(userId);
 
-      toast.dismiss();
+      dismissToast();
       if (response.success) {
         showSuccess('Project Manager deleted successfully');
         // Reload PMs list
@@ -1421,7 +1411,7 @@ const ProjectApprovals: React.FC = () => {
         showError(response.message);
       }
     } catch (error) {
-      toast.dismiss();
+      dismissToast();
       console.error('Delete PM error:', error);
       showError('Failed to delete Project Manager');
     }

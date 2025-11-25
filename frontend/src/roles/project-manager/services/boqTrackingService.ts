@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
@@ -12,7 +12,7 @@ axios.interceptors.response.use(
 
       // Check if it's an invalid/expired token
       if (errorMessage.includes('token') || errorMessage.includes('Token')) {
-        toast.error('Session expired. Please log in again.');
+        showError('Session expired. Please log in again.');
 
         // Clear localStorage and redirect to login
         localStorage.removeItem('token');
@@ -32,7 +32,7 @@ class BOQTrackingService {
   private getHeaders() {
     const token = localStorage.getItem('access_token'); // Fixed: was 'token', should be 'access_token'
     if (!token) {
-      toast.error('No authentication token found. Please log in.');
+      showError('No authentication token found. Please log in.');
       setTimeout(() => {
         window.location.href = '/login';
       }, 1000);

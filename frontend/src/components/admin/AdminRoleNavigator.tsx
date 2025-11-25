@@ -10,7 +10,7 @@ import { ChevronDownIcon, ChevronRightIcon, UserGroupIcon, XMarkIcon } from '@he
 import { adminApi } from '@/api/admin';
 import { useAdminViewStore } from '@/store/adminViewStore';
 import { useAuthStore } from '@/store/authStore';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface RoleGroup {
@@ -73,7 +73,7 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
       setRoleGroups(groups);
     } catch (error) {
       console.error('Error fetching role groups:', error);
-      toast.error('Failed to load users');
+      showError('Failed to load users');
     } finally {
       setLoading(false);
     }
@@ -91,7 +91,7 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
 
   const handleViewAsRole = (role: RoleGroup & { dashboardPath?: string }) => {
     setRoleView(role.roleName, role.roleId, role.displayName);
-    toast.success(`Now viewing as ${role.displayName}. Navigate to role-specific pages to see their view.`);
+    showSuccess(`Now viewing as ${role.displayName}. Navigate to role-specific pages to see their view.`);
     setIsExpanded(false);
 
     // Navigate to dashboard to refresh the view with new role context
@@ -102,7 +102,7 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
 
   const handleViewAsUser = (role: RoleGroup, userItem: any) => {
     setRoleView(role.roleName, role.roleId, `${role.displayName} (${userItem.full_name})`, userItem.user_id);
-    toast.success(`Now viewing as ${userItem.full_name} (${role.displayName})`);
+    showSuccess(`Now viewing as ${userItem.full_name} (${role.displayName})`);
     setIsExpanded(false);
 
     // Navigate to dashboard to refresh the view with new role context
@@ -114,7 +114,7 @@ export const AdminRoleNavigator: React.FC<AdminRoleNavigatorProps> = ({ isCollap
   const handleResetView = () => {
     resetToAdminView();
     navigate('/admin/dashboard');
-    toast.success('Returned to Admin view');
+    showSuccess('Returned to Admin view');
   };
 
   // Don't show for non-admin users

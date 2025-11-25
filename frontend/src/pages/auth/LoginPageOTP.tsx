@@ -29,7 +29,7 @@ import {
   Calculator,
   DollarSign
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import OTPInput from '@/components/OTPInput';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import authApi from '@/api/auth';
@@ -93,12 +93,12 @@ const LoginPageOTP: React.FC = () => {
     e.preventDefault();
     
     if (!email) {
-      toast.error('Please enter your email address');
+      showError('Please enter your email address');
       return;
     }
 
     if (!selectedRole) {
-      toast.error('Please select your role');
+      showError('Please select your role');
       return;
     }
 
@@ -112,13 +112,13 @@ const LoginPageOTP: React.FC = () => {
       setStep('otp');
       setResendTimer(30);
       
-      toast.success('OTP Sent Successfully!', {
+      showSuccess('OTP Sent Successfully!', {
         description: response.message,
         icon: <Mail className="w-5 h-5 text-green-500" />
       });
     } catch (error: any) {
       console.error('Failed to send OTP:', error);
-      toast.error('Failed to send OTP', {
+      showError('Failed to send OTP', {
         description: error.message || 'Please check your connection and try again'
       });
     } finally {
@@ -133,7 +133,7 @@ const LoginPageOTP: React.FC = () => {
     }
     
     if (otp.length !== 6) {
-      toast.error('Invalid OTP', {
+      showError('Invalid OTP', {
         description: 'Please enter a 6-digit OTP'
       });
       return;
@@ -147,7 +147,7 @@ const LoginPageOTP: React.FC = () => {
       setStep('success');
       setUserRole(response.user.role);
       
-      toast.success('Login Successful!', {
+      showSuccess('Login Successful!', {
         description: `Welcome ${response.user.full_name || response.user.role}`,
         icon: <CheckCircle className="w-5 h-5 text-green-500" />
       });
@@ -171,7 +171,7 @@ const LoginPageOTP: React.FC = () => {
           }
         }
         
-        toast.error('Invalid OTP', {
+        showError('Invalid OTP', {
           description: error.message
         });
       }
@@ -186,12 +186,12 @@ const LoginPageOTP: React.FC = () => {
         const response = await authApi.sendOTP(email, selectedRole);
         setResendTimer(30);
         
-        toast.success('OTP Resent!', {
+        showSuccess('OTP Resent!', {
           description: response.message,
           icon: <RefreshCw className="w-5 h-5 text-green-500" />
         });
       } catch (error: any) {
-        toast.error('Failed to resend OTP', {
+        showError('Failed to resend OTP', {
           description: error.message
         });
       } finally {

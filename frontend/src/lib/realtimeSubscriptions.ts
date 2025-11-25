@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { invalidateQueries } from '@/lib/queryClient';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 // Types for subscription channels
@@ -151,9 +151,9 @@ const subscribeToPurchases = () => {
 
           // Show notification based on event type
           if (payload.eventType === 'INSERT') {
-            toast.success('New purchase request created');
+            showSuccess('New purchase request created');
           } else if (payload.eventType === 'UPDATE') {
-            toast.info('Purchase request updated');
+            showInfo('Purchase request updated');
           }
         }
       )
@@ -186,9 +186,9 @@ const subscribeToTasks = () => {
 
           // Show notification for task updates
           if (payload.eventType === 'INSERT') {
-            toast.success('New task assigned');
+            showSuccess('New task assigned');
           } else if (payload.eventType === 'UPDATE' && payload.new?.status === 'completed') {
-            toast.success('Task completed');
+            showSuccess('Task completed');
           }
         }
       )
@@ -247,7 +247,7 @@ const subscribeToUserNotifications = (userId: string) => {
           // Show the notification
           const notification = payload.new;
           if (notification?.message) {
-            toast.info(notification.message);
+            showInfo(notification.message);
           }
 
           // Invalidate notifications query
@@ -342,18 +342,18 @@ const subscribeToBOQs = () => {
             if (payload.eventType === 'UPDATE' && newStatus !== oldStatus) {
               // Status changed - show appropriate notification
               if (newStatus === 'PM_Approved') {
-                toast.success('BOQ approved by PM');
+                showSuccess('BOQ approved by PM');
               } else if (newStatus === 'Approved' || newStatus === 'TD_Approved') {
-                toast.success('BOQ approved by Technical Director');
+                showSuccess('BOQ approved by Technical Director');
               } else if (newStatus === 'Pending_TD_Approval') {
-                toast.info('BOQ sent to Technical Director for approval');
+                showInfo('BOQ sent to Technical Director for approval');
               } else if (newStatus === 'Client_Confirmed') {
-                toast.success('BOQ confirmed by client');
+                showSuccess('BOQ confirmed by client');
               } else if (newStatus === 'Rejected') {
-                toast.error('BOQ rejected');
+                showError('BOQ rejected');
               }
             } else if (payload.eventType === 'INSERT') {
-              toast.info('New BOQ created');
+              showInfo('New BOQ created');
             }
           }
         )
@@ -483,13 +483,13 @@ const subscribeToBOQInternalRevisions = () => {
             if (payload.eventType === 'INSERT') {
               const actorRole = payload.new?.actor_role;
               if (actorRole === 'estimator') {
-                toast.info('New internal revision created');
+                showInfo('New internal revision created');
               } else if (actorRole === 'technical_director') {
                 const actionType = payload.new?.action_type;
                 if (actionType === 'APPROVED') {
-                  toast.success('Internal revision approved');
+                  showSuccess('Internal revision approved');
                 } else if (actionType === 'REJECTED') {
-                  toast.error('Internal revision rejected');
+                  showError('Internal revision rejected');
                 }
               }
             }
@@ -568,16 +568,16 @@ const subscribeToChangeRequests = () => {
 
           // Show notification based on event
           if (payload.eventType === 'INSERT') {
-            toast.info('New change request created');
+            showInfo('New change request created');
           } else if (payload.eventType === 'UPDATE') {
             const newStatus = payload.new?.status;
             const oldStatus = payload.old?.status;
 
             if (newStatus !== oldStatus) {
               if (newStatus === 'approved') {
-                toast.success('Change request approved');
+                showSuccess('Change request approved');
               } else if (newStatus === 'rejected') {
-                toast.error('Change request rejected');
+                showError('Change request rejected');
               }
             }
           }

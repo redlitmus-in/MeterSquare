@@ -35,7 +35,7 @@ import {
   Pencil
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
@@ -109,7 +109,7 @@ const ChangeRequestsPage: React.FC = () => {
     // Check if materials are new or existing to determine routing
     const request = changeRequests.find(r => r.cr_id === crId);
     if (!request) {
-      toast.error('Change request not found');
+      showError('Change request not found');
       return;
     }
 
@@ -131,13 +131,13 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.sendForReview(crId, routeTo, buyerId);
       if (response.success) {
-        toast.success(response.message || `Request sent to ${destination}`);
+        showSuccess(response.message || `Request sent to ${destination}`);
         refetch(); // Trigger background refresh
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error) {
-      toast.error('Failed to send request for review');
+      showError('Failed to send request for review');
     }
   };
 
@@ -160,13 +160,13 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.approve(crId, 'Approved by PM', buyerId);
       if (response.success) {
-        toast.success(response.message || 'Change request approved successfully');
+        showSuccess(response.message || 'Change request approved successfully');
         refetch(); // Trigger background refresh
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error) {
-      toast.error('Failed to approve change request');
+      showError('Failed to approve change request');
     }
   };
 
@@ -178,13 +178,13 @@ const ChangeRequestsPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error fetching buyers:', error);
-      toast.error('Failed to load buyers');
+      showError('Failed to load buyers');
     }
   };
 
   const handleBuyerSelection = async () => {
     if (!selectedBuyerId) {
-      toast.error('Please select a buyer');
+      showError('Please select a buyer');
       return;
     }
 
@@ -213,15 +213,15 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.reject(rejectingCrId, reason);
       if (response.success) {
-        toast.success('Change request rejected');
+        showSuccess('Change request rejected');
         refetch(); // Trigger background refresh
         setShowRejectionModal(false);
         setRejectingCrId(null);
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error) {
-      toast.error('Failed to reject change request');
+      showError('Failed to reject change request');
     }
   };
 
@@ -232,11 +232,11 @@ const ChangeRequestsPage: React.FC = () => {
         setSelectedChangeRequest(response.data);
         setShowDetailsModal(true);
       } else {
-        toast.error(response.message || 'Failed to load details');
+        showError(response.message || 'Failed to load details');
       }
     } catch (error) {
       console.error('Error in handleReview:', error);
-      toast.error('Failed to load change request details');
+      showError('Failed to load change request details');
     }
   };
 
@@ -254,7 +254,7 @@ const ChangeRequestsPage: React.FC = () => {
     refetch();
     setShowEditModal(false);
     setSelectedChangeRequest(null);
-    toast.success('Change request updated successfully');
+    showSuccess('Change request updated successfully');
   };
 
   const handleApproveFromModal = async () => {

@@ -12,7 +12,7 @@ import {
   DocumentTextIcon,
   UserGroupIcon,
 } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
 import { siteEngineerService } from '../services/siteEngineerService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -130,7 +130,7 @@ const MyProjects: React.FC = () => {
       const projectsList = response.projects || [];
 
       if (projectsList.length === 0) {
-        toast.info('No projects assigned yet');
+        showInfo('No projects assigned yet');
       }
 
       return projectsList;
@@ -147,7 +147,7 @@ const MyProjects: React.FC = () => {
 
       // Get the first BOQ ID from the project's boq_ids array
       if (!project.boq_ids || project.boq_ids.length === 0) {
-        toast.error('No BOQ found for this project');
+        showError('No BOQ found for this project');
         setShowDetailsModal(false);
         return;
       }
@@ -257,7 +257,7 @@ const MyProjects: React.FC = () => {
       setRejectedChangeRequests([]);
     } catch (error: any) {
       console.error('Error loading project details:', error);
-      toast.error(error?.response?.data?.error || 'Failed to load project details');
+      showError(error?.response?.data?.error || 'Failed to load project details');
     } finally {
       setLoadingDetails(false);
     }
@@ -1006,7 +1006,7 @@ const MyProjects: React.FC = () => {
           setSelectedProjectForBOQ(null);
         }}
         onSubmit={async () => {
-          toast.success('Extra items added successfully!');
+          showSuccess('Extra items added successfully!');
           setShowCreateBOQModal(false);
           const currentProject = selectedProjectForBOQ;
           setSelectedProjectForBOQ(null);
@@ -1078,13 +1078,13 @@ const MyProjects: React.FC = () => {
                   try {
                     setRequesting(true);
                     await siteEngineerService.requestProjectCompletion(projectToRequest.project_id);
-                    toast.success('Completion request sent to Project Manager');
+                    showSuccess('Completion request sent to Project Manager');
                     setShowRequestModal(false);
                     setProjectToRequest(null);
                     refetch();
                   } catch (error: any) {
                     console.error('Error requesting completion:', error);
-                    toast.error(error?.response?.data?.error || 'Failed to send request');
+                    showError(error?.response?.data?.error || 'Failed to send request');
                   } finally {
                     setRequesting(false);
                   }
@@ -1145,7 +1145,7 @@ const MyProjects: React.FC = () => {
           boqName={projectToAssign.boq_name}
           projectName={projectToAssign.project_name}
           onSuccess={() => {
-            toast.success('BOQ assigned to buyer successfully!');
+            showSuccess('BOQ assigned to buyer successfully!');
             setShowAssignBuyerModal(false);
             setProjectToAssign(null);
             refetch();

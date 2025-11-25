@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Filter, Package, AlertTriangle, CheckCircle, X, Save, Info, RefreshCw, Edit2, Trash2, Bell, ClipboardList, Check, XCircle } from 'lucide-react';
 import { inventoryService, InventoryMaterial, InternalMaterialRequest } from '../services/inventoryService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 
@@ -125,7 +125,7 @@ const MaterialsManagement: React.FC = () => {
 
     } catch (error) {
       console.error('Error fetching materials:', error);
-      toast.error('Failed to fetch materials');
+      showError('Failed to fetch materials');
     } finally {
       setLoading(false);
     }
@@ -148,12 +148,12 @@ const MaterialsManagement: React.FC = () => {
 
     try {
       const material = await inventoryService.createInventoryItem(formData);
-      toast.success(`Material ${material.material_code} created successfully`);
+      showSuccess(`Material ${material.material_code} created successfully`);
       setShowCreateModal(false);
       resetForm();
       fetchMaterials();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to create material');
+      showError(error.message || 'Failed to create material');
     }
   };
 
@@ -168,12 +168,12 @@ const MaterialsManagement: React.FC = () => {
         selectedMaterial.inventory_material_id,
         formData
       );
-      toast.success(`Material ${updated.material_code} updated successfully`);
+      showSuccess(`Material ${updated.material_code} updated successfully`);
       setShowEditModal(false);
       resetForm();
       fetchMaterials();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to update material');
+      showError(error.message || 'Failed to update material');
     }
   };
 
@@ -187,10 +187,10 @@ const MaterialsManagement: React.FC = () => {
 
     try {
       await inventoryService.deleteInventoryItem(material.inventory_material_id);
-      toast.success('Material deleted successfully');
+      showSuccess('Material deleted successfully');
       fetchMaterials();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to delete material');
+      showError(error.message || 'Failed to delete material');
     }
   };
 
@@ -234,19 +234,19 @@ const MaterialsManagement: React.FC = () => {
     if (!selectedRequest?.request_id) return;
 
     if (!remarks.trim()) {
-      toast.error('Please provide remarks for approval');
+      showError('Please provide remarks for approval');
       return;
     }
 
     try {
       await inventoryService.approveInternalRequest(selectedRequest.request_id, { remarks });
-      toast.success('Request approved successfully');
+      showSuccess('Request approved successfully');
       setShowApproveModal(false);
       setSelectedRequest(null);
       setRemarks('');
       fetchRequests();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to approve request');
+      showError(error.message || 'Failed to approve request');
     }
   };
 
@@ -255,19 +255,19 @@ const MaterialsManagement: React.FC = () => {
     if (!selectedRequest?.request_id) return;
 
     if (!remarks.trim()) {
-      toast.error('Please provide a reason for rejection');
+      showError('Please provide a reason for rejection');
       return;
     }
 
     try {
       await inventoryService.rejectInternalRequest(selectedRequest.request_id, remarks);
-      toast.success('Request rejected');
+      showSuccess('Request rejected');
       setShowRejectModal(false);
       setSelectedRequest(null);
       setRemarks('');
       fetchRequests();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to reject request');
+      showError(error.message || 'Failed to reject request');
     }
   };
 

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { User, LoginRequest, LoginResponse } from '@/types';
 import { apiWrapper, API_ENDPOINTS } from '@/api/config';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { getRoleDashboardPath } from '@/utils/roleRouting';
 
 interface AuthState {
@@ -53,7 +53,7 @@ export const useAuthStore = create<AuthState>()(
             error: null,
           });
 
-          toast.success('Login successful!');
+          showSuccess('Login successful!');
         } catch (error: any) {
           const errorMessage = error.response?.data?.detail || 'Login failed';
           set({
@@ -62,7 +62,7 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: false,
             user: null,
           });
-          toast.error(errorMessage);
+          showError(errorMessage);
           throw error;
         }
       },
@@ -81,14 +81,14 @@ export const useAuthStore = create<AuthState>()(
             error: null,
           });
 
-          toast.success('Registration successful! Please login.');
+          showSuccess('Registration successful! Please login.');
         } catch (error: any) {
           const errorMessage = error.response?.data?.detail || 'Registration failed';
           set({
             error: errorMessage,
             isLoading: false,
           });
-          toast.error(errorMessage);
+          showError(errorMessage);
           throw error;
         }
       },
@@ -105,7 +105,7 @@ export const useAuthStore = create<AuthState>()(
           isAuthenticated: false,
           error: null,
         });
-        toast.success('Logged out successfully');
+        showSuccess('Logged out successfully');
       },
 
       getCurrentUser: async () => {
@@ -192,14 +192,14 @@ export const useAuthStore = create<AuthState>()(
             error: null,
           });
 
-          toast.success('Profile updated successfully!');
+          showSuccess('Profile updated successfully!');
         } catch (error: any) {
           const errorMessage = error.response?.data?.detail || 'Profile update failed';
           set({
             error: errorMessage,
             isLoading: false,
           });
-          toast.error(errorMessage);
+          showError(errorMessage);
           throw error;
         }
       },

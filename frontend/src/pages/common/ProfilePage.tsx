@@ -32,7 +32,7 @@ import {
   Activity
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 const ProfilePage: React.FC = () => {
   const { user, logout, updateProfile, isLoading } = useAuthStore();
@@ -56,11 +56,11 @@ const ProfilePage: React.FC = () => {
     try {
       // Validate form
       if (!formData.full_name.trim()) {
-        toast.error('Full name is required');
+        showError('Full name is required');
         return;
       }
       if (!formData.email.trim()) {
-        toast.error('Email is required');
+        showError('Email is required');
         return;
       }
 
@@ -106,13 +106,13 @@ const ProfilePage: React.FC = () => {
 
     // Validate file type
     if (!file.type.startsWith('image/')) {
-      toast.error('Please select an image file');
+      showError('Please select an image file');
       return;
     }
 
     // Validate file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
-      toast.error('Image size should be less than 5MB');
+      showError('Image size should be less than 5MB');
       return;
     }
 
@@ -132,10 +132,10 @@ const ProfilePage: React.FC = () => {
       // const response = await apiWrapper.post('/upload/avatar', formData);
       // setFormData(prev => ({ ...prev, avatar_url: response.url }));
 
-      toast.success('Avatar updated! Click Save to confirm changes.');
+      showSuccess('Avatar updated! Click Save to confirm changes.');
     } catch (error) {
       console.error('Failed to upload avatar:', error);
-      toast.error('Failed to upload avatar');
+      showError('Failed to upload avatar');
     } finally {
       setUploading(false);
     }

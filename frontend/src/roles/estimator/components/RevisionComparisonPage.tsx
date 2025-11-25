@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, TrendingUp, TrendingDown, Send, Mail, Edit, Eye, ArrowRight, CheckCircle, Clock, XCircle, Calculator, Info, Image as ImageIcon, FileCheck } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { BOQ } from '../types';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -236,7 +236,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
       }
     } catch (error) {
       console.error('Error loading revision data:', error);
-      toast.error('Failed to load revision data');
+      showError('Failed to load revision data');
     } finally {
       setIsLoading(false);
     }

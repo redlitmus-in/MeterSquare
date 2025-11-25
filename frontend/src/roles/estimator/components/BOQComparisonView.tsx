@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowRight, TrendingUp, TrendingDown, Minus, AlertCircle } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface BOQComparisonViewProps {
   boqId: number;
@@ -70,7 +70,7 @@ const BOQComparisonView: React.FC<BOQComparisonViewProps> = ({ boqId, currentRev
       }
     } catch (error) {
       console.error('Error loading revision history:', error);
-      toast.error('Failed to load revision history');
+      showError('Failed to load revision history');
     } finally {
       setIsLoading(false);
     }

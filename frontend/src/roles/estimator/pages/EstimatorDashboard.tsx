@@ -14,7 +14,7 @@ import {
   Users,
   Calendar
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { estimatorService } from '../services/estimatorService';
 import { BOQ, BOQDashboardMetrics } from '../types';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
@@ -41,7 +41,7 @@ const EstimatorDashboard: React.FC = () => {
     try {
       await Promise.all([loadMetrics(), loadRecentBoqs()]);
     } catch (error) {
-      toast.error('Failed to load dashboard data');
+      showError('Failed to load dashboard data');
     } finally {
       setIsLoading(false);
     }
@@ -95,7 +95,7 @@ const EstimatorDashboard: React.FC = () => {
   };
 
   const handleBOQCreated = () => {
-    toast.success('BOQ created successfully!');
+    showSuccess('BOQ created successfully!');
     setIsCreatingBoq(false);
     loadDashboardData();
   };
@@ -587,7 +587,7 @@ const EstimatorDashboard: React.FC = () => {
         boq={selectedBoq}
         onEdit={() => {}}
         onDownload={() => {
-          toast.info('BOQ download feature will be implemented soon');
+          showInfo('BOQ download feature will be implemented soon');
         }}
       />
     </div>

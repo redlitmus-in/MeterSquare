@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo, showLoading, dismissToast } from '@/utils/toastHelper';
 import { estimatorService } from '../services/estimatorService';
 import { downloadClientBOQPDF, previewClientBOQPDF } from '@/services/boqPdfService';
 import { downloadClientBOQExcel } from '@/services/boqExcelService';
@@ -295,7 +295,7 @@ MeterSquare Interiors LLC`;
 
       if (response.success) {
         setEmailSent(true);
-        toast.success(response.message);
+        showSuccess(response.message);
 
         // Wait 2 seconds to show success message before closing
         setTimeout(() => {
@@ -303,11 +303,11 @@ MeterSquare Interiors LLC`;
           handleClose();
         }, 2000);
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error: any) {
       console.error('Error sending BOQ email:', error);
-      toast.error('Failed to send email. Please try again.');
+      showError('Failed to send email. Please try again.');
     } finally {
       setIsSending(false);
     }
@@ -948,14 +948,14 @@ MeterSquare Interiors LLC`;
                               <button
                                 onClick={async () => {
                                   try {
-                                    toast.loading('Generating PDF preview...');
+                                    showLoading('Generating PDF preview...');
                                     const pdfUrl = await previewClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined);
                                     setPreviewPDFUrl(pdfUrl);
                                     setShowPDFPreview(true);
-                                    toast.dismiss();
+                                    dismissToast();
                                   } catch (error) {
-                                    toast.dismiss();
-                                    toast.error('Failed to generate PDF preview');
+                                    dismissToast();
+                                    showError('Failed to generate PDF preview');
                                     console.error('PDF preview error:', error);
                                   }
                                 }}
@@ -972,13 +972,13 @@ MeterSquare Interiors LLC`;
                             <button
                               onClick={async () => {
                                 try {
-                                  toast.loading('Generating Excel file...');
+                                  showLoading('Generating Excel file...');
                                   await downloadClientBOQExcel(boqId);
-                                  toast.dismiss();
-                                  toast.success('Excel file downloaded successfully');
+                                  dismissToast();
+                                  showSuccess('Excel file downloaded successfully');
                                 } catch (error) {
-                                  toast.dismiss();
-                                  toast.error('Failed to download Excel file');
+                                  dismissToast();
+                                  showError('Failed to download Excel file');
                                   console.error('Excel download error:', error);
                                 }
                               }}
@@ -991,13 +991,13 @@ MeterSquare Interiors LLC`;
                             <button
                               onClick={async () => {
                                 try {
-                                  toast.loading('Generating PDF file...');
+                                  showLoading('Generating PDF file...');
                                   await downloadClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined);
-                                  toast.dismiss();
-                                  toast.success('PDF file downloaded successfully');
+                                  dismissToast();
+                                  showSuccess('PDF file downloaded successfully');
                                 } catch (error) {
-                                  toast.dismiss();
-                                  toast.error('Failed to download PDF file');
+                                  dismissToast();
+                                  showError('Failed to download PDF file');
                                   console.error('PDF download error:', error);
                                 }
                               }}
@@ -1223,9 +1223,9 @@ MeterSquare Interiors LLC`;
                     onClick={async () => {
                       try {
                         await downloadClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined);
-                        toast.success('PDF downloaded successfully');
+                        showSuccess('PDF downloaded successfully');
                       } catch (error) {
-                        toast.error('Failed to download PDF');
+                        showError('Failed to download PDF');
                       }
                     }}
                     className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors font-medium flex items-center gap-2"

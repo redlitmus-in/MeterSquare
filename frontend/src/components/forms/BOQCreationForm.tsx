@@ -45,7 +45,7 @@ import {
   useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo, showLoading, dismissToast } from '@/utils/toastHelper';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { ProjectOption, BOQMaterial, BOQLabour, BOQCreatePayload, WorkType, TermsConditionsItem } from '@/roles/estimator/types';
 import { ModernSelect } from '@/components/ui/modern-select';
@@ -358,7 +358,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
       // Show a subtle confirmation that data is backed up locally
       const mode = editMode ? 'Changes saved' : 'Draft saved';
-      toast.success(mode, {
+      showSuccess(mode, {
         duration: 1500,
         description: `${boqName} - ${items.length} items${hasImages ? ' with images' : ''}`
       });
@@ -433,7 +433,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const handleSaveAndClose = async () => {
     setShowInactivityModal(false);
     await saveNow(); // Save to localStorage one more time
-    toast.success('Draft saved locally - you can continue later', { duration: 3000 });
+    showSuccess('Draft saved locally - you can continue later', { duration: 3000 });
     onClose();
   };
 
@@ -460,13 +460,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         // handleSubmit already shows success toast and closes the form
       } catch (error) {
         console.error('Failed to save changes:', error);
-        toast.error('Failed to save changes to database');
+        showError('Failed to save changes to database');
         return; // Don't close if save failed
       }
     } else {
       // CREATE mode: Save to localStorage
       await saveNow();
-      toast.success('Draft saved locally - you can continue later', {
+      showSuccess('Draft saved locally - you can continue later', {
         duration: 3000,
         description: `BOQ: ${boqName}`
       });
@@ -500,11 +500,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       setTermsConditions(original.termsConditions || []);
 
       clearLocalStorage(); // Also clear any draft in localStorage
-      toast.info('Changes discarded - reverted to original');
+      showInfo('Changes discarded - reverted to original');
     } else {
       // CREATE mode: Clear draft
       clearLocalStorage();
-      toast.info('Draft discarded');
+      showInfo('Draft discarded');
     }
 
     onClose();
@@ -589,7 +589,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         // Mark that we restored a draft
         draftRestoredRef.current = true;
 
-        toast.success(`Resuming: ${actualData.boqName}`, {
+        showSuccess(`Resuming: ${actualData.boqName}`, {
           description: `Draft with ${actualData.items?.length || 0} items restored`
         });
       } else {
@@ -708,7 +708,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       setPreliminaryNotes(actualData.preliminaryNotes || '');
       setTermsConditions(actualData.termsConditions || []);
 
-      toast.success('Previous work restored - continue where you left off!');
+      showSuccess('Previous work restored - continue where you left off!');
     }
     setShowRecoveryModal(false);
   };
@@ -716,7 +716,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const handleDiscardData = () => {
     clearLocalStorage();
     setShowRecoveryModal(false);
-    toast.info('Starting fresh');
+    showInfo('Starting fresh');
   };
 
   // Load projects and master items on mount
@@ -746,7 +746,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       const projectsData = await estimatorService.getProjects();
       setProjects(projectsData);
     } catch (error) {
-      toast.error('Failed to load projects');
+      showError('Failed to load projects');
     } finally {
       setIsLoadingProjects(false);
     }
@@ -763,7 +763,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       setMasterItems(itemsData);
     } catch (error) {
       console.error('Failed to load master items:', error);
-      toast.error('Failed to load master items');
+      showError('Failed to load master items');
     } finally {
       setIsLoadingMasterData(false);
     }
@@ -801,7 +801,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       }
     } catch (error) {
       console.error('Failed to load master preliminaries:', error);
-      toast.error('Failed to load preliminary items');
+      showError('Failed to load preliminary items');
       if (!draftRestoredRef.current) {
         setPreliminaries([]);
       }
@@ -909,7 +909,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     } catch (error: any) {
       console.error('❌ Failed to load master terms:', error);
       console.error('❌ Error details:', error.response?.data || error.message);
-      toast.error('Failed to load terms & conditions');
+      showError('Failed to load terms & conditions');
       if (!draftRestoredRef.current) {
         setTermsConditions([]);
       }
@@ -1293,10 +1293,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           }
         }
 
-        toast.success(editMode ? 'BOQ loaded for editing' : 'BOQ data loaded');
+        showSuccess(editMode ? 'BOQ loaded for editing' : 'BOQ data loaded');
       } catch (error) {
         console.error('Failed to load BOQ data:', error);
-        toast.error('Failed to load BOQ data');
+        showError('Failed to load BOQ data');
       }
     };
 
@@ -1456,11 +1456,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
       // Show success message if sub-items were loaded
       if (subItemsData.sub_items.length > 0) {
-        toast.success(`Loaded ${subItemsData.sub_items.length} sub-item(s) with materials and labour`);
+        showSuccess(`Loaded ${subItemsData.sub_items.length} sub-item(s) with materials and labour`);
       }
     } catch (error) {
       console.error('Failed to load item details:', error);
-      toast.error('Failed to load item details');
+      showError('Failed to load item details');
     } finally {
       setLoadingItemData(prev => ({ ...prev, [itemId]: false }));
     }
@@ -1507,7 +1507,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     setExpandedItems(expandedItems.filter(id => id !== itemId));
 
     setDeletingItemId(null);
-    toast.success(`"${itemName}" deleted successfully`);
+    showSuccess(`"${itemName}" deleted successfully`);
   };
 
   // Drag and drop configuration - Professional implementation
@@ -2069,10 +2069,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           throw new Error(errorData.error || 'Failed to delete preliminary from master database');
         }
 
-        toast.success('Preliminary deleted from master list');
+        showSuccess('Preliminary deleted from master list');
       } catch (error) {
         console.error('Error deleting preliminary:', error);
-        toast.error(error instanceof Error ? error.message : 'Failed to delete preliminary from master database');
+        showError(error instanceof Error ? error.message : 'Failed to delete preliminary from master database');
         return; // Don't remove from UI if backend delete failed
       }
     }
@@ -2110,14 +2110,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
   const saveTermEdit = async (term: TermsConditionsItem) => {
     if (!term.terms_text.trim()) {
-      toast.error('Term text cannot be empty');
+      showError('Term text cannot be empty');
       return;
     }
 
     try {
       if (term.isCustom) {
         // Create new master term
-        toast.loading('Saving term...', { id: 'save-term' });
+        showLoading('Saving term...', { id: 'save-term' });
         const response = await estimatorService.createTermMaster({
           terms_text: term.terms_text.trim()
         });
@@ -2130,29 +2130,29 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               ? { ...t, term_id: newTermId, id: `term-${newTermId}`, isCustom: false }
               : t
           ));
-          toast.success('Term saved successfully', { id: 'save-term' });
+          showSuccess('Term saved successfully', { id: 'save-term' });
         } else {
-          toast.error(response.message || 'Failed to save term', { id: 'save-term' });
+          showError(response.message || 'Failed to save term', { id: 'save-term' });
           return;
         }
       } else if (term.term_id) {
         // Update existing master term
-        toast.loading('Updating term...', { id: 'update-term' });
+        showLoading('Updating term...', { id: 'update-term' });
         const response = await estimatorService.updateTermMaster(term.term_id, {
           terms_text: term.terms_text.trim()
         });
 
         if (response.success) {
-          toast.success('Term updated successfully', { id: 'update-term' });
+          showSuccess('Term updated successfully', { id: 'update-term' });
         } else {
-          toast.error(response.message || 'Failed to update term', { id: 'update-term' });
+          showError(response.message || 'Failed to update term', { id: 'update-term' });
           return;
         }
       }
       setEditingTermId(null);
     } catch (error: any) {
       console.error('Error saving term:', error);
-      toast.error(error.message || 'An error occurred while saving', { id: 'save-term' });
+      showError(error.message || 'An error occurred while saving', { id: 'save-term' });
     }
   };
 
@@ -2164,13 +2164,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     try {
       // If it's a saved term (has term_id), delete from backend
       if (term.term_id) {
-        toast.loading('Deleting term...', { id: 'delete-term' });
+        showLoading('Deleting term...', { id: 'delete-term' });
         const response = await estimatorService.deleteTermMaster(term.term_id);
 
         if (response.success) {
-          toast.success('Term deleted successfully', { id: 'delete-term' });
+          showSuccess('Term deleted successfully', { id: 'delete-term' });
         } else {
-          toast.error(response.message || 'Failed to delete term', { id: 'delete-term' });
+          showError(response.message || 'Failed to delete term', { id: 'delete-term' });
           return;
         }
       }
@@ -2184,7 +2184,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       }
     } catch (error: any) {
       console.error('Error deleting term:', error);
-      toast.error(error.message || 'An error occurred while deleting', { id: 'delete-term' });
+      showError(error.message || 'An error occurred while deleting', { id: 'delete-term' });
     }
   };
 
@@ -2213,10 +2213,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
 
-      toast.success('Template downloaded successfully');
+      showSuccess('Template downloaded successfully');
     } catch (error) {
       console.error('Download error:', error);
-      toast.error('Failed to download template. Please contact support.');
+      showError('Failed to download template. Please contact support.');
     }
   };
 
@@ -2235,25 +2235,25 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     const allowedExtensions = ['xlsx', 'xls'];
     const fileExtension = file.name.split('.').pop()?.toLowerCase();
     if (!fileExtension || !allowedExtensions.includes(fileExtension)) {
-      toast.error('Please upload an Excel file (.xlsx or .xls)');
+      showError('Please upload an Excel file (.xlsx or .xls)');
       return;
     }
 
     // Validate file size (10MB)
     const maxSize = 10 * 1024 * 1024;
     if (file.size > maxSize) {
-      toast.error('File size exceeds 10MB limit');
+      showError('File size exceeds 10MB limit');
       return;
     }
 
     // Validate project and BOQ name
     if (!selectedProjectId) {
-      toast.error('Please select a project first');
+      showError('Please select a project first');
       return;
     }
 
     if (!boqName.trim()) {
-      toast.error('Please enter BOQ name first');
+      showError('Please enter BOQ name first');
       return;
     }
 
@@ -2270,13 +2270,13 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       console.log('Upload result:', result);
 
       if (result.success && result.boq_id) {
-        toast.success(result.message);
+        showSuccess(result.message);
 
         // Show warnings if any
         if (result.warnings && result.warnings.length > 0) {
           setTimeout(() => {
             result.warnings.forEach((warning, index) => {
-              setTimeout(() => toast.warning(warning, { duration: 5000 }), index * 100);
+              setTimeout(() => showWarning(warning, { duration: 5000 }), index * 100);
             });
           }, 500);
         }
@@ -2297,20 +2297,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           errorMessage.forEach((msg, index) => {
             setTimeout(() => {
               if (msg.includes('❌') || msg.includes('⚠️')) {
-                toast.error(msg, { duration: 8000 });
+                showError(msg, { duration: 8000 });
               } else if (msg.trim()) {
-                toast.error(msg, { duration: 6000 });
+                showError(msg, { duration: 6000 });
               }
             }, index * 200);
           });
         } else {
           // Single error
-          toast.error(result.message, { duration: 8000 });
+          showError(result.message, { duration: 8000 });
         }
       }
     } catch (error) {
       console.error('Upload exception:', error);
-      toast.error('Failed to upload BOQ from Excel. Please check your file and try again.');
+      showError('Failed to upload BOQ from Excel. Please check your file and try again.');
     } finally {
       setIsUploadingBulk(false);
       // Reset file input
@@ -2322,24 +2322,24 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
   const handleSubmit = async () => {
     if (!boqName.trim()) {
-      toast.error('Please enter BOQ name');
+      showError('Please enter BOQ name');
       return;
     }
 
     if (!selectedProjectId) {
-      toast.error('Please select a project');
+      showError('Please select a project');
       return;
     }
 
     if (items.length === 0) {
-      toast.error('Please add at least one BOQ item');
+      showError('Please add at least one BOQ item');
       return;
     }
 
     // Validate items
     for (const item of items) {
       if (!item.item_name.trim()) {
-        toast.error('Please fill in all item names');
+        showError('Please fill in all item names');
         return;
       }
 
@@ -2350,7 +2350,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       const hasDirectData = item.materials.length > 0 || item.labour.length > 0;
 
       if (!hasSubItemsWithData && !hasDirectData) {
-        toast.error('Each item must have at least one material or labour entry (either in sub-items or at item level)');
+        showError('Each item must have at least one material or labour entry (either in sub-items or at item level)');
         return;
       }
     }
@@ -2359,7 +2359,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     const customPrelims = preliminaries.filter(p => p.isCustom && p.description?.trim() && !p.prelim_id);
 
     if (customPrelims.length > 0) {
-      toast.info('Saving custom preliminaries...');
+      showInfo('Saving custom preliminaries...');
 
       for (const customPrelim of customPrelims) {
         try {
@@ -2381,14 +2381,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
       // Update state with new prelim_ids
       setPreliminaries([...preliminaries]);
-      toast.success('Custom preliminaries saved to master list');
+      showSuccess('Custom preliminaries saved to master list');
     }
 
     // Save custom terms to master table before submitting BOQ
     const customTerms = termsConditions.filter(t => t.isCustom && t.terms_text?.trim() && !t.term_id);
 
     if (customTerms.length > 0) {
-      toast.info('Saving custom terms...');
+      showInfo('Saving custom terms...');
 
       for (const customTerm of customTerms) {
         try {
@@ -2411,7 +2411,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
 
       // Update state with new term_ids
       setTermsConditions([...termsConditions]);
-      toast.success('Custom terms saved to master list');
+      showSuccess('Custom terms saved to master list');
     }
 
     setIsSubmitting(true);
@@ -2527,7 +2527,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         const result = await estimatorService.revisionBOQ(existingBoqData.boq_id, revisionPayload);
 
         if (result.success) {
-          toast.success(result.message || 'BOQ revision created successfully');
+          showSuccess(result.message || 'BOQ revision created successfully');
 
           // Clear auto-save data on successful revision creation
           clearLocalStorage();
@@ -2538,7 +2538,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           );
 
           if (hasNewImages && result.boq_id) {
-            toast.loading('Uploading new images...', { id: 'upload-images' });
+            showLoading('Uploading new images...', { id: 'upload-images' });
 
             // Re-fetch the new revision BOQ to get the latest sub_item_ids
             const boqDetailsResult = await estimatorService.getBOQById(result.boq_id);
@@ -2570,7 +2570,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           totalUploaded += formSubItem.images.length;
                         } else {
                           totalFailed += formSubItem.images.length;
-                          toast.error(`Failed to upload images for ${formSubItem.sub_item_name}`);
+                          showError(`Failed to upload images for ${formSubItem.sub_item_name}`);
                         }
                       } catch (error) {
                         totalFailed += formSubItem.images?.length || 0;
@@ -2581,11 +2581,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               }
 
               if (totalUploaded > 0) {
-                toast.success(`${totalUploaded} new image(s) uploaded successfully`, { id: 'upload-images' });
+                showSuccess(`${totalUploaded} new image(s) uploaded successfully`, { id: 'upload-images' });
               } else if (totalFailed > 0) {
-                toast.error(`Failed to upload ${totalFailed} image(s)`, { id: 'upload-images' });
+                showError(`Failed to upload ${totalFailed} image(s)`, { id: 'upload-images' });
               } else {
-                toast.dismiss('upload-images');
+                dismissToast('upload-images');
               }
             }
           }
@@ -2596,7 +2596,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           isClosingAfterSubmitRef.current = true;
           onClose();
         } else {
-          toast.error(result.message || 'Failed to create BOQ revision');
+          showError(result.message || 'Failed to create BOQ revision');
         }
       }
       // Edit mode - Update existing BOQ
@@ -2810,7 +2810,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         const result = await response.json();
 
         if (response.ok && result.success) {
-          toast.success(result.message || 'BOQ updated successfully');
+          showSuccess(result.message || 'BOQ updated successfully');
 
           // Clear auto-save data on successful update
           clearLocalStorage();
@@ -2821,7 +2821,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           );
 
           if (hasNewImages) {
-            toast.loading('Uploading new images...', { id: 'upload-images' });
+            showLoading('Uploading new images...', { id: 'upload-images' });
 
             // Re-fetch BOQ to get the latest sub_item_ids
             const boqDetailsResult = await estimatorService.getBOQById(existingBoqData.boq_id);
@@ -2853,7 +2853,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           totalUploaded += formSubItem.images.length;
                         } else {
                           totalFailed += formSubItem.images.length;
-                          toast.error(`Failed to upload images for ${formSubItem.sub_item_name}`);
+                          showError(`Failed to upload images for ${formSubItem.sub_item_name}`);
                         }
                       } catch (error) {
                         totalFailed += formSubItem.images?.length || 0;
@@ -2864,11 +2864,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               }
 
               if (totalUploaded > 0) {
-                toast.success(`${totalUploaded} new image(s) uploaded successfully`, { id: 'upload-images' });
+                showSuccess(`${totalUploaded} new image(s) uploaded successfully`, { id: 'upload-images' });
               } else if (totalFailed > 0) {
-                toast.error(`Failed to upload ${totalFailed} image(s)`, { id: 'upload-images' });
+                showError(`Failed to upload ${totalFailed} image(s)`, { id: 'upload-images' });
               } else {
-                toast.dismiss('upload-images');
+                dismissToast('upload-images');
               }
             }
           }
@@ -2879,7 +2879,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           isClosingAfterSubmitRef.current = true;
           onClose();
         } else {
-          toast.error(result.error || 'Failed to update BOQ');
+          showError(result.error || 'Failed to update BOQ');
         }
       }
       // Use new_purchase endpoint for PM/SE adding extra items
@@ -2929,7 +2929,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         const result = await response.json();
 
         if (response.ok && result.success) {
-          toast.success(result.message || 'Extra items added successfully');
+          showSuccess(result.message || 'Extra items added successfully');
 
           // Clear auto-save data on successful addition
           clearLocalStorage();
@@ -2940,7 +2940,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           isClosingAfterSubmitRef.current = true;
           onClose();
         } else {
-          toast.error(result.error || 'Failed to add extra items');
+          showError(result.error || 'Failed to add extra items');
         }
       } else {
         // Regular BOQ creation for Estimator
@@ -3089,7 +3089,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         const result = await estimatorService.createBOQ(payload);
 
         if (result.success && result.boq_id) {
-          toast.success(result.message);
+          showSuccess(result.message);
 
           // Check for images BEFORE clearing localStorage
           const hasImages = items.some(item =>
@@ -3100,7 +3100,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           clearLocalStorage();
 
           if (hasImages) {
-            toast.loading('Uploading images...', { id: 'upload-images' });
+            showLoading('Uploading images...', { id: 'upload-images' });
             const boqDetailsResult = await estimatorService.getBOQById(result.boq_id);
 
             if (boqDetailsResult.success && boqDetailsResult.data?.existing_purchase?.items) {
@@ -3130,7 +3130,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                           totalUploaded += formSubItem.images.length;
                         } else {
                           totalFailed += formSubItem.images.length;
-                          toast.error(`Failed to upload images for ${formSubItem.sub_item_name}`);
+                          showError(`Failed to upload images for ${formSubItem.sub_item_name}`);
                         }
                       } catch (error) {
                         totalFailed += formSubItem.images?.length || 0;
@@ -3141,14 +3141,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
               }
 
               if (totalUploaded > 0) {
-                toast.success(`${totalUploaded} image(s) uploaded successfully`, { id: 'upload-images' });
+                showSuccess(`${totalUploaded} image(s) uploaded successfully`, { id: 'upload-images' });
               } else if (totalFailed > 0) {
-                toast.error(`Failed to upload ${totalFailed} image(s)`, { id: 'upload-images' });
+                showError(`Failed to upload ${totalFailed} image(s)`, { id: 'upload-images' });
               } else {
-                toast.dismiss('upload-images');
+                dismissToast('upload-images');
               }
             } else {
-              toast.error('BOQ created but images upload failed. Please add images in edit mode.', { id: 'upload-images' });
+              showError('BOQ created but images upload failed. Please add images in edit mode.', { id: 'upload-images' });
             }
           }
 
@@ -3158,11 +3158,11 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           isClosingAfterSubmitRef.current = true;
           onClose();
         } else {
-          toast.error(result.message);
+          showError(result.message);
         }
       }
     } catch (error) {
-      toast.error(isNewPurchase ? 'Failed to add extra items' : 'Failed to create BOQ');
+      showError(isNewPurchase ? 'Failed to add extra items' : 'Failed to create BOQ');
     } finally {
       setIsSubmitting(false);
     }
@@ -4006,9 +4006,9 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               return itm;
                                             }));
 
-                                            toast.success(`${files.length} image(s) added`);
+                                            showSuccess(`${files.length} image(s) added`);
                                           } else {
-                                            toast.error('Please drop only image files');
+                                            showError('Please drop only image files');
                                           }
                                         }}
                                       >
@@ -4048,7 +4048,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 return itm;
                                               }));
 
-                                              toast.success(`${files.length} image(s) added`);
+                                              showSuccess(`${files.length} image(s) added`);
                                             }
                                             e.target.value = '';
                                           }}
@@ -4094,14 +4094,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                     try {
                                                       const response = await estimatorService.deleteSubItemImage(subItemId, imageInfo.filename);
                                                       if (response.success) {
-                                                        toast.success('Image deleted from database');
+                                                        showSuccess('Image deleted from database');
                                                       } else {
-                                                        toast.error('Failed to delete image');
+                                                        showError('Failed to delete image');
                                                         return;
                                                       }
                                                     } catch (error) {
                                                       console.error('Failed to delete image:', error);
-                                                      toast.error('Failed to delete image');
+                                                      showError('Failed to delete image');
                                                       return;
                                                     }
                                                   }
@@ -4136,7 +4136,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                   }
 
                                                   if (!imageInfo?.isExisting) {
-                                                    toast.success('Image removed');
+                                                    showSuccess('Image removed');
                                                   }
                                                 }}
                                                 className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"

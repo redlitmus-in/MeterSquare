@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Purchase, buyerService } from '../services/buyerService';
 import { buyerVendorService, Vendor, VendorProduct } from '../services/buyerVendorService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
 
 interface VendorSelectionModalProps {
@@ -127,7 +127,7 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
       setVendors(response.vendors);
     } catch (error: any) {
       console.error('Error loading vendors:', error);
-      toast.error('Failed to load vendors');
+      showError('Failed to load vendors');
     } finally {
       setLoadingVendors(false);
     }
@@ -201,13 +201,13 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
 
   const handleSelectVendor = () => {
     if (!selectedVendorId) {
-      toast.error('Please select a vendor');
+      showError('Please select a vendor');
       return;
     }
 
     const selectedVendor = vendors.find(v => v.vendor_id === selectedVendorId);
     if (!selectedVendor) {
-      toast.error('Vendor not found');
+      showError('Vendor not found');
       return;
     }
 
@@ -223,12 +223,12 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
         cr_id: purchase.cr_id,
         vendor_id: selectedVendorId!
       });
-      toast.success(response.message || 'Vendor selection sent to TD for approval!');
+      showSuccess(response.message || 'Vendor selection sent to TD for approval!');
       onVendorSelected?.();
       onClose();
     } catch (error: any) {
       console.error('Error selecting vendor:', error);
-      toast.error(error.message || 'Failed to select vendor');
+      showError(error.message || 'Failed to select vendor');
     } finally {
       setIsSelectingVendor(false);
     }
@@ -251,7 +251,7 @@ const VendorSelectionModal: React.FC<VendorSelectionModalProps> = ({
       }
     } catch (error) {
       console.error('Error loading vendor details:', error);
-      toast.error('Failed to load vendor details');
+      showError('Failed to load vendor details');
     } finally {
       setLoadingVendorDetails(false);
     }

@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Search, Package, X, SendHorizontal, ClipboardList, RefreshCw } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { useAutoSync } from '@/hooks/useAutoSync';
@@ -164,12 +164,12 @@ const Store: React.FC = () => {
   // Submit material request
   const submitRequest = async () => {
     if (!selectedItem || requestQuantity <= 0) {
-      toast.error('Please enter a valid quantity');
+      showError('Please enter a valid quantity');
       return;
     }
 
     if (!selectedProjectId) {
-      toast.error('Please select a project');
+      showError('Please select a project');
       return;
     }
 
@@ -196,7 +196,7 @@ const Store: React.FC = () => {
       );
 
       if (response.data) {
-        toast.success(`Request submitted for ${requestQuantity} ${selectedItem.unit} of ${selectedItem.name}`);
+        showSuccess(`Request submitted for ${requestQuantity} ${selectedItem.unit} of ${selectedItem.name}`);
         setIsRequestModalOpen(false);
         setSelectedItem(null);
         // Switch to requests tab to show the new request
@@ -204,7 +204,7 @@ const Store: React.FC = () => {
       }
     } catch (error: any) {
       console.error('Error submitting request:', error);
-      toast.error(error.response?.data?.error || 'Failed to submit request');
+      showError(error.response?.data?.error || 'Failed to submit request');
     } finally {
       setIsSubmitting(false);
     }

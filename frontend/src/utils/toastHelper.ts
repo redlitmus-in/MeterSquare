@@ -10,7 +10,10 @@
  * 2. Incoming notifications from others = Different style (handled by realtimeNotificationHub)
  */
 
-import { toast } from 'sonner';
+import { toast, ExternalToast } from 'sonner';
+
+// Toast options type
+type ToastOptions = string | ExternalToast;
 
 // ============================================
 // ACTION FEEDBACK TOASTS (For your own actions)
@@ -19,33 +22,55 @@ import { toast } from 'sonner';
 /**
  * Show success toast - Use after successful API call
  * @example showSuccess('BOQ approved successfully')
+ * @example showSuccess('BOQ approved', 'Sent to estimator')
+ * @example showSuccess('BOQ approved', { description: 'Sent to estimator', duration: 5000 })
  */
-export const showSuccess = (message: string, description?: string) => {
-  toast.success(message, { description });
+export const showSuccess = (message: string, options?: ToastOptions) => {
+  if (typeof options === 'string') {
+    toast.success(message, { description: options });
+  } else {
+    toast.success(message, options);
+  }
 };
 
 /**
  * Show error toast - Use when API call fails
  * @example showError('Failed to approve BOQ')
+ * @example showError('Failed', 'Please try again')
+ * @example showError('Failed', { description: 'Please try again', duration: 5000 })
  */
-export const showError = (message: string, description?: string) => {
-  toast.error(message, { description });
+export const showError = (message: string, options?: ToastOptions) => {
+  if (typeof options === 'string') {
+    toast.error(message, { description: options });
+  } else {
+    toast.error(message, options);
+  }
 };
 
 /**
  * Show warning toast - Use for validation warnings
  * @example showWarning('Please fill all required fields')
+ * @example showWarning('Warning', 'Some fields are missing')
  */
-export const showWarning = (message: string, description?: string) => {
-  toast.warning(message, { description });
+export const showWarning = (message: string, options?: ToastOptions) => {
+  if (typeof options === 'string') {
+    toast.warning(message, { description: options });
+  } else {
+    toast.warning(message, options);
+  }
 };
 
 /**
  * Show info toast - Use for general information
  * @example showInfo('No projects assigned yet')
+ * @example showInfo('Info', 'You have no new notifications')
  */
-export const showInfo = (message: string, description?: string) => {
-  toast.info(message, { description });
+export const showInfo = (message: string, options?: ToastOptions) => {
+  if (typeof options === 'string') {
+    toast.info(message, { description: options });
+  } else {
+    toast.info(message, options);
+  }
 };
 
 // ============================================
@@ -53,14 +78,10 @@ export const showInfo = (message: string, description?: string) => {
 // ============================================
 
 /**
- * Show loading toast - Returns a promise that resolves when complete
- * @example
- * showLoading(
- *   fetchData(),
- *   { loading: 'Loading...', success: 'Done!', error: 'Failed!' }
- * )
+ * Show loading toast with promise - Returns when promise resolves
+ * @example showLoadingPromise(fetchData(), { loading: 'Loading...', success: 'Done!', error: 'Failed!' })
  */
-export const showLoading = <T>(
+export const showLoadingPromise = <T>(
   promise: Promise<T>,
   messages: {
     loading: string;
@@ -69,6 +90,26 @@ export const showLoading = <T>(
   }
 ) => {
   return toast.promise(promise, messages);
+};
+
+/**
+ * Show loading toast with ID (for manual dismiss)
+ * @example showLoading('Saving...', 'save-id')
+ * @example showLoading('Saving...', { id: 'save-id' })
+ */
+export const showLoading = (message: string, options?: string | { id?: string }) => {
+  if (typeof options === 'string') {
+    return toast.loading(message, { id: options });
+  }
+  return toast.loading(message, options);
+};
+
+/**
+ * Dismiss a toast by ID
+ * @example dismissToast('save-id')
+ */
+export const dismissToast = (id: string) => {
+  toast.dismiss(id);
 };
 
 /**

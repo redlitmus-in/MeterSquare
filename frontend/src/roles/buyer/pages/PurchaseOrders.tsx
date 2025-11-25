@@ -26,7 +26,7 @@ import {
   X,
   MessageSquare
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { useAutoSync } from '@/hooks/useAutoSync';
@@ -150,17 +150,17 @@ const PurchaseOrders: React.FC = () => {
 
   const handleSendWhatsApp = async (purchase: Purchase) => {
     if (!purchase.vendor_phone) {
-      toast.error('Vendor phone number not available');
+      showError('Vendor phone number not available');
       return;
     }
 
     try {
       setSendingWhatsAppId(purchase.cr_id);
       await buyerService.sendVendorWhatsApp(purchase.cr_id, purchase.vendor_phone);
-      toast.success('Purchase order sent via WhatsApp!');
+      showSuccess('Purchase order sent via WhatsApp!');
       refetchPending();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to send WhatsApp');
+      showError(error.message || 'Failed to send WhatsApp');
     } finally {
       setSendingWhatsAppId(null);
     }
@@ -171,13 +171,13 @@ const PurchaseOrders: React.FC = () => {
       setCompletingPurchaseId(crId);
       await buyerService.completePurchase({ cr_id: crId });
 
-      toast.success('Purchase marked as complete successfully!');
+      showSuccess('Purchase marked as complete successfully!');
 
       // Refetch both lists
       refetchPending();
       refetchCompleted();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to complete purchase');
+      showError(error.message || 'Failed to complete purchase');
     } finally {
       setCompletingPurchaseId(null);
     }
@@ -192,7 +192,7 @@ const PurchaseOrders: React.FC = () => {
       const availability = await buyerService.checkStoreAvailability(purchase.cr_id);
       setStoreAvailability(availability);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to check store availability');
+      showError(error.message || 'Failed to check store availability');
       setIsStoreModalOpen(false);
     } finally {
       setCheckingStoreAvailability(false);
@@ -206,7 +206,7 @@ const PurchaseOrders: React.FC = () => {
       setCompletingFromStore(true);
       const result = await buyerService.completeFromStore(selectedPurchase.cr_id);
 
-      toast.success(result.message || 'Material requests sent to M2 Store!');
+      showSuccess(result.message || 'Material requests sent to M2 Store!');
       setIsStoreModalOpen(false);
       setStoreAvailability(null);
       setSelectedPurchase(null);
@@ -214,7 +214,7 @@ const PurchaseOrders: React.FC = () => {
       // Refetch pending list (purchase stays in pending until manually completed)
       refetchPending();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to request from store');
+      showError(error.message || 'Failed to request from store');
     } finally {
       setCompletingFromStore(false);
     }

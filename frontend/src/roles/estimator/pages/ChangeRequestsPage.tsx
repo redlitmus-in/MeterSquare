@@ -29,7 +29,7 @@ import {
   Pencil
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import RejectionReasonModal from '@/components/modals/RejectionReasonModal';
@@ -84,19 +84,19 @@ const ChangeRequestsPage: React.FC = () => {
         setChangeRequests(response.data);
         // Only show success toast on initial load to avoid spam
         if (showToasts && response.data.length > 0) {
-          toast.success(`Loaded ${response.data.length} purchase request(s)`);
+          showSuccess(`Loaded ${response.data.length} purchase request(s)`);
         }
       } else {
         // Only show error toast on initial load to avoid spam
         if (showToasts) {
-          toast.error(response.message || 'Failed to load purchase requests');
+          showError(response.message || 'Failed to load purchase requests');
         }
       }
     } catch (error) {
       console.error('[ChangeRequests] Error loading change requests:', error);
       // Only show error toast on initial load to avoid spam
       if (showToasts) {
-        toast.error('Failed to load purchase requests');
+        showError('Failed to load purchase requests');
       }
     } finally {
       if (initialLoad) {
@@ -128,15 +128,15 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.reject(rejectingCrId, reason);
       if (response.success) {
-        toast.success('Purchase request rejected');
+        showSuccess('Purchase request rejected');
         loadChangeRequests();
         setShowRejectionModal(false);
         setRejectingCrId(null);
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error) {
-      toast.error('Failed to reject purchase request');
+      showError('Failed to reject purchase request');
     }
   };
 
@@ -147,11 +147,11 @@ const ChangeRequestsPage: React.FC = () => {
         setSelectedChangeRequest(response.data);
         setShowDetailsModal(true);
       } else {
-        toast.error(response.message || 'Failed to load details');
+        showError(response.message || 'Failed to load details');
       }
     } catch (error) {
       console.error('Error in handleReview:', error);
-      toast.error('Failed to load purchase request details');
+      showError('Failed to load purchase request details');
     }
   };
 
@@ -184,11 +184,11 @@ const ChangeRequestsPage: React.FC = () => {
         setSelectedChangeRequest(response.data);
         setShowEditModal(true);
       } else {
-        toast.error(response.message || 'Failed to load change request details');
+        showError(response.message || 'Failed to load change request details');
       }
     } catch (error) {
       console.error('Error loading change request for edit:', error);
-      toast.error('Failed to load change request details');
+      showError('Failed to load change request details');
     }
   };
 
@@ -715,7 +715,7 @@ const ChangeRequestsPage: React.FC = () => {
             setShowEditModal(false);
             setSelectedChangeRequest(null);
             loadChangeRequests(true);
-            toast.success('Purchase request updated successfully');
+            showSuccess('Purchase request updated successfully');
           }}
         />
       )}

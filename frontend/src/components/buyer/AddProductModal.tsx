@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { buyerVendorService, VendorProduct } from '@/roles/buyer/services/buyerVendorService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -113,11 +113,11 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
       if (editProduct && editProduct.product_id) {
         // Update existing product
         product = await buyerVendorService.updateVendorProduct(vendorId, editProduct.product_id, formData);
-        toast.success('Product updated successfully');
+        showSuccess('Product updated successfully');
       } else {
         // Add new product
         product = await buyerVendorService.addVendorProduct(vendorId, formData as Omit<VendorProduct, 'product_id' | 'vendor_id'>);
-        toast.success('Product added successfully');
+        showSuccess('Product added successfully');
       }
 
       onProductAdded(product);
@@ -125,7 +125,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
       resetForm();
     } catch (error: any) {
       console.error('Error saving product:', error);
-      toast.error(error.message || 'Failed to save product');
+      showError(error.message || 'Failed to save product');
       setErrors([error.message || 'Failed to save product']);
     } finally {
       setLoading(false);

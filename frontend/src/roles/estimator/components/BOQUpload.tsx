@@ -16,7 +16,7 @@ import {
   FileUp,
   Info
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface BOQUploadProps {
   onUploadSuccess: (boq: BOQ) => void;
@@ -38,7 +38,7 @@ const BOQUpload: React.FC<BOQUploadProps> = ({ onUploadSuccess, onCancel }) => {
         setUploadResponse(null);
       } else {
         setError('Please upload a PDF file');
-        toast.error('Invalid file type. Please upload a PDF file.');
+        showError('Invalid file type. Please upload a PDF file.');
       }
     }
   }, []);
@@ -66,15 +66,15 @@ const BOQUpload: React.FC<BOQUploadProps> = ({ onUploadSuccess, onCancel }) => {
 
       if (response.success && response.data) {
         setUploadResponse(response);
-        toast.success('PDF processed successfully!');
+        showSuccess('PDF processed successfully!');
       } else {
         setError(response.message || 'Failed to process PDF');
-        toast.error(response.message || 'Failed to process PDF');
+        showError(response.message || 'Failed to process PDF');
       }
     } catch (err) {
       console.error('Upload error:', err);
       setError('An error occurred while uploading the file');
-      toast.error('Failed to upload file');
+      showError('Failed to upload file');
     } finally {
       setUploading(false);
     }
@@ -83,7 +83,7 @@ const BOQUpload: React.FC<BOQUploadProps> = ({ onUploadSuccess, onCancel }) => {
   const handleConfirm = () => {
     if (uploadResponse?.data?.extracted) {
       onUploadSuccess(uploadResponse.data.extracted);
-      toast.success('BOQ data confirmed and ready for submission');
+      showSuccess('BOQ data confirmed and ready for submission');
     }
   };
 

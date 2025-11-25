@@ -13,7 +13,7 @@ import {
   ChevronDownIcon,
   ChevronUpIcon
 } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface ExtensionRequest {
   boq_id: number;
@@ -177,12 +177,12 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
 
   const handleSubmit = async () => {
     if (action === 'reject' && !rejectionReason.trim()) {
-      toast.error('Please provide a reason for rejection');
+      showError('Please provide a reason for rejection');
       return;
     }
 
     if (action === 'alter' && alteredDays <= 0) {
-      toast.error('Days must be greater than 0');
+      showError('Days must be greater than 0');
       return;
     }
 
@@ -234,7 +234,7 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
 
       if (response.ok && data.success) {
         if (action === 'approve') {
-          toast.success('Day extension request approved');
+          showSuccess('Day extension request approved');
           // Refresh history to show the newly approved request
           await fetchExtensionHistory(extensionRequest.boq_id);
           onClose();
@@ -242,7 +242,7 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
             onSuccess('approved');
           }
         } else if (action === 'alter') {
-          toast.success(`Extension days edited to ${alteredDays} days. Now please approve or reject the request.`, {
+          showSuccess(`Extension days edited to ${alteredDays} days. Now please approve or reject the request.`, {
             duration: 4000
           });
 
@@ -278,7 +278,7 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
           // alteredDays will be updated by the useEffect
           // Don't call onSuccess for edit - wait for approve/reject
         } else if (action === 'reject') {
-          toast.success('Day extension request rejected');
+          showSuccess('Day extension request rejected');
           // Refresh history to show the newly rejected request
           await fetchExtensionHistory(extensionRequest.boq_id);
           onClose();
@@ -288,28 +288,28 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
         }
       } else {
         if (response.status === 401) {
-          toast.error('Unauthorized. Please login again.');
+          showError('Unauthorized. Please login again.');
         } else if (response.status === 403) {
-          toast.error('You do not have permission to perform this action.');
+          showError('You do not have permission to perform this action.');
         } else if (data.error && (data.error.includes('already approved') || data.error.includes('approved'))) {
-          toast.info('This request has already been approved.');
+          showInfo('This request has already been approved.');
           onClose();
           if (onSuccess) {
             onSuccess('approved'); // Remove from pending list
           }
         } else if (data.error && (data.error.includes('already rejected') || data.error.includes('rejected'))) {
-          toast.info('This request has already been rejected.');
+          showInfo('This request has already been rejected.');
           onClose();
           if (onSuccess) {
             onSuccess('rejected'); // Remove from pending list
           }
         } else {
-          toast.error(data.error || data.message || 'Failed to process request');
+          showError(data.error || data.message || 'Failed to process request');
         }
       }
     } catch (error) {
       console.error('Error processing day extension request:', error);
-      toast.error('Network error. Please check your connection and try again.');
+      showError('Network error. Please check your connection and try again.');
     } finally {
       setIsSubmitting(false);
     }

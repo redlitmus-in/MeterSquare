@@ -8,7 +8,7 @@ import {
   CalculatorIcon,
   ChevronDownIcon
 } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 
@@ -104,7 +104,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
         setProjects(response.data.projects || []);
       } catch (error) {
         console.error('Error fetching projects:', error);
-        toast.error('Failed to load assigned projects');
+        showError('Failed to load assigned projects');
       } finally {
         setLoading(false);
       }
@@ -126,7 +126,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
           setItemOverhead(response.data);
         } catch (error) {
           console.error('Error fetching item overhead:', error);
-          toast.error('Failed to load item overhead data');
+          showError('Failed to load item overhead data');
         } finally {
           setFetchingOverhead(false);
         }
@@ -211,29 +211,29 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
 
     // Validation
     if (!selectedProject || !selectedArea || !selectedBoq || !selectedItem) {
-      toast.error('Please select project, area, BOQ, and item');
+      showError('Please select project, area, BOQ, and item');
       return;
     }
 
     if (subItems.length === 0) {
-      toast.error('Please add at least one material');
+      showError('Please add at least one material');
       return;
     }
 
     // Validate each material
     for (const item of subItems) {
       if (!item.name || item.qty <= 0 || !item.unit || item.unit_price <= 0) {
-        toast.error('Please fill all material fields with valid values');
+        showError('Please fill all material fields with valid values');
         return;
       }
       if (item.is_new && (!item.new_reason || item.new_reason.length < 10)) {
-        toast.error('Please provide a reason (min 10 characters) for new materials');
+        showError('Please provide a reason (min 10 characters) for new materials');
         return;
       }
     }
 
     if (!justification || justification.length < 15) {
-      toast.error('Please provide justification (min 15 characters)');
+      showError('Please provide justification (min 15 characters)');
       return;
     }
 

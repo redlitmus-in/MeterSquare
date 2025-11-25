@@ -13,7 +13,7 @@ import {
   MagnifyingGlassIcon,
   FunnelIcon,
 } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface Project {
   id: number;
@@ -177,10 +177,10 @@ const TeamAssignment: React.FC = () => {
 
   const handleAssignment = () => {
     if (!selectedProject || !selectedPM) {
-      toast.error('Please select a project and Project Manager');
+      showError('Please select a project and Project Manager');
       return;
     }
-    toast.success(`Project Manager assigned successfully to ${selectedProject.name}`);
+    showSuccess(`Project Manager assigned successfully to ${selectedProject.name}`);
     // API call would go here to assign PM to project
     // Site Engineer will be assigned by the PM later
   };

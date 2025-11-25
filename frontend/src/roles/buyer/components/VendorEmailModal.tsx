@@ -21,7 +21,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Purchase, buyerService } from '../services/buyerService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface VendorEmailModalProps {
   purchase: Purchase;
@@ -71,7 +71,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     // Validate file size (max 200MB per file)
     for (const file of newFiles) {
       if (file.size > 200 * 1024 * 1024) {
-        toast.error(`${file.name} is too large. Maximum file size is 200MB.`);
+        showError(`${file.name} is too large. Maximum file size is 200MB.`);
         continue;
       }
       validFiles.push(file);
@@ -129,7 +129,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       setEditedDeliveryReq(`Materials should be delivered to the project site: ${purchase.location}\nPlease coordinate delivery schedule with the buyer\nProper packaging and labeling is required\nInvoice should reference PO Number: CR-${purchase.cr_id}`);
     } catch (error: any) {
       console.error('Error loading email preview:', error);
-      toast.error(error.message || 'Failed to load email preview');
+      showError(error.message || 'Failed to load email preview');
     } finally {
       setIsLoadingPreview(false);
     }
@@ -137,7 +137,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
   const handlePreview = () => {
     if (!vendorEmail || !vendorEmail.trim()) {
-      toast.error('Please enter vendor email address');
+      showError('Please enter vendor email address');
       return;
     }
 
@@ -147,12 +147,12 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
     const invalidEmails = emailList.filter(email => !emailRegex.test(email));
     if (invalidEmails.length > 0) {
-      toast.error(`Invalid email address: ${invalidEmails[0]}`);
+      showError(`Invalid email address: ${invalidEmails[0]}`);
       return;
     }
 
     if (emailList.length === 0) {
-      toast.error('Please enter at least one valid email address');
+      showError('Please enter at least one valid email address');
       return;
     }
 
@@ -166,7 +166,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
       // Upload files first if there are any
       if (attachedFiles.length > 0) {
-        toast.info(`Uploading ${attachedFiles.length} file(s)...`);
+        showInfo(`Uploading ${attachedFiles.length} file(s)...`);
         try {
           const uploadResult = await buyerService.uploadFiles(purchase.cr_id, attachedFiles);
 
@@ -177,20 +177,20 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
             if (successCount === 0) {
               // All files failed
-              toast.error('All file uploads failed. Please try again.');
+              showError('All file uploads failed. Please try again.');
               setIsSendingEmail(false);
               return;
             } else {
               // Some succeeded, some failed
-              toast.warning(`${successCount} file(s) uploaded, ${failedCount} failed`);
+              showWarning(`${successCount} file(s) uploaded, ${failedCount} failed`);
             }
           } else {
             // All files uploaded successfully
-            toast.success(`${uploadResult.uploaded_files.length} file(s) uploaded successfully`);
+            showSuccess(`${uploadResult.uploaded_files.length} file(s) uploaded successfully`);
           }
         } catch (uploadError: any) {
           console.error('Error uploading files:', uploadError);
-          toast.error(uploadError.message || 'Failed to upload files');
+          showError(uploadError.message || 'Failed to upload files');
           setIsSendingEmail(false);
           return;
         }
@@ -213,7 +213,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       const message = emailCount > 1
         ? `Purchase order email sent to ${emailCount} recipients successfully!`
         : 'Purchase order email sent to vendor successfully!';
-      toast.success(message);
+      showSuccess(message);
 
       setTimeout(() => {
         onEmailSent?.();
@@ -221,7 +221,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       }, 2000);
     } catch (error: any) {
       console.error('Error sending email:', error);
-      toast.error(error.message || 'Failed to send email to vendor');
+      showError(error.message || 'Failed to send email to vendor');
     } finally {
       setIsSendingEmail(false);
     }
@@ -233,7 +233,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       const phoneToSend = editedVendorPhone || purchase.vendor_phone;
 
       if (!phoneToSend) {
-        toast.error('Vendor phone number is required for WhatsApp');
+        showError('Vendor phone number is required for WhatsApp');
         return;
       }
 
@@ -241,7 +241,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
       await buyerService.sendVendorWhatsApp(purchase.cr_id, phoneToSend);
 
-      toast.success('Purchase order sent via WhatsApp successfully!');
+      showSuccess('Purchase order sent via WhatsApp successfully!');
 
       // Close modal and refresh
       setTimeout(() => {
@@ -250,7 +250,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       }, 1500);
     } catch (error: any) {
       console.error('Error sending WhatsApp:', error);
-      toast.error(error.message || 'Failed to send WhatsApp message');
+      showError(error.message || 'Failed to send WhatsApp message');
     } finally {
       setIsSendingWhatsApp(false);
     }
@@ -262,7 +262,7 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
       const customHtml = constructEmailHtml();
       setEditedEmailContent(customHtml);
       setIsEditMode(false);
-      toast.success('Changes saved');
+      showSuccess('Changes saved');
     } else {
       // Enter edit mode
       setIsEditMode(true);

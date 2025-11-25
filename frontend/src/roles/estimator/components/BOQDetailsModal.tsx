@@ -27,7 +27,7 @@ import {
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
 import { estimatorService } from '../services/estimatorService';
 import { BOQGetResponse, BOQItemDetailed } from '../types';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { BOQ_CONFIG } from '@/config/boqConfig';
 import BOQHistoryTimeline from './BOQHistoryTimeline';
 import BOQRevisionHistory from './BOQRevisionHistory';
@@ -98,10 +98,10 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
         }
         setExpandedItems(expandedIds);
       } else {
-        toast.error(result.message || 'Failed to fetch BOQ details');
+        showError(result.message || 'Failed to fetch BOQ details');
       }
     } catch (error) {
-      toast.error('Error loading BOQ details');
+      showError('Error loading BOQ details');
     } finally {
       setIsLoading(false);
     }

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ClockIcon } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { boqTrackingService } from '../services/boqTrackingService';
 import { useLabourHoursAutoSync } from '@/hooks/useAutoSync';
 
@@ -85,12 +85,12 @@ export default function RecordLabourHours() {
     e.preventDefault();
 
     if (!selectedBOQ || !selectedItem || !selectedLabour) {
-      toast.error('Please select BOQ, item, and labour');
+      showError('Please select BOQ, item, and labour');
       return;
     }
 
     if (!formData.actual_hours || !formData.actual_rate_per_hour) {
-      toast.error('Please fill in all required fields');
+      showError('Please fill in all required fields');
       return;
     }
 
@@ -112,7 +112,7 @@ export default function RecordLabourHours() {
         notes: formData.notes
       });
 
-      toast.success('Labour hours recorded successfully!');
+      showSuccess('Labour hours recorded successfully!');
 
       // Reset form
       setFormData({
@@ -126,7 +126,7 @@ export default function RecordLabourHours() {
 
     } catch (error: any) {
       console.error('Error recording labour hours:', error);
-      toast.error(error.response?.data?.error || 'Failed to record labour hours');
+      showError(error.response?.data?.error || 'Failed to record labour hours');
     } finally {
       setLoading(false);
     }

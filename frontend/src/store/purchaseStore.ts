@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { apiClient, API_ENDPOINTS } from '@/api/config';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { subscribeToRealtime } from '@/lib/realtimeSubscriptions';
 import { sendPRNotification, requestNotificationPermission } from '@/middleware/notificationMiddleware';
 
@@ -315,7 +315,7 @@ const usePurchaseStore = create<PurchaseStore>()(
               // Only send notifications if user is NOT a site/MEP supervisor (they are creators, not receivers)
               if (!userRole.includes('site') && !userRole.includes('mep') && !userRole.includes('supervisor')) {
                 // Show toast notification
-                toast.info(`${newPurchases.length} new purchase${newPurchases.length > 1 ? 's' : ''} received`);
+                showInfo(`${newPurchases.length} new purchase${newPurchases.length > 1 ? 's' : ''} received`);
 
                 // Send browser notifications for each new purchase
                 newPurchases.forEach(async (purchase) => {
@@ -487,7 +487,7 @@ const usePurchaseStore = create<PurchaseStore>()(
       set((state) => ({
         purchases: [purchase, ...state.purchases]
       }));
-      toast.success(`New purchase PR #${purchase.purchase_id} added`);
+      showSuccess(`New purchase PR #${purchase.purchase_id} added`);
     },
 
     // Remove a purchase
@@ -529,7 +529,7 @@ const usePurchaseStore = create<PurchaseStore>()(
           get().fetchPurchases(userRole || undefined);
 
           // Show notification for new data
-          toast.success('New purchase data available!', {
+          showSuccess('New purchase data available!', {
             duration: 2000,
             position: 'top-right',
           });
@@ -540,7 +540,7 @@ const usePurchaseStore = create<PurchaseStore>()(
           get().fetchPurchases(userRole || undefined);
 
           // Show notification for updated data
-          toast.info('Purchase data updated!', {
+          showInfo('Purchase data updated!', {
             duration: 2000,
             position: 'top-right',
           });

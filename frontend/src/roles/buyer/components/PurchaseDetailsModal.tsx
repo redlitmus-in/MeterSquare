@@ -29,7 +29,7 @@ import {
 import { formatCurrency } from '@/utils/formatters';
 import { Purchase, buyerService } from '../services/buyerService';
 import { buyerVendorService, Vendor } from '../services/buyerVendorService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface PurchaseDetailsModalProps {
   purchase: Purchase;
@@ -65,7 +65,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
       setVendors(response.vendors);
     } catch (error: any) {
       console.error('Error loading vendors:', error);
-      toast.error('Failed to load vendors');
+      showError('Failed to load vendors');
     } finally {
       setLoadingVendors(false);
     }
@@ -73,7 +73,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
 
   const handleSelectVendor = async () => {
     if (!selectedVendorId) {
-      toast.error('Please select a vendor');
+      showError('Please select a vendor');
       return;
     }
 
@@ -83,12 +83,12 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
         cr_id: purchase.cr_id,
         vendor_id: selectedVendorId
       });
-      toast.success('Vendor selected successfully! Waiting for TD approval.');
+      showSuccess('Vendor selected successfully! Waiting for TD approval.');
       onVendorSelected?.();
       onClose();
     } catch (error: any) {
       console.error('Error selecting vendor:', error);
-      toast.error(error.message || 'Failed to select vendor');
+      showError(error.message || 'Failed to select vendor');
     } finally {
       setIsSelectingVendor(false);
     }

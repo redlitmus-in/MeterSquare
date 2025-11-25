@@ -39,7 +39,7 @@ import { useNotificationStore } from '@/store/notificationStore';
 import { NotificationData } from '@/services/notificationService';
 import { sanitizeNotification, sanitizeText } from '@/utils/sanitizer';
 import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 const NotificationsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -122,7 +122,7 @@ const NotificationsPage: React.FC = () => {
         markAsRead(notification.id);
       } catch (error) {
         console.error('Navigation error:', error);
-        toast.error('Failed to navigate to the requested page');
+        showError('Failed to navigate to the requested page');
       }
     }
   }, [markAsRead, navigate, location.pathname]);
@@ -132,9 +132,9 @@ const NotificationsPage: React.FC = () => {
     setIsRefreshing(true);
     try {
       // Trigger notification sync/refresh logic here
-      toast.success('Notifications refreshed');
+      showSuccess('Notifications refreshed');
     } catch (error) {
-      toast.error('Failed to refresh notifications');
+      showError('Failed to refresh notifications');
     } finally {
       setIsRefreshing(false);
     }
@@ -144,13 +144,13 @@ const NotificationsPage: React.FC = () => {
   const handleMarkSelectedAsRead = () => {
     selectedNotifications.forEach(id => markAsRead(id));
     setSelectedNotifications([]);
-    toast.success(`Marked ${selectedNotifications.length} notifications as read`);
+    showSuccess(`Marked ${selectedNotifications.length} notifications as read`);
   };
 
   const handleDeleteSelected = () => {
     selectedNotifications.forEach(id => deleteNotification(id));
     setSelectedNotifications([]);
-    toast.success(`Deleted ${selectedNotifications.length} notifications`);
+    showSuccess(`Deleted ${selectedNotifications.length} notifications`);
   };
 
   const toggleNotificationSelection = (id: string) => {
@@ -560,7 +560,7 @@ const NotificationsPage: React.FC = () => {
             onClick={() => {
               if (window.confirm('Are you sure you want to clear all notifications?')) {
                 clearAll();
-                toast.success('All notifications cleared');
+                showSuccess('All notifications cleared');
               }
             }}
             variant="destructive"

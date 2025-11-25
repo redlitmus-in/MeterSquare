@@ -1,7 +1,7 @@
 import { useQuery, useMutation, UseQueryOptions, UseMutationOptions } from '@tanstack/react-query';
 import { apiWrapper } from '@/api/config';
 import { CACHE_TIMES, queryClient, invalidateQueries } from '@/lib/queryClient';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 // Types for API responses
 export type ApiError = {
@@ -72,7 +72,7 @@ export function useApiQuery<TData = any>(
                        error?.response?.data?.message ||
                        error?.message ||
                        'Failed to fetch data';
-        toast.error(message);
+        showError(message);
       }
     },
     ...queryOptions,
@@ -122,7 +122,7 @@ export function useApiMutation<TData = any, TVariables = any>(
     onSuccess: async (data, variables, context) => {
       // Show success toast
       if (showSuccessToast) {
-        toast.success(successMessage || 'Operation successful');
+        showSuccess(successMessage || 'Operation successful');
       }
 
       // Invalidate and refetch queries
@@ -144,7 +144,7 @@ export function useApiMutation<TData = any, TVariables = any>(
                        error?.response?.data?.message ||
                        error?.message ||
                        'Operation failed';
-        toast.error(message);
+        showError(message);
       }
 
       // Rollback optimistic update on error

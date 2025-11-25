@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Task, TaskCreate, TaskUpdate, TaskStatus, Priority } from '@/types';
 import { apiWrapper, API_ENDPOINTS } from '@/api/config';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface TaskState {
   tasks: Task[];
@@ -49,7 +49,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
     }
   },
 
@@ -74,7 +74,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
     }
   },
 
@@ -97,7 +97,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
     }
   },
 
@@ -116,14 +116,14 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         error: null,
       }));
 
-      toast.success('Task created successfully!');
+      showSuccess('Task created successfully!');
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || 'Failed to create task';
       set({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
       throw error;
     }
   },
@@ -145,14 +145,14 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         error: null,
       }));
 
-      toast.success('Task updated successfully!');
+      showSuccess('Task updated successfully!');
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || 'Failed to update task';
       set({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
       throw error;
     }
   },
@@ -171,14 +171,14 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         error: null,
       }));
 
-      toast.success('Task deleted successfully!');
+      showSuccess('Task deleted successfully!');
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || 'Failed to delete task';
       set({
         error: errorMessage,
         isLoading: false,
       });
-      toast.error(errorMessage);
+      showError(errorMessage);
       throw error;
     }
   },

@@ -12,7 +12,7 @@ import {
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
 import { useAuthStore } from '@/store/authStore';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface DashboardStats {
@@ -84,7 +84,7 @@ const BuyerDashboard: React.FC = () => {
       }
     } catch (error) {
       console.error('Error loading dashboard stats:', error);
-      toast.error('Failed to load dashboard statistics');
+      showError('Failed to load dashboard statistics');
     } finally {
       setLoading(false);
     }

@@ -16,7 +16,7 @@ import { buyerVendorService, Vendor, VendorProduct } from '@/roles/buyer/service
 import AddVendorModal from '@/components/buyer/AddVendorModal';
 import AddProductModal from '@/components/buyer/AddProductModal';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
 import { getRoleSlug } from '@/utils/roleRouting';
 
@@ -90,7 +90,7 @@ const VendorDetails: React.FC = () => {
       setProducts(vendorData.products || []);
     } catch (error: any) {
       console.error('Error loading vendor details:', error);
-      toast.error(error.message || 'Failed to load vendor details');
+      showError(error.message || 'Failed to load vendor details');
       navigate(vendorsPath);
     } finally {
       setLoading(false);
@@ -131,11 +131,11 @@ const VendorDetails: React.FC = () => {
 
     try {
       await buyerVendorService.deleteVendorProduct(parseInt(vendorId), product.product_id);
-      toast.success('Product deleted successfully');
+      showSuccess('Product deleted successfully');
       loadVendorDetails();
     } catch (error: any) {
       console.error('Error deleting product:', error);
-      toast.error(error.message || 'Failed to delete product');
+      showError(error.message || 'Failed to delete product');
     }
   };
 
@@ -150,11 +150,11 @@ const VendorDetails: React.FC = () => {
 
     try {
       await buyerVendorService.deleteVendor(parseInt(vendorId));
-      toast.success('Vendor deleted successfully');
+      showSuccess('Vendor deleted successfully');
       navigate(vendorsPath);
     } catch (error: any) {
       console.error('Error deleting vendor:', error);
-      toast.error(error.message || 'Failed to delete vendor');
+      showError(error.message || 'Failed to delete vendor');
     }
   };
 

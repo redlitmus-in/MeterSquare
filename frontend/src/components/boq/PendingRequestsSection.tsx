@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Clock, Package, Eye, Send, CheckCircle, XCircle } from 'lucide-react';
 import { ChangeRequestItem, changeRequestService } from '@/services/changeRequestService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
 import { formatCurrency } from '@/utils/formatters';
 import { isSiteEngineer, isProjectManager, canSendForReview } from '@/utils/roleHelpers';
@@ -50,14 +50,14 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
       const response = await changeRequestService.sendForReview(crId);
 
       if (response.success) {
-        toast.success(response.message || `Change request sent for review`);
+        showSuccess(response.message || `Change request sent for review`);
         onStatusUpdate?.();
       } else {
-        toast.error(response.message || 'Failed to send request');
+        showError(response.message || 'Failed to send request');
       }
     } catch (error) {
       console.error('Error sending request:', error);
-      toast.error('Failed to send request for review');
+      showError('Failed to send request for review');
     } finally {
       setSendingCrId(null);
     }
@@ -68,14 +68,14 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
     try {
       const response = await changeRequestService.approve(crId, 'Approved by Project Manager');
       if (response.success) {
-        toast.success('Change request approved successfully');
+        showSuccess('Change request approved successfully');
         onStatusUpdate?.();
       } else {
-        toast.error(response.message || 'Failed to approve request');
+        showError(response.message || 'Failed to approve request');
       }
     } catch (error) {
       console.error('Error approving request:', error);
-      toast.error('Failed to approve request');
+      showError('Failed to approve request');
     } finally {
       setApprovingCrId(null);
     }
@@ -84,7 +84,7 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
   const handleReject = async (crId: number) => {
     const reason = prompt('Please provide a reason for rejection:');
     if (!reason || reason.trim() === '') {
-      toast.error('Rejection reason is required');
+      showError('Rejection reason is required');
       return;
     }
 
@@ -92,14 +92,14 @@ const PendingRequestsSection: React.FC<PendingRequestsSectionProps> = ({
     try {
       const response = await changeRequestService.reject(crId, reason);
       if (response.success) {
-        toast.success('Change request rejected');
+        showSuccess('Change request rejected');
         onStatusUpdate?.();
       } else {
-        toast.error(response.message || 'Failed to reject request');
+        showError(response.message || 'Failed to reject request');
       }
     } catch (error) {
       console.error('Error rejecting request:', error);
-      toast.error('Failed to reject request');
+      showError('Failed to reject request');
     } finally {
       setRejectingCrId(null);
     }

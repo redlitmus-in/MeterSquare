@@ -34,7 +34,7 @@ import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { estimatorService } from '../services/estimatorService';
 import { BOQ, BOQFilter, BOQStatus } from '../types';
-import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { showSuccess, showError, showWarning, showInfo, showLoading, dismissToast } from '@/utils/toastHelper';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 import {
   Upload,
@@ -988,7 +988,7 @@ const EstimatorHub: React.FC = () => {
       const formatName = format === 'excel' ? 'Excel' : 'PDF';
       const typeName = isInternal ? 'Internal' : 'Client';
 
-      toast.loading(`Generating ${typeName} ${formatName} file...`);
+      showLoading(`Generating ${typeName} ${formatName} file...`);
 
       // Use backend API for both Excel and PDF generation (ensures data consistency)
       if (format === 'excel') {
@@ -1005,11 +1005,11 @@ const EstimatorHub: React.FC = () => {
         }
       }
 
-      toast.dismiss();
+      dismissToast();
       showSuccess(`${typeName} BOQ downloaded successfully as ${formatName}`);
       setShowFormatModal(false);
     } catch (error) {
-      toast.dismiss();
+      dismissToast();
       showError('Failed to download BOQ');
       console.error('Download error:', error);
     }

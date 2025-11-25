@@ -34,7 +34,7 @@ import {
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { buyerService, Purchase } from '@/roles/buyer/services/buyerService';
 import { buyerVendorService, Vendor, VendorProduct } from '@/roles/buyer/services/buyerVendorService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import ChangeRequestDetailsModal from '@/components/modals/ChangeRequestDetailsModal';
 import EditChangeRequestModal from '@/components/modals/EditChangeRequestModal';
@@ -104,14 +104,14 @@ const ChangeRequestsPage: React.FC = () => {
       } else {
         // Only show error toast on initial load to avoid spam
         if (showLoadingSpinner) {
-          toast.error(response.message || 'Failed to load change requests');
+          showError(response.message || 'Failed to load change requests');
         }
       }
     } catch (error) {
       console.error('Error loading change requests:', error);
       // Only show error toast on initial load to avoid spam
       if (showLoadingSpinner) {
-        toast.error('Failed to load change requests');
+        showError('Failed to load change requests');
       }
     } finally {
       if (showLoadingSpinner) {
@@ -212,15 +212,15 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.reject(rejectingCrId, reason);
       if (response.success) {
-        toast.success('Change request rejected');
+        showSuccess('Change request rejected');
         loadChangeRequests();
         setShowRejectionModal(false);
         setRejectingCrId(null);
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error) {
-      toast.error('Failed to reject change request');
+      showError('Failed to reject change request');
     }
   };
 
@@ -231,11 +231,11 @@ const ChangeRequestsPage: React.FC = () => {
         setSelectedChangeRequest(response.data);
         setShowDetailsModal(true);
       } else {
-        toast.error(response.message || 'Failed to load details');
+        showError(response.message || 'Failed to load details');
       }
     } catch (error) {
       console.error('Error in handleReview:', error);
-      toast.error('Failed to load change request details');
+      showError('Failed to load change request details');
     }
   };
 
@@ -246,11 +246,11 @@ const ChangeRequestsPage: React.FC = () => {
         setSelectedChangeRequest(response.data);
         setShowEditModal(true);
       } else {
-        toast.error(response.message || 'Failed to load details');
+        showError(response.message || 'Failed to load details');
       }
     } catch (error) {
       console.error('Error in handleEdit:', error);
-      toast.error('Failed to load change request details');
+      showError('Failed to load change request details');
     }
   };
 
@@ -380,7 +380,7 @@ const ChangeRequestsPage: React.FC = () => {
         throw new Error(data.error || 'Failed to approve vendor');
       }
 
-      toast.success('Vendor selection approved successfully! Buyer has been notified.');
+      showSuccess('Vendor selection approved successfully! Buyer has been notified.');
 
       // Reload data from database to get the latest state
       await Promise.all([
@@ -393,7 +393,7 @@ const ChangeRequestsPage: React.FC = () => {
       setApprovedSubTab('vendor_approved');
     } catch (error: any) {
       console.error('Error approving vendor:', error);
-      toast.error(error.message || 'Failed to approve vendor');
+      showError(error.message || 'Failed to approve vendor');
     } finally {
       setApprovingVendorId(null);
     }
@@ -406,11 +406,11 @@ const ChangeRequestsPage: React.FC = () => {
         setSelectedChangeRequest(response.data);
         setShowDetailsModal(true);
       } else {
-        toast.error(response.message || 'Failed to load details');
+        showError(response.message || 'Failed to load details');
       }
     } catch (error) {
       console.error('Error loading vendor approval details:', error);
-      toast.error('Failed to load change request details');
+      showError('Failed to load change request details');
     }
   };
 
@@ -430,7 +430,7 @@ const ChangeRequestsPage: React.FC = () => {
         setVendorProducts(products);
       } catch (error) {
         console.error('Error loading vendor details:', error);
-        toast.error('Failed to load vendor details');
+        showError('Failed to load vendor details');
       } finally {
         setLoadingVendorDetails(false);
       }
@@ -1382,7 +1382,7 @@ const ChangeRequestsPage: React.FC = () => {
             setShowVendorSelectionModal(false);
             loadVendorApprovals();
             loadChangeRequests();
-            toast.success('Vendor selection updated!');
+            showSuccess('Vendor selection updated!');
           }}
         />
       )}

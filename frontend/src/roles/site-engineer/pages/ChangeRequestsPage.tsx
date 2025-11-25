@@ -9,7 +9,7 @@ import {
   ExclamationTriangleIcon,
   EyeIcon
 } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import ExtraSubItemsForm from '@/components/change-requests/ExtraSubItemsForm';
@@ -66,12 +66,12 @@ const ChangeRequestsPage: React.FC = () => {
         );
       }
 
-      toast.success('Change request submitted successfully');
+      showSuccess('Change request submitted successfully');
       setShowForm(false);
       refetch(); // Trigger background refresh
     } catch (error: any) {
       console.error('Error submitting change request:', error);
-      toast.error(error.response?.data?.error || 'Failed to submit change request');
+      showError(error.response?.data?.error || 'Failed to submit change request');
     }
   };
 

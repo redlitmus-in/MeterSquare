@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, CheckCircle, User } from 'lucide-react';
 import { changeRequestService } from '@/services/changeRequestService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 interface Buyer {
@@ -61,10 +61,10 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
           setSelectedBuyerId(response.buyers[0].user_id);
         }
       } else {
-        toast.error(response.message || 'Failed to load buyers');
+        showError(response.message || 'Failed to load buyers');
       }
     } catch (error) {
-      toast.error('Failed to load buyers');
+      showError('Failed to load buyers');
     } finally {
       setFetchingBuyers(false);
     }
@@ -72,7 +72,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
 
   const handleApprove = async () => {
     if (!selectedBuyerId) {
-      toast.error('Please select a buyer');
+      showError('Please select a buyer');
       return;
     }
 
@@ -94,14 +94,14 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
       }
 
       if (response.success) {
-        toast.success(response.message || 'Request approved and assigned to buyer');
+        showSuccess(response.message || 'Request approved and assigned to buyer');
         onSuccess();
         onClose();
       } else {
-        toast.error(response.message || 'Failed to approve request');
+        showError(response.message || 'Failed to approve request');
       }
     } catch (error) {
-      toast.error('Failed to approve request');
+      showError('Failed to approve request');
     } finally {
       setLoading(false);
     }

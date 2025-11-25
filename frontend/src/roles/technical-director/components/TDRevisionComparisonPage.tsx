@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Search, TrendingUp, TrendingDown, CheckCircle, XCircle, Eye, Clock, Calculator, Info, Image as ImageIcon, FileCheck } from 'lucide-react';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import InternalRevisionTimeline from '@/roles/estimator/components/InternalRevisionTimeline';
@@ -238,7 +238,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
       }
     } catch (error) {
       console.error('Error loading revision data:', error);
-      toast.error('Failed to load revision data');
+      showError('Failed to load revision data');
     } finally {
       setIsLoading(false);
     }

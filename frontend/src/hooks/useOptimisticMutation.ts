@@ -26,7 +26,7 @@
  */
 
 import { useMutation, useQueryClient, UseMutationOptions } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface OptimisticMutationOptions<TData = any, TVariables = any, TContext = any> {
   /**
@@ -128,7 +128,7 @@ export function useOptimisticMutation<TData = any, TVariables = any>({
 
       // Show success message
       if (successMessage) {
-        toast.success(successMessage);
+        showSuccess(successMessage);
       }
 
       // Invalidate related queries to ensure data is fresh
@@ -158,7 +158,7 @@ export function useOptimisticMutation<TData = any, TVariables = any>({
 
       // Show error message
       const message = error?.response?.data?.message || error?.message || errorMessage;
-      toast.error(message);
+      showError(message);
 
       // Call custom error callback
       if (onError) {

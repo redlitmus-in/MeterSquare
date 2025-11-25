@@ -1,4 +1,5 @@
 import { toast } from 'sonner';
+import { showSuccess, showError } from '@/utils/toastHelper';
 import {
   getSecureUserData,
   isValidInternalUrl,
@@ -175,10 +176,10 @@ class NotificationService {
           debug.info('Notification permission granted');
 
           // Show toast only (removed welcome notification to avoid persistent display)
-          toast.success('Notifications enabled! You will receive real-time updates.');
+          showSuccess('Notifications enabled! You will receive real-time updates.');
         } else if (permission === 'denied') {
           debug.warn('Notification permission denied');
-          toast.error('Notifications blocked. You can enable them in browser settings.');
+          showError('Notifications blocked. You can enable them in browser settings.');
         }
 
         return permission;
@@ -318,7 +319,7 @@ class NotificationService {
     await this.sendBrowserNotification(notification);
 
     // Show toast notification
-    toast.success(`Email sent to ${emailData.recipient}`, {
+    showSuccess(`Email sent to ${emailData.recipient}`, {
       description: emailData.subject,
       duration: getToastDuration('default')
     });

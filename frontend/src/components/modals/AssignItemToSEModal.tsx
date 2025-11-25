@@ -15,7 +15,7 @@ import {
   Mail,
   Loader2,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { getAvailableSiteEngineers, assignItemsToSE } from '@/services/boqAssignmentService';
 import { apiClient } from '@/api/config';
 import { projectManagerService } from '@/roles/project-manager/services/projectManagerService';
@@ -209,7 +209,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
       const engineers = await getAvailableSiteEngineers();
       setSiteEngineers(engineers);
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to load site engineers');
+      showError(error.response?.data?.message || 'Failed to load site engineers');
     } finally {
       setLoading(false);
     }
@@ -266,7 +266,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
       setExistingAssignments(assignments);
     } catch (error: any) {
       console.error('❌ Failed to load BOQ items:', error);
-      toast.error('Failed to load BOQ items');
+      showError('Failed to load BOQ items');
     } finally {
       setLoadingItems(false);
     }
@@ -274,12 +274,12 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
 
   const handleAssignment = async () => {
     if (!selectedSE) {
-      toast.error('Please select a Site Engineer');
+      showError('Please select a Site Engineer');
       return;
     }
 
     if (selectedItemIndices.length === 0) {
-      toast.error('Please select at least one item to assign');
+      showError('Please select at least one item to assign');
       return;
     }
 
@@ -297,7 +297,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
       });
       setExistingAssignments(newAssignments);
 
-      toast.success(`Successfully assigned ${selectedItemIndices.length} item(s) to ${selectedSE.full_name || selectedSE.sitesupervisor_name}`);
+      showSuccess(`Successfully assigned ${selectedItemIndices.length} item(s) to ${selectedSE.full_name || selectedSE.sitesupervisor_name}`);
 
       // Check if there are any unassigned items remaining
       const allIndices = initialSelectedItems.length > 0
@@ -308,7 +308,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
       // If all items are now assigned, switch to the assigned tab
       if (remainingUnassigned.length === 0) {
         setItemsViewTab('assigned');
-        toast.info('All items have been assigned. Switched to Assigned tab.');
+        showInfo('All items have been assigned. Switched to Assigned tab.');
       }
 
       // Clear selection
@@ -318,7 +318,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
       onSuccess();
       // Don't close the modal - keep it open to show the assigned tab
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to assign items');
+      showError(error.response?.data?.message || 'Failed to assign items');
     } finally {
       setAssigning(false);
     }
@@ -347,17 +347,17 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
   // Validation helper
   const validateSEForm = useCallback((form: { full_name: string; email: string; phone: string }) => {
     if (!form.full_name || !form.email || !form.phone) {
-      toast.error('Please fill in all fields');
+      showError('Please fill in all fields');
       return false;
     }
 
     if (!EMAIL_REGEX.test(form.email)) {
-      toast.error('Please enter a valid email address');
+      showError('Please enter a valid email address');
       return false;
     }
 
     if (form.phone.length < MIN_PHONE_LENGTH) {
-      toast.error(`Phone number must be at least ${MIN_PHONE_LENGTH} digits`);
+      showError(`Phone number must be at least ${MIN_PHONE_LENGTH} digits`);
       return false;
     }
 
@@ -370,7 +370,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
     setCreating(true);
     try {
       const response = await projectManagerService.createSiteSupervisor(newSEForm);
-      toast.success('Site Engineer created successfully');
+      showSuccess('Site Engineer created successfully');
 
       setNewSEForm({ full_name: '', email: '', phone: '' });
       await fetchSiteEngineers();
@@ -381,7 +381,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
         setSelectedSE(newSE);
       }
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to create Site Engineer');
+      showError(error.response?.data?.message || 'Failed to create Site Engineer');
     } finally {
       setCreating(false);
     }
@@ -402,7 +402,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
     setUpdating(true);
     try {
       await projectManagerService.updateSiteSupervisor(editingSE.user_id, editForm);
-      toast.success('Site Engineer updated successfully');
+      showSuccess('Site Engineer updated successfully');
 
       setEditingSE(null);
       await fetchSiteEngineers();
@@ -416,7 +416,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
         });
       }
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to update Site Engineer');
+      showError(error.response?.data?.message || 'Failed to update Site Engineer');
     } finally {
       setUpdating(false);
     }
@@ -428,7 +428,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
 
     try {
       await projectManagerService.deleteSiteSupervisor(se.user_id);
-      toast.success('Site Engineer deleted successfully');
+      showSuccess('Site Engineer deleted successfully');
 
       await fetchSiteEngineers();
 
@@ -436,7 +436,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
         setSelectedSE(null);
       }
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to delete Site Engineer');
+      showError(error.response?.data?.message || 'Failed to delete Site Engineer');
     }
   };
 

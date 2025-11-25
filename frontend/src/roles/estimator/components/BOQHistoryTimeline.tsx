@@ -19,7 +19,7 @@ import {
   TruckIcon
 } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import DayExtensionApprovalModal from '@/roles/technical-director/components/DayExtensionApprovalModal';
 
 interface BOQHistoryTimelineProps {
@@ -204,11 +204,11 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataCh
 
         setHistory(transformedHistory);
       } else {
-        toast.error(result.message || 'Failed to load BOQ history');
+        showError(result.message || 'Failed to load BOQ history');
       }
     } catch (error) {
       console.error('Error loading BOQ history:', error);
-      toast.error('Failed to load history');
+      showError('Failed to load history');
     } finally {
       setIsLoading(false);
     }

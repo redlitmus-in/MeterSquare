@@ -11,7 +11,7 @@ import {
   ChevronDownIcon,
   ChevronUpIcon
 } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface DayExtensionRequestModalProps {
   isOpen: boolean;
@@ -121,25 +121,25 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
   const handleSubmit = async () => {
     // Check if there are pending requests
     if (hasPendingRequest) {
-      toast.error(`Cannot create new request. You have ${pendingRequestCount} pending request${pendingRequestCount > 1 ? 's' : ''} awaiting TD approval.`);
+      showError(`Cannot create new request. You have ${pendingRequestCount} pending request${pendingRequestCount > 1 ? 's' : ''} awaiting TD approval.`);
       return;
     }
 
     // Validation
     if (additionalDays <= 0) {
-      toast.error('Additional days must be greater than 0');
+      showError('Additional days must be greater than 0');
       return;
     }
 
     if (!reason.trim()) {
-      toast.error('Please provide a reason for the extension');
+      showError('Please provide a reason for the extension');
       return;
     }
 
     // Check if token exists
     const token = localStorage.getItem('access_token') || localStorage.getItem('token');
     if (!token) {
-      toast.error('Authentication token not found. Please login again.');
+      showError('Authentication token not found. Please login again.');
       return;
     }
 
@@ -162,7 +162,7 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
       const data = await response.json();
 
       if (response.ok && data.success) {
-        toast.success('Day extension request sent to Technical Director');
+        showSuccess('Day extension request sent to Technical Director');
         // Reset form
         setAdditionalDays(1);
         setReason('');
@@ -175,16 +175,16 @@ const DayExtensionRequestModal: React.FC<DayExtensionRequestModalProps> = ({
       } else {
         // Handle specific error messages
         if (response.status === 401) {
-          toast.error('Unauthorized. Please login again.');
+          showError('Unauthorized. Please login again.');
         } else if (response.status === 403) {
-          toast.error('You do not have permission to perform this action.');
+          showError('You do not have permission to perform this action.');
         } else {
-          toast.error(data.error || data.message || 'Failed to submit day extension request');
+          showError(data.error || data.message || 'Failed to submit day extension request');
         }
       }
     } catch (error) {
       console.error('Error submitting day extension request:', error);
-      toast.error('Network error. Please check your connection and try again.');
+      showError('Network error. Please check your connection and try again.');
     } finally {
       setIsSubmitting(false);
     }

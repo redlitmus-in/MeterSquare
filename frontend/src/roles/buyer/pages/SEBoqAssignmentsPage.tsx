@@ -11,7 +11,7 @@ import {
   DocumentTextIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import VendorSelectionModal from '../components/VendorSelectionModal';
 import { BOQAssignment, getSEBoqAssignments, selectVendorForSEBoq, completeSEBoqPurchase } from '@/services/boqAssignmentService';
@@ -39,7 +39,7 @@ const SEBoqAssignmentsPage: React.FC = () => {
       const data = await getSEBoqAssignments();
       setAssignments(data);
     } catch (error) {
-      toast.error('Failed to load SE BOQ assignments');
+      showError('Failed to load SE BOQ assignments');
       console.error(error);
     } finally {
       setLoading(false);
@@ -52,14 +52,14 @@ const SEBoqAssignmentsPage: React.FC = () => {
 
     try {
       await selectVendorForSEBoq(selectedAssignment.assignment_id, vendorId);
-      toast.success('Vendor selected. Awaiting TD approval.');
+      showSuccess('Vendor selected. Awaiting TD approval.');
       setShowVendorModal(false);
       setSelectedAssignment(null);
       // Silent refresh without loading spinner
       fetchAssignments(false);
     } catch (error: any) {
       const errorMessage = error?.response?.data?.error || 'Failed to select vendor';
-      toast.error(errorMessage);
+      showError(errorMessage);
       console.error(error);
     }
   };
@@ -67,12 +67,12 @@ const SEBoqAssignmentsPage: React.FC = () => {
   const handleCompletePurchase = async (assignmentId: number) => {
     try {
       await completeSEBoqPurchase(assignmentId);
-      toast.success('Purchase completed successfully');
+      showSuccess('Purchase completed successfully');
       // Silent refresh without loading spinner
       fetchAssignments(false);
     } catch (error: any) {
       const errorMessage = error?.response?.data?.error || 'Failed to complete purchase';
-      toast.error(errorMessage);
+      showError(errorMessage);
       console.error(error);
     }
   };

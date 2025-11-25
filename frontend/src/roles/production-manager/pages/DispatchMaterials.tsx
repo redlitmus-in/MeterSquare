@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Send, FileText, Package, CheckCircle, TruckIcon, Calendar, RefreshCw, AlertCircle, X, AlertTriangle, BoxIcon } from 'lucide-react';
 import { inventoryService, InternalMaterialRequest, InventoryMaterial } from '../services/inventoryService';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface AvailabilityInfo {
   available: boolean;
@@ -43,7 +43,7 @@ const DispatchMaterials: React.FC = () => {
       setMaterials(materialsData || []);
     } catch (error) {
       console.error('Error fetching data:', error);
-      toast.error('Failed to fetch data');
+      showError('Failed to fetch data');
     } finally {
       setLoading(false);
     }
@@ -197,13 +197,13 @@ const DispatchMaterials: React.FC = () => {
       await inventoryService.approveInternalRequest(selectedRequest.request_id!, {
         inventory_material_id: selectedMaterialId
       });
-      toast.success('Request approved successfully! Stock has been allocated.');
+      showSuccess('Request approved successfully! Stock has been allocated.');
       setShowApprovalModal(false);
       setSelectedRequest(null);
       fetchData();
     } catch (error: any) {
       console.error('Error approving request:', error);
-      toast.error(error.message || 'Failed to approve request');
+      showError(error.message || 'Failed to approve request');
     } finally {
       setDispatching(null);
     }
@@ -215,11 +215,11 @@ const DispatchMaterials: React.FC = () => {
     setDispatching(requestId);
     try {
       await inventoryService.dispatchMaterial(requestId);
-      toast.success('Material dispatched successfully!');
+      showSuccess('Material dispatched successfully!');
       fetchData();
     } catch (error: any) {
       console.error('Error dispatching material:', error);
-      toast.error(error.message || 'Failed to dispatch material');
+      showError(error.message || 'Failed to dispatch material');
     } finally {
       setDispatching(null);
     }
@@ -231,11 +231,11 @@ const DispatchMaterials: React.FC = () => {
     setDispatching(requestId);
     try {
       await inventoryService.issueMaterial(requestId);
-      toast.success('Material delivery confirmed!');
+      showSuccess('Material delivery confirmed!');
       fetchData();
     } catch (error: any) {
       console.error('Error fulfilling request:', error);
-      toast.error(error.message || 'Failed to confirm delivery');
+      showError(error.message || 'Failed to confirm delivery');
     } finally {
       setDispatching(null);
     }
@@ -248,11 +248,11 @@ const DispatchMaterials: React.FC = () => {
     setDispatching(requestId);
     try {
       await inventoryService.rejectInternalRequest(requestId, reason);
-      toast.success('Request rejected');
+      showSuccess('Request rejected');
       fetchData();
     } catch (error: any) {
       console.error('Error rejecting request:', error);
-      toast.error(error.message || 'Failed to reject request');
+      showError(error.message || 'Failed to reject request');
     } finally {
       setDispatching(null);
     }

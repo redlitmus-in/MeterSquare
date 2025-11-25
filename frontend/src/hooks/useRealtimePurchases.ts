@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import usePurchaseStore, { startPolling, stopPolling } from '@/store/purchaseStore';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 interface UseRealtimePurchasesOptions {
   role: string;
@@ -52,7 +52,7 @@ export const useRealtimePurchases = ({ role, showNotifications = true }: UseReal
     await fetchPurchases(role);
     setIsRefreshing(false);
     if (showNotifications) {
-      toast.success('Data refreshed');
+      showSuccess('Data refreshed');
     }
   };
 

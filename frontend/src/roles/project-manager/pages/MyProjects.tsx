@@ -16,7 +16,7 @@ import {
   MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 import { Squares2X2Icon, ListBulletIcon } from '@heroicons/react/24/solid';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
 import { projectManagerService } from '../services/projectManagerService';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
@@ -211,7 +211,7 @@ const MyProjects: React.FC = () => {
       });
 
       if (enrichedProjects.length === 0) {
-        toast.info('No projects assigned yet');
+        showInfo('No projects assigned yet');
       }
 
       return enrichedProjects;
@@ -289,7 +289,7 @@ const MyProjects: React.FC = () => {
       setAvailableSEs(allSEs);
     } catch (error) {
       console.error('Error loading site engineers:', error);
-      toast.error('Failed to load site engineers');
+      showError('Failed to load site engineers');
     } finally {
       setLoadingSEs(false);
     }
@@ -303,7 +303,7 @@ const MyProjects: React.FC = () => {
       setShowCompletionDetails(projectId);
     } catch (error) {
       console.error('Error loading completion details:', error);
-      toast.error('Failed to load completion details');
+      showError('Failed to load completion details');
     } finally {
       setLoadingCompletionDetails(false);
     }
@@ -314,9 +314,9 @@ const MyProjects: React.FC = () => {
       setCompleting(true);
       const response = await projectManagerService.confirmSECompletion(projectId, seUserId);
       if (response.success) {
-        toast.success(response.message || 'Completion confirmed successfully');
+        showSuccess(response.message || 'Completion confirmed successfully');
         if (response.project_completed) {
-          toast.success('Project automatically marked as complete!', {
+          showSuccess('Project automatically marked as complete!', {
             duration: 5000,
             icon: '🎉'
           });
@@ -327,7 +327,7 @@ const MyProjects: React.FC = () => {
       }
     } catch (error: any) {
       const errorMessage = error.response?.data?.error || 'Failed to confirm completion';
-      toast.error(errorMessage);
+      showError(errorMessage);
       console.error('Error confirming completion:', error);
     } finally {
       setCompleting(false);
@@ -354,7 +354,7 @@ const MyProjects: React.FC = () => {
       }
     } catch (error) {
       console.error('Error loading buyers:', error);
-      toast.error('Failed to load buyers');
+      showError('Failed to load buyers');
     }
   };
 
@@ -489,11 +489,11 @@ const MyProjects: React.FC = () => {
         setShowFullScreenBOQ(true);
         setFullScreenBoqMode('view');
       } else {
-        toast.error('Failed to load BOQ details');
+        showError('Failed to load BOQ details');
       }
     } catch (error) {
       console.error('Error loading BOQ details:', error);
-      toast.error('Failed to load BOQ details');
+      showError('Failed to load BOQ details');
     } finally {
       setLoadingBOQDetails(false);
     }
@@ -501,7 +501,7 @@ const MyProjects: React.FC = () => {
 
   const handleCreateSE = async () => {
     if (!newSEData.full_name || !newSEData.email || !newSEData.phone) {
-      toast.error('Please fill all required fields');
+      showError('Please fill all required fields');
       return;
     }
 
@@ -511,13 +511,13 @@ const MyProjects: React.FC = () => {
         ...newSEData,
         project_ids: []
       });
-      toast.success('Site Engineer created successfully');
+      showSuccess('Site Engineer created successfully');
       setNewSEData({ full_name: '', email: '', phone: '' });
       await loadAvailableSEs();
       setAssignMode('existing');
     } catch (error: any) {
       console.error('Error creating SE:', error);
-      toast.error(error?.response?.data?.error || 'Failed to create Site Engineer');
+      showError(error?.response?.data?.error || 'Failed to create Site Engineer');
     } finally {
       setCreatingNewSE(false);
     }
@@ -525,7 +525,7 @@ const MyProjects: React.FC = () => {
 
   const handleEditSE = async () => {
     if (!editingSE || !editSEData.full_name || !editSEData.email || !editSEData.phone) {
-      toast.error('Please fill all required fields');
+      showError('Please fill all required fields');
       return;
     }
 
@@ -535,13 +535,13 @@ const MyProjects: React.FC = () => {
         email: editSEData.email,
         phone: editSEData.phone
       });
-      toast.success('Site Engineer updated successfully');
+      showSuccess('Site Engineer updated successfully');
       setShowEditModal(false);
       setEditingSE(null);
       await loadAvailableSEs();
     } catch (error: any) {
       console.error('Error updating SE:', error);
-      toast.error(error?.response?.data?.error || 'Failed to update Site Engineer');
+      showError(error?.response?.data?.error || 'Failed to update Site Engineer');
     }
   };
 
@@ -550,19 +550,19 @@ const MyProjects: React.FC = () => {
 
     try {
       await projectManagerService.deleteSE(seToDelete.id);
-      toast.success('Site Engineer deleted successfully');
+      showSuccess('Site Engineer deleted successfully');
       setShowDeleteConfirm(false);
       setSeToDelete(null);
       loadAvailableSEs();
       refetch();
     } catch (error: any) {
-      toast.error(error?.response?.data?.error || 'Failed to delete Site Engineer');
+      showError(error?.response?.data?.error || 'Failed to delete Site Engineer');
     }
   };
 
   const handleAssignSE = async () => {
     if (!selectedSE || !selectedProject) {
-      toast.error('Please select a Site Engineer');
+      showError('Please select a Site Engineer');
       return;
     }
 
@@ -584,7 +584,7 @@ const MyProjects: React.FC = () => {
         ? `Assigned ${selectedSE.sitesupervisor_name} (SE) and ${selectedBuyer.full_name} (Buyer) to ${selectedProject.project_name}`
         : `Assigned ${selectedSE.sitesupervisor_name} to ${selectedProject.project_name}`;
 
-      toast.success(assignmentMessage);
+      showSuccess(assignmentMessage);
       setSelectedSE(null);
       setSelectedBuyer(null);
       setBuyerSearchQuery('');
@@ -593,7 +593,7 @@ const MyProjects: React.FC = () => {
       setFilterStatus('assigned');
     } catch (error: any) {
       console.error('Error assigning SE:', error);
-      toast.error(error?.response?.data?.error || 'Failed to assign Site Engineer');
+      showError(error?.response?.data?.error || 'Failed to assign Site Engineer');
     } finally {
       setAssigning(false);
     }
@@ -616,7 +616,7 @@ const MyProjects: React.FC = () => {
     setShowItemAssignmentModal(false);
     setItemAssignmentRefreshTrigger(prev => prev + 1);
     refetch();
-    toast.success('Items assigned successfully');
+    showSuccess('Items assigned successfully');
   };
 
   const filteredProjects = projects.filter(project => {
@@ -1962,7 +1962,7 @@ const MyProjects: React.FC = () => {
           setSelectedProjectForBOQ(null);
         }}
         onSubmit={async () => {
-          toast.success('Extra items added successfully!');
+          showSuccess('Extra items added successfully!');
           setShowCreateBOQModal(false);
           const projectId = selectedProjectForBOQ?.project_id;
           setSelectedProjectForBOQ(null);
@@ -2049,13 +2049,13 @@ const MyProjects: React.FC = () => {
                   try {
                     setCompleting(true);
                     await projectManagerService.updateProject(projectToComplete.project_id, { status: 'completed' });
-                    toast.success(projectToComplete.completion_requested ? 'Completion request approved' : 'Project marked as completed');
+                    showSuccess(projectToComplete.completion_requested ? 'Completion request approved' : 'Project marked as completed');
                     setShowCompleteModal(false);
                     setProjectToComplete(null);
                     refetch();
                   } catch (error: any) {
                     console.error('Error completing project:', error);
-                    toast.error(error?.response?.data?.error || 'Failed to complete project');
+                    showError(error?.response?.data?.error || 'Failed to complete project');
                   } finally {
                     setCompleting(false);
                   }
@@ -2101,14 +2101,14 @@ const MyProjects: React.FC = () => {
           if (selectedChangeRequest) {
             const response = await changeRequestService.approve(selectedChangeRequest.cr_id);
             if (response.success) {
-              toast.success('Change request approved');
+              showSuccess('Change request approved');
               setShowChangeRequestModal(false);
               setSelectedChangeRequest(null);
               if (selectedProject?.boq_id) {
                 await loadBOQDetails(selectedProject.boq_id);
               }
             } else {
-              toast.error(response.message || 'Failed to approve');
+              showError(response.message || 'Failed to approve');
             }
           }
         }}
@@ -2119,14 +2119,14 @@ const MyProjects: React.FC = () => {
 
             const response = await changeRequestService.reject(selectedChangeRequest.cr_id, reason);
             if (response.success) {
-              toast.success('Change request rejected');
+              showSuccess('Change request rejected');
               setShowChangeRequestModal(false);
               setSelectedChangeRequest(null);
               if (selectedProject?.boq_id) {
                 await loadBOQDetails(selectedProject.boq_id);
               }
             } else {
-              toast.error(response.message || 'Failed to reject');
+              showError(response.message || 'Failed to reject');
             }
           }
         }}
@@ -2192,7 +2192,7 @@ const MyProjects: React.FC = () => {
                 <button
                   onClick={async () => {
                     if (!rejectionReason.trim()) {
-                      toast.error('Please provide a rejection reason');
+                      showError('Please provide a rejection reason');
                       return;
                     }
 
@@ -2207,13 +2207,13 @@ const MyProjects: React.FC = () => {
 
                       // Check backend response
                       if (!response || response.success === false) {
-                        toast.error(response?.message || 'Failed to reject BOQ');
+                        showError(response?.message || 'Failed to reject BOQ');
                         setProcessingBOQ(false);
                         return;
                       }
 
                       // Success - show toast and close modals
-                      toast.success(response.message || 'BOQ rejected and sent to estimator');
+                      showSuccess(response.message || 'BOQ rejected and sent to estimator');
 
                       setShowRejectModal(false);
                       setRejectionReason('');
@@ -2227,7 +2227,7 @@ const MyProjects: React.FC = () => {
                     } catch (error: any) {
                       console.error('Rejection error:', error);
                       setProcessingBOQ(false);
-                      toast.error(error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to reject BOQ');
+                      showError(error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to reject BOQ');
                     }
                   }}
                   disabled={processingBOQ || !rejectionReason.trim()}
@@ -2310,13 +2310,13 @@ const MyProjects: React.FC = () => {
 
                       // Check backend response
                       if (!response || response.success === false) {
-                        toast.error(response?.message || 'Failed to approve BOQ');
+                        showError(response?.message || 'Failed to approve BOQ');
                         setProcessingBOQ(false);
                         return;
                       }
 
                       // Success - show toast and close modals
-                      toast.success(response.message || 'BOQ approved and sent to estimator');
+                      showSuccess(response.message || 'BOQ approved and sent to estimator');
 
                       setShowApproveModal(false);
                       setApprovalComments('');
@@ -2330,7 +2330,7 @@ const MyProjects: React.FC = () => {
                     } catch (error: any) {
                       console.error('Approval error:', error);
                       setProcessingBOQ(false);
-                      toast.error(error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to approve BOQ');
+                      showError(error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to approve BOQ');
                     }
                   }}
                   disabled={processingBOQ}
@@ -2571,12 +2571,12 @@ const MyProjects: React.FC = () => {
                       comments: approvalComments || '',
                     });
 
-                    toast.success('BOQ approved and sent to estimator');
+                    showSuccess('BOQ approved and sent to estimator');
                     setShowComparisonModal(false);
                     setApprovalComments('');
                     refetch();
                   } catch (error: any) {
-                    toast.error(error.response?.data?.error || 'Failed to approve BOQ');
+                    showError(error.response?.data?.error || 'Failed to approve BOQ');
                   } finally {
                     setProcessingBOQ(false);
                   }
@@ -2602,7 +2602,7 @@ const MyProjects: React.FC = () => {
         }}
         onSubmit={async (data: any) => {
           setShowEditBOQModal(false);
-          toast.success('BOQ updated successfully');
+          showSuccess('BOQ updated successfully');
 
           // Reload BOQ details to show updated data
           if (selectedProject?.boq_id) {

@@ -16,7 +16,7 @@ import { buyerVendorService, Vendor } from '@/roles/buyer/services/buyerVendorSe
 import AddVendorModal from '@/components/buyer/AddVendorModal';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useAuthStore } from '@/store/authStore';
 import { getRoleSlug } from '@/utils/roleRouting';
 
@@ -77,7 +77,7 @@ const VendorManagement: React.FC = () => {
       setStatistics(response.statistics);
     } catch (error: any) {
       console.error('Error loading vendors:', error);
-      toast.error(error.message || 'Failed to load vendors');
+      showError(error.message || 'Failed to load vendors');
     } finally {
       setLoading(false);
     }
@@ -104,13 +104,13 @@ const VendorManagement: React.FC = () => {
 
     try {
       await buyerVendorService.deleteVendor(vendorToDelete.vendor_id);
-      toast.success('Vendor deleted successfully');
+      showSuccess('Vendor deleted successfully');
       loadVendors();
       setShowDeleteConfirm(false);
       setVendorToDelete(null);
     } catch (error: any) {
       console.error('Error deleting vendor:', error);
-      toast.error(error.message || 'Failed to delete vendor');
+      showError(error.message || 'Failed to delete vendor');
     }
   };
 
