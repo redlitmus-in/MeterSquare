@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import {
   X,
   Plus,
@@ -278,6 +279,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [itemMaterials, setItemMaterials] = useState<Record<number, MasterMaterial[]>>({});
   const [itemLabours, setItemLabours] = useState<Record<number, MasterLabour[]>>({});
   const [isLoadingMasterData, setIsLoadingMasterData] = useState(false);
+  const [isLoadingExistingBoq, setIsLoadingExistingBoq] = useState(false);
 
   // Search/dropdown states
   const [itemSearchTerms, setItemSearchTerms] = useState<Record<string, string>>({});
@@ -1009,6 +1011,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     const loadExistingBoqData = async () => {
       if (!isOpen || (!editMode && !isRevision) || !existingBoqData) return;
 
+      setIsLoadingExistingBoq(true);
       try {
         // Fetch full BOQ details if we only have basic data
         let boqDetails = existingBoqData;
@@ -1297,6 +1300,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       } catch (error) {
         console.error('Failed to load BOQ data:', error);
         showError('Failed to load BOQ data');
+      } finally {
+        setIsLoadingExistingBoq(false);
       }
     };
 
@@ -3231,7 +3236,24 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           </div>
 
           {/* Content - Scrollable */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 relative">
+            {/* Loading overlay for existing BOQ data */}
+            {isLoadingExistingBoq && (
+              <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-50">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-white rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4 max-w-sm mx-4 border border-gray-100"
+                >
+                  <ModernLoadingSpinners variant="pulse-wave" size="lg" />
+                  <div className="text-center">
+                    <h3 className="text-lg font-semibold text-gray-900">Loading BOQ Data</h3>
+                    <p className="text-sm text-gray-500 mt-1">Please be patient, this may take a moment...</p>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+
             {/* BOQ Details */}
             <div className="bg-gradient-to-br from-gray-50 to-blue-50/30 rounded-xl p-5 mb-6 border border-blue-100">
               <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">

@@ -339,6 +339,7 @@ const EstimatorHub: React.FC = () => {
   const [boqToSendToTD, setBoqToSendToTD] = useState<BOQ | null>(null);
   const [isRevisionEdit, setIsRevisionEdit] = useState(false);
   const [isSendingToTD, setIsSendingToTD] = useState(false);
+  const [isLoadingBoqForEdit, setIsLoadingBoqForEdit] = useState(false);
 
   // Full-screen BOQ view states
   const [showFullScreenBOQ, setShowFullScreenBOQ] = useState(false);
@@ -1380,17 +1381,30 @@ const EstimatorHub: React.FC = () => {
               {canEdit && (
                 <button
                   className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-all"
-                  onClick={() => {
-                    console.log('✏️ Edit button clicked:', {
-                      boqId: boq.boq_id,
-                      hasProject: !!boq.project,
-                      project: boq.project
-                    });
-                    setEditingBoq(boq);
-                    setSelectedProjectForBOQ(boq.project);
-                    setFullScreenBoqMode('edit');
-                    setShowFullScreenBOQ(true);
-                    console.log('✏️ States set - should see useEffect log next');
+                  onClick={async () => {
+                    setIsLoadingBoqForEdit(true);
+                    try {
+                      console.log('✏️ Edit button clicked:', {
+                        boqId: boq.boq_id,
+                        hasProject: !!boq.project,
+                        project: boq.project
+                      });
+                      // Load full BOQ data with sub_items
+                      if (boq.boq_id) {
+                        const result = await estimatorService.getBOQById(boq.boq_id);
+                        if (result.success && result.data) {
+                          setEditingBoq(result.data);
+                          setSelectedProjectForBOQ(result.data.project || boq.project);
+                          setFullScreenBoqMode('edit');
+                          setShowFullScreenBOQ(true);
+                        } else {
+                          showError('Failed to load BOQ details');
+                        }
+                      }
+                      console.log('✏️ States set - should see useEffect log next');
+                    } finally {
+                      setIsLoadingBoqForEdit(false);
+                    }
                   }}
                   title="Edit BOQ"
                 >
@@ -1547,11 +1561,23 @@ const EstimatorHub: React.FC = () => {
                   e.currentTarget.style.backgroundColor = 'transparent';
                   e.currentTarget.style.color = '#22c55e';
                 }}
-                onClick={() => {
-                  setEditingBoq(boq);
-                  setSelectedProjectForBOQ(boq.project);
-                  setFullScreenBoqMode('edit');
-                  setShowFullScreenBOQ(true);
+                onClick={async () => {
+                  setIsLoadingBoqForEdit(true);
+                  try {
+                    if (boq.boq_id) {
+                      const result = await estimatorService.getBOQById(boq.boq_id);
+                      if (result.success && result.data) {
+                        setEditingBoq(result.data);
+                        setSelectedProjectForBOQ(result.data.project || boq.project);
+                        setFullScreenBoqMode('edit');
+                        setShowFullScreenBOQ(true);
+                      } else {
+                        showError('Failed to load BOQ details');
+                      }
+                    }
+                  } finally {
+                    setIsLoadingBoqForEdit(false);
+                  }
                 }}
               >
                 <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1591,11 +1617,23 @@ const EstimatorHub: React.FC = () => {
               <button
                 className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
                 style={{ backgroundColor: 'rgb(34, 197, 94)' }}
-                onClick={() => {
-                  setEditingBoq(boq);
-                  setSelectedProjectForBOQ(boq.project);
-                  setFullScreenBoqMode('edit');
-                  setShowFullScreenBOQ(true);
+                onClick={async () => {
+                  setIsLoadingBoqForEdit(true);
+                  try {
+                    if (boq.boq_id) {
+                      const result = await estimatorService.getBOQById(boq.boq_id);
+                      if (result.success && result.data) {
+                        setEditingBoq(result.data);
+                        setSelectedProjectForBOQ(result.data.project || boq.project);
+                        setFullScreenBoqMode('edit');
+                        setShowFullScreenBOQ(true);
+                      } else {
+                        showError('Failed to load BOQ details');
+                      }
+                    }
+                  } finally {
+                    setIsLoadingBoqForEdit(false);
+                  }
                 }}
               >
                 <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1642,12 +1680,24 @@ const EstimatorHub: React.FC = () => {
               <button
                 className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
                 style={{ backgroundColor: 'rgb(34, 197, 94)' }}
-                onClick={() => {
-                  setEditingBoq(boq);
-                  setSelectedProjectForBOQ(boq.project);
-                  setIsRevisionEdit(true); // Set flag for revision edit
-                  setFullScreenBoqMode('edit');
-                  setShowFullScreenBOQ(true);
+                onClick={async () => {
+                  setIsLoadingBoqForEdit(true);
+                  try {
+                    if (boq.boq_id) {
+                      const result = await estimatorService.getBOQById(boq.boq_id);
+                      if (result.success && result.data) {
+                        setEditingBoq(result.data);
+                        setSelectedProjectForBOQ(result.data.project || boq.project);
+                        setIsRevisionEdit(true);
+                        setFullScreenBoqMode('edit');
+                        setShowFullScreenBOQ(true);
+                      } else {
+                        showError('Failed to load BOQ details');
+                      }
+                    }
+                  } finally {
+                    setIsLoadingBoqForEdit(false);
+                  }
                 }}
               >
                 <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1738,11 +1788,24 @@ const EstimatorHub: React.FC = () => {
               <button
                 className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
                 style={{ backgroundColor: 'rgb(34, 197, 94)' }}
-                onClick={() => {
-                  setEditingBoq(boq);
-                  setSelectedProjectForBOQ(boq.project);
-                  setFullScreenBoqMode('edit');
-                  setShowFullScreenBOQ(true);
+                onClick={async () => {
+                  setIsLoadingBoqForEdit(true);
+                  try {
+                    if (boq.boq_id) {
+                      const result = await estimatorService.getBOQById(boq.boq_id);
+                      if (result.success && result.data) {
+                        setEditingBoq(result.data);
+                        setSelectedProjectForBOQ(result.data.project || boq.project);
+                        setIsRevisionEdit(true);
+                        setFullScreenBoqMode('edit');
+                        setShowFullScreenBOQ(true);
+                      } else {
+                        showError('Failed to load BOQ details');
+                      }
+                    }
+                  } finally {
+                    setIsLoadingBoqForEdit(false);
+                  }
                 }}
               >
                 <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1791,12 +1854,24 @@ const EstimatorHub: React.FC = () => {
             <button
               className="col-span-2 text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
               style={{ backgroundColor: 'rgb(34, 197, 94)' }}
-              onClick={() => {
+              onClick={async () => {
                 console.log('✏️ TD Rejected - Edit BOQ clicked');
-                setEditingBoq(boq);
-                setSelectedProjectForBOQ(boq.project);
-                setFullScreenBoqMode('edit');
-                setShowFullScreenBOQ(true);
+                setIsLoadingBoqForEdit(true);
+                try {
+                  if (boq.boq_id) {
+                    const result = await estimatorService.getBOQById(boq.boq_id);
+                    if (result.success && result.data) {
+                      setEditingBoq(result.data);
+                      setSelectedProjectForBOQ(result.data.project || boq.project);
+                      setFullScreenBoqMode('edit');
+                      setShowFullScreenBOQ(true);
+                    } else {
+                      showError('Failed to load BOQ details');
+                    }
+                  }
+                } finally {
+                  setIsLoadingBoqForEdit(false);
+                }
               }}
             >
               <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1809,11 +1884,23 @@ const EstimatorHub: React.FC = () => {
               <button
                 className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
                 style={{ backgroundColor: 'rgb(34, 197, 94)' }}
-                onClick={() => {
-                  setEditingBoq(boq);
-                  setSelectedProjectForBOQ(boq.project);
-                  setFullScreenBoqMode('edit');
-                  setShowFullScreenBOQ(true);
+                onClick={async () => {
+                  setIsLoadingBoqForEdit(true);
+                  try {
+                    if (boq.boq_id) {
+                      const result = await estimatorService.getBOQById(boq.boq_id);
+                      if (result.success && result.data) {
+                        setEditingBoq(result.data);
+                        setSelectedProjectForBOQ(result.data.project || boq.project);
+                        setFullScreenBoqMode('edit');
+                        setShowFullScreenBOQ(true);
+                      } else {
+                        showError('Failed to load BOQ details');
+                      }
+                    }
+                  } finally {
+                    setIsLoadingBoqForEdit(false);
+                  }
                 }}
               >
                 <Edit className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1980,7 +2067,7 @@ const EstimatorHub: React.FC = () => {
                       } else if (isUnderRevision) {
                         return (
                           <>
-                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setIsRevisionEdit(true); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }} className="h-8 w-8 p-0" title="Edit Again">
+                            <Button variant="ghost" size="sm" onClick={async () => { setIsLoadingBoqForEdit(true); try { if (boq.boq_id) { const result = await estimatorService.getBOQById(boq.boq_id); if (result.success && result.data) { setEditingBoq(result.data); setSelectedProjectForBOQ(result.data.project || boq.project); setIsRevisionEdit(true); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); } else { showError('Failed to load BOQ details'); } } } finally { setIsLoadingBoqForEdit(false); } }} className="h-8 w-8 p-0" title="Edit Again">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={async () => {
@@ -1999,7 +2086,7 @@ const EstimatorHub: React.FC = () => {
                       } else if (isClientRejected) {
                         return (
                           <>
-                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }} className="h-8 w-8 p-0" title="Revise BOQ">
+                            <Button variant="ghost" size="sm" onClick={async () => { setIsLoadingBoqForEdit(true); try { if (boq.boq_id) { const result = await estimatorService.getBOQById(boq.boq_id); if (result.success && result.data) { setEditingBoq(result.data); setSelectedProjectForBOQ(result.data.project || boq.project); setIsRevisionEdit(true); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); } else { showError('Failed to load BOQ details'); } } } finally { setIsLoadingBoqForEdit(false); } }} className="h-8 w-8 p-0" title="Revise BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={async () => {
@@ -2023,7 +2110,7 @@ const EstimatorHub: React.FC = () => {
                       } else if (isDraft) {
                         return (
                           <>
-                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }} className="h-8 w-8 p-0" title="Edit BOQ">
+                            <Button variant="ghost" size="sm" onClick={async () => { setIsLoadingBoqForEdit(true); try { if (boq.boq_id) { const result = await estimatorService.getBOQById(boq.boq_id); if (result.success && result.data) { setEditingBoq(result.data); setSelectedProjectForBOQ(result.data.project || boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); } else { showError('Failed to load BOQ details'); } } } finally { setIsLoadingBoqForEdit(false); } }} className="h-8 w-8 p-0" title="Edit BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={async () => {
@@ -2047,7 +2134,7 @@ const EstimatorHub: React.FC = () => {
                       } else if (isSentToClient) {
                         return (
                           <>
-                            <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }} className="h-8 w-8 p-0" title="Edit BOQ">
+                            <Button variant="ghost" size="sm" onClick={async () => { setIsLoadingBoqForEdit(true); try { if (boq.boq_id) { const result = await estimatorService.getBOQById(boq.boq_id); if (result.success && result.data) { setEditingBoq(result.data); setSelectedProjectForBOQ(result.data.project || boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); } else { showError('Failed to load BOQ details'); } } } finally { setIsLoadingBoqForEdit(false); } }} className="h-8 w-8 p-0" title="Edit BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { showSuccess(result.message); loadBOQs(); } else { showError(result.message); } }} className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Client Approved">
@@ -3163,12 +3250,24 @@ const EstimatorHub: React.FC = () => {
                   setEmailMode('client');
                   setShowSendEmailModal(true);
                 }}
-                onEdit={(boq) => {
-                  setEditingBoq(boq);
-                  setSelectedProjectForBOQ(boq.project);
-                  setIsRevisionEdit(true);
-                  setFullScreenBoqMode('edit');
-                  setShowFullScreenBOQ(true);
+                onEdit={async (boq) => {
+                  setIsLoadingBoqForEdit(true);
+                  try {
+                    if (boq.boq_id) {
+                      const result = await estimatorService.getBOQById(boq.boq_id);
+                      if (result.success && result.data) {
+                        setEditingBoq(result.data);
+                        setSelectedProjectForBOQ(result.data.project || boq.project);
+                        setIsRevisionEdit(true);
+                        setFullScreenBoqMode('edit');
+                        setShowFullScreenBOQ(true);
+                      } else {
+                        showError('Failed to load BOQ details');
+                      }
+                    }
+                  } finally {
+                    setIsLoadingBoqForEdit(false);
+                  }
                 }}
                 onViewDetails={(boq) => {
                   setSelectedBoqForDetails(boq);
@@ -3706,13 +3805,25 @@ const EstimatorHub: React.FC = () => {
                                 size="sm"
                                 variant="outline"
                                 className="text-green-600 hover:text-green-700 hover:bg-green-50 border-green-300"
-                                onClick={() => {
+                                onClick={async () => {
                                   console.log('✏️ Project View - Edit BOQ clicked');
-                                  setEditingBoq(boq);
-                                  setSelectedProjectForBOQ(boq.project);
-                                  setFullScreenBoqMode('edit');
-                                  setShowFullScreenBOQ(true);
-                                  setViewingProject(null);
+                                  setIsLoadingBoqForEdit(true);
+                                  try {
+                                    if (boq.boq_id) {
+                                      const result = await estimatorService.getBOQById(boq.boq_id);
+                                      if (result.success && result.data) {
+                                        setEditingBoq(result.data);
+                                        setSelectedProjectForBOQ(result.data.project || boq.project);
+                                        setFullScreenBoqMode('edit');
+                                        setShowFullScreenBOQ(true);
+                                        setViewingProject(null);
+                                      } else {
+                                        showError('Failed to load BOQ details');
+                                      }
+                                    }
+                                  } finally {
+                                    setIsLoadingBoqForEdit(false);
+                                  }
                                 }}
                               >
                                 <Edit className="h-4 w-4" />
@@ -4115,19 +4226,24 @@ const EstimatorHub: React.FC = () => {
               className="w-full bg-gradient-to-r from-red-50 to-red-100 text-red-900 hover:from-red-100 hover:to-red-200 border border-red-200 shadow-sm"
               onClick={async () => {
                 setShowRevisionModal(false);
-                // Load full BOQ data with sub_items before opening form
-                if (selectedBoqForRevision?.boq_id) {
-                  const result = await estimatorService.getBOQById(selectedBoqForRevision.boq_id);
-                  if (result.success && result.data) {
-                    console.log('✏️ Revision Modal - Make Revision clicked');
-                    setEditingBoq(result.data);
-                    setSelectedProjectForBOQ(result.data.project || selectedBoqForRevision.project);
-                    setIsRevisionEdit(true); // Set flag for revision edit
-                    setFullScreenBoqMode('edit');
-                    setShowFullScreenBOQ(true);
-                  } else {
-                    showError('Failed to load BOQ details');
+                setIsLoadingBoqForEdit(true);
+                try {
+                  // Load full BOQ data with sub_items before opening form
+                  if (selectedBoqForRevision?.boq_id) {
+                    const result = await estimatorService.getBOQById(selectedBoqForRevision.boq_id);
+                    if (result.success && result.data) {
+                      console.log('✏️ Revision Modal - Make Revision clicked');
+                      setEditingBoq(result.data);
+                      setSelectedProjectForBOQ(result.data.project || selectedBoqForRevision.project);
+                      setIsRevisionEdit(true); // Set flag for revision edit
+                      setFullScreenBoqMode('edit');
+                      setShowFullScreenBOQ(true);
+                    } else {
+                      showError('Failed to load BOQ details');
+                    }
                   }
+                } finally {
+                  setIsLoadingBoqForEdit(false);
                 }
               }}
             >
