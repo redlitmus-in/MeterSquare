@@ -136,6 +136,7 @@ class RealtimeNotificationHub {
       });
 
       this.socket.on('notification', (notification: RealtimeNotification) => {
+        console.log('[NotificationHub] Real-time notification received:', notification.title);
         this.handleIncomingNotification(notification);
       });
 
@@ -157,10 +158,12 @@ class RealtimeNotificationHub {
     if (!this.socket || !this.isConnected) return;
 
     if (this.userId) {
+      console.log(`[NotificationHub] Joining user room: user_${this.userId}`);
       this.socket.emit('join:user', this.userId);
     }
 
     if (this.userRole) {
+      console.log(`[NotificationHub] Joining role room: role_${this.userRole}`);
       this.socket.emit('join:role', this.userRole);
     }
   }
@@ -169,8 +172,11 @@ class RealtimeNotificationHub {
    * Handle incoming notification from Socket.IO
    */
   private async handleIncomingNotification(notification: RealtimeNotification) {
+    console.log('[NotificationHub] Processing notification:', notification.id, notification.title);
+
     // Deduplicate: Skip if already processed
     if (this.processedNotificationIds.has(notification.id)) {
+      console.log('[NotificationHub] Skipping duplicate notification:', notification.id);
       return;
     }
     this.processedNotificationIds.add(notification.id);
@@ -185,19 +191,34 @@ class RealtimeNotificationHub {
     const currentUserId = userData?.id || userData?.userId;
     const targetUserId = notification.targetUserId || notification.userId;
 
+    console.log('[NotificationHub] User check - current:', currentUserId, 'target:', targetUserId);
+
     // Check if notification is for current user
+    // NOTE: If notification came through user-specific room, this check is redundant
+    // but we keep it as a safety check
     if (targetUserId && String(targetUserId) !== String(currentUserId)) {
+      console.log('[NotificationHub] Skipping - not for current user');
       return;
     }
 
     // Check if notification is for current role
-    if (notification.targetRole) {
-      const targetRole = notification.targetRole.toLowerCase().replace(/[\s-_]/g, '');
-      const currentRole = this.userRole?.toLowerCase().replace(/[\s-_]/g, '');
-      if (targetRole !== currentRole) {
+    if (notification.targetRole && this.userRole) {
+      const normalizeRole = (role: string) => role.toLowerCase().replace(/[\s\-_]/g, '');
+      const targetRole = normalizeRole(notification.targetRole);
+      const currentRole = normalizeRole(this.userRole);
+
+      // Also check common role mappings
+      const roleMatches = targetRole === currentRole ||
+        (targetRole === 'technicaldirector' && (currentRole === 'technicaldirector' || currentRole === 'td')) ||
+        (targetRole === 'projectmanager' && (currentRole === 'projectmanager' || currentRole === 'pm')) ||
+        (targetRole === 'siteengineer' && (currentRole === 'siteengineer' || currentRole === 'se'));
+
+      if (!roleMatches) {
         return;
       }
     }
+
+    console.log('[NotificationHub] Notification passed all checks, showing popup & desktop notification');
 
     const notificationData = {
       id: notification.id,
@@ -273,23 +294,27 @@ class RealtimeNotificationHub {
    */
   private async showDesktopNotification(notification: RealtimeNotification) {
     // Check if browser supports notifications
-    if (!('Notification' in window)) return;
+    if (!('Notification' in window)) {
+      return;
+    }
 
     // Check permission
-    if (Notification.permission === 'default') {
-      // Request permission
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') return;
-    } else if (Notification.permission !== 'granted') {
+    let permission = Notification.permission;
+    if (permission === 'default') {
+      permission = await Notification.requestPermission();
+    }
+
+    if (permission !== 'granted') {
       return;
     }
 
     // Create desktop notification
     try {
+      const actionUrl = (notification as any).actionUrl || notification.metadata?.actionUrl;
       const desktopNotif = new Notification(notification.title, {
         body: notification.message,
-        icon: '/assets/logo.png',
-        badge: '/assets/logofavi.png',
+        icon: window.location.origin + '/assets/logo.png',
+        badge: window.location.origin + '/assets/logofavi.png',
         tag: notification.id,
         requireInteraction: notification.priority === 'urgent' || notification.priority === 'high',
         silent: false
@@ -299,8 +324,8 @@ class RealtimeNotificationHub {
       desktopNotif.onclick = () => {
         window.focus();
         desktopNotif.close();
-        if ((notification as any).actionUrl) {
-          window.location.href = (notification as any).actionUrl;
+        if (actionUrl) {
+          window.location.href = actionUrl;
         }
       };
 
@@ -309,13 +334,7 @@ class RealtimeNotificationHub {
         setTimeout(() => desktopNotif.close(), 10000);
       }
     } catch (error) {
-      console.error('❌ Desktop notification failed:', error);
-      console.error('Notification data:', {
-        title: notification.title,
-        hasMessage: !!notification.message,
-        priority: notification.priority,
-        permission: Notification.permission
-      });
+      // Silent fail in production
     }
   }
 
@@ -390,7 +409,8 @@ class RealtimeNotificationHub {
       try {
         const user = JSON.parse(userDataStr);
         this.userId = String(user.user_id || user.id || user.userId || '');
-        this.userRole = user.role || null;
+        // Check multiple possible role fields
+        this.userRole = user.role || user.role_name || null;
       } catch {
         this.userId = null;
         this.userRole = null;
@@ -473,6 +493,9 @@ class RealtimeNotificationHub {
         }
 
         // Process each notification
+        const now = Date.now();
+        const RECENT_THRESHOLD = 5 * 60 * 1000; // 5 minutes - show popup for recent notifications
+
         for (const notif of data.notifications) {
           // Convert backend format to frontend format
           const notification: RealtimeNotification = {
@@ -494,26 +517,37 @@ class RealtimeNotificationHub {
             }
           };
 
-          // Add to store silently (no toast for old notifications)
-          if (!this.processedNotificationIds.has(notification.id)) {
-            this.processedNotificationIds.add(notification.id);
+          // Skip if already processed
+          if (this.processedNotificationIds.has(notification.id)) {
+            continue;
+          }
+          this.processedNotificationIds.add(notification.id);
 
-            const notificationData = {
-              id: notification.id,
-              type: notification.type || 'info',
-              title: notification.title,
-              message: notification.message,
-              priority: notification.priority || 'medium',
-              timestamp: new Date(notification.timestamp || Date.now()),
-              read: false,
-              metadata: notification.metadata,
-              actionUrl: (notification as any).actionUrl || notification.metadata?.actionUrl,
-              actionLabel: (notification as any).actionLabel || notification.metadata?.actionLabel,
-              senderName: notification.senderName
-            };
+          const notificationData = {
+            id: notification.id,
+            type: notification.type || 'info',
+            title: notification.title,
+            message: notification.message,
+            priority: notification.priority || 'medium',
+            timestamp: new Date(notification.timestamp || Date.now()),
+            read: false,
+            metadata: notification.metadata,
+            actionUrl: (notification as any).actionUrl || notification.metadata?.actionUrl,
+            actionLabel: (notification as any).actionLabel || notification.metadata?.actionLabel,
+            senderName: notification.senderName
+          };
 
-            // Add to notification store (shows in notification panel)
-            useNotificationStore.getState().addNotification(notificationData);
+          // Add to notification store (shows in notification panel + badge count)
+          useNotificationStore.getState().addNotification(notificationData);
+
+          // Check if notification is recent (within 5 minutes)
+          const notificationTime = new Date(notification.timestamp || Date.now()).getTime();
+          const isRecent = (now - notificationTime) < RECENT_THRESHOLD;
+
+          // Show popup and desktop notification for recent missed notifications
+          if (isRecent) {
+            this.showIncomingNotificationPopup(notification);
+            this.showDesktopNotification(notification);
           }
         }
       }

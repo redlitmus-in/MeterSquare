@@ -714,6 +714,11 @@ function App() {
       // Reconnect real-time hub with new credentials (handles all notification services)
       realtimeNotificationHub.reconnect();
 
+      // Request desktop notification permission on login
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
+
       // Fetch missed notifications on app mount/login
       // This ensures notifications show even if user was offline when they were sent
       setTimeout(() => {

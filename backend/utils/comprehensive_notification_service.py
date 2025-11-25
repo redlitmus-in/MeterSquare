@@ -120,7 +120,7 @@ class ComprehensiveNotificationService:
     @staticmethod
     def notify_boq_sent_to_td(boq_id, project_name, estimator_id, estimator_name, td_user_id):
         """
-        Notify TD when BOQ sent for final approval
+        Notify TD when BOQ sent for approval
         Trigger: Estimator forwards BOQ to TD
         Recipients: Technical Director
         Priority: URGENT
@@ -131,16 +131,17 @@ class ComprehensiveNotificationService:
             notification = NotificationManager.create_notification(
                 user_id=td_user_id,
                 type='approval',
-                title='BOQ Requires Final Approval',
-                message=f'BOQ for {project_name} requires your final approval',
+                title='New BOQ for Approval',
+                message=f'BOQ for {project_name} requires your approval. Submitted by {estimator_name}',
                 priority='urgent',
                 category='boq',
                 action_required=True,
-                action_url=f'/technical-director/boq/{boq_id}',
+                action_url='/technical-director/project-approvals',
                 action_label='Review BOQ',
                 metadata={'boq_id': boq_id},
                 sender_id=estimator_id,
-                sender_name=estimator_name
+                sender_name=estimator_name,
+                target_role='technical_director'
             )
 
             log.info(f"[notify_boq_sent_to_td] DB notification created: {notification.id}")
@@ -179,6 +180,94 @@ class ComprehensiveNotificationService:
             log.info(f"Sent BOQ to client notification for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error sending BOQ to client notification: {e}")
+
+    @staticmethod
+    def notify_client_confirmed(boq_id, project_name, estimator_id, estimator_name, client_name=None):
+        """
+        Notify TD when client confirms/approves BOQ
+        Trigger: Estimator marks BOQ as client confirmed
+        Recipients: All Technical Directors
+        Priority: HIGH
+        """
+        try:
+            # Get all TD users
+            td_role = Role.query.filter_by(role_name='Technical Director').first()
+            if not td_role:
+                log.warning("No Technical Director role found in database")
+                return
+
+            td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+            if not td_users:
+                log.warning("No active Technical Director users found")
+                return
+
+            client_info = f" by {client_name}" if client_name else ""
+
+            for td_user in td_users:
+                notification = NotificationManager.create_notification(
+                    user_id=td_user.user_id,
+                    type='success',
+                    title='Client Approved BOQ',
+                    message=f'BOQ for {project_name} has been approved{client_info}. Confirmed by {estimator_name}',
+                    priority='high',
+                    category='boq',
+                    action_url=f'/technical-director/record-material',
+                    action_label='View BOQ',
+                    metadata={'boq_id': boq_id, 'client_confirmed': True},
+                    sender_id=estimator_id,
+                    sender_name=estimator_name
+                )
+
+                send_notification_to_user(td_user.user_id, notification.to_dict())
+                log.info(f"Sent client confirmation notification to TD {td_user.user_id} for BOQ {boq_id}")
+
+        except Exception as e:
+            log.error(f"Error sending client confirmation notification: {e}")
+            import traceback
+            log.error(traceback.format_exc())
+
+    @staticmethod
+    def notify_client_rejected(boq_id, project_name, estimator_id, estimator_name, rejection_reason):
+        """
+        Notify TD when client rejects BOQ
+        Trigger: Estimator marks BOQ as client rejected
+        Recipients: All Technical Directors
+        Priority: HIGH
+        """
+        try:
+            td_role = Role.query.filter_by(role_name='Technical Director').first()
+            if not td_role:
+                log.warning("No Technical Director role found in database")
+                return
+
+            td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+            if not td_users:
+                log.warning("No active Technical Director users found")
+                return
+
+            for td_user in td_users:
+                notification = NotificationManager.create_notification(
+                    user_id=td_user.user_id,
+                    type='rejection',
+                    title='Client Rejected BOQ',
+                    message=f'BOQ for {project_name} was rejected by client. Reason: {rejection_reason}',
+                    priority='high',
+                    category='boq',
+                    action_required=True,
+                    action_url=f'/technical-director/boq/{boq_id}',
+                    action_label='View Details',
+                    metadata={'boq_id': boq_id, 'client_rejected': True, 'reason': rejection_reason},
+                    sender_id=estimator_id,
+                    sender_name=estimator_name
+                )
+
+                send_notification_to_user(td_user.user_id, notification.to_dict())
+                log.info(f"Sent client rejection notification to TD {td_user.user_id} for BOQ {boq_id}")
+
+        except Exception as e:
+            log.error(f"Error sending client rejection notification: {e}")
+            import traceback
+            log.error(traceback.format_exc())
 
     @staticmethod
     def notify_td_boq_decision(boq_id, project_name, td_id, td_name, recipient_user_ids, approved, rejection_reason=None):
@@ -610,6 +699,165 @@ class ComprehensiveNotificationService:
             log.info(f"Sent vendor approved notification for vendor {vendor_id}")
         except Exception as e:
             log.error(f"Error sending vendor approved notification: {e}")
+
+    # ==================== REVISION WORKFLOW NOTIFICATIONS ====================
+
+    @staticmethod
+    def notify_internal_revision_created(boq_id, project_name, revision_number, actor_id, actor_name, actor_role):
+        """
+        Notify TD when an internal revision is created
+        Trigger: Estimator/PM makes changes to BOQ (internal revision)
+        Recipients: All Technical Directors
+        Priority: HIGH
+        """
+        try:
+            td_role = Role.query.filter_by(role_name='Technical Director').first()
+            if not td_role:
+                log.warning("No Technical Director role found in database")
+                return
+
+            td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+            if not td_users:
+                log.warning("No active Technical Director users found")
+                return
+
+            for td_user in td_users:
+                notification = NotificationManager.create_notification(
+                    user_id=td_user.user_id,
+                    type='approval',
+                    title='Internal Revision Pending Review',
+                    message=f'BOQ for {project_name} has internal revision #{revision_number} by {actor_name} ({actor_role})',
+                    priority='high',
+                    category='boq',
+                    action_required=True,
+                    action_url=f'/technical-director/internal-revisions',
+                    action_label='Review Revision',
+                    metadata={'boq_id': boq_id, 'internal_revision_number': revision_number},
+                    sender_id=actor_id,
+                    sender_name=actor_name
+                )
+
+                send_notification_to_user(td_user.user_id, notification.to_dict())
+                log.info(f"Sent internal revision notification to TD {td_user.user_id} for BOQ {boq_id}")
+
+        except Exception as e:
+            log.error(f"Error sending internal revision notification: {e}")
+            import traceback
+            log.error(traceback.format_exc())
+
+    @staticmethod
+    def notify_internal_revision_approved(boq_id, project_name, revision_number, td_id, td_name, actor_user_id, actor_name):
+        """
+        Notify the person who created the revision when TD approves it
+        Trigger: TD approves internal revision
+        Recipients: User who made the revision
+        Priority: HIGH
+        """
+        try:
+            notification = NotificationManager.create_notification(
+                user_id=actor_user_id,
+                type='success',
+                title='Internal Revision Approved',
+                message=f'Your internal revision #{revision_number} for {project_name} was approved by {td_name}',
+                priority='high',
+                category='boq',
+                action_url=f'/estimator/boq/{boq_id}',
+                action_label='View BOQ',
+                metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'approved'},
+                sender_id=td_id,
+                sender_name=td_name
+            )
+
+            send_notification_to_user(actor_user_id, notification.to_dict())
+            log.info(f"Sent internal revision approved notification for BOQ {boq_id}")
+        except Exception as e:
+            log.error(f"Error sending internal revision approved notification: {e}")
+
+    @staticmethod
+    def notify_internal_revision_rejected(boq_id, project_name, revision_number, td_id, td_name, actor_user_id, actor_name, rejection_reason):
+        """
+        Notify the person who created the revision when TD rejects it
+        Trigger: TD rejects internal revision
+        Recipients: User who made the revision
+        Priority: HIGH
+        """
+        try:
+            notification = NotificationManager.create_notification(
+                user_id=actor_user_id,
+                type='rejection',
+                title='Internal Revision Rejected',
+                message=f'Your internal revision #{revision_number} for {project_name} was rejected by {td_name}. Reason: {rejection_reason}',
+                priority='high',
+                category='boq',
+                action_required=True,
+                action_url=f'/estimator/boq/{boq_id}',
+                action_label='View Details',
+                metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'rejected', 'reason': rejection_reason},
+                sender_id=td_id,
+                sender_name=td_name
+            )
+
+            send_notification_to_user(actor_user_id, notification.to_dict())
+            log.info(f"Sent internal revision rejected notification for BOQ {boq_id}")
+        except Exception as e:
+            log.error(f"Error sending internal revision rejected notification: {e}")
+
+    @staticmethod
+    def notify_client_revision_approved(boq_id, project_name, td_id, td_name, estimator_user_id, estimator_name):
+        """
+        Notify estimator when TD approves client revision
+        Trigger: TD approves client revision BOQ
+        Recipients: Estimator who submitted revision
+        Priority: HIGH
+        """
+        try:
+            notification = NotificationManager.create_notification(
+                user_id=estimator_user_id,
+                type='success',
+                title='Client Revision Approved',
+                message=f'Client revision for {project_name} has been approved by {td_name}',
+                priority='high',
+                category='boq',
+                action_url=f'/estimator/boq/{boq_id}',
+                action_label='View BOQ',
+                metadata={'boq_id': boq_id, 'client_revision_approved': True},
+                sender_id=td_id,
+                sender_name=td_name
+            )
+
+            send_notification_to_user(estimator_user_id, notification.to_dict())
+            log.info(f"Sent client revision approved notification to estimator {estimator_user_id} for BOQ {boq_id}")
+        except Exception as e:
+            log.error(f"Error sending client revision approved notification: {e}")
+
+    @staticmethod
+    def notify_client_revision_rejected(boq_id, project_name, td_id, td_name, estimator_user_id, estimator_name, rejection_reason):
+        """
+        Notify estimator when TD rejects client revision
+        Trigger: TD rejects client revision BOQ
+        Recipients: Estimator who submitted revision
+        Priority: HIGH
+        """
+        try:
+            notification = NotificationManager.create_notification(
+                user_id=estimator_user_id,
+                type='rejection',
+                title='Client Revision Rejected',
+                message=f'Client revision for {project_name} was rejected by {td_name}. Reason: {rejection_reason}',
+                priority='high',
+                category='boq',
+                action_required=True,
+                action_url=f'/estimator/boq/{boq_id}',
+                action_label='Make Changes',
+                metadata={'boq_id': boq_id, 'client_revision_rejected': True, 'reason': rejection_reason},
+                sender_id=td_id,
+                sender_name=td_name
+            )
+
+            send_notification_to_user(estimator_user_id, notification.to_dict())
+            log.info(f"Sent client revision rejected notification to estimator {estimator_user_id} for BOQ {boq_id}")
+        except Exception as e:
+            log.error(f"Error sending client revision rejected notification: {e}")
 
 
 # Create singleton instance

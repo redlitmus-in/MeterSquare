@@ -544,6 +544,34 @@ def client_revision_td_mail_send():
         db.session.commit()
         log.info(f"BOQ {boq_id} - Database committed successfully")
 
+        # Send real-time notification to estimator
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            estimator_user_id = estimator.user_id if estimator else None
+
+            if estimator_user_id:
+                if technical_director_status.lower() == 'approved':
+                    ComprehensiveNotificationService.notify_client_revision_approved(
+                        boq_id=boq_id,
+                        project_name=project_data.get('project_name', boq.boq_name),
+                        td_id=td_user_id,
+                        td_name=td_name,
+                        estimator_user_id=estimator_user_id,
+                        estimator_name=estimator_name
+                    )
+                else:
+                    ComprehensiveNotificationService.notify_client_revision_rejected(
+                        boq_id=boq_id,
+                        project_name=project_data.get('project_name', boq.boq_name),
+                        td_id=td_user_id,
+                        td_name=td_name,
+                        estimator_user_id=estimator_user_id,
+                        estimator_name=estimator_name,
+                        rejection_reason=rejection_reason or comments or "No reason provided"
+                    )
+        except Exception as notif_error:
+            log.error(f"Failed to send client revision notification: {notif_error}")
+
         log.info(f"BOQ {boq_id} {new_status.lower()} by TD, email sent to {recipient_email}")
 
         return jsonify({

@@ -847,6 +847,21 @@ def update_internal_revision_boq(boq_id):
 
         db.session.commit()
 
+        # Send notification to TD about internal revision
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            project = boq.project
+            ComprehensiveNotificationService.notify_internal_revision_created(
+                boq_id=boq_id,
+                project_name=project.project_name if project else boq.boq_name,
+                revision_number=new_internal_rev,
+                actor_id=user_id,
+                actor_name=user_name,
+                actor_role=user_role
+            )
+        except Exception as notif_error:
+            log.error(f"Failed to send internal revision notification: {notif_error}")
+
         # Return success response
         return jsonify({
             "message": "BOQ internal revision stored successfully",

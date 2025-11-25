@@ -466,7 +466,9 @@ export function mapNotificationToWorkflow(
     if (titleLower.includes('revision')) {
       return NOTIFICATION_WORKFLOWS.find(w => w.id === 'td_revision_boq');
     }
-    if (titleLower.includes('pending') || titleLower.includes('created')) {
+    // Match "New BOQ for Approval", "BOQ Pending", "BOQ Created"
+    if (titleLower.includes('new boq') || titleLower.includes('pending') || titleLower.includes('created') ||
+        messageLower.includes('requires your approval') || messageLower.includes('awaiting your approval')) {
       return NOTIFICATION_WORKFLOWS.find(w => w.id === 'est_create_boq');
     }
   }

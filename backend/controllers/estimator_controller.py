@@ -117,34 +117,20 @@ def confirm_client_approval(boq_id):
 
         db.session.commit()
 
-        # Send notification to TD about client approval
+        # Send notification to TD about client approval using comprehensive service
         try:
-            from utils.notification_utils import NotificationManager
-            from socketio_server import send_notification_to_user
-
-            # Get TD users
-            td_role = Role.query.filter_by(role_name='Technical Director').first()
-            if td_role:
-                td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
-                for td_user in td_users:
-                    notification = NotificationManager.create_notification(
-                        user_id=td_user.user_id,
-                        type='success',
-                        title='Client Approved BOQ',
-                        message=f'Client approved BOQ for {project.project_name if project else "project"}. Confirmed by {estimator_name}',
-                        priority='high',
-                        category='boq',
-                        action_url=f'/technical-director/boq/{boq_id}',
-                        action_label='View BOQ',
-                        metadata={'boq_id': boq_id},
-                        sender_id=estimator_id,
-                        sender_name=estimator_name
-                    )
-                    # Send via Socket.IO
-                    send_notification_to_user(td_user.user_id, notification.to_dict())
-                    log.info(f"Sent client approval notification to TD {td_user.user_id}")
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            ComprehensiveNotificationService.notify_client_confirmed(
+                boq_id=boq_id,
+                project_name=project.project_name if project else "project",
+                estimator_id=estimator_id,
+                estimator_name=estimator_name,
+                client_name=client_name
+            )
         except Exception as notif_error:
             log.error(f"Failed to send client approval notification: {notif_error}")
+            import traceback
+            log.error(traceback.format_exc())
 
         return jsonify({
             "success": True,
@@ -197,32 +183,20 @@ def reject_client_approval(boq_id):
 
         db.session.commit()
 
-        # Send notification to TD about client rejection
+        # Send notification to TD about client rejection using comprehensive service
         try:
-            from utils.notification_utils import NotificationManager
-            from socketio_server import send_notification_to_user
-
-            td_role = Role.query.filter_by(role_name='Technical Director').first()
-            if td_role:
-                td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
-                for td_user in td_users:
-                    notification = NotificationManager.create_notification(
-                        user_id=td_user.user_id,
-                        type='rejection',
-                        title='Client Rejected BOQ',
-                        message=f'Client rejected BOQ for {project.project_name if project else "project"}. Reason: {rejection_reason}',
-                        priority='high',
-                        category='boq',
-                        action_url=f'/technical-director/boq/{boq_id}',
-                        action_label='View BOQ',
-                        metadata={'boq_id': boq_id, 'rejection_reason': rejection_reason},
-                        sender_id=estimator_id,
-                        sender_name=estimator_name
-                    )
-                    send_notification_to_user(td_user.user_id, notification.to_dict())
-                    log.info(f"Sent client rejection notification to TD {td_user.user_id}")
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            ComprehensiveNotificationService.notify_client_rejected(
+                boq_id=boq_id,
+                project_name=project.project_name if project else "project",
+                estimator_id=estimator_id,
+                estimator_name=estimator_name,
+                rejection_reason=rejection_reason
+            )
         except Exception as notif_error:
             log.error(f"Failed to send client rejection notification: {notif_error}")
+            import traceback
+            log.error(traceback.format_exc())
 
         return jsonify({
             "success": True,

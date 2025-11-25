@@ -275,7 +275,36 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     // Get user role for building proper paths
     const userRole = user?.role_id || user?.role || '';
 
-    // Get smart redirect path based on notification content
+    // PRIORITY 1: Use actionUrl from backend if available (most accurate)
+    const backendActionUrl = notification.actionUrl || notification.metadata?.actionUrl;
+    if (backendActionUrl) {
+      try {
+        // Build role-prefixed path from backend action URL
+        const fullPath = backendActionUrl.startsWith('/') && !backendActionUrl.includes('/technical-director/') && !backendActionUrl.includes('/estimator/') && !backendActionUrl.includes('/project-manager/')
+          ? buildRolePath(userRole, backendActionUrl)
+          : backendActionUrl;
+
+        if (onNavigate) {
+          onNavigate(fullPath);
+        } else {
+          navigate(fullPath, {
+            replace: false,
+            state: {
+              from: location.pathname,
+              notification: notification.id,
+              autoFocus: true
+            }
+          });
+        }
+        setShowPanel(false);
+        markAsRead(notification.id);
+        return;
+      } catch (error) {
+        // Fall through to smart redirect
+      }
+    }
+
+    // PRIORITY 2: Get smart redirect path based on notification content
     const redirectConfig = getNotificationRedirectPath(notification, userRole);
 
     if (redirectConfig) {

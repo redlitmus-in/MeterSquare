@@ -1,6 +1,8 @@
 import { supabase } from '@/lib/supabase';
 import { invalidateQueries } from '@/lib/queryClient';
-import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+// NOTE: Toast imports removed - Supabase realtime broadcasts to ALL users.
+// Toast notifications are handled by Socket.IO (realtimeNotificationHub)
+// which sends targeted notifications only to the correct users.
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 // Types for subscription channels
@@ -149,11 +151,10 @@ const subscribeToPurchases = () => {
           invalidateQueries(['purchases']);
           invalidateQueries(['purchase', payload.new?.purchase_id]);
 
-          // Show notification based on event type
-          if (payload.eventType === 'INSERT') {
-            showSuccess('New purchase request created');
-          } else if (payload.eventType === 'UPDATE') {
-            showInfo('Purchase request updated');
+          // NOTE: DO NOT show toasts here - broadcasts to ALL users!
+          // Socket.IO handles targeted notifications
+          if (import.meta.env.DEV && payload.eventType === 'INSERT') {
+            console.log(`[RealtimeSubscriptions] New purchase request: ${payload.new?.purchase_id}`);
           }
         }
       )
@@ -184,11 +185,10 @@ const subscribeToTasks = () => {
           invalidateQueries(['tasks']);
           invalidateQueries(['task', payload.new?.task_id]);
 
-          // Show notification for task updates
-          if (payload.eventType === 'INSERT') {
-            showSuccess('New task assigned');
-          } else if (payload.eventType === 'UPDATE' && payload.new?.status === 'completed') {
-            showSuccess('Task completed');
+          // NOTE: DO NOT show toasts here - broadcasts to ALL users!
+          // Socket.IO handles targeted notifications
+          if (import.meta.env.DEV) {
+            console.log(`[RealtimeSubscriptions] Task ${payload.eventType}: ${payload.new?.task_id}`);
           }
         }
       )
@@ -244,14 +244,15 @@ const subscribeToUserNotifications = (userId: string) => {
           filter: `user_id=eq.${userId}`,
         },
         (payload) => {
-          // Show the notification
-          const notification = payload.new;
-          if (notification?.message) {
-            showInfo(notification.message);
-          }
+          // NOTE: DO NOT show toasts here - Socket.IO (realtimeNotificationHub) handles this
+          // to avoid duplicate notifications. This just refreshes the notification query.
 
-          // Invalidate notifications query
+          // Invalidate notifications query so panel updates
           invalidateQueries(['notifications']);
+
+          if (import.meta.env.DEV) {
+            console.log(`[RealtimeSubscriptions] Notification received for user: ${payload.new?.id}`);
+          }
         }
       )
       .subscribe();
@@ -339,21 +340,24 @@ const subscribeToBOQs = () => {
             const newStatus = payload.new?.status;
             const oldStatus = payload.old?.status;
 
+            // NOTE: DO NOT show toasts here!
+            // Supabase realtime broadcasts to ALL users, not just the relevant ones.
+            // Toast notifications are handled by Socket.IO (realtimeNotificationHub)
+            // which sends targeted notifications only to the correct users.
+            // This subscription is ONLY for silently refreshing data in the background.
+
             if (payload.eventType === 'UPDATE' && newStatus !== oldStatus) {
-              // Status changed - show appropriate notification
-              if (newStatus === 'PM_Approved') {
-                showSuccess('BOQ approved by PM');
-              } else if (newStatus === 'Approved' || newStatus === 'TD_Approved') {
-                showSuccess('BOQ approved by Technical Director');
-              } else if (newStatus === 'Pending_TD_Approval') {
-                showInfo('BOQ sent to Technical Director for approval');
-              } else if (newStatus === 'Client_Confirmed') {
-                showSuccess('BOQ confirmed by client');
-              } else if (newStatus === 'Rejected') {
-                showError('BOQ rejected');
+              // Status changed - silently trigger data refresh
+              // Toast notification will come from Socket.IO to the correct user
+              if (import.meta.env.DEV) {
+                console.log(`[RealtimeSubscriptions] BOQ ${payload.new?.boq_id} status changed: ${oldStatus} -> ${newStatus}`);
               }
             } else if (payload.eventType === 'INSERT') {
-              showInfo('New BOQ created');
+              // New BOQ created - silently trigger data refresh
+              // Toast notification will come from Socket.IO to the correct user
+              if (import.meta.env.DEV) {
+                console.log(`[RealtimeSubscriptions] New BOQ created: ${payload.new?.boq_id}`);
+              }
             }
           }
         )
@@ -479,19 +483,10 @@ const subscribeToBOQInternalRevisions = () => {
             invalidateQueries(['boqs']);
             invalidateQueries(['boq', payload.new?.boq_id || payload.old?.boq_id]);
 
-            // Show notification based on event
-            if (payload.eventType === 'INSERT') {
-              const actorRole = payload.new?.actor_role;
-              if (actorRole === 'estimator') {
-                showInfo('New internal revision created');
-              } else if (actorRole === 'technical_director') {
-                const actionType = payload.new?.action_type;
-                if (actionType === 'APPROVED') {
-                  showSuccess('Internal revision approved');
-                } else if (actionType === 'REJECTED') {
-                  showError('Internal revision rejected');
-                }
-              }
+            // NOTE: DO NOT show toasts here - broadcasts to ALL users!
+            // Socket.IO handles targeted notifications
+            if (import.meta.env.DEV && payload.eventType === 'INSERT') {
+              console.log(`[RealtimeSubscriptions] Internal revision ${payload.new?.action_type}: BOQ ${payload.new?.boq_id}`);
             }
           }
         )
@@ -566,20 +561,10 @@ const subscribeToChangeRequests = () => {
           invalidateQueries(['change-request', payload.new?.request_id || payload.old?.request_id]);
           invalidateQueries(['vendor-approvals']); // TD vendor approvals
 
-          // Show notification based on event
-          if (payload.eventType === 'INSERT') {
-            showInfo('New change request created');
-          } else if (payload.eventType === 'UPDATE') {
-            const newStatus = payload.new?.status;
-            const oldStatus = payload.old?.status;
-
-            if (newStatus !== oldStatus) {
-              if (newStatus === 'approved') {
-                showSuccess('Change request approved');
-              } else if (newStatus === 'rejected') {
-                showError('Change request rejected');
-              }
-            }
+          // NOTE: DO NOT show toasts here - broadcasts to ALL users!
+          // Socket.IO handles targeted notifications
+          if (import.meta.env.DEV) {
+            console.log(`[RealtimeSubscriptions] Change request ${payload.eventType}: ${payload.new?.cr_id}`);
           }
         }
       )
