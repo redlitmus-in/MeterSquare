@@ -199,8 +199,8 @@ class NotificationMiddleware {
     // Send sender notification to background service so it appears in notification list
     await this.sendToBackgroundService(senderNotification);
 
-    // Also show toast for immediate feedback
-    this.showToast(senderNotification);
+    // NOTE: No toast here - the component that calls sendPRNotification
+    // should show its own toast for immediate feedback
   }
 
   /**
@@ -342,39 +342,40 @@ class NotificationMiddleware {
     const isSender = notification.metadata?.senderId === currentUserId ||
                     notification.isSenderNotification === true;
 
-    console.log('📨 Dispatching notification:', {
-      notificationId: notification.id,
-      isSender,
-      currentUserId,
-      targetRole: notification.targetRole,
-      priority: notification.priority
-    });
+    if (import.meta.env.DEV) {
+      console.log('📨 Dispatching notification:', {
+        notificationId: notification.id,
+        isSender,
+        currentUserId,
+        targetRole: notification.targetRole,
+        priority: notification.priority
+      });
+    }
 
     if (isSender) {
-      // Sender gets only toast confirmation
-      console.log('Showing toast for sender');
-      this.showToast(notification);
+      // Sender already gets toast from the component that performs the action
+      // No additional toast needed here - would be duplicate
+      if (import.meta.env.DEV) {
+        console.log('[NotificationMiddleware] Sender action confirmed (no toast - component handles it)');
+      }
     } else {
-      // Receiver gets full notification experience
-      console.log('Processing notification for receiver');
+      // Receiver gets notification experience:
+      // 1. Add to panel (store)
+      // 2. In-app notification popup (different style from action toasts)
+      // 3. Desktop notification
 
-      // Add to store
+      // Add to store (shows in notification panel + badge)
       const store = useNotificationStore.getState();
       store.addNotification(notification);
 
-      // Check and show browser notification first (more important)
-      const hasPermission = await this.hasNotificationPermission();
-      console.log('Browser notification permission:', hasPermission);
+      // Show in-app notification popup (DIFFERENT from action toast)
+      this.showIncomingNotificationPopup(notification);
 
+      // Show browser/desktop notification
+      const hasPermission = await this.hasNotificationPermission();
       if (hasPermission) {
         await this.showBrowserNotification(notification);
-      } else {
-        console.warn('⚠️ Browser notifications not permitted');
       }
-
-      // Then show toast (less important, can be commented out for testing)
-      // Comment out the next line to test browser notifications without toast
-      this.showToast(notification);
 
       // Send to background service for persistence
       await this.sendToBackgroundService(notification);
@@ -406,6 +407,46 @@ class NotificationMiddleware {
       'forwarded': `PR ${prData.documentId} forwarded to ${prData.nextRole}`
     };
     return messages[type] || `PR ${prData.documentId} action completed`;
+  }
+
+  /**
+   * Show in-app notification popup for INCOMING notifications
+   * This is styled DIFFERENTLY from action toasts (success/error)
+   */
+  private showIncomingNotificationPopup(notification: NotificationData): void {
+    // Determine icon based on notification type
+    const getIcon = () => {
+      switch (notification.type) {
+        case 'approval':
+        case 'success':
+          return '✅';
+        case 'rejection':
+        case 'error':
+          return '❌';
+        case 'warning':
+        case 'alert':
+          return '⚠️';
+        case 'assignment':
+          return '📋';
+        default:
+          return '🔔';
+      }
+    };
+
+    // Format sender info if available
+    const senderInfo = notification.metadata?.sender
+      ? `From: ${notification.metadata.sender}`
+      : '';
+
+    // Use toast.message() for incoming notifications - different from success/error
+    toast.message(`${getIcon()} ${notification.title}`, {
+      description: `${notification.message}${senderInfo ? `\n${senderInfo}` : ''}`,
+      duration: notification.priority === 'urgent' || notification.priority === 'high' ? 8000 : 5000,
+      action: notification.metadata?.actionUrl ? {
+        label: 'View',
+        onClick: () => window.location.href = notification.metadata!.actionUrl!
+      } : undefined
+    });
   }
 
   private showToast(notification: NotificationData): void {

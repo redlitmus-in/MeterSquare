@@ -12,6 +12,9 @@ const activeSubscriptions = new Map<SubscriptionChannel, any>();
 // Track if subscriptions are already initialized
 let subscriptionsInitialized = false;
 
+// Track if subscriptions are intentionally paused (to prevent reconnection loops)
+let isIntentionallyPaused = false;
+
 // Interface for custom subscription configuration
 interface SubscribeToRealtimeConfig {
   table: string;
@@ -301,9 +304,6 @@ const subscribeToBOQs = () => {
       // Remove existing subscription first to prevent duplicates
       const existing = activeSubscriptions.get('boqs');
       if (existing) {
-        if (import.meta.env.DEV) {
-          console.log('🧹 Removing existing BOQ subscription before recreating...');
-        }
         supabase.removeChannel(existing);
         activeSubscriptions.delete('boqs');
       }
@@ -358,29 +358,21 @@ const subscribeToBOQs = () => {
           }
         )
         .subscribe((status, err) => {
-          if (import.meta.env.DEV) {
-            console.log('📡 BOQ subscription status:', status, err);
-          }
-
           // Handle subscription being closed and reconnect
           if (status === 'CLOSED') {
-            if (import.meta.env.DEV) {
-              console.warn('⚠️ BOQ subscription was closed, reconnecting in 3 seconds...');
+            // Don't reconnect if intentionally paused
+            if (isIntentionallyPaused) {
+              return;
             }
             // Only reconnect if we haven't exceeded retries
             if (retryCount < MAX_RETRIES) {
               retryCount++;
               if (retryTimeout) clearTimeout(retryTimeout);
               retryTimeout = setTimeout(() => {
-                if (import.meta.env.DEV) {
-                  console.log(`🔄 Reconnecting BOQ subscription (attempt ${retryCount}/${MAX_RETRIES})...`);
-                }
+                // Double-check we're still not paused before reconnecting
+                if (isIntentionallyPaused) return;
                 createSubscription();
               }, 3000);
-            } else {
-              if (import.meta.env.DEV) {
-                console.error('❌ BOQ subscription closed too many times. Stopping reconnection attempts.');
-              }
             }
             return;
           }
@@ -389,41 +381,19 @@ const subscribeToBOQs = () => {
           if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
             if (import.meta.env.DEV) {
               console.error(`❌ BOQ subscription ${status}`, err);
-              console.error('Debug info:', {
-                supabaseUrl: supabase.supabaseUrl,
-                channel: subscription.topic,
-                error: err,
-                retryCount: retryCount,
-                maxRetries: MAX_RETRIES
-              });
             }
 
             if (retryCount < MAX_RETRIES) {
               retryCount++;
               const backoffDelay = Math.min(5000 * retryCount, 30000); // Exponential backoff max 30s
-              if (import.meta.env.DEV) {
-                console.log(`🔄 Retrying BOQ subscription (${retryCount}/${MAX_RETRIES}) in ${backoffDelay/1000} seconds...`);
-              }
               if (retryTimeout) clearTimeout(retryTimeout);
               retryTimeout = setTimeout(() => {
+                if (isIntentionallyPaused) return;
                 supabase.removeChannel(subscription);
                 createSubscription();
               }, backoffDelay);
-            } else {
-              if (import.meta.env.DEV) {
-                console.error('❌ BOQ subscription failed after max retries.');
-                console.error('Note: Database configuration is correct. This may be:');
-                console.error('1. Network/firewall blocking WebSocket connections');
-                console.error('2. Supabase quota limit reached');
-                console.error('3. Too many concurrent connections');
-                console.error('✅ Fallback: Socket.IO + polling will handle notifications');
-              }
-              // Don't show toast error in production - Socket.IO + polling fallback handles notifications
             }
           } else if (status === 'SUBSCRIBED') {
-            if (import.meta.env.DEV) {
-              console.log('✅ BOQ subscription active');
-            }
             retryCount = 0; // Reset retry count on success
             if (retryTimeout) clearTimeout(retryTimeout);
           }
@@ -482,9 +452,6 @@ const subscribeToBOQInternalRevisions = () => {
       // Remove existing subscription first to prevent duplicates
       const existing = activeSubscriptions.get('boq_internal_revisions');
       if (existing) {
-        if (import.meta.env.DEV) {
-          console.log('🧹 Removing existing Internal Revisions subscription before recreating...');
-        }
         supabase.removeChannel(existing);
         activeSubscriptions.delete('boq_internal_revisions');
       }
@@ -529,28 +496,20 @@ const subscribeToBOQInternalRevisions = () => {
           }
         )
         .subscribe((status, err) => {
-          if (import.meta.env.DEV) {
-            console.log('📡 BOQ Internal Revisions subscription status:', status, err);
-          }
-
           // Handle subscription being closed and reconnect
           if (status === 'CLOSED') {
-            if (import.meta.env.DEV) {
-              console.warn('⚠️ Internal Revisions subscription was closed, reconnecting in 3 seconds...');
+            // Don't reconnect if intentionally paused
+            if (isIntentionallyPaused) {
+              return;
             }
             // Only reconnect if we haven't exceeded retries
             if (retryCount < MAX_RETRIES) {
               retryCount++;
               setTimeout(() => {
-                if (import.meta.env.DEV) {
-                  console.log(`🔄 Reconnecting Internal Revisions subscription (attempt ${retryCount}/${MAX_RETRIES})...`);
-                }
+                // Double-check we're still not paused before reconnecting
+                if (isIntentionallyPaused) return;
                 createSubscription();
               }, 3000);
-            } else {
-              if (import.meta.env.DEV) {
-                console.error('❌ Internal Revisions subscription closed too many times. Stopping reconnection attempts.');
-              }
             }
             return;
           }
@@ -559,33 +518,17 @@ const subscribeToBOQInternalRevisions = () => {
           if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
             if (import.meta.env.DEV) {
               console.error(`❌ Internal Revisions subscription ${status}`, err);
-              console.error('Debug info:', {
-                supabaseUrl: supabase.supabaseUrl,
-                channel: subscription.topic,
-                error: err
-              });
             }
 
             if (retryCount < MAX_RETRIES) {
               retryCount++;
-              if (import.meta.env.DEV) {
-                console.log(`🔄 Retrying Internal Revisions subscription (${retryCount}/${MAX_RETRIES}) in 5 seconds...`);
-              }
               setTimeout(() => {
+                if (isIntentionallyPaused) return;
                 supabase.removeChannel(subscription);
                 createSubscription();
               }, 5000);
-            } else {
-              if (import.meta.env.DEV) {
-                console.error('❌ Internal Revisions subscription failed after max retries.');
-                console.error('Possible fixes:');
-                console.error('1. Check if RLS is enabled on "boq_internal_revisions" table');
-                console.error('2. Run this SQL: ALTER PUBLICATION supabase_realtime ADD TABLE boq_internal_revisions;');
-                console.error('3. Run this SQL: ALTER TABLE boq_internal_revisions DISABLE ROW LEVEL SECURITY;');
-              }
             }
           } else if (status === 'SUBSCRIBED') {
-            // Removed verbose log - was causing console spam
             retryCount = 0;
           }
         });
@@ -655,6 +598,7 @@ export const cleanupSubscriptions = () => {
   if (import.meta.env.DEV) {
     console.log('🧹 Cleaning up all subscriptions...');
   }
+  isIntentionallyPaused = true; // Prevent reconnection attempts during cleanup
   activeSubscriptions.forEach((subscription, channel) => {
     try {
       supabase.removeChannel(subscription);
@@ -666,12 +610,14 @@ export const cleanupSubscriptions = () => {
   });
   activeSubscriptions.clear();
   subscriptionsInitialized = false; // Reset flag so subscriptions can be recreated
+  isIntentionallyPaused = false; // Reset after cleanup
 };
 
 /**
  * Pause all subscriptions (useful when app goes to background)
  */
 export const pauseSubscriptions = () => {
+  isIntentionallyPaused = true;
   activeSubscriptions.forEach((subscription) => {
     try {
       subscription.unsubscribe();
@@ -685,6 +631,7 @@ export const pauseSubscriptions = () => {
  * Resume all subscriptions
  */
 export const resumeSubscriptions = () => {
+  isIntentionallyPaused = false;
   activeSubscriptions.forEach((subscription) => {
     try {
       subscription.subscribe();
@@ -698,12 +645,8 @@ export const resumeSubscriptions = () => {
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', cleanupSubscriptions);
 
-  // Handle visibility change (pause/resume when tab is hidden/visible)
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      pauseSubscriptions();
-    } else {
-      resumeSubscriptions();
-    }
-  });
+  // NOTE: Removed visibility change handler as it was causing reconnection loops.
+  // Supabase realtime handles connection management internally and will
+  // automatically reconnect when needed. Manual pause/resume was triggering
+  // CLOSED status which then triggered reconnection logic, creating infinite loops.
 }

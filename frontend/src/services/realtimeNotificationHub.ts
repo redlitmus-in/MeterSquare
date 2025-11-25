@@ -9,6 +9,10 @@ import { getSecureUserData } from '@/utils/notificationSecurity';
 import { useNotificationStore } from '@/store/notificationStore';
 import { toast } from 'sonner';
 
+// NOTE: We use toast for INCOMING notifications but with DIFFERENT styling
+// - YOUR actions: toast.success/error (green/red) - shown by component
+// - INCOMING from others: toast with info style (blue/purple) - shown here
+
 interface RealtimeNotification {
   id: string;
   type: string;
@@ -209,26 +213,59 @@ class RealtimeNotificationHub {
       senderName: notification.senderName
     };
 
-    // Add to notification store (shows in notification panel)
+    // Add to notification store (shows in notification panel + badge count)
     useNotificationStore.getState().addNotification(notificationData);
 
-    // Show toast notification
-    const toastType = notification.type === 'error' ? 'error' :
-                      notification.type === 'warning' ? 'warning' :
-                      notification.type === 'success' || notification.type === 'approval' ? 'success' : 'info';
+    // Show in-app notification popup (DIFFERENT from action toasts)
+    // This is styled differently to distinguish from your own action feedback
+    this.showIncomingNotificationPopup(notification);
 
-    if (toastType === 'success') {
-      toast.success(notification.title, { description: notification.message });
-    } else if (toastType === 'error') {
-      toast.error(notification.title, { description: notification.message });
-    } else if (toastType === 'warning') {
-      toast.warning(notification.title, { description: notification.message });
-    } else {
-      toast.info(notification.title, { description: notification.message });
-    }
-
-    // Show desktop notification (browser notification)
+    // Also show desktop notification (browser notification)
     this.showDesktopNotification(notification);
+  }
+
+  /**
+   * Show in-app notification popup for INCOMING notifications
+   * This is styled DIFFERENTLY from action toasts (success/error)
+   * Uses info/message style to distinguish from your own actions
+   */
+  private showIncomingNotificationPopup(notification: RealtimeNotification) {
+    // Determine icon based on notification type
+    const getIcon = () => {
+      switch (notification.type) {
+        case 'approval':
+        case 'success':
+          return '✅';
+        case 'rejection':
+        case 'error':
+          return '❌';
+        case 'warning':
+        case 'alert':
+          return '⚠️';
+        case 'assignment':
+          return '📋';
+        default:
+          return '🔔';
+      }
+    };
+
+    // Format sender info if available
+    const senderInfo = notification.senderName
+      ? `From: ${notification.senderName}`
+      : '';
+
+    // Use toast.message() for incoming notifications - different from success/error
+    // This creates a neutral-styled notification that looks different from action feedback
+    toast.message(`${getIcon()} ${notification.title}`, {
+      description: `${notification.message}${senderInfo ? `\n${senderInfo}` : ''}`,
+      duration: notification.priority === 'urgent' || notification.priority === 'high' ? 8000 : 5000,
+      action: (notification as any).actionUrl ? {
+        label: 'View',
+        onClick: () => {
+          window.location.href = (notification as any).actionUrl;
+        }
+      } : undefined,
+    });
   }
 
   /**
@@ -295,9 +332,13 @@ class RealtimeNotificationHub {
                     data.approvedBy === currentUserId;
 
     if (isSender) {
-      const message = `PR ${data.documentId} ${type} successfully`;
-      toast.success('Action Confirmed', { description: message });
+      // Sender already gets toast from the component that performed the action
+      // No need to show another toast here - would be duplicate
+      if (import.meta.env.DEV) {
+        console.log(`[PR Notification] Sender confirmed: PR ${data.documentId} ${type}`);
+      }
     } else if (data.targetRole === this.userRole || data.targetUserId === currentUserId) {
+      // Receiver gets desktop notification + panel notification (no toast)
       const notification: RealtimeNotification = {
         id: `pr-${type}-${data.documentId}-${Date.now()}`,
         type: type === 'rejected' ? 'error' : 'success',

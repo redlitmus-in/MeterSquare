@@ -10,9 +10,15 @@ import { setupCacheValidator } from '@/utils/clearCache';
 import { queryClient } from '@/lib/queryClient';
 import { setupRealtimeSubscriptions } from '@/lib/realtimeSubscriptions';
 import { initializeNotificationService } from '@/store/notificationStore';
-import { backgroundNotificationService } from '@/services/backgroundNotificationService';
 import { realtimeNotificationHub } from '@/services/realtimeNotificationHub';
+// NOTE: backgroundNotificationService removed - realtimeNotificationHub handles everything
 import { Security } from '@/utils/security'; // Initialize security system
+
+// Load notification debugger and desktop notification tester in development
+if (import.meta.env.DEV) {
+  import('@/utils/notificationDebugger');
+  import('@/utils/testDesktopNotifications');
+}
 
 // Critical components loaded immediately
 import { LoginPage } from '@/pages/auth/LoginPage';
@@ -27,6 +33,7 @@ const ProjectsPage = lazy(() => import('@/pages/common/ProjectsPage'));
 const ProcessFlowPage = lazy(() => import('@/pages/common/ProcessFlowPage'));
 const ProfilePage = lazy(() => import('@/pages/common/ProfilePage'));
 const WorkflowStatusPage = lazy(() => import('@/pages/common/WorkflowStatusPage'));
+const NotificationsPage = lazy(() => import('@/pages/common/NotificationsPage'));
 const CreativeErrorPage = lazy(() => import('@/components/ui/CreativeErrorPage'));
 
 // Lazy load procurement pages - Temporarily commented out
@@ -704,12 +711,7 @@ function App() {
       // Only setup subscriptions once - don't recreate on every user object change
       const currentSubs = setupRealtimeSubscriptions(userRole);
 
-      // Update background service with credentials
-      const token = localStorage.getItem('access_token');
-      const userId = (user as any)?.id || (user as any)?.userId;
-      backgroundNotificationService.updateCredentials(token, userRole, userId);
-
-      // Reconnect real-time hub with new credentials
+      // Reconnect real-time hub with new credentials (handles all notification services)
       realtimeNotificationHub.reconnect();
 
       // Fetch missed notifications on app mount/login
@@ -727,13 +729,11 @@ function App() {
             console.log('🔌 User logged out - cleaning up subscriptions');
           }
           currentSubs();
-          backgroundNotificationService.updateCredentials(null, null, null);
           realtimeNotificationHub.disconnect();
         }
       };
     } else {
       // Clear credentials on logout
-      backgroundNotificationService.updateCredentials(null, null, null);
       realtimeNotificationHub.disconnect();
     }
   }, [isAuthenticated]); // REMOVED 'user' from dependencies to prevent unnecessary re-runs
@@ -745,9 +745,8 @@ function App() {
     // Initialize notification services
     initializeNotificationService();
 
-    // Initialize background notification service
     if (import.meta.env.DEV) {
-      console.log('Initializing background notification service...');
+      console.log('Notification services initialized');
     }
 
     // Quick initialization - don't block on environment validation
@@ -911,6 +910,7 @@ function App() {
             <Route path="workflows/material-dispatch-production" element={<MaterialDispatchProductionPage />} />
             <Route path="workflows/material-dispatch-site" element={<MaterialDispatchSitePage />} />
             <Route path="profile" element={<ProfilePage />} />
+            <Route path="notifications" element={<NotificationsPage />} />
 
             {/* Technical Director Routes */}
             <Route path="project-approvals" element={

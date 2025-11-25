@@ -36,7 +36,7 @@ import {
   Activity,
   Image as ImageIcon
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import axios from 'axios';
 import { apiClient } from '@/api/config';
 import { formatCurrency } from '@/utils/formatters';
@@ -351,14 +351,14 @@ const ProjectApprovals: React.FC = () => {
         console.error('Failed to load BOQs:', response.message);
         // Only show error toast on initial load, not during auto-refresh
         if (showLoadingSpinner) {
-          toast.error(response.message || 'Failed to load BOQs');
+          showError(response.message || 'Failed to load BOQs');
         }
       }
     } catch (error) {
       console.error('Error loading BOQs:', error);
       // Only show error toast on initial load, not during auto-refresh
       if (showLoadingSpinner) {
-        toast.error('Failed to load BOQs');
+        showError('Failed to load BOQs');
       }
     } finally {
       if (showLoadingSpinner) {
@@ -457,15 +457,15 @@ const ProjectApprovals: React.FC = () => {
           setShowDayExtensionModal(true);
         } else {
           console.log('No pending extensions found');
-          toast.info('No pending day extension requests for this project');
+          showInfo('No pending day extension requests for this project');
         }
       } else {
         console.error('API error:', data);
-        toast.error(data.error || 'Failed to load day extension requests');
+        showError(data.error || 'Failed to load day extension requests');
       }
     } catch (error) {
       console.error('Error fetching day extension details:', error);
-      toast.error('Failed to load day extension requests');
+      showError('Failed to load day extension requests');
     } finally {
       setLoadingDayExtensions(false);
     }
@@ -506,11 +506,11 @@ const ProjectApprovals: React.FC = () => {
 
         setSelectedEstimation(estimation);
       } else {
-        toast.error('Failed to load BOQ details');
+        showError('Failed to load BOQ details');
       }
     } catch (error) {
       console.error('Error loading BOQ details:', error);
-      toast.error('Failed to load BOQ details');
+      showError('Failed to load BOQ details');
     } finally {
       setLoadingBOQDetails(false);
     }
@@ -1125,7 +1125,7 @@ const ProjectApprovals: React.FC = () => {
         }
       } else {
         if (!notes || !notes.trim()) {
-          toast.error('Please provide a rejection reason');
+          showError('Please provide a rejection reason');
           return;
         }
 
@@ -1145,7 +1145,7 @@ const ProjectApprovals: React.FC = () => {
           ? await tdService.rejectClientRevision(id, notes)
           : await tdService.rejectBOQ(id, notes);
         if (response.success) {
-          toast.success('BOQ rejected successfully');
+          showSuccess('BOQ rejected successfully');
 
           // Update selectedEstimation status to 'rejected' immediately
           if (selectedEstimation?.id === id) {
@@ -1168,13 +1168,13 @@ const ProjectApprovals: React.FC = () => {
             loadRevisionTabs();
           }
         } else {
-          toast.error(response.message || 'Failed to reject BOQ');
+          showError(response.message || 'Failed to reject BOQ');
           // Revert optimistic update on error
           await loadBOQs(false);
         }
       }
     } catch (error) {
-      toast.error('An error occurred while processing the request');
+      showError('An error occurred while processing the request');
       // Revert optimistic update on error
       await loadBOQs(false);
     } finally {
@@ -1205,7 +1205,7 @@ const ProjectApprovals: React.FC = () => {
         ? await tdService.approveClientRevision(selectedEstimation.id, approvalNotes)
         : await tdService.approveBOQ(selectedEstimation.id, approvalNotes);
       if (response.success) {
-        toast.success('BOQ approved successfully');
+        showSuccess('BOQ approved successfully');
 
         // Update selectedEstimation status to 'approved' or 'revision_approved' immediately
         if (selectedEstimation?.id) {
@@ -1231,13 +1231,13 @@ const ProjectApprovals: React.FC = () => {
           loadRevisionTabs();
         }
       } else {
-        toast.error(response.message || 'Failed to approve BOQ');
+        showError(response.message || 'Failed to approve BOQ');
         // Revert optimistic update on error
         await loadBOQs(false);
       }
     } catch (error) {
       console.error('Approval error:', error);
-      toast.error('Failed to approve BOQ');
+      showError('Failed to approve BOQ');
       // Revert optimistic update on error
       await loadBOQs(false);
     } finally {
@@ -1271,11 +1271,11 @@ const ProjectApprovals: React.FC = () => {
       }
 
       toast.dismiss();
-      toast.success(`${typeName} BOQ downloaded successfully as ${formatName}`);
+      showSuccess(`${typeName} BOQ downloaded successfully as ${formatName}`);
       setShowFormatModal(false);
     } catch (error) {
       toast.dismiss();
-      toast.error('Failed to download BOQ');
+      showError('Failed to download BOQ');
       console.error('Download error:', error);
     }
   };
@@ -1305,13 +1305,13 @@ const ProjectApprovals: React.FC = () => {
       }
     } catch (error) {
       console.error('Error loading PMs/MEPs:', error);
-      toast.error('Failed to load Project Managers/MEP Supervisors');
+      showError('Failed to load Project Managers/MEP Supervisors');
     }
   };
 
   const handleAssignPM = async () => {
     if (!selectedEstimation || !selectedEstimation.projectId) {
-      toast.error('No project selected');
+      showError('No project selected');
       return;
     }
 
@@ -1319,7 +1319,7 @@ const ProjectApprovals: React.FC = () => {
       if (assignMode === 'create') {
         // Validate new PM data
         if (!newPMData.full_name || !newPMData.email || !newPMData.phone) {
-          toast.error('Please fill all PM details');
+          showError('Please fill all PM details');
           return;
         }
 
@@ -1331,7 +1331,7 @@ const ProjectApprovals: React.FC = () => {
 
         toast.dismiss();
         if (response.success) {
-          toast.success('Project Manager created and assigned successfully');
+          showSuccess('Project Manager created and assigned successfully');
           setShowAssignPMModal(false);
           setNewPMData({ full_name: '', email: '', phone: '' });
           await loadBOQs();
@@ -1340,12 +1340,12 @@ const ProjectApprovals: React.FC = () => {
             await loadBOQDetails(selectedEstimation.id);
           }
         } else {
-          toast.error(response.message);
+          showError(response.message);
         }
       } else {
         // Assign to existing PM(s)
         if (selectedPMIds.length === 0) {
-          toast.error('Please select at least one Project Manager');
+          showError('Please select at least one Project Manager');
           return;
         }
 
@@ -1366,7 +1366,7 @@ const ProjectApprovals: React.FC = () => {
             toast.dismiss();
 
             if (!mepResponse.success) {
-              toast.warning(`PMs assigned, but MEP assignment failed: ${mepResponse.message}`);
+              showWarning(`PMs assigned, but MEP assignment failed: ${mepResponse.message}`);
             } else {
               const successMessage = pmCount > 1 && selectedMEPIds.length > 0
                 ? `Project assigned to ${pmCount} PM(s) and ${selectedMEPIds.length} MEP(s) successfully`
@@ -1375,13 +1375,13 @@ const ProjectApprovals: React.FC = () => {
                 : selectedMEPIds.length > 0
                 ? `Project assigned to PM and ${selectedMEPIds.length} MEP(s) successfully`
                 : 'Project assigned to PM successfully';
-              toast.success(successMessage);
+              showSuccess(successMessage);
             }
           } else {
             const successMessage = pmCount > 1
               ? `Project assigned to ${pmCount} PMs successfully`
               : 'Project assigned to PM successfully';
-            toast.success(successMessage);
+            showSuccess(successMessage);
           }
 
           setShowAssignPMModal(false);
@@ -1393,13 +1393,13 @@ const ProjectApprovals: React.FC = () => {
             await loadBOQDetails(selectedEstimation.id);
           }
         } else {
-          toast.error(response.message);
+          showError(response.message);
         }
       }
     } catch (error) {
       toast.dismiss();
       console.error('Assign PM error:', error);
-      toast.error('Failed to assign Project Manager');
+      showError('Failed to assign Project Manager');
     }
   };
 
@@ -1414,16 +1414,16 @@ const ProjectApprovals: React.FC = () => {
 
       toast.dismiss();
       if (response.success) {
-        toast.success('Project Manager deleted successfully');
+        showSuccess('Project Manager deleted successfully');
         // Reload PMs list
         await loadPMs();
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error) {
       toast.dismiss();
       console.error('Delete PM error:', error);
-      toast.error('Failed to delete Project Manager');
+      showError('Failed to delete Project Manager');
     }
   };
 
@@ -2006,7 +2006,7 @@ const ProjectApprovals: React.FC = () => {
                               setSelectedProjectPMs(retryPMs);
                               setShowPMDetailsModal(true);
                             } else {
-                              toast.error('PM details not found. Please refresh the page.');
+                              showError('PM details not found. Please refresh the page.');
                             }
                           }
                         }}
@@ -2149,7 +2149,7 @@ const ProjectApprovals: React.FC = () => {
                                       setSelectedProjectPMs(retryPMs);
                                       setShowPMDetailsModal(true);
                                     } else {
-                                      toast.error('PM details not found. Please refresh the page.');
+                                      showError('PM details not found. Please refresh the page.');
                                     }
                                   }
                                 }}
@@ -4930,7 +4930,7 @@ const ProjectApprovals: React.FC = () => {
                     if (rejectionReason.trim()) {
                       handleApproval(selectedEstimation.id, false, rejectionReason);
                     } else {
-                      toast.error('Please provide a rejection reason');
+                      showError('Please provide a rejection reason');
                     }
                   }}
                   disabled={isRejecting}

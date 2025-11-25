@@ -324,6 +324,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     }
   };
 
+
   // Memoized navigation items to prevent re-calculation on every render
   const navigation = useMemo(() => {
     const roleId = user?.role_id;

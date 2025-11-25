@@ -18,7 +18,7 @@ export interface NotificationData {
   timestamp: Date;
   read: boolean;
   priority: 'low' | 'medium' | 'high' | 'urgent';
-  category: 'procurement' | 'approval' | 'vendor' | 'system' | 'project';
+  category: 'procurement' | 'approval' | 'vendor' | 'system' | 'project' | 'material' | 'task' | 'change_request' | 'production' | 'general';
   actionRequired?: boolean;
   actionUrl?: string;
   actionLabel?: string;
@@ -31,7 +31,19 @@ export interface NotificationData {
     emailId?: string;
     recipient?: string;
     link?: string;
+    boq_id?: string;
+    cr_id?: string;
+    vendor_id?: string;
+    po_id?: string;
+    material_id?: string;
+    request_id?: string;
+    dispatch_id?: string;
+    task_id?: string;
+    project_id?: string;
+    extension_id?: string;
+    grn_id?: string;
   };
+  targetRole?: string;
 }
 
 class NotificationService {
@@ -70,8 +82,26 @@ class NotificationService {
         const swUrl = '/sw.js';
         // Validate service worker URL
         if (isValidServiceWorkerUrl(swUrl)) {
-          this.serviceWorkerRegistration = await navigator.serviceWorker.register(swUrl);
+          // Add timestamp to force update in development
+          const swUrlWithVersion = import.meta.env.DEV ? `${swUrl}?v=${Date.now()}` : swUrl;
+
+          this.serviceWorkerRegistration = await navigator.serviceWorker.register(swUrlWithVersion, {
+            updateViaCache: 'none' // Force check for updates
+          });
           debug.info('Service Worker registered successfully');
+
+          // Check for updates
+          this.serviceWorkerRegistration.addEventListener('updatefound', () => {
+            debug.info('Service Worker update found');
+            const newWorker = this.serviceWorkerRegistration?.installing;
+            if (newWorker) {
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'activated') {
+                  debug.info('New Service Worker activated');
+                }
+              });
+            }
+          });
 
           // Wait for service worker to be ready and active
           const registration = await navigator.serviceWorker.ready;
@@ -87,6 +117,11 @@ class NotificationService {
               debug.info('Service Worker activated');
             });
           }
+
+          // Check for updates on focus
+          window.addEventListener('focus', () => {
+            registration.update();
+          });
         } else {
           debug.error('Invalid service worker URL');
         }
@@ -394,7 +429,8 @@ class NotificationService {
   private setupDirectNotificationHandlers(browserNotification: Notification, sanitizedNotification: NotificationData) {
     const debug = getDebugLogger();
 
-    browserNotification.onclick = () => {
+    browserNotification.onclick = (event) => {
+      event.preventDefault(); // Prevent default browser behavior
       debug.info('Notification clicked');
       this.handleNotificationClick(sanitizedNotification);
       browserNotification.close();
@@ -426,16 +462,78 @@ class NotificationService {
     }
     window.focus();
 
-    // Navigate to action URL if available and valid
-    if (notification.actionUrl && isValidInternalUrl(notification.actionUrl)) {
-      debug.info('Navigating to notification action URL');
-      window.location.href = notification.actionUrl;
-    } else if (notification.actionUrl) {
-      debug.warn('Invalid action URL blocked');
+    // Check if we have a custom click handler registered
+    if (this.notificationClickHandler) {
+      debug.info('Using custom notification click handler');
+      this.notificationClickHandler(notification);
+    } else {
+      // Fallback: Import the redirect utilities and handle smart redirects
+      debug.info('Using fallback redirect handler for desktop notification');
+
+      // Import redirect utilities dynamically
+      Promise.all([
+        import('@/utils/notificationRedirects'),
+        import('@/utils/roleRouting')
+      ]).then(([{ getNotificationRedirectPath, buildNotificationUrl }, { buildRolePath }]) => {
+        // Get user role from localStorage or session
+        const userData = getSecureUserData();
+        const userRole = userData?.role_id || userData?.role || '';
+
+        // Get smart redirect path
+        const redirectConfig = getNotificationRedirectPath(notification, userRole);
+
+        if (redirectConfig) {
+          const redirectUrl = buildNotificationUrl(redirectConfig);
+          debug.info('Redirecting to smart URL:', redirectUrl);
+          window.location.href = redirectUrl;
+        } else if (notification.metadata?.link) {
+          // Special handling for BOQ links
+          if (notification.metadata.link.includes('/boq/')) {
+            const boqId = notification.metadata.link.split('/boq/').pop()?.split('?')[0];
+
+            // Check if user is Technical Director
+            const isTD = userRole && (
+              userRole.toString().toLowerCase().includes('technical') ||
+              userRole.toString().toLowerCase().includes('director') ||
+              userRole === '2' ||
+              userRole === 2
+            );
+
+            const targetPath = isTD ? '/project-approvals' : '/projects';
+            const fullPath = buildRolePath(userRole, targetPath);
+            const finalUrl = `${fullPath}?boq_id=${boqId}&tab=pending`;
+
+            debug.info('Redirecting BOQ notification to:', finalUrl);
+            window.location.href = finalUrl;
+          } else if (notification.actionUrl && isValidInternalUrl(notification.actionUrl)) {
+            debug.info('Navigating to notification action URL');
+            window.location.href = notification.actionUrl;
+          } else if (notification.metadata.link && isValidInternalUrl(notification.metadata.link)) {
+            debug.info('Navigating to notification metadata link');
+            window.location.href = notification.metadata.link;
+          }
+        } else if (notification.actionUrl && isValidInternalUrl(notification.actionUrl)) {
+          debug.info('Navigating to notification action URL');
+          window.location.href = notification.actionUrl;
+        }
+      }).catch(error => {
+        debug.error('Failed to load redirect utilities:', error);
+        // Final fallback
+        if (notification.actionUrl && isValidInternalUrl(notification.actionUrl)) {
+          window.location.href = notification.actionUrl;
+        }
+      });
     }
 
     // Mark as read
     this.markAsRead(notification.id);
+  }
+
+  // Set custom notification click handler (for proper React Router navigation)
+  private notificationClickHandler: ((notification: NotificationData) => void) | null = null;
+
+  setNotificationClickHandler(handler: (notification: NotificationData) => void) {
+    this.notificationClickHandler = handler;
   }
 
   // Mark notification as read

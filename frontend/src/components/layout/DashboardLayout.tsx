@@ -155,12 +155,10 @@ const DashboardLayout: React.FC = React.memo(() => {
         </main>
       </div>
 
-      {/* Floating Notifications - Show only on dashboard pages */}
-      {isDashboardPage && (
-        <div className={`fixed top-16 right-4 z-[100] transition-all duration-300 ${showHeader ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}`}>
-          <NotificationSystem />
-        </div>
-      )}
+      {/* Floating Notifications - Now available globally for toast notifications */}
+      <div className={`fixed top-16 right-4 z-[100] transition-all duration-300`}>
+        <NotificationSystem />
+      </div>
 
       {/* Admin View Context Indicator - Show only for admin when viewing as another role */}
       {(user?.role === 'admin' || user?.role_id === 5) && viewingAsRoleName && (

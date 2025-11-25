@@ -40,6 +40,9 @@ import { useNotificationStore } from '@/store/notificationStore';
 import { NotificationData } from '@/services/notificationService';
 import { sanitizeNotification, sanitizeText } from '@/utils/sanitizer';
 import { cn } from '@/lib/utils';
+import { getNotificationRedirectPath, buildNotificationUrl } from '@/utils/notificationRedirects';
+import { useAuthStore } from '@/store/authStore';
+import { buildRolePath } from '@/utils/roleRouting';
 
 interface NotificationSystemProps {
   position?: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
@@ -54,7 +57,8 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  
+  const { user } = useAuthStore();
+
   const {
     notifications,
     unreadCount,
@@ -266,41 +270,86 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     }
   }, []);
 
-  // FIXED: Handle PR notification action with proper navigation
+  // Enhanced notification action handler with smart redirects
   const handleNotificationAction = useCallback((notification: NotificationData) => {
-    if (notification.actionRequired && notification.metadata?.link) {
+    // Get user role for building proper paths
+    const userRole = user?.role_id || user?.role || '';
+
+    // Get smart redirect path based on notification content
+    const redirectConfig = getNotificationRedirectPath(notification, userRole);
+
+    if (redirectConfig) {
+      const redirectUrl = buildNotificationUrl(redirectConfig);
+
       try {
         // Use custom navigation handler if provided
         if (onNavigate) {
-          onNavigate(notification.metadata.link);
-        } 
-        // Check if it's an internal route (starts with /)
-        else if (notification.metadata.link.startsWith('/')) {
-          // Use React Router navigation for internal routes
-          navigate(notification.metadata.link, { 
+          onNavigate(redirectUrl);
+        } else {
+          // Navigate to the specific page/tab
+          navigate(redirectUrl, {
             replace: false,
-            state: { from: location.pathname } // Pass current location for back navigation
+            state: {
+              from: location.pathname,
+              notification: notification.id,
+              autoFocus: true // Flag to auto-focus the related item
+            }
           });
-        } 
-        // Handle external links
-        else if (notification.metadata.link.startsWith('http')) {
-          window.open(notification.metadata.link, '_blank', 'noopener,noreferrer');
         }
-        // Handle relative paths
-        else {
-          navigate(`/${notification.metadata.link}`, { 
+
+        // Close the notification panel after navigation
+        setShowPanel(false);
+      } catch (error) {
+        console.error('Navigation error:', error);
+        // Fallback to direct navigation
+        window.location.href = redirectUrl;
+      }
+    } else if (notification.metadata?.link) {
+      // Fallback to metadata.link if no smart redirect found
+      try {
+        // Check if the link contains /boq/ and needs special handling
+        if (notification.metadata.link.includes('/boq/')) {
+          const boqId = notification.metadata.link.split('/boq/').pop()?.split('?')[0];
+
+          // Check if user is Technical Director for proper routing
+          const isTD = userRole && (
+            userRole.toString().toLowerCase().includes('technical') ||
+            userRole.toString().toLowerCase().includes('director') ||
+            userRole === '2' || // TD role_id
+            userRole === 2
+          );
+
+          // TD should go to project-approvals for pending BOQs
+          const targetPath = isTD ? '/project-approvals' : '/projects';
+          const fullPath = buildRolePath(userRole, targetPath);
+
+          navigate(`${fullPath}?boq_id=${boqId}&tab=pending`, {
+            replace: false,
+            state: { from: location.pathname }
+          });
+        } else if (notification.metadata.link.startsWith('/')) {
+          navigate(notification.metadata.link, {
+            replace: false,
+            state: { from: location.pathname }
+          });
+        } else if (notification.metadata.link.startsWith('http')) {
+          window.open(notification.metadata.link, '_blank', 'noopener,noreferrer');
+        } else {
+          navigate(`/${notification.metadata.link}`, {
             replace: false,
             state: { from: location.pathname }
           });
         }
+        setShowPanel(false);
       } catch (error) {
         console.error('Navigation error:', error);
-        // Fallback to window.location for problematic cases
         window.location.href = notification.metadata.link;
       }
     }
+
+    // Mark notification as read
     markAsRead(notification.id);
-  }, [markAsRead, navigate, location.pathname, onNavigate]);
+  }, [markAsRead, navigate, location.pathname, onNavigate, user]);
 
   // ADDED: Helper function to safely navigate
   const safeNavigate = useCallback((path: string) => {
@@ -308,7 +357,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
       if (onNavigate) {
         onNavigate(path);
       } else {
-        navigate(path, { 
+        navigate(path, {
           replace: false,
           state: { from: location.pathname }
         });
@@ -319,6 +368,39 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
       window.location.href = path;
     }
   }, [navigate, location.pathname, onNavigate]);
+
+  // Register desktop notification click handler
+  useEffect(() => {
+    // Import notification service and register click handler
+    import('@/services/notificationService').then(({ notificationService }) => {
+      notificationService.setNotificationClickHandler((notification) => {
+        // Use the same handler as panel notifications
+        handleNotificationAction(notification);
+      });
+    });
+
+    // Listen for service worker messages (for when notification is clicked while window is open)
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'NOTIFICATION_CLICK') {
+        handleNotificationAction(event.data.notification);
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+    }
+
+    return () => {
+      // Cleanup handlers on unmount
+      import('@/services/notificationService').then(({ notificationService }) => {
+        notificationService.setNotificationClickHandler(null);
+      });
+
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+      }
+    };
+  }, [handleNotificationAction]);
 
   // Position classes for toast notifications
   const positionClasses = {
@@ -381,6 +463,21 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                   )}
                 </div>
                 <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      // Build role-based path for notifications
+                      const userRole = user?.role_id || user?.role || '';
+                      const notificationsPath = buildRolePath(userRole, '/notifications');
+                      navigate(notificationsPath);
+                      setShowPanel(false);
+                    }}
+                    className="text-white hover:bg-white/10 h-7 px-2 text-xs"
+                    title="View all notifications"
+                  >
+                    View All
+                  </Button>
                   {!isPermissionGranted && (
                     <Button
                       size="sm"
@@ -436,9 +533,10 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                           key={notification.id}
                           initial={{ opacity: 0, x: -20 }}
                           animate={{ opacity: 1, x: 0 }}
-                          className={`p-3 hover:bg-gray-50 transition-colors ${
+                          className={`p-3 hover:bg-gray-50 transition-colors cursor-pointer ${
                             !notification.read ? 'bg-[#243d8a]/5/30' : ''
                           }`}
+                          onClick={() => handleNotificationAction(notification)}
                         >
                           <div className="flex items-start gap-3">
                             <div className={`p-1.5 rounded-md ${getNotificationColor(notification.type)}`}>
@@ -489,21 +587,14 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                                   <Badge className={`text-[10px] px-1.5 py-0.5 ${getPriorityColor(notification.priority)} border`}>
                                     {notification.priority}
                                   </Badge>
-                                  {notification.actionRequired && (
-                                    <Button 
-                                      size="sm" 
-                                      className="h-6 px-2 text-[11px]"
-                                      onClick={() => handleNotificationAction(notification)}
-                                    >
-                                      {notification.actionLabel || 'Action'}
-                                      <ChevronRight className="w-3 h-3 ml-0.5" />
-                                    </Button>
-                                  )}
                                   {!notification.read && (
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      onClick={() => markAsRead(notification.id)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        markAsRead(notification.id);
+                                      }}
                                       className="h-6 w-6 p-0"
                                       title="Mark as read"
                                     >
@@ -513,7 +604,10 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => deleteNotification(notification.id)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteNotification(notification.id);
+                                    }}
                                     className="h-6 w-6 p-0 text-gray-400 hover:text-red-600"
                                     title="Delete"
                                   >

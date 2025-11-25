@@ -34,7 +34,7 @@ import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { estimatorService } from '../services/estimatorService';
 import { BOQ, BOQFilter, BOQStatus } from '../types';
-import { toast } from 'sonner';
+import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 import {
   Upload,
@@ -115,7 +115,7 @@ const ProjectCreationForm: React.FC<{
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.project_name.trim()) {
-      toast.error('Project name is required');
+      showError('Project name is required');
       return;
     }
     onSubmit(formData);
@@ -465,27 +465,15 @@ const EstimatorHub: React.FC = () => {
         setLoading(true);
       }
       const response = await estimatorService.getAllBOQs();
-      console.log('🔍 [EstimatorHub] Raw API Response:', response);
       if (response.success && response.data) {
         // Map the backend BOQ data to include proper project structure
         const mappedBOQs = response.data.map((boq: any) => {
-          console.log(`📊 [EstimatorHub] BOQ ${boq.boq_id} - Raw values from backend:`, {
-            boq_name: boq.boq_name,
-            total_cost: boq.total_cost,
-            selling_price: boq.selling_price,
-            estimatedSellingPrice: boq.estimatedSellingPrice,
-            discount_percentage: boq.discount_percentage,
-            discount_amount: boq.discount_amount,
-            preliminary_amount: boq.preliminaries?.cost_details?.amount
-          });
-
           // IMPORTANT: Prioritize total_cost as it's the most reliable field after discount
           // Calculate grand total: items + preliminary - discount
           const baseTotalCost = boq.total_cost || boq.selling_price || boq.estimatedSellingPrice || 0;
           const preliminaryAmount = boq.preliminaries?.cost_details?.amount || 0;
           const discountAmount = boq.discount_amount || 0;
           const finalTotalCost = (baseTotalCost + preliminaryAmount) - discountAmount;
-          console.log(`💰 [EstimatorHub] BOQ ${boq.boq_id} - Final total_cost: ${finalTotalCost} (Items: ${baseTotalCost} + Preliminary: ${preliminaryAmount} - Discount: ${discountAmount})`);
 
           return {
             ...boq,
@@ -528,7 +516,7 @@ const EstimatorHub: React.FC = () => {
     } catch (error: any) {
       console.error('Error loading BOQs:', error);
       if (error.name !== 'AbortError') {
-        toast.error('Failed to load BOQs');
+        showError('Failed to load BOQs');
       }
       setBOQs([]);
     } finally {
@@ -609,16 +597,16 @@ const EstimatorHub: React.FC = () => {
         : await estimatorService.createProject(projectData);
 
       if (response.success) {
-        toast.success(response.message);
+        showSuccess(response.message);
         setShowProjectDialog(false);
         setEditingProject(null);
         await loadProjects();
         return response.project;
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error) {
-      toast.error(editingProject ? 'Failed to update project' : 'Failed to create project');
+      showError(editingProject ? 'Failed to update project' : 'Failed to create project');
     }
   };
 
@@ -628,14 +616,14 @@ const EstimatorHub: React.FC = () => {
     try {
       const response = await estimatorService.deleteProject(deletingProject.project_id);
       if (response.success) {
-        toast.success(response.message);
+        showSuccess(response.message);
         setDeletingProject(null);
         await loadProjects();
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error) {
-      toast.error('Failed to delete project');
+      showError('Failed to delete project');
     }
   };
 
@@ -739,16 +727,16 @@ const EstimatorHub: React.FC = () => {
       });
 
       if (response.success) {
-        toast.success('BOQ created successfully');
+        showSuccess('BOQ created successfully');
         setShowPreviewDialog(false);
         setExtractedBOQ(null);
         setActiveTab('projects'); // Show pending projects tab
         await loadBOQs();
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error) {
-      toast.error('Failed to create BOQ');
+      showError('Failed to create BOQ');
     } finally {
       setLoading(false);
     }
@@ -758,13 +746,13 @@ const EstimatorHub: React.FC = () => {
     try {
       const response = await estimatorService.sendBOQForConfirmation(boqId);
       if (response.success) {
-        toast.success('BOQ sent for confirmation');
+        showSuccess('BOQ sent for confirmation');
         await loadBOQs();
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error) {
-      toast.error('Failed to send BOQ for confirmation');
+      showError('Failed to send BOQ for confirmation');
     }
   };
 
@@ -772,13 +760,13 @@ const EstimatorHub: React.FC = () => {
     try {
       const response = await estimatorService.approveBOQ(boqId);
       if (response.success) {
-        toast.success('BOQ approved successfully');
+        showSuccess('BOQ approved successfully');
         await loadBOQs();
       } else {
-        toast.error(response.message);
+        showError(response.message);
       }
     } catch (error) {
-      toast.error('Failed to approve BOQ');
+      showError('Failed to approve BOQ');
     }
   };
 
@@ -789,7 +777,7 @@ const EstimatorHub: React.FC = () => {
   };
 
   const handleBOQCreated = (boqId: number) => {
-    toast.success('BOQ created successfully!');
+    showSuccess('BOQ created successfully!');
     setShowFullScreenBOQ(false);
 
     // Clear project-specific draft if it exists
@@ -818,7 +806,7 @@ const EstimatorHub: React.FC = () => {
       const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
 
       if (projectBoqs.length === 0) {
-        toast.error('No BOQ found for this project. Please create a BOQ first.');
+        showError('No BOQ found for this project. Please create a BOQ first.');
         setSendingToTD(false);
         setSendingProjectId(null);
         return;
@@ -840,17 +828,17 @@ const EstimatorHub: React.FC = () => {
       }
 
       if (successCount > 0) {
-        toast.success(`Successfully sent ${successCount} BOQ(s) via email to Technical Director`);
+        showSuccess(`Successfully sent ${successCount} BOQ(s) via email to Technical Director`);
         await loadBOQs(); // Refresh the BOQ list to get updated email_sent status
         setActiveTab('sent'); // Switch to "Send BOQ" tab
       }
 
       if (failureCount > 0) {
-        toast.warning(`${failureCount} BOQ(s) failed to send`);
+        showWarning(`${failureCount} BOQ(s) failed to send`);
       }
     } catch (error) {
       console.error('Error sending BOQ to TD:', error);
-      toast.error('Failed to send BOQ to Technical Director');
+      showError('Failed to send BOQ to Technical Director');
     } finally {
       setSendingToTD(false);
       setSendingProjectId(null);
@@ -863,7 +851,7 @@ const EstimatorHub: React.FC = () => {
       const projectBoqs = boqs.filter(boq => boq.project?.project_id == project.project_id);
 
       if (projectBoqs.length === 0) {
-        toast.error('No BOQ found for this project. Please create a BOQ first.');
+        showError('No BOQ found for this project. Please create a BOQ first.');
         return;
       }
 
@@ -878,18 +866,18 @@ const EstimatorHub: React.FC = () => {
       if (pmResult.success) {
         setProjectManagers(pmResult.data);
       } else {
-        toast.error(pmResult.message || 'Failed to load Project Managers');
+        showError(pmResult.message || 'Failed to load Project Managers');
       }
       setLoadingPMs(false);
     } catch (error) {
       console.error('Error opening PM selection:', error);
-      toast.error('Failed to load Project Managers');
+      showError('Failed to load Project Managers');
     }
   };
 
   const handleConfirmSendToPM = async () => {
     if (!selectedPM || !projectToSendToPM) {
-      toast.error('Please select a Project Manager');
+      showError('Please select a Project Manager');
       return;
     }
 
@@ -899,7 +887,7 @@ const EstimatorHub: React.FC = () => {
       const projectBoqs = boqs.filter(boq => boq.project?.project_id == projectToSendToPM.project_id);
 
       if (projectBoqs.length === 0) {
-        toast.error('No BOQ found for this project');
+        showError('No BOQ found for this project');
         setIsSendingToPM(false);
         return;
       }
@@ -911,17 +899,17 @@ const EstimatorHub: React.FC = () => {
       const response = await estimatorService.sendBOQToProjectManager(boq.boq_id, selectedPM);
 
       if (response.success) {
-        toast.success(`Successfully sent BOQ to ${selectedPMData?.full_name}`);
+        showSuccess(`Successfully sent BOQ to ${selectedPMData?.full_name}`);
         setShowPMSelectionModal(false);
         setSelectedPM(null);
         setProjectToSendToPM(null);
         await loadBOQs(); // Refresh BOQ list
       } else {
-        toast.error(response.message || 'Failed to send BOQ to Project Manager');
+        showError(response.message || 'Failed to send BOQ to Project Manager');
       }
     } catch (error) {
       console.error('Error sending BOQ to PM:', error);
-      toast.error('Failed to send BOQ to Project Manager');
+      showError('Failed to send BOQ to Project Manager');
     } finally {
       setIsSendingToPM(false);
     }
@@ -933,58 +921,58 @@ const EstimatorHub: React.FC = () => {
     try {
       const response = await estimatorService.deleteBOQ(deletingBoq.boq_id);
       if (response.success) {
-        toast.success('BOQ deleted successfully');
+        showSuccess('BOQ deleted successfully');
         setDeletingBoq(null);
         await loadBOQs(); // Refresh the BOQ list
       } else {
-        toast.error(response.message || 'Failed to delete BOQ');
+        showError(response.message || 'Failed to delete BOQ');
       }
     } catch (error) {
-      toast.error('Failed to delete BOQ');
+      showError('Failed to delete BOQ');
     }
   };
 
   const handleClientRejection = async () => {
     if (!boqToReject || !rejectionReason.trim()) {
-      toast.error('Please provide a rejection reason');
+      showError('Please provide a rejection reason');
       return;
     }
 
     try {
       const result = await estimatorService.rejectClientApproval(boqToReject.boq_id!, rejectionReason);
       if (result.success) {
-        toast.success(result.message);
+        showSuccess(result.message);
         setShowClientRejectionModal(false);
         setBoqToReject(null);
         setRejectionReason('');
         await loadBOQs(); // Refresh list
       } else {
-        toast.error(result.message);
+        showError(result.message);
       }
     } catch (error) {
-      toast.error('Failed to record client rejection');
+      showError('Failed to record client rejection');
     }
   };
 
   const handleCancelBOQ = async () => {
     if (!boqToCancel || !cancellationReason.trim()) {
-      toast.error('Please provide a cancellation reason');
+      showError('Please provide a cancellation reason');
       return;
     }
 
     try {
       const result = await estimatorService.cancelBOQ(boqToCancel.boq_id!, cancellationReason);
       if (result.success) {
-        toast.success(result.message);
+        showSuccess(result.message);
         setShowCancelModal(false);
         setBoqToCancel(null);
         setCancellationReason('');
         await loadBOQs(); // Refresh list
       } else {
-        toast.error(result.message);
+        showError(result.message);
       }
     } catch (error) {
-      toast.error('Failed to cancel BOQ');
+      showError('Failed to cancel BOQ');
     }
   };
 
@@ -1018,11 +1006,11 @@ const EstimatorHub: React.FC = () => {
       }
 
       toast.dismiss();
-      toast.success(`${typeName} BOQ downloaded successfully as ${formatName}`);
+      showSuccess(`${typeName} BOQ downloaded successfully as ${formatName}`);
       setShowFormatModal(false);
     } catch (error) {
       toast.dismiss();
-      toast.error('Failed to download BOQ');
+      showError('Failed to download BOQ');
       console.error('Download error:', error);
     }
   };
@@ -1032,7 +1020,7 @@ const EstimatorHub: React.FC = () => {
       // Fetch full BOQ details first
       const result = await estimatorService.getBOQById(boq.boq_id);
       if (!result.success || !result.data) {
-        toast.error('Failed to fetch BOQ details');
+        showError('Failed to fetch BOQ details');
         return;
       }
 
@@ -1102,7 +1090,7 @@ const EstimatorHub: React.FC = () => {
       setBoqToDownload(transformedData);
       setShowFormatModal(true);
     } catch (error) {
-      toast.error('Failed to load BOQ for download');
+      showError('Failed to load BOQ for download');
       console.error('Download error:', error);
     }
   };
@@ -1112,7 +1100,7 @@ const EstimatorHub: React.FC = () => {
       // Fetch full BOQ details
       const result = await estimatorService.getBOQById(boq.boq_id);
       if (!result.success || !result.data) {
-        toast.error('Failed to fetch BOQ details');
+        showError('Failed to fetch BOQ details');
         return;
       }
 
@@ -1259,10 +1247,10 @@ const EstimatorHub: React.FC = () => {
       const fileName = `BOQ_${boqData.boq_name?.replace(/[^a-z0-9]/gi, '_')}_${format(new Date(), 'yyyyMMdd')}.pdf`;
       doc.save(fileName);
 
-      toast.success('BOQ downloaded successfully');
+      showSuccess('BOQ downloaded successfully');
     } catch (error) {
       console.error('Error downloading BOQ:', error);
-      toast.error('Failed to download BOQ');
+      showError('Failed to download BOQ');
     }
   };
 
@@ -1555,12 +1543,12 @@ const EstimatorHub: React.FC = () => {
                   // Direct send to TD without email popup (like Internal Revisions)
                   const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
                   if (result.success) {
-                    toast.success('BOQ sent to Technical Director successfully!');
+                    showSuccess('BOQ sent to Technical Director successfully!');
                     await loadBOQs();
                     // Switch to Revisions tab to see the sent BOQ
                     setActiveTab('revisions');
                   } else {
-                    toast.error(result.message || 'Failed to send BOQ');
+                    showError(result.message || 'Failed to send BOQ');
                   }
                 }}
                 title="Send revised BOQ to Technical Director for approval"
@@ -1601,13 +1589,13 @@ const EstimatorHub: React.FC = () => {
                   try {
                     const result = await estimatorService.sendBOQToTechnicalDirector(boq.boq_id!);
                     if (result.success) {
-                      toast.success('BOQ sent to Technical Director successfully!');
+                      showSuccess('BOQ sent to Technical Director successfully!');
                       loadBOQs();
                     } else {
-                      toast.error(result.message);
+                      showError(result.message);
                     }
                   } catch (error) {
-                    toast.error('Failed to send BOQ to TD');
+                    showError('Failed to send BOQ to TD');
                   } finally {
                     setSendingToTD(false);
                     setSendingBOQId(null);
@@ -1651,12 +1639,12 @@ const EstimatorHub: React.FC = () => {
                   // Direct send to TD without email popup (like Internal Revisions)
                   const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
                   if (result.success) {
-                    toast.success('BOQ sent to Technical Director successfully!');
+                    showSuccess('BOQ sent to Technical Director successfully!');
                     await loadBOQs();
                     // Switch to Revisions tab to see the sent BOQ
                     setActiveTab('revisions');
                   } else {
-                    toast.error(result.message || 'Failed to send BOQ');
+                    showError(result.message || 'Failed to send BOQ');
                   }
                 }}
                 title="Send revised BOQ to Technical Director for approval"
@@ -1675,10 +1663,10 @@ const EstimatorHub: React.FC = () => {
                 onClick={async () => {
                   const result = await estimatorService.confirmClientApproval(boq.boq_id!);
                   if (result.success) {
-                    toast.success(result.message);
+                    showSuccess(result.message);
                     loadBOQs(); // Refresh list
                   } else {
-                    toast.error(result.message);
+                    showError(result.message);
                   }
                 }}
               >
@@ -1817,12 +1805,12 @@ const EstimatorHub: React.FC = () => {
                   // Direct send to TD without email popup (like Internal Revisions)
                   const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
                   if (result.success) {
-                    toast.success('BOQ sent to Technical Director successfully!');
+                    showSuccess('BOQ sent to Technical Director successfully!');
                     await loadBOQs();
                     // Switch to Revisions tab to see the sent BOQ
                     setActiveTab('revisions');
                   } else {
-                    toast.error(result.message || 'Failed to send BOQ');
+                    showError(result.message || 'Failed to send BOQ');
                   }
                 }}
                 title="Send revised BOQ to Technical Director for approval"
@@ -1977,10 +1965,10 @@ const EstimatorHub: React.FC = () => {
                             <Button variant="ghost" size="sm" onClick={async () => {
                               const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
                               if (result.success) {
-                                toast.success('Revision sent to Technical Director successfully!');
+                                showSuccess('Revision sent to Technical Director successfully!');
                                 loadBOQs();
                               } else {
-                                toast.error(result.message || 'Failed to send revision');
+                                showError(result.message || 'Failed to send revision');
                               }
                             }} className="h-8 w-8 p-0" title="Send Revision to TD">
                               <Send className="h-4 w-4 text-red-600" />
@@ -1997,11 +1985,11 @@ const EstimatorHub: React.FC = () => {
                               // Direct send to TD without email popup
                               const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending revised BOQ for review' });
                               if (result.success) {
-                                toast.success('BOQ sent to Technical Director successfully!');
+                                showSuccess('BOQ sent to Technical Director successfully!');
                                 await loadBOQs();
                                 setActiveTab('revisions');
                               } else {
-                                toast.error(result.message || 'Failed to send BOQ');
+                                showError(result.message || 'Failed to send BOQ');
                               }
                             }} className="h-8 w-8 p-0" title="Send Revision to TD">
                               <Send className="h-4 w-4 text-red-600" />
@@ -2021,11 +2009,11 @@ const EstimatorHub: React.FC = () => {
                               // Direct send to TD without email popup
                               const result = await estimatorService.sendBOQEmail(boq.boq_id!, { comments: 'Sending BOQ for review' });
                               if (result.success) {
-                                toast.success('BOQ sent to Technical Director successfully!');
+                                showSuccess('BOQ sent to Technical Director successfully!');
                                 await loadBOQs();
                                 setActiveTab('pending');
                               } else {
-                                toast.error(result.message || 'Failed to send BOQ');
+                                showError(result.message || 'Failed to send BOQ');
                               }
                             }} className="h-8 w-8 p-0" title="Send to TD">
                               <Send className="h-4 w-4 text-red-600" />
@@ -2041,7 +2029,7 @@ const EstimatorHub: React.FC = () => {
                             <Button variant="ghost" size="sm" onClick={() => { setEditingBoq(boq); setSelectedProjectForBOQ(boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); }} className="h-8 w-8 p-0" title="Edit BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { toast.success(result.message); loadBOQs(); } else { toast.error(result.message); } }} className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Client Approved">
+                            <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { showSuccess(result.message); loadBOQs(); } else { showError(result.message); } }} className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Client Approved">
                               <CheckCircle className="h-4 w-4 mr-1" />
                               <span className="text-xs">Approved</span>
                             </Button>
@@ -3142,10 +3130,10 @@ const EstimatorHub: React.FC = () => {
                       : 'Sending BOQ for review'
                   });
                   if (result.success) {
-                    toast.success('BOQ sent to Technical Director successfully!');
+                    showSuccess('BOQ sent to Technical Director successfully!');
                     loadBOQs();
                   } else {
-                    toast.error(result.message || 'Failed to send BOQ to TD');
+                    showError(result.message || 'Failed to send BOQ to TD');
                   }
                 }}
                 onSendToClient={(boq) => {
@@ -3173,10 +3161,10 @@ const EstimatorHub: React.FC = () => {
                 onClientApproval={async (boq) => {
                   const result = await estimatorService.confirmClientApproval(boq.boq_id!);
                   if (result.success) {
-                    toast.success(result.message);
+                    showSuccess(result.message);
                     loadBOQs();
                   } else {
-                    toast.error(result.message);
+                    showError(result.message);
                   }
                 }}
                 onRevisionRequest={(boq) => {
@@ -3945,11 +3933,11 @@ const EstimatorHub: React.FC = () => {
                   const result = await estimatorService.sendBOQEmail(boqToSendToTD?.boq_id!, { comments: 'Sending BOQ for review' });
                   if (result.success) {
                     setShowSendToTDPopup(false);
-                    toast.success('BOQ sent to Technical Director successfully!');
+                    showSuccess('BOQ sent to Technical Director successfully!');
                     await loadBOQs();
                     setActiveTab('revisions'); // Auto-switch to Revisions tab
                   } else {
-                    toast.error(result.message || 'Failed to send BOQ');
+                    showError(result.message || 'Failed to send BOQ');
                   }
                 } finally {
                   setIsSendingToTD(false);
@@ -3979,7 +3967,7 @@ const EstimatorHub: React.FC = () => {
                 setShowSendToTDPopup(false);
                 setBoqToSendToTD(null);
                 setEditingBoq(null); // Clear editingBoq after "Send Later"
-                toast.success('BOQ saved! You can send it to TD later.');
+                showSuccess('BOQ saved! You can send it to TD later.');
               }}
             >
               Send Later
@@ -4117,7 +4105,7 @@ const EstimatorHub: React.FC = () => {
                     setFullScreenBoqMode('edit');
                     setShowFullScreenBOQ(true);
                   } else {
-                    toast.error('Failed to load BOQ details');
+                    showError('Failed to load BOQ details');
                   }
                 }
               }}
