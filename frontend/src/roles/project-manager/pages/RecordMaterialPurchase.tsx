@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useSearchParams } from 'react-router-dom';
 import { DocumentTextIcon, ShoppingCartIcon } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { boqTrackingService } from '../services/boqTrackingService';
@@ -11,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Eye, User } from 'lucide-react';
 
 export default function RecordMaterialPurchase() {
+  const [searchParams] = useSearchParams();
   const [selectedBOQ, setSelectedBOQ] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState('live');
 
@@ -65,6 +67,20 @@ export default function RecordMaterialPurchase() {
       });
     }
   }, [boqList, activeTab]);
+
+  // Auto-select BOQ from URL param (e.g., from notification click)
+  useEffect(() => {
+    const boqIdFromUrl = searchParams.get('boq_id');
+    if (boqIdFromUrl && boqList.length > 0 && !selectedBOQ) {
+      const boqId = parseInt(boqIdFromUrl, 10);
+      const boq = boqList.find((b: any) => b.boq_id === boqId);
+      if (boq) {
+        setSelectedBOQ(boq);
+        // Store for highlighting
+        sessionStorage.setItem('highlight_boq_id', boqIdFromUrl);
+      }
+    }
+  }, [searchParams, boqList, selectedBOQ]);
 
   const handleBOQChange = async (boqId: number) => {
     const boq = filteredBOQList.find(b => b.boq_id === boqId);

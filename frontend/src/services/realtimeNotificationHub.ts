@@ -136,7 +136,6 @@ class RealtimeNotificationHub {
       });
 
       this.socket.on('notification', (notification: RealtimeNotification) => {
-        console.log('[NotificationHub] Real-time notification received:', notification.title);
         this.handleIncomingNotification(notification);
       });
 
@@ -158,12 +157,10 @@ class RealtimeNotificationHub {
     if (!this.socket || !this.isConnected) return;
 
     if (this.userId) {
-      console.log(`[NotificationHub] Joining user room: user_${this.userId}`);
       this.socket.emit('join:user', this.userId);
     }
 
     if (this.userRole) {
-      console.log(`[NotificationHub] Joining role room: role_${this.userRole}`);
       this.socket.emit('join:role', this.userRole);
     }
   }
@@ -172,11 +169,8 @@ class RealtimeNotificationHub {
    * Handle incoming notification from Socket.IO
    */
   private async handleIncomingNotification(notification: RealtimeNotification) {
-    console.log('[NotificationHub] Processing notification:', notification.id, notification.title);
-
     // Deduplicate: Skip if already processed
     if (this.processedNotificationIds.has(notification.id)) {
-      console.log('[NotificationHub] Skipping duplicate notification:', notification.id);
       return;
     }
     this.processedNotificationIds.add(notification.id);
@@ -191,13 +185,8 @@ class RealtimeNotificationHub {
     const currentUserId = userData?.id || userData?.userId;
     const targetUserId = notification.targetUserId || notification.userId;
 
-    console.log('[NotificationHub] User check - current:', currentUserId, 'target:', targetUserId);
-
     // Check if notification is for current user
-    // NOTE: If notification came through user-specific room, this check is redundant
-    // but we keep it as a safety check
     if (targetUserId && String(targetUserId) !== String(currentUserId)) {
-      console.log('[NotificationHub] Skipping - not for current user');
       return;
     }
 
@@ -217,8 +206,6 @@ class RealtimeNotificationHub {
         return;
       }
     }
-
-    console.log('[NotificationHub] Notification passed all checks, showing popup & desktop notification');
 
     const notificationData = {
       id: notification.id,
@@ -291,6 +278,7 @@ class RealtimeNotificationHub {
 
   /**
    * Show desktop (browser) notification
+   * Firefox has stricter requirements - check permissions in Firefox settings
    */
   private async showDesktopNotification(notification: RealtimeNotification) {
     // Check if browser supports notifications
@@ -298,29 +286,39 @@ class RealtimeNotificationHub {
       return;
     }
 
-    // Check permission
+    // Check permission - Firefox may block if not from user gesture
     let permission = Notification.permission;
     if (permission === 'default') {
-      permission = await Notification.requestPermission();
+      try {
+        permission = await Notification.requestPermission();
+      } catch {
+        return;
+      }
     }
 
     if (permission !== 'granted') {
       return;
     }
 
-    // Create desktop notification
+    // Create desktop notification with Firefox-compatible options
     try {
       const actionUrl = (notification as any).actionUrl || notification.metadata?.actionUrl;
-      const desktopNotif = new Notification(notification.title, {
+
+      // Base options that work in all browsers
+      const notifOptions: NotificationOptions = {
         body: notification.message,
         icon: window.location.origin + '/assets/logo.png',
-        badge: window.location.origin + '/assets/logofavi.png',
-        tag: notification.id,
-        requireInteraction: notification.priority === 'urgent' || notification.priority === 'high',
-        silent: false
-      });
+        tag: notification.id
+      };
 
-      // Handle click - focus window and navigate if actionUrl exists
+      // requireInteraction may cause issues in Firefox - only use for urgent
+      if (notification.priority === 'urgent') {
+        notifOptions.requireInteraction = true;
+      }
+
+      const desktopNotif = new Notification(notification.title, notifOptions);
+
+      // Handle click
       desktopNotif.onclick = () => {
         window.focus();
         desktopNotif.close();
@@ -329,12 +327,10 @@ class RealtimeNotificationHub {
         }
       };
 
-      // Auto close after 10 seconds for non-urgent
-      if (notification.priority !== 'urgent' && notification.priority !== 'high') {
-        setTimeout(() => desktopNotif.close(), 10000);
-      }
+      // Auto close after 8 seconds
+      setTimeout(() => desktopNotif.close(), 8000);
     } catch (error) {
-      // Silent fail in production
+      // Notification failed
     }
   }
 

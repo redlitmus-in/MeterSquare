@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { useSearchParams } from 'react-router-dom';
 import {
   DocumentCheckIcon,
   ClockIcon,
@@ -220,8 +221,22 @@ interface BOQAssignment {
 }
 
 const ProjectApprovals: React.FC = () => {
+  const [searchParams] = useSearchParams();
+
+  // Map URL tab param to filterStatus
+  const getInitialFilterStatus = (): 'pending' | 'revisions' | 'approved' | 'sent' | 'assigned' | 'rejected' => {
+    const urlTab = searchParams.get('tab');
+    if (urlTab === 'internal-revisions' || urlTab === 'revisions') return 'revisions';
+    if (urlTab === 'approved') return 'approved';
+    if (urlTab === 'sent' || urlTab === 'client-response') return 'sent';
+    if (urlTab === 'assigned') return 'assigned';
+    if (urlTab === 'rejected') return 'rejected';
+    if (urlTab === 'completed') return 'approved'; // completed shows in approved filter
+    return 'pending';
+  };
+
   const [selectedEstimation, setSelectedEstimation] = useState<EstimationItem | null>(null);
-  const [filterStatus, setFilterStatus] = useState<'pending' | 'revisions' | 'approved' | 'sent' | 'assigned' | 'rejected'>('pending');
+  const [filterStatus, setFilterStatus] = useState<'pending' | 'revisions' | 'approved' | 'sent' | 'assigned' | 'rejected'>(getInitialFilterStatus());
   const [revisionSubTab, setRevisionSubTab] = useState<'pending_approval' | 'revision_approved'>('pending_approval');
   const [showBOQModal, setShowBOQModal] = useState(false);
   const [showFullScreenBOQ, setShowFullScreenBOQ] = useState(false);
@@ -309,6 +324,30 @@ const ProjectApprovals: React.FC = () => {
     }
     // Note: 'assigned' tab data (pendingDayExtensions) will auto-reload via useEffect when boqs updates
   }, [boqUpdateTimestamp, filterStatus]); // Reload whenever timestamp OR active tab changes
+
+  // Sync filterStatus with URL when URL changes (e.g., from notification click)
+  useEffect(() => {
+    const urlTab = searchParams.get('tab');
+    if (urlTab) {
+      let newFilterStatus: 'pending' | 'revisions' | 'approved' | 'sent' | 'assigned' | 'rejected' = 'pending';
+      if (urlTab === 'internal-revisions' || urlTab === 'revisions') newFilterStatus = 'revisions';
+      else if (urlTab === 'approved') newFilterStatus = 'approved';
+      else if (urlTab === 'sent' || urlTab === 'client-response') newFilterStatus = 'sent';
+      else if (urlTab === 'assigned') newFilterStatus = 'assigned';
+      else if (urlTab === 'rejected') newFilterStatus = 'rejected';
+      else if (urlTab === 'completed') newFilterStatus = 'approved';
+
+      if (newFilterStatus !== filterStatus) {
+        setFilterStatus(newFilterStatus);
+      }
+    }
+
+    // Check if boq_id param is present - could be used to highlight specific BOQ
+    const boqIdFromUrl = searchParams.get('boq_id');
+    if (boqIdFromUrl) {
+      sessionStorage.setItem('highlight_boq_id', boqIdFromUrl);
+    }
+  }, [searchParams]);
 
   // Load day extensions only when 'assigned' tab is active and BOQs are loaded
   useEffect(() => {

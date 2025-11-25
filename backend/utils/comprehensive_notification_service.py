@@ -7,9 +7,36 @@ from utils.notification_utils import NotificationManager
 from socketio_server import send_notification_to_user, send_notification_to_role
 from models.user import User
 from models.role import Role
+from models.notification import Notification
 from config.logging import get_logger
+from config.db import db
+from datetime import datetime, timedelta
 
 log = get_logger()
+
+
+def check_duplicate_notification(user_id, title_pattern, metadata_key, metadata_value, minutes=5):
+    """
+    Check if a similar notification was already sent recently
+    Returns True if duplicate exists, False otherwise
+    """
+    try:
+        cutoff_time = datetime.utcnow() - timedelta(minutes=minutes)
+        existing = Notification.query.filter(
+            Notification.user_id == user_id,
+            Notification.title.ilike(f'%{title_pattern}%'),
+            Notification.created_at >= cutoff_time,
+            Notification.deleted_at.is_(None)
+        ).first()
+
+        if existing and existing.meta_data:
+            if existing.meta_data.get(metadata_key) == metadata_value:
+                log.info(f"[DuplicateCheck] Found existing notification for user {user_id}, {metadata_key}={metadata_value}")
+                return True
+        return False
+    except Exception as e:
+        log.error(f"[DuplicateCheck] Error checking duplicate: {e}")
+        return False
 
 
 class ComprehensiveNotificationService:
@@ -61,7 +88,7 @@ class ComprehensiveNotificationService:
                 priority='urgent',
                 category='boq',
                 action_required=True,
-                action_url=f'/projects/boq/{boq_id}',
+                action_url=f'/project-manager/my-projects?boq_id={boq_id}',
                 action_label='Review BOQ',
                 metadata={'boq_id': boq_id},
                 sender_id=estimator_id,
@@ -90,7 +117,7 @@ class ComprehensiveNotificationService:
                     message=f'Your BOQ for {project_name} has been approved by {pm_name}',
                     priority='high',
                     category='boq',
-                    action_url=f'/estimator/boq/{boq_id}',
+                    action_url=f'/estimator/projects?tab=approved&boq_id={boq_id}',
                     action_label='View BOQ',
                     metadata={'boq_id': boq_id, 'decision': 'approved'},
                     sender_id=pm_id,
@@ -105,7 +132,7 @@ class ComprehensiveNotificationService:
                     priority='high',
                     category='boq',
                     action_required=True,
-                    action_url=f'/estimator/boq/{boq_id}',
+                    action_url=f'/estimator/projects?tab=rejected&boq_id={boq_id}',
                     action_label='View Details',
                     metadata={'boq_id': boq_id, 'decision': 'rejected', 'reason': rejection_reason},
                     sender_id=pm_id,
@@ -126,7 +153,10 @@ class ComprehensiveNotificationService:
         Priority: URGENT
         """
         try:
-            log.info(f"[notify_boq_sent_to_td] Creating notification for TD {td_user_id}...")
+            # Check for duplicate notification (within 5 minutes)
+            if check_duplicate_notification(td_user_id, 'BOQ', 'boq_id', boq_id, minutes=5):
+                log.info(f"[notify_boq_sent_to_td] Skipping duplicate notification for TD {td_user_id}, BOQ {boq_id}")
+                return
 
             notification = NotificationManager.create_notification(
                 user_id=td_user_id,
@@ -136,7 +166,7 @@ class ComprehensiveNotificationService:
                 priority='urgent',
                 category='boq',
                 action_required=True,
-                action_url='/technical-director/project-approvals',
+                action_url=f'/technical-director/project-approvals?tab=pending&boq_id={boq_id}',
                 action_label='Review BOQ',
                 metadata={'boq_id': boq_id},
                 sender_id=estimator_id,
@@ -144,10 +174,8 @@ class ComprehensiveNotificationService:
                 target_role='technical_director'
             )
 
-            log.info(f"[notify_boq_sent_to_td] DB notification created: {notification.id}")
-
             send_notification_to_user(td_user_id, notification.to_dict())
-            log.info(f"[notify_boq_sent_to_td] Socket.IO sent to user {td_user_id}")
+            log.info(f"[notify_boq_sent_to_td] Notification sent to TD {td_user_id} for BOQ {boq_id}")
         except Exception as e:
             log.error(f"[notify_boq_sent_to_td] ERROR: {e}")
             import traceback
@@ -170,7 +198,7 @@ class ComprehensiveNotificationService:
                     message=f'BOQ for {project_name} has been sent to client ({client_email}) by {estimator_name}',
                     priority='high',
                     category='boq',
-                    action_url=f'/technical-director/boq/{boq_id}',
+                    action_url=f'/technical-director/project-approvals?tab=sent&boq_id={boq_id}',
                     action_label='View BOQ',
                     metadata={'boq_id': boq_id, 'client_email': client_email},
                     sender_id=estimator_id,
@@ -190,8 +218,8 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
-            # Get all TD users
-            td_role = Role.query.filter_by(role_name='Technical Director').first()
+            # Get all TD users - use 'role' column not 'role_name'
+            td_role = Role.query.filter(Role.role.ilike('%technical%director%')).first()
             if not td_role:
                 log.warning("No Technical Director role found in database")
                 return
@@ -204,6 +232,10 @@ class ComprehensiveNotificationService:
             client_info = f" by {client_name}" if client_name else ""
 
             for td_user in td_users:
+                # Check for duplicate notification
+                if check_duplicate_notification(td_user.user_id, 'Client Approved', 'boq_id', boq_id, minutes=5):
+                    continue
+
                 notification = NotificationManager.create_notification(
                     user_id=td_user.user_id,
                     type='success',
@@ -211,7 +243,7 @@ class ComprehensiveNotificationService:
                     message=f'BOQ for {project_name} has been approved{client_info}. Confirmed by {estimator_name}',
                     priority='high',
                     category='boq',
-                    action_url=f'/technical-director/record-material',
+                    action_url=f'/technical-director/project-approvals?tab=sent&boq_id={boq_id}',
                     action_label='View BOQ',
                     metadata={'boq_id': boq_id, 'client_confirmed': True},
                     sender_id=estimator_id,
@@ -235,7 +267,7 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
-            td_role = Role.query.filter_by(role_name='Technical Director').first()
+            td_role = Role.query.filter(Role.role.ilike('%technical%director%')).first()
             if not td_role:
                 log.warning("No Technical Director role found in database")
                 return
@@ -246,6 +278,10 @@ class ComprehensiveNotificationService:
                 return
 
             for td_user in td_users:
+                # Check for duplicate notification
+                if check_duplicate_notification(td_user.user_id, 'Client Rejected', 'boq_id', boq_id, minutes=5):
+                    continue
+
                 notification = NotificationManager.create_notification(
                     user_id=td_user.user_id,
                     type='rejection',
@@ -254,7 +290,7 @@ class ComprehensiveNotificationService:
                     priority='high',
                     category='boq',
                     action_required=True,
-                    action_url=f'/technical-director/boq/{boq_id}',
+                    action_url=f'/technical-director/project-approvals?tab=sent&boq_id={boq_id}',
                     action_label='View Details',
                     metadata={'boq_id': boq_id, 'client_rejected': True, 'reason': rejection_reason},
                     sender_id=estimator_id,
@@ -278,7 +314,13 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
+            decision = 'approved' if approved else 'rejected'
             for user_id in recipient_user_ids:
+                # Check for duplicate notification
+                if check_duplicate_notification(user_id, 'BOQ', 'boq_id', boq_id, minutes=5):
+                    log.info(f"[notify_td_boq_decision] Skipping duplicate for user {user_id}, BOQ {boq_id}")
+                    continue
+
                 if approved:
                     notification = NotificationManager.create_notification(
                         user_id=user_id,
@@ -287,11 +329,12 @@ class ComprehensiveNotificationService:
                         message=f'BOQ for {project_name} has been approved by {td_name}',
                         priority='high',
                         category='boq',
-                        action_url=f'/projects/boq/{boq_id}',
+                        action_url=f'/estimator/projects?tab=approved&boq_id={boq_id}',
                         action_label='View BOQ',
                         metadata={'boq_id': boq_id, 'decision': 'approved'},
                         sender_id=td_id,
-                        sender_name=td_name
+                        sender_name=td_name,
+                        target_role='estimator'
                     )
                 else:
                     notification = NotificationManager.create_notification(
@@ -302,16 +345,16 @@ class ComprehensiveNotificationService:
                         priority='high',
                         category='boq',
                         action_required=True,
-                        action_url=f'/estimator/boq/{boq_id}',
+                        action_url=f'/estimator/projects?tab=rejected&boq_id={boq_id}',
                         action_label='View Details',
                         metadata={'boq_id': boq_id, 'decision': 'rejected', 'reason': rejection_reason},
                         sender_id=td_id,
-                        sender_name=td_name
+                        sender_name=td_name,
+                        target_role='estimator'
                     )
 
                 send_notification_to_user(user_id, notification.to_dict())
-
-            log.info(f"Sent TD decision notification for BOQ {boq_id}")
+                log.info(f"[notify_td_boq_decision] Sent {decision} notification to user {user_id} for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error sending TD decision notification: {e}")
 
@@ -333,7 +376,7 @@ class ComprehensiveNotificationService:
                     priority='urgent',
                     category='project',
                     action_required=True,
-                    action_url=f'/projects/{project_id}',
+                    action_url=f'/project-manager/my-projects?project_id={project_id}',
                     action_label='View Project',
                     metadata={'project_id': project_id},
                     sender_id=td_id,
@@ -363,7 +406,7 @@ class ComprehensiveNotificationService:
                 priority='high',
                 category='assignment',
                 action_required=True,
-                action_url=f'/site-engineer/assignments/{boq_id}',
+                action_url=f'/site-engineer/projects?boq_id={boq_id}',
                 action_label='View Items',
                 metadata={'boq_id': boq_id, 'items_count': items_count},
                 sender_id=pm_id,
@@ -392,7 +435,7 @@ class ComprehensiveNotificationService:
                 priority='medium',
                 category='project',
                 action_required=True,
-                action_url=f'/project-manager/confirmations/{boq_id}',
+                action_url=f'/project-manager/my-projects?boq_id={boq_id}',
                 action_label='Confirm Completion',
                 metadata={'boq_id': boq_id},
                 sender_id=se_id,
@@ -420,7 +463,7 @@ class ComprehensiveNotificationService:
                 message=f'{pm_name} has confirmed completion of your items for {project_name}',
                 priority='medium',
                 category='project',
-                action_url=f'/site-engineer/projects/{boq_id}',
+                action_url=f'/site-engineer/projects?boq_id={boq_id}',
                 action_label='View Project',
                 metadata={'boq_id': boq_id},
                 sender_id=pm_id,
@@ -452,7 +495,7 @@ class ComprehensiveNotificationService:
                     priority='urgent',
                     category='change_request',
                     action_required=True,
-                    action_url=f'/{recipient_role.lower()}/change-requests/{cr_id}',
+                    action_url=f'/{recipient_role.lower().replace(" ", "-")}/change-requests?cr_id={cr_id}',
                     action_label='Review Request',
                     metadata={'cr_id': cr_id},
                     sender_id=creator_id,
@@ -483,7 +526,7 @@ class ComprehensiveNotificationService:
                     priority='high',
                     category='change_request',
                     action_required=True,
-                    action_url=f'/{next_role.lower()}/change-requests/{cr_id}',
+                    action_url=f'/{next_role.lower().replace(" ", "-")}/change-requests?cr_id={cr_id}',
                     action_label='Review Request',
                     metadata={'cr_id': cr_id},
                     sender_id=approver_id,
@@ -513,7 +556,7 @@ class ComprehensiveNotificationService:
                 priority='high',
                 category='change_request',
                 action_required=True,
-                action_url=f'/change-requests/{cr_id}',
+                action_url=f'/site-engineer/change-requests?cr_id={cr_id}',
                 action_label='View Details',
                 metadata={'cr_id': cr_id, 'reason': rejection_reason},
                 sender_id=rejector_id,
@@ -542,7 +585,7 @@ class ComprehensiveNotificationService:
                 priority='urgent',
                 category='change_request',
                 action_required=True,
-                action_url=f'/technical-director/vendor-approvals/{cr_id}',
+                action_url=f'/technical-director/vendor-approval?cr_id={cr_id}',
                 action_label='Review Vendor',
                 metadata={'cr_id': cr_id, 'vendor_name': vendor_name},
                 sender_id=buyer_id,
@@ -570,7 +613,7 @@ class ComprehensiveNotificationService:
                 message=f'{buyer_name} completed the purchase for your change request in {project_name}',
                 priority='medium',
                 category='change_request',
-                action_url=f'/change-requests/{cr_id}',
+                action_url=f'/site-engineer/change-requests?cr_id={cr_id}',
                 action_label='View Details',
                 metadata={'cr_id': cr_id},
                 sender_id=buyer_id,
@@ -601,7 +644,7 @@ class ComprehensiveNotificationService:
                 priority='urgent',
                 category='extension',
                 action_required=True,
-                action_url=f'/technical-director/extensions/{boq_id}',
+                action_url=f'/technical-director/project-approvals?tab=assigned&boq_id={boq_id}',
                 action_label='Review Request',
                 metadata={'boq_id': boq_id, 'days_requested': days_requested, 'reason': reason},
                 sender_id=pm_id,
@@ -629,7 +672,7 @@ class ComprehensiveNotificationService:
                 message=f'{td_name} approved {days_approved} day(s) extension for {project_name}',
                 priority='high',
                 category='extension',
-                action_url=f'/project-manager/projects/{boq_id}',
+                action_url=f'/project-manager/my-projects?boq_id={boq_id}',
                 action_label='View Project',
                 metadata={'boq_id': boq_id, 'days_approved': days_approved},
                 sender_id=td_id,
@@ -658,7 +701,7 @@ class ComprehensiveNotificationService:
                 priority='high',
                 category='extension',
                 action_required=True,
-                action_url=f'/project-manager/projects/{boq_id}',
+                action_url=f'/project-manager/my-projects?boq_id={boq_id}',
                 action_label='View Details',
                 metadata={'boq_id': boq_id, 'reason': rejection_reason},
                 sender_id=td_id,
@@ -711,7 +754,7 @@ class ComprehensiveNotificationService:
         Priority: HIGH
         """
         try:
-            td_role = Role.query.filter_by(role_name='Technical Director').first()
+            td_role = Role.query.filter(Role.role.ilike('%technical%director%')).first()
             if not td_role:
                 log.warning("No Technical Director role found in database")
                 return
@@ -722,6 +765,10 @@ class ComprehensiveNotificationService:
                 return
 
             for td_user in td_users:
+                # Check for duplicate notification
+                if check_duplicate_notification(td_user.user_id, 'Internal Revision', 'boq_id', boq_id, minutes=5):
+                    continue
+
                 notification = NotificationManager.create_notification(
                     user_id=td_user.user_id,
                     type='approval',
@@ -730,7 +777,7 @@ class ComprehensiveNotificationService:
                     priority='high',
                     category='boq',
                     action_required=True,
-                    action_url=f'/technical-director/internal-revisions',
+                    action_url=f'/technical-director/project-approvals?tab=revisions&boq_id={boq_id}',
                     action_label='Review Revision',
                     metadata={'boq_id': boq_id, 'internal_revision_number': revision_number},
                     sender_id=actor_id,
@@ -761,7 +808,7 @@ class ComprehensiveNotificationService:
                 message=f'Your internal revision #{revision_number} for {project_name} was approved by {td_name}',
                 priority='high',
                 category='boq',
-                action_url=f'/estimator/boq/{boq_id}',
+                action_url=f'/estimator/projects?tab=revisions&boq_id={boq_id}',
                 action_label='View BOQ',
                 metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'approved'},
                 sender_id=td_id,
@@ -790,7 +837,7 @@ class ComprehensiveNotificationService:
                 priority='high',
                 category='boq',
                 action_required=True,
-                action_url=f'/estimator/boq/{boq_id}',
+                action_url=f'/estimator/projects?tab=revisions&boq_id={boq_id}',
                 action_label='View Details',
                 metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'rejected', 'reason': rejection_reason},
                 sender_id=td_id,
@@ -818,7 +865,7 @@ class ComprehensiveNotificationService:
                 message=f'Client revision for {project_name} has been approved by {td_name}',
                 priority='high',
                 category='boq',
-                action_url=f'/estimator/boq/{boq_id}',
+                action_url=f'/estimator/projects?tab=revisions&boq_id={boq_id}',
                 action_label='View BOQ',
                 metadata={'boq_id': boq_id, 'client_revision_approved': True},
                 sender_id=td_id,
@@ -847,7 +894,7 @@ class ComprehensiveNotificationService:
                 priority='high',
                 category='boq',
                 action_required=True,
-                action_url=f'/estimator/boq/{boq_id}',
+                action_url=f'/estimator/projects?tab=revisions&boq_id={boq_id}',
                 action_label='Make Changes',
                 metadata={'boq_id': boq_id, 'client_revision_rejected': True, 'reason': rejection_reason},
                 sender_id=td_id,

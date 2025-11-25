@@ -1081,7 +1081,6 @@ function App() {
                 <AdminSettings />
               </AdminRoute>
             } />
-
             {/* Site Engineer specific routes - Temporarily commented out */}
             {/* <Route path="my-project" element={<MyProject />} /> */}
             {/* <Route path="task-execution" element={<TaskExecution />} /> */}

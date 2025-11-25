@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -275,7 +275,13 @@ const ProjectCreationForm: React.FC<{
 
 const EstimatorHub: React.FC = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('projects');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Initialize tab from URL param or default to 'projects'
+  const urlTab = searchParams.get('tab');
+  const validTabs = ['projects', 'sent', 'approved', 'revisions', 'rejected', 'completed', 'cancelled'];
+  const initialTab = urlTab && validTabs.includes(urlTab) ? urlTab : 'projects';
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [loading, setLoading] = useState(true);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [sendingToTD, setSendingToTD] = useState(false);
@@ -427,6 +433,21 @@ const EstimatorHub: React.FC = () => {
   useEffect(() => {
     setBoqCurrentPage(1);
   }, [activeTab]);
+
+  // Sync activeTab with URL when URL changes (e.g., from notification click)
+  useEffect(() => {
+    const tabFromUrl = searchParams.get('tab');
+    if (tabFromUrl && validTabs.includes(tabFromUrl) && tabFromUrl !== activeTab) {
+      setActiveTab(tabFromUrl);
+    }
+
+    // Check if boq_id param is present - could be used to highlight specific BOQ
+    const boqIdFromUrl = searchParams.get('boq_id');
+    if (boqIdFromUrl) {
+      // Store for potential use in highlighting the specific BOQ
+      sessionStorage.setItem('highlight_boq_id', boqIdFromUrl);
+    }
+  }, [searchParams]);
 
   // Check for saved draft on component mount
   useEffect(() => {
