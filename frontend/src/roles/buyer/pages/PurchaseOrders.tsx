@@ -598,8 +598,8 @@ const PurchaseOrders: React.FC = () => {
                         </Button>
                       )}
 
-                      {/* Send to Vendor - TEMPORARILY HIDDEN */}
-                      {/* {purchase.status === 'pending' && purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (
+                      {/* Send to Vendor */}
+                      {purchase.status === 'pending' && purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (
                         purchase.vendor_email_sent ? (
                           <div className="w-full h-7 bg-green-50 border border-green-200 rounded flex items-center justify-center text-xs font-medium text-green-700 px-2 py-1">
                             <CheckCircle className="w-3 h-3 mr-1" />
@@ -615,7 +615,7 @@ const PurchaseOrders: React.FC = () => {
                               <Mail className="w-3 h-3 mr-1" />
                               Email
                             </Button>
-                            <Button
+                            {/* <Button
                               onClick={() => handleSendWhatsApp(purchase)}
                               disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
                               size="sm"
@@ -628,10 +628,10 @@ const PurchaseOrders: React.FC = () => {
                                 <MessageSquare className="w-3 h-3 mr-1" />
                               )}
                               WhatsApp
-                            </Button>
+                            </Button> */}
                           </div>
                         )
-                      )} */}
+                      )}
 
                       {/* Second Row: View */}
                       <Button
@@ -806,8 +806,8 @@ const PurchaseOrders: React.FC = () => {
                               </Button>
                             )}
 
-                            {/* Send to Vendor - TEMPORARILY HIDDEN */}
-                            {/* {purchase.status === 'pending' && purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (
+                            {/* Send to Vendor */}
+                            {purchase.status === 'pending' && purchase.vendor_id && !purchase.vendor_selection_pending_td_approval && (
                               purchase.vendor_email_sent ? (
                                 <div className="px-2 py-1 h-auto bg-green-50 border border-green-200 rounded text-xs font-medium text-green-700 flex items-center gap-1">
                                   <CheckCircle className="w-3 h-3" />
@@ -823,7 +823,7 @@ const PurchaseOrders: React.FC = () => {
                                     <Mail className="w-3 h-3 sm:mr-1" />
                                     <span className="hidden lg:inline">Email</span>
                                   </Button>
-                                  <Button
+                                  {/* <Button
                                     onClick={() => handleSendWhatsApp(purchase)}
                                     disabled={sendingWhatsAppId === purchase.cr_id || !purchase.vendor_phone}
                                     size="sm"
@@ -836,10 +836,10 @@ const PurchaseOrders: React.FC = () => {
                                       <MessageSquare className="w-3 h-3 sm:mr-1" />
                                     )}
                                     <span className="hidden lg:inline">WA</span>
-                                  </Button>
+                                  </Button> */}
                                 </>
                               )
-                            )} */}
+                            )}
 
                             {/* Mark as Complete - Only show after email is sent */}
                             {purchase.status === 'pending' && !purchase.vendor_selection_pending_td_approval && purchase.vendor_id && purchase.vendor_email_sent && (
